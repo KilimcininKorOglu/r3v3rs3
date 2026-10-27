@@ -2339,5 +2339,10 @@
   "traffic.priority_critical": "Kritik (u=0..2)",
   "traffic.priority_normal": "Normal (u=3..4)",
   "traffic.priority_background": "Arka Plan (u=5..7)",
-  "traffic.priority_throttled": "Hız Sınırlanan / Bekletilen"
+  "traffic.priority_throttled": "Hız Sınırlanan / Bekletilen",
+  "traffic.priority_active": "Aktif Akışlar",
+  "traffic.priority_desc": "Gerçek zamanlı RFC 9218 HTTP/2 ve HTTP/3 çoklu akış öncelik dağılımı ve uyarlamalı geri basınç telemetrisi.",
+  "traffic.priority_distribution": "Akış Öncelik Dağılımı",
+  "traffic.priority_info_title": "RFC 9218 Öncelik Aciliyet Hiyerarşisi",
+  "traffic.priority_info_desc": "HTTP/2 ve HTTP/3 akışları, kritik görüntüleme yolunu optimize etmek için MIME türlerine, dosya uzantılarına ve istemci başlıklarına göre dinamik olarak önceliklendirilir."
 }

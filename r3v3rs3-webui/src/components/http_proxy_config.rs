@@ -774,6 +774,7 @@ pub fn http_proxy_config(props: &Props) -> Html {
 
             { toggle(state_input(&form, checked, |form, value| form.stream_priority.enabled = value), form.stream_priority.enabled, locale.t("proxies.stream_priority"), "my-6") }
             <p class={HINT_CLASS}>{locale.t("proxies.stream_priority_hint")}</p>
+            { stream_priority_subtoggles(locale, &form) }
 
             <label class={LABEL_CLASS}>{locale.t("http_form.vhosts")}</label>
             <input type="text" autocapitalize="off" value={form.vhosts.clone()} onchange={state_input(&form, text, |form, value| form.vhosts = value)} class={INPUT_CLASS} placeholder="example.com" />
@@ -2409,6 +2410,24 @@ async fn get_access_lists() -> Result<Vec<AccessListEntry>, gloo_net::Error> {
         .await?
         .json()
         .await
+}
+
+fn stream_priority_subtoggles(locale: Locale, form: &UseStateHandle<ProxyForm>) -> Html {
+    if !form.stream_priority.enabled {
+        return html! {};
+    }
+    html! {
+        <div class="ml-4 pl-4 border-l-2 border-primary-200 dark:border-primary-800 space-y-4 my-4">
+            <div>
+                { toggle(state_input(form, checked, |form, value| form.stream_priority.inject_header = value), form.stream_priority.inject_header, locale.t("proxies.stream_priority_inject_header"), "my-2") }
+                <p class={HINT_CLASS}>{locale.t("proxies.stream_priority_inject_header_hint")}</p>
+            </div>
+            <div>
+                { toggle(state_input(form, checked, |form, value| form.stream_priority.adaptive_concurrency = value), form.stream_priority.adaptive_concurrency, locale.t("proxies.stream_priority_adaptive_concurrency"), "my-2") }
+                <p class={HINT_CLASS}>{locale.t("proxies.stream_priority_adaptive_concurrency_hint")}</p>
+            </div>
+        </div>
+    }
 }
 
 /// The select element of the access list of a proxy or a route. A selected list that `lists` does

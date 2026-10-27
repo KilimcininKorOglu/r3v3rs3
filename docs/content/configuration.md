@@ -1650,6 +1650,13 @@ r3 traffic priority
 
 MCP tools: `get_stream_priority`, `set_stream_priority`, `get_stream_priority_stats`.
 
+### WebUI Management & Telemetry
+
+Stream prioritization can be managed directly from the WebUI:
+- **Proxy Configuration**: Under proxy advanced settings, enable *Stream Priority (RFC 9218)* and configure the *Inject Priority Header* and *Adaptive Concurrency* options.
+- **Port Settings**: Enable *Stream Priority Optimization* on any HTTP/2 or HTTP/3 listening port.
+- **Live Traffic Telemetry**: The `/traffic` page includes a dedicated *Stream Priority* tab displaying active multiplexed streams, priority classification breakdown (Critical, Normal, Background), adaptive backpressure pacing counters, and visual percentage distribution bars.
+
 ## Metrics
 
 `GET /api/metrics` returns the counters of the running process in the Prometheus text format (`text/plain; version=0.0.4`):

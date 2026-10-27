@@ -2339,5 +2339,10 @@
   "traffic.priority_critical": "Critical (u=0..2)",
   "traffic.priority_normal": "Normal (u=3..4)",
   "traffic.priority_background": "Background (u=5..7)",
-  "traffic.priority_throttled": "Throttled / Paced"
+  "traffic.priority_throttled": "Throttled / Paced",
+  "traffic.priority_active": "Active Streams",
+  "traffic.priority_desc": "Real-time RFC 9218 HTTP/2 and HTTP/3 multiplexed stream priority distribution and adaptive backpressure telemetry.",
+  "traffic.priority_distribution": "Stream Priority Distribution",
+  "traffic.priority_info_title": "RFC 9218 Priority Urgency Hierarchy",
+  "traffic.priority_info_desc": "HTTP/2 and HTTP/3 streams are prioritized dynamically based on MIME types, file extensions, and explicit client headers to optimize critical rendering path."
 }

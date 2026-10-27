@@ -1650,6 +1650,13 @@ r3 traffic priority
 
 MCP araçları: `get_stream_priority`, `set_stream_priority`, `get_stream_priority_stats`.
 
+### WebUI Yönetimi ve Telemetri
+
+Akış önceliklendirmesi doğrudan WebUI üzerinden yönetilebilir:
+- **Proxy Yapılandırması**: Proxy gelişmiş ayarları altında *Akış Önceliklendirme (RFC 9218)* seçeneğini etkinleştirin, *Priority Başlığı Ekle* ve *Uyarlamalı Eşzamanlılık* alt seçeneklerini yapılandırın.
+- **Port Ayarları**: HTTP/2 veya HTTP/3 dinleyen herhangi bir portta *Akış Önceliklendirme Optimizasyonu* ayarını etkinleştirin.
+- **Canlı Trafik Telemetrisi**: `/traffic` sayfası, aktif çoklu akışları, öncelik sınıflandırma dağılımını (Kritik, Normal, Arka Plan), geri basınç geciktirme sayaçlarını ve görsel dağılım çubuğunu gösteren özel bir *Akış Önceliklendirmesi* sekmesi içerir.
+
 ## Metrics
 
 `GET /api/metrics` çalışan sürecin sayaçlarını Prometheus text formatında (`text/plain; version=0.0.4`) döndürür:

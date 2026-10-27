@@ -8,6 +8,7 @@ use gloo_net::eventsource::futures::EventSource;
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::priority::StreamPriorityStats;
 use r3v3rs3_api::traffic::{
     AccessLogEntry, ActiveConnectionInfo, ConnectionProtocol, CountryTrafficStat,
     TrafficGeoDistribution,
@@ -24,6 +25,7 @@ const MAX_UI_ENTRIES: usize = 1000;
 pub enum TrafficTab {
     AccessLogs,
     ActiveConnections,
+    StreamPriority,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -301,9 +303,14 @@ fn tab_bar_view(
         let active_tab = active_tab.clone();
         Callback::from(move |_: MouseEvent| active_tab.set(TrafficTab::ActiveConnections))
     };
+    let on_select_priority = {
+        let active_tab = active_tab.clone();
+        Callback::from(move |_: MouseEvent| active_tab.set(TrafficTab::StreamPriority))
+    };
 
     let logs_active = **active_tab == TrafficTab::AccessLogs;
     let conns_active = **active_tab == TrafficTab::ActiveConnections;
+    let priority_active = **active_tab == TrafficTab::StreamPriority;
 
     let base_btn =
         "px-4 py-2 font-medium text-sm rounded-lg transition-colors flex items-center gap-2";
@@ -336,8 +343,40 @@ fn tab_bar_view(
                     </span>
                 }
             </button>
+            <button
+                class={classes!(base_btn, if priority_active { active_style } else { inactive_style })}
+                onclick={on_select_priority}
+            >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
+                </svg>
+                { locale.t("traffic.stream_priority") }
+            </button>
         </div>
     }
+}
+
+#[hook]
+fn use_stream_priority_stats(
+    stats: &UseStateHandle<StreamPriorityStats>,
+    trigger: &UseStateHandle<u32>,
+    active_tab: TrafficTab,
+) {
+    let stats = stats.clone();
+    let trigger_val = **trigger;
+    use_effect_with((trigger_val, active_tab), move |_| {
+        if active_tab == TrafficTab::StreamPriority {
+            spawn_local(async move {
+                let req = Request::get(&format!("{API_ENDPOINT}/traffic/priority"));
+                if let Ok(res) = req.send().await
+                    && let Ok(data) = res.json::<StreamPriorityStats>().await
+                {
+                    stats.set(data);
+                }
+            });
+        }
+        || ()
+    });
 }
 
 #[hook]
@@ -523,6 +562,189 @@ fn active_connections_view(
     }
 }
 
+fn stream_priority_view(
+    locale: Locale,
+    stats: &StreamPriorityStats,
+    trigger: &UseStateHandle<u32>,
+) -> Html {
+    let on_refresh = {
+        let trigger = trigger.clone();
+        Callback::from(move |_: MouseEvent| trigger.set(*trigger + 1))
+    };
+
+    html! {
+        <div class="space-y-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-semibold text-neutral-800 dark:text-neutral-100 flex items-center gap-2">
+                        { locale.t("traffic.stream_priority") }
+                        <span class="text-xs px-2 py-0.5 rounded font-mono font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
+                            { "RFC 9218" }
+                        </span>
+                    </h3>
+                    <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                        { locale.t("traffic.priority_desc") }
+                    </p>
+                </div>
+                <button
+                    class="px-3 py-1.5 text-sm bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-lg transition-colors flex items-center gap-1.5"
+                    onclick={on_refresh}
+                >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    { locale.t("traffic.refresh") }
+                </button>
+            </div>
+
+            { priority_kpi_cards(locale, stats) }
+            { priority_distribution_card(locale, stats) }
+            { priority_reference_guide(locale) }
+        </div>
+    }
+}
+
+fn priority_card_item(
+    title: &str,
+    value: &str,
+    subtitle: &str,
+    accent_class: &'static str,
+) -> Html {
+    html! {
+        <div class="p-4 bg-white dark:bg-neutral-800/40 border dark:border-neutral-700 rounded-xl shadow-sm flex flex-col justify-between">
+            <span class="text-xs font-medium text-neutral-500 dark:text-neutral-400">{ title }</span>
+            <div class={classes!("text-2xl", "font-bold", "font-mono", "my-1", accent_class)}>{ value }</div>
+            <span class="text-[11px] text-neutral-400 dark:text-neutral-500">{ subtitle }</span>
+        </div>
+    }
+}
+
+fn priority_kpi_cards(locale: Locale, stats: &StreamPriorityStats) -> Html {
+    html! {
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            { priority_card_item(&locale.t("traffic.priority_active"), &stats.active_streams.to_string(), "In-flight HTTP/2 & 3", "text-neutral-900 dark:text-neutral-100") }
+            { priority_card_item(&locale.t("traffic.priority_total"), &stats.total_requests.to_string(), "RFC 9218 processed", "text-blue-600 dark:text-blue-400") }
+            { priority_card_item(&locale.t("traffic.priority_critical"), &stats.critical_requests.to_string(), "HTML, CSS, JS, fonts", "text-rose-600 dark:text-rose-400") }
+            { priority_card_item(&locale.t("traffic.priority_normal"), &stats.normal_requests.to_string(), "APIs & subresources", "text-cyan-600 dark:text-cyan-400") }
+            { priority_card_item(&locale.t("traffic.priority_background"), &stats.background_requests.to_string(), "Images & streaming", "text-amber-600 dark:text-amber-400") }
+            { priority_card_item(&locale.t("traffic.priority_throttled"), &stats.throttled_background.to_string(), "Backpressure paced", "text-purple-600 dark:text-purple-400") }
+        </div>
+    }
+}
+
+fn calculate_priority_percentages(stats: &StreamPriorityStats) -> (f64, f64, f64) {
+    let sum = stats.critical_requests + stats.normal_requests + stats.background_requests;
+    if sum == 0 {
+        return (0.0, 0.0, 0.0);
+    }
+    let total = sum as f64;
+    (
+        (stats.critical_requests as f64 / total) * 100.0,
+        (stats.normal_requests as f64 / total) * 100.0,
+        (stats.background_requests as f64 / total) * 100.0,
+    )
+}
+
+fn priority_distribution_card(locale: Locale, stats: &StreamPriorityStats) -> Html {
+    let (crit_pct, norm_pct, bg_pct) = calculate_priority_percentages(stats);
+    html! {
+        <div class="p-5 bg-white dark:bg-neutral-800/40 border dark:border-neutral-700 rounded-xl shadow-sm space-y-3">
+            <h4 class="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+                { locale.t("traffic.priority_distribution") }
+            </h4>
+            <div class="w-full bg-neutral-200 dark:bg-neutral-700 rounded-full h-3 overflow-hidden flex">
+                <div class="bg-rose-500 h-full transition-all duration-300" style={format!("width: {crit_pct:.1}%")} />
+                <div class="bg-cyan-500 h-full transition-all duration-300" style={format!("width: {norm_pct:.1}%")} />
+                <div class="bg-amber-500 h-full transition-all duration-300" style={format!("width: {bg_pct:.1}%")} />
+            </div>
+            <div class="flex flex-wrap items-center gap-6 text-xs text-neutral-600 dark:text-neutral-300 pt-1 font-mono">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
+                    <span>{ format!("{}: {:.1}%", locale.t("traffic.priority_critical"), crit_pct) }</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-cyan-500 inline-block" />
+                    <span>{ format!("{}: {:.1}%", locale.t("traffic.priority_normal"), norm_pct) }</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                    <span>{ format!("{}: {:.1}%", locale.t("traffic.priority_background"), bg_pct) }</span>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+fn priority_reference_guide(locale: Locale) -> Html {
+    html! {
+        <div class="p-5 bg-white dark:bg-neutral-800/40 border dark:border-neutral-700 rounded-xl shadow-sm space-y-4">
+            <div>
+                <h4 class="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+                    { locale.t("traffic.priority_info_title") }
+                </h4>
+                <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                    { locale.t("traffic.priority_info_desc") }
+                </p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                <div class="p-3 rounded-lg bg-neutral-50 dark:bg-neutral-800/60 border dark:border-neutral-700 space-y-1">
+                    <span class="font-semibold text-rose-600 dark:text-rose-400 block font-mono">
+                        { "u=0..2 (Weight 256 - 64)" }
+                    </span>
+                    <span class="font-medium text-neutral-700 dark:text-neutral-300 block">
+                        { "Critical Rendering Path" }
+                    </span>
+                    <span class="text-neutral-500 dark:text-neutral-400 block text-[11px]">
+                        { "HTML documents, CSS stylesheet bundles, critical JS runtime, fonts (woff2)." }
+                    </span>
+                </div>
+                <div class="p-3 rounded-lg bg-neutral-50 dark:bg-neutral-800/60 border dark:border-neutral-700 space-y-1">
+                    <span class="font-semibold text-cyan-600 dark:text-cyan-400 block font-mono">
+                        { "u=3..4 (Weight 32 - 16)" }
+                    </span>
+                    <span class="font-medium text-neutral-700 dark:text-neutral-300 block">
+                        { "Normal Sub-resources" }
+                    </span>
+                    <span class="text-neutral-500 dark:text-neutral-400 block text-[11px]">
+                        { "Standard REST/GraphQL APIs, JSON endpoints, secondary scripts, favicons." }
+                    </span>
+                </div>
+                <div class="p-3 rounded-lg bg-neutral-50 dark:bg-neutral-800/60 border dark:border-neutral-700 space-y-1">
+                    <span class="font-semibold text-amber-600 dark:text-amber-400 block font-mono">
+                        { "u=5..7 (Weight 8 - 2, i=?1)" }
+                    </span>
+                    <span class="font-medium text-neutral-700 dark:text-neutral-300 block">
+                        { "Background & Media" }
+                    </span>
+                    <span class="text-neutral-500 dark:text-neutral-400 block text-[11px]">
+                        { "Images (webp, avif), video streams (mp4), file downloads, telemetry." }
+                    </span>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+fn traffic_tab_content(
+    locale: Locale,
+    active_tab: TrafficTab,
+    logs_view: Html,
+    connections: &[ActiveConnectionInfo],
+    conns_trigger: &UseStateHandle<u32>,
+    priority_stats: &StreamPriorityStats,
+    priority_trigger: &UseStateHandle<u32>,
+) -> Html {
+    match active_tab {
+        TrafficTab::AccessLogs => logs_view,
+        TrafficTab::ActiveConnections => {
+            active_connections_view(locale, connections, conns_trigger)
+        }
+        TrafficTab::StreamPriority => {
+            stream_priority_view(locale, priority_stats, priority_trigger)
+        }
+    }
+}
+
 struct LogsTabProps<'a> {
     locale: Locale,
     on_back: Callback<MouseEvent>,
@@ -596,6 +818,8 @@ pub fn traffic_view() -> Html {
     let active_tab = use_state(default_traffic_tab);
     let connections = use_state(Vec::<ActiveConnectionInfo>::new);
     let conns_trigger = use_state(u32::default);
+    let priority_stats = use_state(StreamPriorityStats::default);
+    let priority_trigger = use_state(u32::default);
     let entries = use_state(Vec::<AccessLogEntry>::new);
     let live = use_state(default_true);
     let auto_scroll = use_state(default_true);
@@ -611,6 +835,7 @@ pub fn traffic_view() -> Html {
     use_live_traffic_stream(&entries, &live);
     use_traffic_auto_scroll(&table_ref, &auto_scroll, &entries);
     use_active_connections(&connections, &conns_trigger, *active_tab);
+    use_stream_priority_stats(&priority_stats, &priority_trigger, *active_tab);
 
     let stats = calculate_stats(&entries);
     let geo_dist = calculate_geo_distribution(&entries);
@@ -653,11 +878,7 @@ pub fn traffic_view() -> Html {
     html! {
         <div class="space-y-4">
             { tab_bar_view(locale, &active_tab, connections.len()) }
-            if *active_tab == TrafficTab::AccessLogs {
-                { logs_view }
-            } else {
-                { active_connections_view(locale, &connections, &conns_trigger) }
-            }
+            { traffic_tab_content(locale, *active_tab, logs_view, &connections, &conns_trigger, &priority_stats, &priority_trigger) }
         </div>
     }
 }
@@ -1615,5 +1836,24 @@ mod tests {
         assert_eq!(format_latency(0.42), "0.42 ms");
         assert_eq!(format_latency(15.2), "15.2 ms");
         assert_eq!(format_latency(1500.0), "1.50 s");
+    }
+
+    #[test]
+    fn test_calculate_priority_percentages() {
+        let empty = StreamPriorityStats::default();
+        assert_eq!(calculate_priority_percentages(&empty), (0.0, 0.0, 0.0));
+
+        let stats = StreamPriorityStats {
+            total_requests: 100,
+            critical_requests: 50,
+            normal_requests: 30,
+            background_requests: 20,
+            throttled_background: 5,
+            active_streams: 12,
+        };
+        let (crit, norm, bg) = calculate_priority_percentages(&stats);
+        assert_eq!(crit, 50.0);
+        assert_eq!(norm, 30.0);
+        assert_eq!(bg, 20.0);
     }
 }

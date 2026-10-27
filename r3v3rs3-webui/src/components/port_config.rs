@@ -115,6 +115,7 @@ struct PortForm {
     proxy_protocol: ProxyProtocolForm,
     http2_limits: Http2LimitsForm,
     http3_limits: Http3LimitsForm,
+    stream_priority: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -225,6 +226,35 @@ fn protocol_name(udp: bool, tls: bool, http: bool, quic: bool) -> &'static str {
     }
 }
 
+fn extract_listen_addr(stack: &Multiaddr) -> Option<(String, u16)> {
+    let host = stack.host().ok()?;
+    let port = stack.port().ok()?;
+    Some((host, port))
+}
+
+fn initial_stream_priority_opts(opts: &PortOptions) -> bool {
+    opts.stream_priority
+        .as_ref()
+        .map(|s| s.enabled)
+        .unwrap_or_default()
+}
+
+#[hook]
+fn use_port_limits(
+    opts: &PortOptions,
+) -> (
+    UseStateHandle<ProxyProtocolForm>,
+    UseStateHandle<Http2LimitsForm>,
+    UseStateHandle<Http3LimitsForm>,
+    UseStateHandle<bool>,
+) {
+    let proxy_protocol = use_state(|| ProxyProtocolForm::new(opts.proxy_protocol.as_ref()));
+    let http2_limits = use_state(|| Http2LimitsForm::new(opts.http2_limits.as_ref()));
+    let http3_limits = use_state(|| Http3LimitsForm::new(opts.http3_limits.as_ref()));
+    let stream_priority = use_state(|| initial_stream_priority_opts(opts));
+    (proxy_protocol, http2_limits, http3_limits, stream_priority)
+}
+
 #[function_component(PortConfig)]
 pub fn port_config(props: &Props) -> Html {
     let locale = use_locale();
@@ -233,10 +263,7 @@ pub fn port_config(props: &Props) -> Html {
     let http = stack.is_http();
     let udp = stack.is_udp();
     let quic = stack.is_quic();
-    let Ok(interface) = stack.host() else {
-        return html!();
-    };
-    let Ok(port) = stack.port() else {
+    let Some((interface, port)) = extract_listen_addr(stack) else {
         return html!();
     };
 
@@ -260,10 +287,8 @@ pub fn port_config(props: &Props) -> Html {
 
     let tls_termination = props.port.opts.tls_termination.clone().unwrap_or_default();
     let tls_fields = use_tls_fields(&tls_termination);
-    let proxy_protocol =
-        use_state(|| ProxyProtocolForm::new(props.port.opts.proxy_protocol.as_ref()));
-    let http2_limits = use_state(|| Http2LimitsForm::new(props.port.opts.http2_limits.as_ref()));
-    let http3_limits = use_state(|| Http3LimitsForm::new(props.port.opts.http3_limits.as_ref()));
+    let (proxy_protocol, http2_limits, http3_limits, stream_priority) =
+        use_port_limits(&props.port.opts);
 
     let form = PortForm {
         active: *active,
@@ -278,6 +303,7 @@ pub fn port_config(props: &Props) -> Html {
         proxy_protocol: (*proxy_protocol).clone(),
         http2_limits: (*http2_limits).clone(),
         http3_limits: (*http3_limits).clone(),
+        stream_priority: *stream_priority,
     };
     let prev_entry =
         use_state::<Result<Port, HashMap<String, String>>, _>(|| Err(Default::default()));
@@ -317,6 +343,7 @@ pub fn port_config(props: &Props) -> Html {
                 &proxy_protocol,
                 &http2_limits,
                 &http3_limits,
+                &stream_priority,
                 &errors,
             ) }
         </>
@@ -548,6 +575,18 @@ fn get_port(
     let proxy_protocol = proxy_protocol(locale, form, &mut errors);
     let http2_limits = http2_limits(locale, form, &mut errors);
     let http3_limits = http3_limits(locale, form, &mut errors);
+    let stream_priority = if form.stream_priority
+        && (supports_http2(&form.protocol) || supports_http3(&form.protocol))
+    {
+        Some(r3v3rs3_api::priority::StreamPriorityConfig {
+            enabled: true,
+            inject_header: true,
+            adaptive_concurrency: true,
+            custom_rules: Vec::new(),
+        })
+    } else {
+        None
+    };
 
     match listen {
         Some(listen) if errors.is_empty() => Ok(Port {
@@ -559,7 +598,7 @@ fn get_port(
                 proxy_protocol,
                 http2_limits,
                 http3_limits,
-                stream_priority: None,
+                stream_priority,
             },
         }),
         _ => Err(errors),
@@ -800,6 +839,7 @@ fn protocol_view(
     proxy_protocol: &UseStateHandle<ProxyProtocolForm>,
     http2_limits: &UseStateHandle<Http2LimitsForm>,
     http3_limits: &UseStateHandle<Http3LimitsForm>,
+    stream_priority: &UseStateHandle<bool>,
     errors: &HashMap<String, String>,
 ) -> Html {
     html! {
@@ -816,6 +856,21 @@ fn protocol_view(
             if supports_http3(protocol) {
                 { http3_limits_view(locale, http3_limits, errors) }
             }
+            if supports_http2(protocol) || supports_http3(protocol) {
+                { stream_priority_view(locale, stream_priority) }
+            }
+        </>
+    }
+}
+
+fn stream_priority_view(locale: Locale, state: &UseStateHandle<bool>) -> Html {
+    let onchange = state_input(state, checked, |val, checked| *val = checked);
+    html! {
+        <>
+            <div class="mt-6">
+                { toggle(onchange, **state, locale.t("ports.stream_priority"), "") }
+            </div>
+            <p class={HINT_CLASS}>{locale.t("ports.stream_priority_hint")}</p>
         </>
     }
 }
@@ -935,6 +990,7 @@ mod tests {
             proxy_protocol: ProxyProtocolForm::new(None),
             http2_limits: Http2LimitsForm::new(None),
             http3_limits: Http3LimitsForm::new(None),
+            stream_priority: false,
         }
     }
 
