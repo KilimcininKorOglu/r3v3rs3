@@ -125,4 +125,26 @@ mod tests {
             assert_ne!(Locale::En.t(&key), key, "missing key {key}");
         }
     }
+
+    #[test]
+    fn every_referenced_asset_exists() {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut sources = Vec::new();
+        read_sources(&manifest_dir.join("src"), &mut sources);
+        let assets = sources
+            .iter()
+            .flat_map(|source| string_literals(source))
+            .filter(|text| text.starts_with("/assets/") && text.ends_with(".svg"))
+            .collect::<std::collections::HashSet<_>>();
+        assert!(assets.len() >= 20, "found only {} assets", assets.len());
+        for asset in assets {
+            let rel = asset.trim_start_matches('/');
+            let path = manifest_dir.join(rel);
+            assert!(
+                path.exists(),
+                "referenced asset {asset} does not exist at {}",
+                path.display()
+            );
+        }
+    }
 }
