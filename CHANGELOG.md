@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.5] - 2026-10-27
+
+### Changed
+- Standardized Database Action Controls: Converted raw text links in the databases table (`databases.rs`) to standardized `ActionIconButton` components (`ActionVariant::View`, `Files`, `Terminal`, `Play`, `Restore`, `Edit`, `Delete`) with localized tooltips and aria-labels, achieving 100% visual parity across all platform lists.
+- Eliminated Redundant S3 & Backup Settings: Removed redundant S3 drawer panels from `databases.rs` and the redundant global storage/schedule configuration form from `database_backups.rs`, replacing them with a direct redirect banner to the centralized Backups & Disaster Recovery center (`/backups`).
+- Dual-Language Platform Documentation: Synchronized `platform.md` and `platform.tr.md` in lockstep documenting standardized database action controls and centralized storage management.
+
 ## [2.7.4] - 2026-10-27
 
 ### Changed
