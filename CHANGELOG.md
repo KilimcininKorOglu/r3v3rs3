@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.8] - 2026-10-27
+
+### Added
+- Interactive Error Page Themes Visual Editor Modal: Integrated `ErrorPagesEditor` inside a full-featured modal on `ErrorPageThemesCard`, enabling visual HTML and status-code editing directly from the Proxies Error Page Themes tab.
+- Custom Error Page Theme Creation: Added "+ New Theme" modal dialog in the WebUI to create custom themes with custom IDs, names, descriptions, and status-code error templates.
+- Row-Level Theme Editing: Added standardized Edit action icon buttons (`ActionVariant::Edit`) to error page theme table rows for quick theme modifications.
+- Dual-Language Documentation: Synchronized `configuration.md` and `configuration.tr.md` documenting the visual editor modal and custom error page theme creation.
+
 ## [2.7.7] - 2026-10-27
 
 ### Changed
