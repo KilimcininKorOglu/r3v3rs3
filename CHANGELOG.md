@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.2] - 2026-10-27
+
+### Fixed
+- WebUI Icon and Static Asset Integrity: Completed comprehensive live crawl and disk validation across all WebUI routes (`/`, `/proxies`, `/ports`, `/certificates`, `/settings`, `/traffic`, `/audit`, `/apps`, `/databases`, `/backups`, `/targets`, `/git-connections`, `/projects`, `/store`, `/ct-logs`, `/apps/{id}`) ensuring zero missing or 404 vector assets and zero broken images.
+- Automated Vector Asset Validation Test Suite: Added `every_icon_in_assets_is_valid` regression test verifying XML/SVG syntax integrity for all icons in `r3v3rs3-webui/assets/icons/`, and extended `every_referenced_asset_exists` to validate all root static assets (`favicon.ico`, `apple-touch-icon.png`, `mstile-*.png`, `safari-pinned-tab.svg`, `browserconfig.xml`, vendor bundles) referenced in `index.html`.
+
 ## [2.7.1] - 2026-10-27
 
 ### Fixed
