@@ -8,8 +8,9 @@ use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::backup_drill_modal::BackupDrillModal;
+use crate::components::wal_segments_modal::WalSegmentsModal;
 use crate::dialog::{self, Icon};
-use crate::format::format_time;
+use crate::format::{format_bytes, format_time};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -35,6 +36,7 @@ pub fn database_backups(props: &Props) -> Html {
     let notice = use_state(Option::<Notice<&'static str>>::default);
     let selected_drill_backup = use_state(Option::<BackupEntry>::default);
     let drill_running = use_state(bool::default);
+    let show_wal_modal = use_state(bool::default);
     let busy = use_state(bool::default);
     let id = props.id;
 
@@ -67,17 +69,43 @@ pub fn database_backups(props: &Props) -> Html {
         reload.clone(),
         &drill_running,
     );
+    let on_open_wal = {
+        let s = show_wal_modal.clone();
+        Callback::from(move |ev: MouseEvent| {
+            ev.prevent_default();
+            s.set(true);
+        })
+    };
+    let wal_modal = (*show_wal_modal).then(|| {
+        let on_close = {
+            let s = show_wal_modal.clone();
+            Callback::from(move |()| s.set(false))
+        };
+        let on_archived = {
+            let reload = reload.clone();
+            Some(Callback::from(move |()| reload.emit(())))
+        };
+        html! {
+            <WalSegmentsModal
+                db_id={id}
+                on_close={on_close}
+                can_edit={can_edit}
+                on_archived={on_archived}
+            />
+        }
+    });
 
     html! {
         <>
             { back_header(locale, &navigator, locale.t("backups.title").to_string()) }
             { notice_view(&notice, |key| html! { {locale.t(key)} }) }
-            { pitr_banner_view(locale, id, (*pitr_range).as_ref(), can_edit, &notice, &reload) }
+            { pitr_banner_view(locale, id, (*pitr_range).as_ref(), can_edit, &notice, &reload, on_open_wal) }
             if can_edit {
                 { take_backup_button(locale, id, busy.clone(), notice.clone(), reload.clone()) }
             }
             { list_view(locale, id, &backups, can_edit, reload.clone(), selected_drill_backup.clone()) }
             { drill_modal }
+            { wal_modal }
             { storage_settings_redirect(locale) }
         </>
     }
@@ -257,6 +285,7 @@ fn pitr_banner_view(
     can_edit: bool,
     notice: &UseStateHandle<Option<Notice<&'static str>>>,
     reload: &Callback<()>,
+    on_open_wal: Callback<MouseEvent>,
 ) -> Html {
     let Some(pitr) = pitr else {
         return html!();
@@ -276,6 +305,19 @@ fn pitr_banner_view(
             </button>
         }
     });
+    let wal_view_btn = html! {
+        <button
+            type="button"
+            class="px-3 py-1.5 rounded bg-neutral-700 text-neutral-200 font-medium hover:bg-neutral-600 text-sm mr-2 inline-flex items-center gap-1.5"
+            onclick={on_open_wal.clone()}
+        >
+            <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+            {locale.t("databases.wal_segments")}
+        </button>
+    };
     let wal_btn = can_edit.then(|| {
         let onclick = archive_wal_action(id, notice.clone(), reload.clone());
         html! {
@@ -286,15 +328,28 @@ fn pitr_banner_view(
     });
     html! {
         <div class="mb-4 p-3 bg-neutral-800/80 rounded border border-neutral-700 flex flex-wrap items-center justify-between gap-2">
-            <div>
-                <span class="font-medium text-neutral-200 mr-2">{locale.t("databases.pitr_window")}</span>
+            <div class="flex items-center flex-wrap gap-2">
+                <span class="font-medium text-neutral-200 mr-1">{locale.t("databases.pitr_window")}</span>
                 <span class="font-mono text-neutral-300 text-sm">{window_text}</span>
-                <span class="ml-3 text-xs text-neutral-400">
-                    {format!("({} base, {} WAL)", pitr.base_backups_count, pitr.wal_segments_count)}
+                <span class="text-xs text-neutral-400">
+                    {format!("({} base,", pitr.base_backups_count)}
                 </span>
+                <button
+                    type="button"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono bg-neutral-700/80 hover:bg-neutral-600 text-cyan-300 hover:text-cyan-200 transition cursor-pointer"
+                    onclick={on_open_wal}
+                    title={locale.t("databases.view_wal_segments")}
+                >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    <span>{format!("{} WAL)", pitr.wal_segments_count)}</span>
+                </button>
             </div>
             <div class="flex items-center">
                 { restore_btn }
+                { wal_view_btn }
                 { wal_btn }
             </div>
         </div>
@@ -475,7 +530,7 @@ fn list_view(
             html! {
                 <tr class="border-b border-neutral-700">
                     <td class="py-1.5">{format_time(entry.created_at.max(0) as u64)}</td>
-                    <td class="py-1.5 font-mono text-neutral-400">{format_size(entry.size)}</td>
+                    <td class="py-1.5 font-mono text-neutral-400">{format_bytes(entry.size)}</td>
                     <td class="py-1.5 font-mono text-neutral-400">{entry.sha256.chars().take(12).collect::<String>()}</td>
                     <td class="py-1.5 text-right">
                         <div class="inline-flex items-center justify-end gap-1.5">
@@ -518,15 +573,6 @@ fn list_view(
             </thead>
             <tbody>{ for rows }</tbody>
         </table>
-    }
-}
-
-/// The size of a backup in KiB or MiB.
-fn format_size(size: u64) -> String {
-    if size >= 1024 * 1024 {
-        format!("{:.1} MiB", size as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.1} KiB", size as f64 / 1024.0)
     }
 }
 

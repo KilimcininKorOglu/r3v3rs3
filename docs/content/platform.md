@@ -391,6 +391,7 @@ To ensure that backups remain uncorrupted and recoverable, r3v3rs3 includes an a
 Beyond nightly or periodic full dumps, r3v3rs3 provides Point-in-Time Recovery (PITR) via continuous Write-Ahead Logging (WAL) and binary log archiving:
 
 - **Recovery Window**: The backups page displays the exact active recovery timeline (from the earliest base backup to the latest recorded change log segment) along with total base backups and archived WAL count.
+- **Archived WAL Inspection Modal**: Operators can click the **WAL Segments** action button or the inline WAL counter badge in the recovery window banner to open an interactive segments inspector modal (`GET /api/databases/{id}/wal/segments`). The inspector provides summary KPI metrics (total segment count, aggregated retained size, and log timestamp coverage), along with a searchable segment table displaying filename, compressed size, sequence start/end range, SHA-256 integrity checksum, and archival timestamp, plus an on-demand **Archive Current Segment** action.
 - **WAL & Log Archiving**: Rotating transaction logs are archived in `<config-dir>/backups/<db_id>/wal/`. Users can trigger manual segment archiving with **Archive WAL Now** or use automated background checkpoints (`POST /api/databases/{id}/wal/archive`):
   - **PostgreSQL**: Archives WAL segments using transaction log rotation (`pg_switch_wal()`) and continuous WAL capture.
   - **MySQL / MariaDB**: Archives rotated binary logs (`FLUSH BINARY LOGS;`).
