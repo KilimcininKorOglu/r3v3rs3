@@ -1403,7 +1403,10 @@ mod tests {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
             let deployments = platform.deployments(id).await?;
-            if !deployments.is_empty() && deployments.iter().all(|d| d.finished_at.is_some()) {
+            if !deployments.is_empty()
+                && deployments.iter().all(|d| d.finished_at.is_some())
+                && !platform.busy_apps().contains(&id)
+            {
                 return Ok(());
             }
             if tokio::time::Instant::now() >= deadline {
