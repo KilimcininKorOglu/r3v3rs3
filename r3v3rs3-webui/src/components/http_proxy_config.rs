@@ -2818,7 +2818,7 @@ fn parse_maintenance(
     }
 }
 
-fn parse_error_pages(
+pub fn parse_error_pages(
     locale: Locale,
     pages: &[ErrorPageForm],
     errors: &mut HashMap<String, String>,

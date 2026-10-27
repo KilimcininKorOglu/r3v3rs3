@@ -426,6 +426,8 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
 Proxy düzeyinde her seferinde ayrı ayrı HTML sayfaları girmek yerine r3v3rs3, WebUI üzerinde **Proxies > Hata Sayfası Temaları** altında platform genelinde yönetilen merkezi bir **Hata Sayfası Temaları (Error Page Themes)** havuzu sunar:
 
 - **Yerleşik Temalar**: Tüm standart hata durum kodları (`400`, `401`, `403`, `404`, `405`, `408`, `429`, `500`, `502`, `503`, `504`) için hazır modern temalarla (`Minimalist Dark`, `Modern Glassmorphism`, `Developer Terminal`, `Illustration Card`, `Maintenance Notice`) birlikte gelir.
+- **Etkileşimli Görsel Editör Modal'ı**: WebUI üzerinden canlı responsive önizleme görünümleri (Masaüstü, Tablet, Mobil), HTML kod editörü ve durum kodu şablonlarıyla temaları doğrudan düzenleme ve test etme imkânı.
+- **Özel Tema Yönetimi**: WebUI üzerinden `+ Yeni Tema` modal'ı veya CLI (`r3 error-page-theme add` / `r3 error-page-theme update`) ile benzersiz kimlikli özel temalar oluşturma ve düzenleme.
 - **Proxy Tema Ataması**: `error_page_theme = "short_id"` ile herhangi bir proxy'ye WebUI, CLI (`r3 proxy update <id> ...`) veya REST API üzerinden tek tıkla hata sayfası teması bağlanabilir.
 - **Proxy Bazlı İnce Ayar / Geçersiz Kılma**: Proxy yapılandırmasında tanımlanan özel `error_pages` girdileri, o durum kodu için atanan temayı geçersiz kılarak öncelik alır.
 - **Varsayılanlara Sıfırlama**: WebUI, CLI (`r3 error-page-theme reset-defaults`) veya MCP (`reset_error_page_themes`) üzerinden yerleşik temalar her zaman varsayılan şablonlara geri döndürülebilir.

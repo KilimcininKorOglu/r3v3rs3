@@ -426,6 +426,8 @@ routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:8080/" }] }]
 Instead of defining custom HTML pages repeatedly per proxy, r3v3rs3 provides a centralized **Error Page Themes** repository managed platform-wide under **Proxies > Error Page Themes** in the WebUI:
 
 - **Built-in Themes**: Ships with ready-to-use modern themes (`Minimalist Dark`, `Modern Glassmorphism`, `Developer Terminal`, `Illustration Card`, `Maintenance Notice`) pre-populated across all standard error status codes (`400`, `401`, `403`, `404`, `405`, `408`, `429`, `500`, `502`, `503`, `504`).
+- **Interactive Visual Editor Modal**: Create and customize themes directly in the WebUI with live responsive preview viewports (Desktop, Tablet, Mobile), HTML code editor, and status code templates.
+- **Custom Theme Management**: Add new custom themes with unique IDs and custom designs, or edit existing templates (`+ New Theme` in WebUI, or `r3 error-page-theme add` / `r3 error-page-theme update`).
 - **Proxy Theme Association**: Assign an error page theme to any proxy with `error_page_theme = "short_id"` via WebUI, CLI (`r3 proxy update <id> ...`), or REST API.
 - **Granular Per-Proxy Overrides**: Any proxy-specific `error_pages` entry takes precedence over the assigned theme for that specific status code.
 - **Reset to Defaults**: Built-in themes can be restored to default templates anytime via WebUI, CLI (`r3 error-page-theme reset-defaults`), or MCP (`reset_error_page_themes`).
