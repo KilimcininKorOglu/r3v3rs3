@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.3] - 2026-10-28
+
+### Added
+- Database WAL Segments Inspection Modal: Integrated `WalSegmentsModal` in the database backups interface (`/databases/{id}/backups`), enabling operators to inspect archived Write-Ahead Logging (WAL) and binary log segments (`GET /api/databases/{id}/wal/segments`) with KPI summaries (total segment count, total retained size, log timestamp coverage), searchable filename table, SHA-256 checksums, and on-demand segment archival (`POST /api/databases/{id}/wal/archive`).
+- Interactive WAL Counter Badge & Action Button: Added a clickable WAL counter badge inside the PITR recovery window banner alongside an explicit "WAL Segments" action button for rapid inspection access.
+- Dual-Language Documentation: Synchronized `platform.md` and `platform.tr.md` in lockstep documenting the archived WAL segments inspector and continuous archiving management.
+
+### Changed
+- Shared Utility Standardization: Replaced redundant local size formatting in `database_backups.rs` with the centralized `format_bytes` helper from `crate::format`.
+
 ## [2.8.2] - 2026-10-28
 
 ### Added
