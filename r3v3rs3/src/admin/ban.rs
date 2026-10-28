@@ -31,6 +31,9 @@ pub struct IpBanTracker {
 
 impl IpBanTracker {
     pub fn check_banned(&mut self, ip: &IpAddr, now: Instant) -> Result<(), Error> {
+        if ip.is_loopback() {
+            return Ok(());
+        }
         self.cleanup(now);
         if let Some(attempt) = self.entries.get(ip)
             && let Some(until) = attempt.banned_until
@@ -52,6 +55,9 @@ impl IpBanTracker {
         ban_duration: Duration,
         now: Instant,
     ) {
+        if ip.is_loopback() {
+            return;
+        }
         let attempt = self.entries.entry(ip).or_insert_with(|| IpAttempt {
             failures: 0,
             window_start: now,
@@ -179,5 +185,20 @@ mod tests {
         assert_eq!(tracker.banned_ips(now).len(), 1);
         assert!(tracker.unban(&ip));
         assert!(tracker.check_banned(&ip, now).is_ok());
+    }
+
+    #[test]
+    fn loopback_is_never_banned() {
+        let mut tracker = IpBanTracker::default();
+        let loopback = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let now = Instant::now();
+        let reset = Duration::from_secs(60);
+        let ban_dur = Duration::from_secs(300);
+
+        for _ in 0..10 {
+            tracker.record_failure(loopback, 1, reset, ban_dur, now);
+        }
+        assert!(tracker.check_banned(&loopback, now).is_ok());
+        assert_eq!(tracker.banned_ips(now).len(), 0);
     }
 }

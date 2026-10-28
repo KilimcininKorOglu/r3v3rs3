@@ -81,6 +81,23 @@ async fn record_successful_login(
     state.record_audit(username, Some(*peer_ip), record).await;
 }
 
+fn header_ip(headers: &axum::http::HeaderMap, name: &'static str) -> Option<IpAddr> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .and_then(|s| s.trim().parse::<IpAddr>().ok())
+}
+
+fn resolve_client_ip(peer: &SocketAddr, headers: &axum::http::HeaderMap) -> IpAddr {
+    if !peer.ip().is_loopback() {
+        return peer.ip();
+    }
+    header_ip(headers, "x-forwarded-for")
+        .or_else(|| header_ip(headers, "x-real-ip"))
+        .unwrap_or_else(|| peer.ip())
+}
+
 /// Signs in and sets the `token` session cookie. An account with TOTP returns `totp_required`
 /// first, and a second request with the TOTP code completes the sign-in.
 #[utoipa::path(
@@ -100,12 +117,14 @@ async fn record_successful_login(
 pub async fn login(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
     jar: CookieJar,
     Json(mut request): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    let client_ip = resolve_client_ip(&peer, &headers);
     resolve_login_username(&state, &mut request);
     let username = request.username.clone();
-    let attempt_key = (peer.ip(), username.clone());
+    let attempt_key = (client_ip, username.clone());
     ensure_login_allowed(&state, &attempt_key).await?;
 
     if let Err(err) = verify_pre_login_conditions(&state, &jar, &request, &attempt_key).await {
@@ -124,7 +143,7 @@ pub async fn login(
 
     let scope = match *result {
         LoginResponse::Success => {
-            record_successful_login(&state, &username, &peer.ip(), &attempt_key).await;
+            record_successful_login(&state, &username, &client_ip, &attempt_key).await;
             SessionScope::Admin
         }
         _ => SessionScope::Login,

@@ -45,7 +45,7 @@ fn default_ban_duration_seconds() -> u64 {
 }
 
 fn default_block_status_codes() -> Vec<u16> {
-    vec![404, 403, 401]
+    vec![404, 403]
 }
 
 fn default_scanner_patterns() -> Vec<String> {

@@ -1737,7 +1737,7 @@ r3v3rs3, gelen canlı HTTP ve TCP trafiğini izleyerek dış tehdit istihbaratı
 
 - **Yerel Davranışsal Tehdit Tespiti**:
   - `/.env`, `/.git`, `/.aws`, `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/phpmyadmin` ve `/config.json` gibi tarayıcı ve sonda kalıplarını otomatik olarak yakalar.
-  - Kayan bir zaman penceresinde (varsayılan: 60 saniye) peş peşe alınan HTTP durum ihlallerini (`404`, `403`, `401`) biriktirir.
+  - Kayan bir zaman penceresinde (varsayılan: 60 saniye) peş peşe alınan HTTP durum ihlallerini (`404`, `403`) biriktirir.
   - İhlaller belirlenen eşiğe ulaştığında (varsayılan: 5 ihlal) ilgili client IP adresini anında karantinaya alır.
 - **TCP Drop Yaptırımı**:
   - Karantinaya alınan IP'lerden gelen bağlantılar, HTTP istek çözümlemesi veya TLS handshake yapılmadan TCP dinleyici seviyesinde anında kapatılır (TCP Drop / Reset). Sunucu CPU ve bellek tüketimi sıfıra indirilir.

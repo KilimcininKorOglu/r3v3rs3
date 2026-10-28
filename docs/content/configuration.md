@@ -1737,7 +1737,7 @@ r3v3rs3 monitors incoming live HTTP and TCP traffic to detect scanner probes, pa
 
 - **Local Behavioral Threat Detection**:
   - Automatically identifies probe patterns such as `/.env`, `/.git`, `/.aws`, `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/phpmyadmin`, and `/config.json`.
-  - Accumulates repeated client status violations (`404`, `403`, `401`) across a sliding time window (default: 60 seconds).
+  - Accumulates repeated client status violations (`404`, `403`) across a sliding time window (default: 60 seconds).
   - Instantly quarantines offending client IPs when violations reach the threshold (default: 5 violations).
 - **TCP Drop Enforcement**:
   - Quarantined IP connections are immediately dropped at the TCP listener level before HTTP request parsing or TLS handshakes, consuming near-zero server CPU and memory.

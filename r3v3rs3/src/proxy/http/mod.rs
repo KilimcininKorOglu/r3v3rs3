@@ -788,6 +788,10 @@ fn check_and_record_quarantine<B>(
         return;
     }
 
+    if uri.contains("/api/") {
+        return;
+    }
+
     let status_code = match mapped {
         Ok(res) => res.status().as_u16(),
         Err(_) => 500,
