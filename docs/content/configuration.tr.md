@@ -1775,6 +1775,7 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 | **Projeler ve Ortam Grupları** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group` | Proje organizasyonu, çoklu ortam izolasyonu ve paylaşılan ortak ortam değişkeni grupları. |
 | **Dışa Dönük Webhook'lar** | `list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook` | Dışa dönük olay bildirim webhook dağıtıcıları: uç nokta yönetimi, HMAC-SHA256 imza sırrı doğrulaması, ayrıntılı olay abonelikleri ve uçtan uca webhook teslimat testi. |
 | **Konteyner Registry'leri** | `list_registries`, `add_registry`, `update_registry`, `delete_registry` | Özel Docker ve OCI konteyner registry kimlik bilgileri: güvenli kimlik doğrulama, pull izinleri ve sunucu hedef uç noktaları. |
+| **Git Bağlantıları** | `list_git_connections`, `get_git_connection`, `add_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches` | Git sağlayıcı bağlantıları (GitHub App, GitLab, Gitea): OAuth bağlantı yönetimi, erişilebilir depo tarama ve uzak dal (branch) listeleme. |
 | **Felaket Kurtarma** | `list_dr_backups`, `create_dr_backup` | İsteğe bağlı AES-256-GCM şifrelemeli ve otomatik S3 replikasyonlu tam sistem yedek anlık görüntüleri. |
 
 MCP sunucusu varsayılan olarak kapalıdır. Panelin ayarlar sayfası onu sunucu çalışırken açar ve giriş yapmasına izin verilecek client'ları tutar. `config.toml` aynı bölümü taşır:

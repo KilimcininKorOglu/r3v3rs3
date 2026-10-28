@@ -387,6 +387,41 @@ pub struct UpdateRegistryParams {
     pub password: Option<String>,
 }
 
+/// The arguments of `add_git_connection`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AddGitConnectionParams {
+    /// Distinct identifier name for the connection (e.g. "github-org", "company-gitlab").
+    pub name: String,
+    /// Git provider type: "github", "gitlab", or "gitea".
+    pub provider: String,
+    /// Optional self-hosted provider base URL (e.g. "https://gitlab.example.com"). Not used for github.
+    pub url: Option<String>,
+    /// OAuth application or GitHub App client ID.
+    pub client_id: String,
+    /// OAuth application client secret.
+    pub client_secret: Option<String>,
+}
+
+/// The arguments of `list_git_repositories`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ListGitRepositoriesParams {
+    /// Connection ID to query repositories from.
+    pub id: String,
+    /// Optional search substring to filter repository names.
+    pub search: Option<String>,
+    /// Optional page number starting from 1.
+    pub page: Option<u32>,
+}
+
+/// The arguments of `list_git_branches`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ListGitBranchesParams {
+    /// Connection ID that has access to the repository.
+    pub id: String,
+    /// Full repository name in "owner/repo" format.
+    pub repository: String,
+}
+
 /// The arguments of `install_store_app`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct InstallStoreAppParams {
@@ -4165,6 +4200,167 @@ impl McpServer {
             .record_audit(&caller.username, caller.client, record)
             .await;
         json_result(json!({ "deleted": true }))
+    }
+
+    // ==========================================
+    // Group 14: Git Connections
+    // ==========================================
+
+    /// List all configured Git provider connections.
+    #[tool(description = "List all configured Git provider connections (GitHub, GitLab, Gitea).")]
+    async fn list_git_connections(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let connections = platform.git_connections().await.map_err(any_error)?;
+        json_result(connections)
+    }
+
+    /// Get details of a Git provider connection by id.
+    #[tool(description = "Get details of a Git provider connection by id.")]
+    async fn get_git_connection(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let entry = platform.git_connection(id).await.map_err(any_error)?;
+        json_result(entry)
+    }
+
+    /// Add a new Git provider connection (GitHub, GitLab, Gitea). Needs the edit scope.
+    #[tool(
+        description = "Add a new Git provider connection (GitHub, GitLab, Gitea). Needs the edit scope."
+    )]
+    async fn add_git_connection(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AddGitConnectionParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let name: r3v3rs3_api::container::AppName = params.name.parse().map_err(any_error)?;
+        let provider: r3v3rs3_api::git_connection::GitProvider =
+            params.provider.parse().map_err(any_error)?;
+        let url = match params.url {
+            Some(u) => Some(
+                u.parse::<r3v3rs3_api::git_connection::ProviderUrl>()
+                    .map_err(any_error)?,
+            ),
+            None => None,
+        };
+        let request = r3v3rs3_api::git_connection::GitConnectionRequest {
+            name,
+            provider,
+            url,
+            client_id: params.client_id,
+            client_secret: params.client_secret,
+        };
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let entry = platform
+            .add_git_connection(request, crate::clock::unix_ms())
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::AddGitConnection)
+            .id(entry.id)
+            .summary(format!("{} ({})", entry.name, entry.provider.as_str()));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(entry)
+    }
+
+    /// Delete a Git provider connection with its saved tokens. Needs the edit scope.
+    #[tool(
+        description = "Delete a Git provider connection with its saved tokens by id. Needs the edit scope."
+    )]
+    async fn delete_git_connection(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let entry = platform
+            .delete_git_connection(id)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::DeleteGitConnection)
+            .id(id)
+            .summary(format!("{} ({})", entry.name, entry.provider.as_str()));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(json!({ "deleted": true }))
+    }
+
+    /// List repositories accessible via a Git provider connection.
+    #[tool(description = "List repositories accessible through a Git provider connection.")]
+    async fn list_git_repositories(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<ListGitRepositoriesParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let query = r3v3rs3_api::git_connection::RepositoryQuery {
+            search: params.search,
+            page: params.page,
+        };
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let repos = platform
+            .git_repositories(id, &query)
+            .await
+            .map_err(any_error)?;
+        json_result(repos)
+    }
+
+    /// List branches of a repository accessible via a Git provider connection.
+    #[tool(
+        description = "List branches of a repository accessible through a Git provider connection."
+    )]
+    async fn list_git_branches(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<ListGitBranchesParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let repo: r3v3rs3_api::git_connection::RepoName =
+            params.repository.parse().map_err(any_error)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let branches = platform.git_branches(id, &repo).await.map_err(any_error)?;
+        json_result(branches)
     }
 }
 
