@@ -143,6 +143,33 @@ fn build_registry_payload(
     }
 }
 
+fn build_git_connection_payload(
+    name: Option<String>,
+    provider: Option<String>,
+    url: Option<String>,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+    payload: Option<String>,
+) -> anyhow::Result<Value> {
+    if let Some(p) = payload {
+        load_payload(&p)
+    } else {
+        let n =
+            name.ok_or_else(|| anyhow::anyhow!("--name is required when payload is omitted"))?;
+        let p = provider
+            .ok_or_else(|| anyhow::anyhow!("--provider is required when payload is omitted"))?;
+        let cid = client_id
+            .ok_or_else(|| anyhow::anyhow!("--client-id is required when payload is omitted"))?;
+        Ok(json!({
+            "name": n,
+            "provider": p,
+            "url": url,
+            "client_id": cid,
+            "client_secret": client_secret,
+        }))
+    }
+}
+
 impl ApiClient {
     pub fn new(client: reqwest::Client, server: String, token: String) -> Self {
         Self {
@@ -2138,6 +2165,124 @@ impl ApiClient {
         Ok(())
     }
 
+    // --- Git Provider Connection operations ---
+
+    pub async fn list_git_connections(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/git/connections", None)
+            .await?;
+        if let Some(arr) = res.as_array() {
+            println!(
+                "{:<26} {:<20} {:<12} {:<14} ACCOUNT",
+                "ID", "NAME", "PROVIDER", "STATUS"
+            );
+            println!(
+                "{:-<26} {:-<20} {:-<12} {:-<14} {:-<20}",
+                "", "", "", "", ""
+            );
+            for item in arr {
+                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
+                let provider = item.get("provider").and_then(|v| v.as_str()).unwrap_or("-");
+                let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("-");
+                let account = item.get("account").and_then(|v| v.as_str()).unwrap_or("-");
+                println!(
+                    "{:<26} {:<20} {:<12} {:<14} {}",
+                    id, name, provider, status, account
+                );
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
+    pub async fn get_git_connection(&self, id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, &format!("/api/git/connections/{id}"), None)
+            .await?;
+        print_json(&res)
+    }
+
+    pub async fn add_git_connection(
+        &self,
+        name: Option<String>,
+        provider: Option<String>,
+        url: Option<String>,
+        client_id: Option<String>,
+        client_secret: Option<String>,
+        payload: Option<String>,
+    ) -> anyhow::Result<()> {
+        let val =
+            build_git_connection_payload(name, provider, url, client_id, client_secret, payload)?;
+        let res = self
+            .request(Method::POST, "/api/git/connections", Some(&val))
+            .await?;
+        println!("git connection added");
+        print_json(&res)
+    }
+
+    pub async fn delete_git_connection(&self, id: &str) -> anyhow::Result<()> {
+        self.request(Method::DELETE, &format!("/api/git/connections/{id}"), None)
+            .await?;
+        println!("git connection/{id} deleted");
+        Ok(())
+    }
+
+    pub async fn list_git_repos(
+        &self,
+        id: &str,
+        search: Option<&str>,
+        page: Option<u32>,
+    ) -> anyhow::Result<()> {
+        let mut path = format!("/api/git/connections/{id}/repositories?");
+        if let Some(s) = search {
+            path.push_str(&format!("search={s}&"));
+        }
+        if let Some(p) = page {
+            path.push_str(&format!("page={p}&"));
+        }
+        let res = self.request(Method::GET, &path, None).await?;
+        if let Some(arr) = res.as_array() {
+            println!("{:<40} {:<10} CLONE_URL", "REPOSITORY", "PRIVATE");
+            println!("{:-<40} {:-<10} {:-<40}", "", "", "");
+            for item in arr {
+                let full_name = item
+                    .get("full_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                let private = item
+                    .get("private")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let clone_url = item
+                    .get("clone_url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                println!("{:<40} {:<10} {}", full_name, private, clone_url);
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
+    pub async fn list_git_branches(&self, id: &str, repo: &str) -> anyhow::Result<()> {
+        let path = format!("/api/git/connections/{id}/branches?repository={repo}");
+        let res = self.request(Method::GET, &path, None).await?;
+        if let Some(arr) = res.as_array() {
+            println!("BRANCH");
+            println!("{:-<30}", "");
+            for item in arr {
+                let b = item.as_str().unwrap_or("-");
+                println!("{}", b);
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
     // --- Cron operations ---
 
     pub async fn list_cron(&self, app_id: &str) -> anyhow::Result<()> {
@@ -2931,5 +3076,24 @@ protocol: http
 
         assert!(build_registry_payload(None, Some("u".to_string()), None, None).is_err());
         assert!(build_registry_payload(Some("s".to_string()), None, None, None).is_err());
+    }
+
+    #[test]
+    fn build_git_connection_payload_constructs_valid_json() {
+        let val = build_git_connection_payload(
+            Some("my-gitlab".to_string()),
+            Some("gitlab".to_string()),
+            Some("https://gitlab.com".to_string()),
+            Some("client123".to_string()),
+            Some("secret456".to_string()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(val["name"], "my-gitlab");
+        assert_eq!(val["provider"], "gitlab");
+        assert_eq!(val["client_id"], "client123");
+        assert_eq!(val["client_secret"], "secret456");
+
+        assert!(build_git_connection_payload(None, None, None, None, None, None).is_err());
     }
 }

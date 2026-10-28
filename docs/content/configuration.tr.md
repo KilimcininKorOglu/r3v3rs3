@@ -1941,6 +1941,14 @@ r3 <server> registry add --server ghcr.io --username user --password token
 r3 <server> registry update <id> [--server ghcr.io] [--username user] [--password token]
 r3 <server> registry delete <id>
 
+# Git Sağlayıcı Bağlantıları ve Depolar
+r3 <server> git list
+r3 <server> git get <id>
+r3 <server> git add --name my-gitlab --provider gitlab --client-id <id> [--client-secret <secret>]
+r3 <server> git repos <id> [--search query] [--page 1]
+r3 <server> git branches <id> --repo owner/repo
+r3 <server> git delete <id>
+
 # Platform Durumu ve Bakım
 r3 <server> platform status
 r3 <server> platform metrics

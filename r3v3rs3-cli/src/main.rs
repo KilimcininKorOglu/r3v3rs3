@@ -87,6 +87,9 @@ enum Command {
     /// Manage container registries for private image pulls.
     #[command(subcommand)]
     Registry(RegistryCommand),
+    /// Manage Git provider connections and repositories.
+    #[command(subcommand)]
+    Git(GitCommand),
     /// Manage scheduled background cron commands for applications.
     #[command(subcommand)]
     Cron(CronCommand),
@@ -796,6 +799,57 @@ pub enum RegistryCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum GitCommand {
+    /// Lists configured Git provider connections.
+    #[command(alias = "ls")]
+    List,
+    /// Shows details of a Git provider connection.
+    Get { id: String },
+    /// Adds a Git provider connection (GitLab or Gitea).
+    Add {
+        /// Connection name (e.g. gitlab-work).
+        #[arg(long)]
+        name: Option<String>,
+        /// Git provider type: gitlab or gitea.
+        #[arg(long)]
+        provider: Option<String>,
+        /// Server URL for Gitea (or self-hosted GitLab).
+        #[arg(long)]
+        url: Option<String>,
+        /// OAuth client ID.
+        #[arg(long)]
+        client_id: Option<String>,
+        /// OAuth client secret.
+        #[arg(long)]
+        client_secret: Option<String>,
+        /// Inline JSON/YAML payload, file path, or '-' for stdin.
+        payload: Option<String>,
+    },
+    /// Deletes a Git provider connection.
+    #[command(alias = "rm")]
+    Delete { id: String },
+    /// Lists accessible Git repositories for a connection.
+    Repos {
+        /// Connection ID.
+        id: String,
+        /// Filter repositories by keyword search.
+        #[arg(long)]
+        search: Option<String>,
+        /// Page number (starting at 1).
+        #[arg(long)]
+        page: Option<u32>,
+    },
+    /// Lists remote branches for a repository.
+    Branches {
+        /// Connection ID.
+        id: String,
+        /// Full repository name (e.g. owner/repo).
+        #[arg(long)]
+        repo: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum CronCommand {
     /// Lists scheduled background commands for an application.
     #[command(alias = "ls")]
@@ -1023,6 +1077,7 @@ async fn run_api_system(api: &api_client::ApiClient, cmd: Command) -> anyhow::Re
         Command::Store(c) => run_store(api, c).await,
         Command::Security(c) => run_security(api, c).await,
         Command::Webhook(c) => run_webhook(api, c).await,
+        Command::Git(c) => run_git(api, c).await,
         Command::Config(c) => run_config(api, c).await,
         Command::Platform(c) => run_platform(api, c).await,
         Command::Apply { file } => run_apply(api, &file).await,
@@ -1496,6 +1551,29 @@ async fn run_registry(api: &api_client::ApiClient, cmd: RegistryCommand) -> anyh
                 .await
         }
         RegistryCommand::Delete { id } => api.delete_registry(&id).await,
+    }
+}
+
+async fn run_git(api: &api_client::ApiClient, cmd: GitCommand) -> anyhow::Result<()> {
+    match cmd {
+        GitCommand::List => api.list_git_connections().await,
+        GitCommand::Get { id } => api.get_git_connection(&id).await,
+        GitCommand::Add {
+            name,
+            provider,
+            url,
+            client_id,
+            client_secret,
+            payload,
+        } => {
+            api.add_git_connection(name, provider, url, client_id, client_secret, payload)
+                .await
+        }
+        GitCommand::Delete { id } => api.delete_git_connection(&id).await,
+        GitCommand::Repos { id, search, page } => {
+            api.list_git_repos(&id, search.as_deref(), page).await
+        }
+        GitCommand::Branches { id, repo } => api.list_git_branches(&id, &repo).await,
     }
 }
 
