@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.4] - 2026-10-28
+
+### Added
+- Autonomous MCP Project Environments & Cross-Env Sync Tools: Added first-class Model Context Protocol tools for project environment lifecycle and configuration synchronization (`list_project_environments`, `create_project_environment`, `update_project_env`, `sync_project_env`), allowing AI agents and deployment scripts to provision environments, update variables, and synchronize configuration differences between environments with selective key cloning.
+- Project Environment Audit Trail: Integrated audit logging (`AddEnvironment`, `UpdateEnvironmentEnv`, `SyncEnvironmentEnv`) across environment management and synchronization MCP operations.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` documenting project environment management and synchronization tools via MCP.
+
 ## [2.9.3] - 2026-10-28
 
 ### Added
