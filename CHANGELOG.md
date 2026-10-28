@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.7] - 2026-10-28
+
+### Added
+- Dedicated Database Backups Tab Navigation: Added `AppTab::Backups` to the unified application console navigation tabs (`/databases/{id}/backups`), replacing the standard application deployments tab for managed database engines.
+- Database Console Engine Summary Card: Added `render_database_card` to the database dashboard overview displaying engine type, container port, host port, target node, and a direct link to the backups tab.
+- Integrated Return Navigation: Aligned top navigation back action to return directly to the Databases hub (`/databases`) when viewing database console tabs.
+- Dual-Language Documentation: Updated `platform.md` and `platform.tr.md` documenting database console navigation and the dedicated backups tab.
+
+### Changed
+- Database Overview Alignment: Replaced standard Git deployment cards and rollback controls with database engine metadata and backup navigation in database consoles.
+
 ## [2.8.6] - 2026-10-28
 
 ### Added
