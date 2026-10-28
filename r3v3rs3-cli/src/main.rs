@@ -124,6 +124,8 @@ pub enum PortCommand {
     Get { id: String },
     /// Adds a port from inline JSON/YAML, a file path, or stdin ('-').
     Add { payload: String },
+    /// Updates a port from inline JSON/YAML, a file path, or stdin ('-').
+    Update { id: String, payload: String },
     /// Deletes a port.
     #[command(alias = "rm")]
     Delete { id: String },
@@ -146,6 +148,8 @@ pub enum ProxyCommand {
     Get { id: String },
     /// Adds a proxy from inline JSON/YAML, a file path, or stdin ('-').
     Add { payload: String },
+    /// Updates a proxy from inline JSON/YAML, a file path, or stdin ('-').
+    Update { id: String, payload: String },
     /// Shows live status of a proxy.
     Status { id: String },
     /// Deletes a proxy.
@@ -348,6 +352,8 @@ pub enum AcmeCommand {
     Get { id: String },
     /// Adds an ACME order from inline JSON/YAML, a file path, or stdin ('-').
     Add { payload: String },
+    /// Updates an ACME order from inline JSON/YAML, a file path, or stdin ('-').
+    Update { id: String, payload: String },
     /// Deletes an ACME order.
     #[command(alias = "rm")]
     Delete { id: String },
@@ -366,6 +372,8 @@ pub enum AclCommand {
     Get { id: String },
     /// Adds an access list from inline JSON/YAML, a file path, or stdin ('-').
     Add { payload: String },
+    /// Updates an access list from inline JSON/YAML, a file path, or stdin ('-').
+    Update { id: String, payload: String },
     /// Deletes an access list.
     #[command(alias = "rm")]
     Delete { id: String },
@@ -398,6 +406,8 @@ pub enum DnsCommand {
     Get { id: String },
     /// Adds a DNS credential entry from inline JSON/YAML, a file path, or stdin ('-').
     Add { payload: String },
+    /// Updates a DNS credential entry from inline JSON/YAML, a file path, or stdin ('-').
+    Update { id: String, payload: String },
     /// Deletes a DNS credential entry.
     #[command(alias = "rm")]
     Delete { id: String },
@@ -414,6 +424,8 @@ pub enum AppCommand {
     Dashboard { id: String },
     /// Adds an application from inline JSON/YAML, a file path, or stdin ('-').
     Add { payload: String },
+    /// Updates an application from inline JSON/YAML, a file path, or stdin ('-').
+    Update { id: String, payload: String },
     /// Triggers a deployment for an application.
     Deploy { id: String },
     /// Rolls back an application to the previous deployment.
@@ -757,6 +769,8 @@ pub enum WebhookCommand {
     Get { id: String },
     /// Adds an outbound webhook from inline JSON/YAML, a file path, or stdin ('-').
     Add { payload: String },
+    /// Updates an outbound webhook from inline JSON/YAML, a file path, or stdin ('-').
+    Update { id: String, payload: String },
     /// Deletes an outbound webhook.
     #[command(alias = "rm")]
     Delete { id: String },
@@ -928,10 +942,24 @@ pub enum CronCommand {
         #[arg(long)]
         name: Option<String>,
     },
+    /// Updates a scheduled command on an application.
+    Update {
+        app_id: String,
+        id: String,
+        #[arg(long)]
+        cron: Option<String>,
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        payload: Option<String>,
+    },
     /// Deletes a scheduled command.
     #[command(alias = "rm")]
     Delete { app_id: String, id: String },
     /// Runs a scheduled command immediately.
+    #[command(alias = "test")]
     Run { app_id: String, id: String },
 }
 
@@ -1222,9 +1250,25 @@ async fn run_port(api: &api_client::ApiClient, cmd: PortCommand) -> anyhow::Resu
         PortCommand::List => api.list_ports().await,
         PortCommand::Get { id } => api.get_port(&id).await,
         PortCommand::Add { payload } => api.add_port(&payload).await,
+        PortCommand::Update { id, payload } => api.update_port(&id, &payload).await,
         PortCommand::Delete { id } => api.delete_port(&id).await,
         PortCommand::Reset { id } => api.reset_port(&id).await,
         PortCommand::SetEarlyData { id, enable } => api.set_port_early_data(&id, enable).await,
+    }
+}
+
+async fn run_proxy_priority(
+    api: &api_client::ApiClient,
+    id: &str,
+    enable: Option<bool>,
+    inject_header: Option<bool>,
+    adaptive_concurrency: Option<bool>,
+) -> anyhow::Result<()> {
+    if let Some(enable) = enable {
+        api.set_stream_priority(id, enable, inject_header, adaptive_concurrency)
+            .await
+    } else {
+        api.get_stream_priority(id).await
     }
 }
 
@@ -1233,6 +1277,7 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
         ProxyCommand::List => api.list_proxies().await,
         ProxyCommand::Get { id } => api.get_proxy(&id).await,
         ProxyCommand::Add { payload } => api.add_proxy(&payload).await,
+        ProxyCommand::Update { id, payload } => api.update_proxy(&id, &payload).await,
         ProxyCommand::Status { id } => api.proxy_status(&id).await,
         ProxyCommand::Delete { id } => api.delete_proxy(&id).await,
         ProxyCommand::PurgeCache { id, path } => api.purge_cache(&id, path.as_deref()).await,
@@ -1251,14 +1296,7 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
             enable,
             inject_header,
             adaptive_concurrency,
-        } => {
-            if let Some(enable) = enable {
-                api.set_stream_priority(&id, enable, inject_header, adaptive_concurrency)
-                    .await
-            } else {
-                api.get_stream_priority(&id).await
-            }
-        }
+        } => run_proxy_priority(api, &id, enable, inject_header, adaptive_concurrency).await,
     }
 }
 
@@ -1355,6 +1393,7 @@ async fn run_acme(api: &api_client::ApiClient, cmd: AcmeCommand) -> anyhow::Resu
         AcmeCommand::List => api.list_acme().await,
         AcmeCommand::Get { id } => api.get_acme(&id).await,
         AcmeCommand::Add { payload } => api.add_acme(&payload).await,
+        AcmeCommand::Update { id, payload } => api.update_acme(&id, &payload).await,
         AcmeCommand::Delete { id } => api.delete_acme(&id).await,
         AcmeCommand::Order { id } => api.order_acme(&id).await,
         AcmeCommand::CnameInstructions { id } => api.get_acme_cname_instructions(&id).await,
@@ -1366,6 +1405,7 @@ async fn run_acl(api: &api_client::ApiClient, cmd: AclCommand) -> anyhow::Result
         AclCommand::List => api.list_acls().await,
         AclCommand::Get { id } => api.get_acl(&id).await,
         AclCommand::Add { payload } => api.add_acl(&payload).await,
+        AclCommand::Update { id, payload } => api.update_acl(&id, &payload).await,
         AclCommand::Delete { id } => api.delete_acl(&id).await,
     }
 }
@@ -1391,6 +1431,7 @@ async fn run_dns(api: &api_client::ApiClient, cmd: DnsCommand) -> anyhow::Result
         DnsCommand::List => api.list_dns().await,
         DnsCommand::Get { id } => api.get_dns(&id).await,
         DnsCommand::Add { payload } => api.add_dns(&payload).await,
+        DnsCommand::Update { id, payload } => api.update_dns(&id, &payload).await,
         DnsCommand::Delete { id } => api.delete_dns(&id).await,
     }
 }
@@ -1401,6 +1442,7 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
         AppCommand::Get { id } => api.get_app(&id).await,
         AppCommand::Dashboard { id } => api.app_dashboard(&id).await,
         AppCommand::Add { payload } => api.add_app(&payload).await,
+        AppCommand::Update { id, payload } => api.update_app(&id, &payload).await,
         AppCommand::Deploy { id } => api.deploy_app(&id).await,
         AppCommand::Rollback { id } => api.rollback_app(&id).await,
         AppCommand::Start { id } => api.start_app(&id).await,
@@ -1598,6 +1640,7 @@ async fn run_webhook(api: &api_client::ApiClient, cmd: WebhookCommand) -> anyhow
         WebhookCommand::List => api.list_webhooks().await,
         WebhookCommand::Get { id } => api.get_webhook(&id).await,
         WebhookCommand::Add { payload } => api.add_webhook(&payload).await,
+        WebhookCommand::Update { id, payload } => api.update_webhook(&id, &payload).await,
         WebhookCommand::Delete { id } => api.delete_webhook(&id).await,
         WebhookCommand::Test { id } => api.test_webhook(&id).await,
     }
@@ -1691,6 +1734,24 @@ async fn run_cron(api: &api_client::ApiClient, cmd: CronCommand) -> anyhow::Resu
         } => {
             api.add_cron(&app_id, &cron, &command, name.as_deref())
                 .await
+        }
+        CronCommand::Update {
+            app_id,
+            id,
+            cron,
+            command,
+            name,
+            payload,
+        } => {
+            api.update_cron(
+                &app_id,
+                &id,
+                cron.as_deref(),
+                command.as_deref(),
+                name.as_deref(),
+                payload.as_deref(),
+            )
+            .await
         }
         CronCommand::Delete { app_id, id } => api.delete_cron(&app_id, &id).await,
         CronCommand::Run { app_id, id } => api.run_cron(&app_id, &id).await,

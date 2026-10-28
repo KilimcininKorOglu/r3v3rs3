@@ -1829,6 +1829,7 @@ r3 http://127.0.0.1:46492 platform status
 r3 <server> port list
 r3 <server> port get <id>
 r3 <server> port add <spec.json|yaml|->
+r3 <server> port update <id> <spec.json|yaml|->
 r3 <server> port delete <id>
 r3 <server> port reset <id>
 
@@ -1836,6 +1837,7 @@ r3 <server> port reset <id>
 r3 <server> proxy list
 r3 <server> proxy get <id>
 r3 <server> proxy add <proxy.json|yaml|->
+r3 <server> proxy update <id> <proxy.json|yaml|->
 r3 <server> proxy status <id>
 r3 <server> proxy purge-cache <id> [--path /static]
 r3 <server> proxy delete <id>
@@ -1849,6 +1851,7 @@ r3 <server> cert delete <id>
 r3 <server> acme list
 r3 <server> acme get <id>
 r3 <server> acme add <acme.json|yaml|->
+r3 <server> acme update <id> <acme.json|yaml|->
 r3 <server> acme order <id>
 r3 <server> acme delete <id>
 
@@ -1856,16 +1859,19 @@ r3 <server> acme delete <id>
 r3 <server> acl list
 r3 <server> acl get <id>
 r3 <server> acl add <acl.json|yaml|->
+r3 <server> acl update <id> <acl.json|yaml|->
 r3 <server> acl delete <id>
 r3 <server> dns list
 r3 <server> dns get <id>
 r3 <server> dns add <dns.json|yaml|->
+r3 <server> dns update <id> <dns.json|yaml|->
 r3 <server> dns delete <id>
 
 # Deployed Applications
 r3 <server> app list
 r3 <server> app get <id>
 r3 <server> app add <app.json|yaml|->
+r3 <server> app update <id> <app.json|yaml|->
 r3 <server> app deploy <id>
 r3 <server> app rollback <id>
 r3 <server> app start <id>
@@ -1928,10 +1934,12 @@ r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5]
 r3 <server> webhook list
 r3 <server> webhook get <id>
 r3 <server> webhook add <webhook.json|yaml|->
+r3 <server> webhook update <id> <webhook.json|yaml|->
 r3 <server> webhook test <id>
 r3 <server> webhook delete <id>
 r3 <server> cron list <app-id>
 r3 <server> cron add <app-id> --cron "0 * * * *" --command "php artisan schedule:run" [--name hourly]
+r3 <server> cron update <app-id> <job-id> [--cron "*/15 * * * *"] [--command "php artisan queue:work"] [--name queue]
 r3 <server> cron run <app-id> <job-id>
 r3 <server> cron delete <app-id> <job-id>
 

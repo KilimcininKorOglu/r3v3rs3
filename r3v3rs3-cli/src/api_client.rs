@@ -307,6 +307,15 @@ impl ApiClient {
         print_json(&res)
     }
 
+    pub async fn update_port(&self, id: &str, payload: &str) -> anyhow::Result<()> {
+        let val = load_payload(payload)?;
+        let res = self
+            .request(Method::PUT, &format!("/api/ports/{id}"), Some(&val))
+            .await?;
+        println!("port/{id} updated");
+        print_json(&res)
+    }
+
     pub async fn delete_port(&self, id: &str) -> anyhow::Result<()> {
         self.request(Method::DELETE, &format!("/api/ports/{id}"), None)
             .await?;
@@ -385,6 +394,15 @@ impl ApiClient {
             .request(Method::POST, "/api/proxies", Some(&val))
             .await?;
         println!("proxy added");
+        print_json(&res)
+    }
+
+    pub async fn update_proxy(&self, id: &str, payload: &str) -> anyhow::Result<()> {
+        let val = load_payload(payload)?;
+        let res = self
+            .request(Method::PUT, &format!("/api/proxies/{id}"), Some(&val))
+            .await?;
+        println!("proxy/{id} updated");
         print_json(&res)
     }
 
@@ -736,6 +754,15 @@ impl ApiClient {
         print_json(&res)
     }
 
+    pub async fn update_acme(&self, id: &str, payload: &str) -> anyhow::Result<()> {
+        let val = load_payload(payload)?;
+        let res = self
+            .request(Method::PUT, &format!("/api/acme/{id}"), Some(&val))
+            .await?;
+        println!("acme/{id} updated");
+        print_json(&res)
+    }
+
     pub async fn delete_acme(&self, id: &str) -> anyhow::Result<()> {
         self.request(Method::DELETE, &format!("/api/acme/{id}"), None)
             .await?;
@@ -829,6 +856,15 @@ impl ApiClient {
             .request(Method::POST, "/api/access-lists", Some(&val))
             .await?;
         println!("access-list added");
+        print_json(&res)
+    }
+
+    pub async fn update_acl(&self, id: &str, payload: &str) -> anyhow::Result<()> {
+        let val = load_payload(payload)?;
+        let res = self
+            .request(Method::PUT, &format!("/api/access-lists/{id}"), Some(&val))
+            .await?;
+        println!("access-list/{id} updated");
         print_json(&res)
     }
 
@@ -953,6 +989,19 @@ impl ApiClient {
         print_json(&res)
     }
 
+    pub async fn update_dns(&self, id: &str, payload: &str) -> anyhow::Result<()> {
+        let val = load_payload(payload)?;
+        let res = self
+            .request(
+                Method::PUT,
+                &format!("/api/dns-credentials/{id}"),
+                Some(&val),
+            )
+            .await?;
+        println!("dns-credential/{id} updated");
+        print_json(&res)
+    }
+
     pub async fn delete_dns(&self, id: &str) -> anyhow::Result<()> {
         self.request(Method::DELETE, &format!("/api/dns-credentials/{id}"), None)
             .await?;
@@ -1066,6 +1115,15 @@ impl ApiClient {
         let val = load_payload(payload)?;
         let res = self.request(Method::POST, "/api/apps", Some(&val)).await?;
         println!("app created");
+        print_json(&res)
+    }
+
+    pub async fn update_app(&self, id: &str, payload: &str) -> anyhow::Result<()> {
+        let val = load_payload(payload)?;
+        let res = self
+            .request(Method::PUT, &format!("/api/apps/{id}"), Some(&val))
+            .await?;
+        println!("app/{id} updated");
         print_json(&res)
     }
 
@@ -2150,6 +2208,15 @@ impl ApiClient {
         print_json(&res)
     }
 
+    pub async fn update_webhook(&self, id: &str, payload: &str) -> anyhow::Result<()> {
+        let val = load_payload(payload)?;
+        let res = self
+            .request(Method::PUT, &format!("/api/webhooks/{id}"), Some(&val))
+            .await?;
+        println!("webhook/{id} updated");
+        print_json(&res)
+    }
+
     pub async fn delete_webhook(&self, id: &str) -> anyhow::Result<()> {
         self.request(Method::DELETE, &format!("/api/webhooks/{id}"), None)
             .await?;
@@ -2474,9 +2541,11 @@ impl ApiClient {
         name: Option<&str>,
     ) -> anyhow::Result<()> {
         let body = serde_json::json!({
+            "schedule": cron,
             "cron": cron,
             "command": command,
             "name": name.unwrap_or(command),
+            "enabled": true,
         });
         let res = self
             .request(
@@ -2486,6 +2555,39 @@ impl ApiClient {
             )
             .await?;
         println!("scheduled command added to app/{app_id}");
+        print_json(&res)
+    }
+
+    pub async fn update_cron(
+        &self,
+        app_id: &str,
+        id: &str,
+        cron: Option<&str>,
+        command: Option<&str>,
+        name: Option<&str>,
+        payload: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let existing = if payload.is_none() {
+            let list = self
+                .request(Method::GET, &format!("/api/apps/{app_id}/commands"), None)
+                .await?;
+            list.as_array().and_then(|arr| {
+                arr.iter()
+                    .find(|it| it.get("id").and_then(|v| v.as_str()) == Some(id))
+                    .cloned()
+            })
+        } else {
+            None
+        };
+        let body = build_cron_update_payload(existing.as_ref(), cron, command, name, payload)?;
+        let res = self
+            .request(
+                Method::PUT,
+                &format!("/api/apps/{app_id}/commands/{id}"),
+                Some(&body),
+            )
+            .await?;
+        println!("scheduled command/{id} updated on app/{app_id}");
         print_json(&res)
     }
 
@@ -3147,6 +3249,35 @@ fn format_duration_secs(secs: u64) -> String {
     }
 }
 
+pub fn build_cron_update_payload(
+    existing: Option<&Value>,
+    cron: Option<&str>,
+    command: Option<&str>,
+    name: Option<&str>,
+    payload: Option<&str>,
+) -> anyhow::Result<Value> {
+    if let Some(p) = payload {
+        return load_payload(p);
+    }
+    let cur = existing.context("scheduled command not found on application")?;
+    let current_name = cur.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let current_schedule = cur
+        .get("schedule")
+        .or_else(|| cur.get("cron"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let current_command = cur.get("command").and_then(|v| v.as_str()).unwrap_or("");
+    let current_enabled = cur.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+
+    Ok(serde_json::json!({
+        "name": name.unwrap_or(current_name),
+        "schedule": cron.unwrap_or(current_schedule),
+        "cron": cron.unwrap_or(current_schedule),
+        "command": command.unwrap_or(current_command),
+        "enabled": current_enabled,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3286,5 +3417,32 @@ protocol: http
 
         assert!(build_account_create_payload(None, None, "editor", None).is_err());
         assert!(build_token_create_payload(None, "read", None).is_err());
+    }
+
+    #[test]
+    fn build_cron_update_payload_merges_existing() {
+        let existing = serde_json::json!({
+            "id": "cmd-1",
+            "name": "backup",
+            "schedule": "0 0 * * *",
+            "command": "run-backup.sh",
+            "enabled": true
+        });
+
+        let updated = build_cron_update_payload(
+            Some(&existing),
+            Some("*/15 * * * *"),
+            None,
+            Some("quick backup"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(updated["name"], "quick backup");
+        assert_eq!(updated["schedule"], "*/15 * * * *");
+        assert_eq!(updated["command"], "run-backup.sh");
+        assert_eq!(updated["enabled"], true);
+
+        assert!(build_cron_update_payload(None, None, None, None, None).is_err());
     }
 }

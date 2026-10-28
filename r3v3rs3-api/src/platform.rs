@@ -2292,6 +2292,7 @@ pub struct AppScheduledCommand {
     #[schema(value_type = String)]
     pub app_id: ShortId,
     pub name: String,
+    #[serde(alias = "cron")]
     pub schedule: String,
     pub command: String,
     #[serde(default = "default_true")]
@@ -2310,6 +2311,7 @@ pub struct AppScheduledCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ScheduledCommandRequest {
     pub name: String,
+    #[serde(alias = "cron")]
     pub schedule: String,
     pub command: String,
     #[serde(default = "default_true")]
