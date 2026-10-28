@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.8] - 2026-10-28
+
+### Added
+- Backend Geo Distribution Integration in Traffic Hub: Connected the interactive SVG world map and top countries leaderboard directly to the aggregated `GET /api/traffic/geo` endpoint, rendering server-side historical and persistent distribution data rather than being constrained to the in-browser log buffer.
+- Comprehensive Country Filter Extraction: Introduced `extract_available_countries_with_geo` and `resolve_geo_distribution` to merge server-side geographic distribution data with client entries and populate filter options with all historical countries.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` documenting the backend-backed geographic traffic map and leaderboard.
+
 ## [2.8.7] - 2026-10-28
 
 ### Added
