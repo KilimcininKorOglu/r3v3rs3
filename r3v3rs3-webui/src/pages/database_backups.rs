@@ -7,6 +7,7 @@ use super::settings::{fetch_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::app_tabs::{AppTab, AppTabs};
 use crate::components::backup_drill_modal::BackupDrillModal;
 use crate::components::wal_segments_modal::WalSegmentsModal;
 use crate::dialog::{self, Icon};
@@ -17,7 +18,7 @@ use gloo_net::http::Request;
 use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{BackupEntry, PitrRange, PitrRestoreRequest};
+use r3v3rs3_api::platform::{AppEntry, BackupEntry, PitrRange, PitrRestoreRequest};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -38,15 +39,22 @@ pub fn database_backups(props: &Props) -> Html {
     let drill_running = use_state(bool::default);
     let show_wal_modal = use_state(bool::default);
     let busy = use_state(bool::default);
+    let app = use_state(|| Option::<AppEntry>::None);
     let id = props.id;
 
     let signed_in = session.info.is_some();
     let can_edit = session.can_edit();
     {
-        let (backups, notice, pitr_range) = (backups.clone(), notice.clone(), pitr_range.clone());
+        let (backups, notice, pitr_range, app) = (
+            backups.clone(),
+            notice.clone(),
+            pitr_range.clone(),
+            app.clone(),
+        );
         use_effect_with((signed_in, id), move |&(signed_in, id)| {
             if signed_in {
                 reload(locale, &backups, &notice, &pitr_range, id);
+                load_app(id, &app);
             }
         });
     }
@@ -54,7 +62,9 @@ pub fn database_backups(props: &Props) -> Html {
     if session.info.is_none() {
         return html!();
     }
-    let navigator = use_navigator().unwrap();
+    let Some(navigator) = use_navigator() else {
+        return html!();
+    };
     let reload = make_reload_cb(
         locale,
         backups.clone(),
@@ -97,7 +107,17 @@ pub fn database_backups(props: &Props) -> Html {
 
     html! {
         <>
-            { back_header(locale, &navigator, locale.t("backups.title").to_string()) }
+            if let Some(a) = (*app).as_ref() {
+                <AppTabs
+                    id={a.id}
+                    name={a.name.to_string()}
+                    active={AppTab::Backups}
+                    is_database=true
+                    domains={a.spec.domains.clone()}
+                />
+            } else {
+                { back_header(locale, &navigator, locale.t("backups.title").to_string()) }
+            }
             { notice_view(&notice, |key| html! { {locale.t(key)} }) }
             { pitr_banner_view(locale, id, (*pitr_range).as_ref(), can_edit, &notice, &reload, on_open_wal) }
             if can_edit {
@@ -109,6 +129,20 @@ pub fn database_backups(props: &Props) -> Html {
             { storage_settings_redirect(locale) }
         </>
     }
+}
+
+fn load_app(id: ShortId, app: &UseStateHandle<Option<AppEntry>>) {
+    let app = app.clone();
+    spawn_local(async move {
+        if let Ok(entry) = fetch_json::<AppEntry>(
+            Locale::En,
+            Request::get(&format!("{API_ENDPOINT}/apps/{id}")),
+        )
+        .await
+        {
+            app.set(Some(entry));
+        }
+    });
 }
 
 #[derive(Properties, PartialEq)]

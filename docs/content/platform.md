@@ -319,6 +319,13 @@ The response shows the password and the connection string once, like a webhook s
 
 A deployment of a database is not blue-green, because the fixed port frees only when the old container stops: r3v3rs3 stops the old container, starts the new one and waits for its health check, so the database answers a few seconds later.
 
+### Database Console Navigation & Backups Tab
+
+Opening the details of a managed database (`/apps/{id}`) displays a dedicated database console customized for database engines:
+- **Dedicated Backups Tab**: The regular application **Deployments** tab is replaced with a first-class **Backups** tab (`/databases/{id}/backups`), providing one-click snapshot backups, point-in-time recovery (PITR) windows, restore drill verification, and WAL segment archival.
+- **Database Engine Summary**: The dashboard highlights engine type, container and host ports, target node, and direct backup status instead of Git deployment history.
+- **Integrated Navigation**: The top navigation bar's **Back** action returns directly to the **Databases** hub (`/databases`).
+
 ### Connect an App
 
 The **Database** field of the app form connects an app to a database of this server. The next deployment of the app injects the connection into the environment of its container: `DATABASE_URL` with the user, the generated password and the port, plus the variables of the engine, for example `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DATABASE` for PostgreSQL, and `MYSQL_*` for MariaDB and MySQL, `MONGO_*` for MongoDB and `REDIS_URL` for Redis. The container resolves `host.docker.internal` to the host of r3v3rs3, so the address works from every app network.

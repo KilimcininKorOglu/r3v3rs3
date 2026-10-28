@@ -1476,6 +1476,7 @@
   "apps.dashboard": "Dashboard",
   "apps.tabs_overview": "Overview",
   "apps.tabs_deployments": "Deployments",
+  "apps.tabs_backups": "Backups",
   "apps.tabs_logs": "Logs",
   "apps.tabs_terminal": "Terminal",
   "apps.tabs_files": "Files",

@@ -122,6 +122,7 @@ pub fn app_view(props: &Props) -> Html {
                     name={entry.name.to_string()}
                     active={crate::components::app_tabs::AppTab::Settings}
                     domains={entry.spec.domains.clone()}
+                    is_database={entry.spec.database.is_some()}
                 />
             }
             if let Some(entry) = (*app).as_ref().filter(|_| can_edit) {

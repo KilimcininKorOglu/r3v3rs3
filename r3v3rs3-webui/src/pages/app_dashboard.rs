@@ -177,6 +177,7 @@ fn render_dashboard_content(p: DashboardParams) -> Html {
                 active={AppTab::Overview}
                 status={status_str.map(ToString::to_string)}
                 domains={p.summary.app.spec.domains.clone()}
+                is_database={p.summary.app.spec.database.is_some()}
             />
 
             { render_quick_actions(&p) }
@@ -187,7 +188,11 @@ fn render_dashboard_content(p: DashboardParams) -> Html {
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 { render_telemetry_card(p.locale, &p.summary) }
-                { render_deployment_card(p.locale, &p.summary) }
+                if p.summary.app.spec.database.is_none() {
+                    { render_deployment_card(p.locale, &p.summary) }
+                } else {
+                    { render_database_card(p.locale, &p.summary) }
+                }
             </div>
 
             <AppMetrics id={p.id} />
@@ -236,7 +241,10 @@ fn render_quick_actions(p: &DashboardParams) -> Html {
                         {p.locale.t("apps.restart")}
                     </button>
                 }
-                if p.can_edit && p.summary.running_deployment.is_some() {
+                if p.can_edit
+                    && p.summary.running_deployment.is_some()
+                    && p.summary.app.spec.database.is_none()
+                {
                     <button
                         type="button"
                         onclick={on_rollback}
@@ -504,6 +512,60 @@ fn render_deployment_card(locale: Locale, summary: &AppDashboardSummary) -> Html
                         <span>{format!("Started: {}", format_time(d.started_at))}</span>
                     </div>
                 }
+            </div>
+        </div>
+    }
+}
+
+fn render_database_card(locale: Locale, summary: &AppDashboardSummary) -> Html {
+    let engine = summary.app.spec.database.as_deref().unwrap_or("database");
+    let target_node = summary.app.target.to_string();
+    let port = summary.app.spec.port;
+    let host_port_str = summary
+        .app
+        .spec
+        .host_port
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let db_id = summary.app.id;
+
+    html! {
+        <div class="p-5 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm space-y-4">
+            <h3 class="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center justify-between">
+                <span>{locale.t("nav.databases")}</span>
+                <span class="text-xs px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 font-mono">
+                    {format!("Node: {target_node}")}
+                </span>
+            </h3>
+
+            <div class="space-y-2 text-sm">
+                <div class="flex items-center gap-2">
+                    <span class="text-neutral-500 dark:text-neutral-400 text-xs w-28">{"Engine:"}</span>
+                    <span class="font-mono text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 px-1.5 py-0.5 rounded font-semibold uppercase">
+                        {engine}
+                    </span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-neutral-500 dark:text-neutral-400 text-xs w-28">{"Container Port:"}</span>
+                    <span class="font-mono text-xs text-neutral-700 dark:text-neutral-200 font-medium">
+                        {port}
+                    </span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-neutral-500 dark:text-neutral-400 text-xs w-28">{"Host Port:"}</span>
+                    <span class="font-mono text-xs text-neutral-700 dark:text-neutral-200 font-medium">
+                        {host_port_str}
+                    </span>
+                </div>
+                <div class="pt-2 border-t border-neutral-100 dark:border-neutral-700 flex justify-end">
+                    <Link<Route>
+                        to={Route::DatabaseBackups { id: db_id }}
+                        classes="inline-flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                    >
+                        {locale.t("apps.tabs_backups")}
+                        {" →"}
+                    </Link<Route>>
+                </div>
             </div>
         </div>
     }

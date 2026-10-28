@@ -1476,6 +1476,7 @@
   "apps.dashboard": "Genel Bakış",
   "apps.tabs_overview": "Genel Bakış",
   "apps.tabs_deployments": "Dağıtımlar",
+  "apps.tabs_backups": "Yedekler",
   "apps.tabs_logs": "Loglar",
   "apps.tabs_terminal": "Terminal",
   "apps.tabs_files": "Dosyalar",

@@ -151,6 +151,7 @@ pub fn app_commands_page(props: &PageProps) -> Html {
                     name={a.name.to_string()}
                     active={crate::components::app_tabs::AppTab::Commands}
                     domains={a.spec.domains.clone()}
+                    is_database={a.spec.database.is_some()}
                 />
             }
             if let Some(err) = (*failed).as_ref() {

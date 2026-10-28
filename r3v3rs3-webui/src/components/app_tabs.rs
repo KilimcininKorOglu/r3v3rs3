@@ -9,6 +9,7 @@ use yew_router::prelude::*;
 pub enum AppTab {
     Overview,
     Deployments,
+    Backups,
     Logs,
     Terminal,
     Files,
@@ -25,6 +26,8 @@ pub struct Props {
     pub status: Option<String>,
     #[prop_or_default]
     pub domains: Vec<SubjectName>,
+    #[prop_or_default]
+    pub is_database: bool,
 }
 
 fn status_badge_class(status: &str) -> &'static str {
@@ -44,17 +47,26 @@ fn status_badge_class(status: &str) -> &'static str {
 pub fn app_tabs(props: &Props) -> Html {
     let locale = use_locale();
     let id = props.id;
+    let (pipeline_tab, pipeline_route, pipeline_label) = if props.is_database {
+        (
+            AppTab::Backups,
+            Route::DatabaseBackups { id },
+            "apps.tabs_backups",
+        )
+    } else {
+        (
+            AppTab::Deployments,
+            Route::AppDeployments { id },
+            "apps.tabs_deployments",
+        )
+    };
     let tabs = [
         (
             AppTab::Overview,
             Route::AppDashboard { id },
             "apps.tabs_overview",
         ),
-        (
-            AppTab::Deployments,
-            Route::AppDeployments { id },
-            "apps.tabs_deployments",
-        ),
+        (pipeline_tab, pipeline_route, pipeline_label),
         (AppTab::Logs, Route::AppLog { id }, "apps.tabs_logs"),
         (
             AppTab::Terminal,
@@ -73,13 +85,18 @@ pub fn app_tabs(props: &Props) -> Html {
             "apps.tabs_settings",
         ),
     ];
+    let back_route = if props.is_database {
+        Route::Databases
+    } else {
+        Route::Apps
+    };
 
     html! {
         <div class="mb-6 space-y-4">
             <div class="flex flex-wrap items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
                     <Link<Route>
-                        to={Route::Apps}
+                        to={back_route}
                         classes="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 hover:dark:bg-neutral-900 font-medium rounded-lg text-sm px-3 py-1.5"
                     >
                         <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 mr-1" />

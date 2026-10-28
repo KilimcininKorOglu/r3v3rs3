@@ -319,6 +319,13 @@ Yanıt, parolayı ve bağlantı dizesini webhook secret gibi bir kez gösterir. 
 
 Bir veritabanının deployment'ı blue-green değildir, çünkü sabit port eski container durmadan boşalmaz: r3v3rs3 eski container'ı durdurur, yenisini başlatır ve sağlık kontrolünü bekler; veritabanı birkaç saniye sonra yanıtlamaya devam eder.
 
+### Veritabanı Konsolu Gezinimi ve Yedekler Sekmesi
+
+Yönetilen bir veritabanının detayları açıldığında (`/apps/{id}`), veritabanı motorlarına özel bir konsol görüntülenir:
+- **Özel Yedekler Sekmesi**: Standart uygulama **Dağıtımlar** sekmesinin yerini doğrudan **Yedekler** sekmesi (`/databases/{id}/backups`) alır; tek tıkla anlık snapshot yedekleme, belirli bir ana dönme (PITR), yedek tatbikatı doğrulama ve WAL segment arşivleme imkânı sunar.
+- **Veritabanı Motor Özeti**: Genel bakış paneli Git dağıtım geçmişi yerine veritabanı motor türünü, container ve host portlarını, hedef düğümü ve doğrudan yedek durumunu gösterir.
+- **Entegre Gezinim**: Üst sekme çubuğundaki **Geri** butonu doğrudan **Veritabanları** (`/databases`) merkezine yönlendirir.
+
 ### Bir uygulamayı bağlamak
 
 App formundaki **Veritabanı** alanı, bir uygulamayı bu sunucudaki bir veritabanına bağlar. Uygulamanın sonraki deployment'ı bağlantıyı container'ının ortamına ekler: kullanıcıyı, üretilmiş parolayı ve portu taşıyan `DATABASE_URL`, artı motorun değişkenleri; örneğin PostgreSQL için `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` ve `POSTGRES_DATABASE`, MariaDB ve MySQL için `MYSQL_*`, MongoDB için `MONGO_*`, Redis için `REDIS_URL`. Container, `host.docker.internal` adresini r3v3rs3'ün hostuna çözer; adres her app ağında çalışır.
