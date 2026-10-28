@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.2] - 2026-10-28
+
+### Added
+- Autonomous MCP Git Connection Tools: Added first-class Model Context Protocol tools for Git provider management (`list_git_connections`, `get_git_connection`, `add_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches`), providing AI agents and automated workflows with full autonomy to manage OAuth links (GitHub, GitLab, Gitea) and inspect remote repositories and branches.
+- Git Connection Audit Trail: Integrated audit recording (`AddGitConnection`, `DeleteGitConnection`) across Git connection MCP operations.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` documenting autonomous Git provider connection management via MCP.
+
 ## [2.9.1] - 2026-10-28
 
 ### Added
