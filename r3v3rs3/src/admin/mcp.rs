@@ -277,6 +277,47 @@ pub struct RollbackParams {
     pub deployment_id: String,
 }
 
+/// The arguments of `add_app_scheduled_command`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AddAppScheduledCommandParams {
+    /// The id of the application.
+    pub app_id: String,
+    /// Human-friendly name for this scheduled command.
+    pub name: String,
+    /// Cron expression (e.g. "0 3 * * *", "@hourly", "@daily").
+    pub schedule: String,
+    /// Shell command string to execute in the container.
+    pub command: String,
+    /// Whether the scheduled command is active (default: true).
+    pub enabled: Option<bool>,
+}
+
+/// The arguments of `update_app_scheduled_command`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateAppScheduledCommandParams {
+    /// The id of the application.
+    pub app_id: String,
+    /// The id of the scheduled command.
+    pub command_id: String,
+    /// Human-friendly name for this scheduled command.
+    pub name: String,
+    /// Cron expression (e.g. "0 3 * * *", "@hourly", "@daily").
+    pub schedule: String,
+    /// Shell command string to execute in the container.
+    pub command: String,
+    /// Whether the scheduled command is active.
+    pub enabled: Option<bool>,
+}
+
+/// The arguments of `delete_app_scheduled_command` and `run_app_scheduled_command`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AppCommandTargetParams {
+    /// The id of the application.
+    pub app_id: String,
+    /// The id of the scheduled command.
+    pub command_id: String,
+}
+
 /// The arguments of `install_store_app`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct InstallStoreAppParams {
@@ -2622,6 +2663,161 @@ impl McpServer {
             .map_err(any_error)?;
         let status = platform.check_app_update(id).await.map_err(any_error)?;
         json_result(status)
+    }
+
+    /// List scheduled commands and cron tasks configured for an application.
+    #[tool(
+        description = "List scheduled commands and cron tasks configured for an application by its id."
+    )]
+    async fn list_app_scheduled_commands(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Read)
+            .await
+            .map_err(any_error)?;
+        let list = platform.scheduled_commands(id).await.map_err(any_error)?;
+        json_result(list)
+    }
+
+    /// Add a new scheduled cron command to an application.
+    #[tool(
+        description = "Add a new scheduled cron command to an application. Needs the edit scope."
+    )]
+    async fn add_app_scheduled_command(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AddAppScheduledCommandParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.app_id)?;
+        let request = r3v3rs3_api::platform::ScheduledCommandRequest {
+            name: params.name,
+            schedule: params.schedule,
+            command: params.command,
+            enabled: params.enabled.unwrap_or(true),
+        };
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let cmd = platform
+            .add_scheduled_command(id, request)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::AddScheduledCommand)
+            .id(id)
+            .summary(&cmd.name);
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(cmd)
+    }
+
+    /// Update an existing scheduled cron command of an application.
+    #[tool(
+        description = "Update an existing scheduled cron command of an application. Needs the edit scope."
+    )]
+    async fn update_app_scheduled_command(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateAppScheduledCommandParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.app_id)?;
+        let cmd_id: ShortId = parse_id(&params.command_id)?;
+        let request = r3v3rs3_api::platform::ScheduledCommandRequest {
+            name: params.name,
+            schedule: params.schedule,
+            command: params.command,
+            enabled: params.enabled.unwrap_or(true),
+        };
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let cmd = platform
+            .update_scheduled_command(cmd_id, request)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::UpdateScheduledCommand)
+            .id(id)
+            .summary(&cmd.name);
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(cmd)
+    }
+
+    /// Delete a scheduled command from an application.
+    #[tool(
+        description = "Delete a scheduled cron command from an application. Needs the edit scope."
+    )]
+    async fn delete_app_scheduled_command(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AppCommandTargetParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.app_id)?;
+        let cmd_id: ShortId = parse_id(&params.command_id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        platform
+            .delete_scheduled_command(cmd_id)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::DeleteScheduledCommand)
+            .id(id)
+            .summary(cmd_id.to_string());
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(json!({ "deleted": true }))
+    }
+
+    /// Run a scheduled command immediately inside the running container of an application.
+    #[tool(
+        description = "Run a scheduled command immediately inside the running container of an application. Needs the edit scope."
+    )]
+    async fn run_app_scheduled_command(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AppCommandTargetParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.app_id)?;
+        let cmd_id: ShortId = parse_id(&params.command_id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let result = platform
+            .execute_scheduled_command(cmd_id)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::RunScheduledCommand)
+            .id(id)
+            .summary(cmd_id.to_string());
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(result)
     }
 
     // ==========================================
