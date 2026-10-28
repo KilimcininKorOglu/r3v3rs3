@@ -122,6 +122,27 @@ fn parse_json_or_yaml(raw: &str, source: &str) -> anyhow::Result<Value> {
     Ok(val)
 }
 
+fn build_registry_payload(
+    server: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+    payload: Option<String>,
+) -> anyhow::Result<Value> {
+    if let Some(p) = payload {
+        load_payload(&p)
+    } else {
+        let s = server
+            .ok_or_else(|| anyhow::anyhow!("--server is required when payload is omitted"))?;
+        let u = username
+            .ok_or_else(|| anyhow::anyhow!("--username is required when payload is omitted"))?;
+        Ok(json!({
+            "server": s,
+            "username": u,
+            "password": password,
+        }))
+    }
+}
+
 impl ApiClient {
     pub fn new(client: reqwest::Client, server: String, token: String) -> Self {
         Self {
@@ -2060,6 +2081,63 @@ impl ApiClient {
         print_json(&res)
     }
 
+    // --- Container Registry operations ---
+
+    pub async fn list_registries(&self) -> anyhow::Result<()> {
+        let res = self.request(Method::GET, "/api/registries", None).await?;
+        if let Some(arr) = res.as_array() {
+            println!("{:<26} {:<32} USERNAME", "ID", "SERVER");
+            println!("{:-<26} {:-<32} {:-<20}", "", "", "");
+            for item in arr {
+                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+                let server = item.get("server").and_then(|v| v.as_str()).unwrap_or("-");
+                let username = item.get("username").and_then(|v| v.as_str()).unwrap_or("-");
+                println!("{:<26} {:<32} {}", id, server, username);
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
+    pub async fn add_registry(
+        &self,
+        server: Option<String>,
+        username: Option<String>,
+        password: Option<String>,
+        payload: Option<String>,
+    ) -> anyhow::Result<()> {
+        let val = build_registry_payload(server, username, password, payload)?;
+        let res = self
+            .request(Method::POST, "/api/registries", Some(&val))
+            .await?;
+        println!("registry added");
+        print_json(&res)
+    }
+
+    pub async fn update_registry(
+        &self,
+        id: &str,
+        server: Option<String>,
+        username: Option<String>,
+        password: Option<String>,
+        payload: Option<String>,
+    ) -> anyhow::Result<()> {
+        let val = build_registry_payload(server, username, password, payload)?;
+        let res = self
+            .request(Method::PUT, &format!("/api/registries/{id}"), Some(&val))
+            .await?;
+        println!("registry/{id} updated");
+        print_json(&res)
+    }
+
+    pub async fn delete_registry(&self, id: &str) -> anyhow::Result<()> {
+        self.request(Method::DELETE, &format!("/api/registries/{id}"), None)
+            .await?;
+        println!("registry/{id} deleted");
+        Ok(())
+    }
+
     // --- Cron operations ---
 
     pub async fn list_cron(&self, app_id: &str) -> anyhow::Result<()> {
@@ -2826,5 +2904,32 @@ protocol: http
     #[test]
     fn load_payload_rejects_garbage() {
         assert!(load_payload("").is_err());
+    }
+
+    #[test]
+    fn build_registry_payload_constructs_valid_json() {
+        let val = build_registry_payload(
+            Some("ghcr.io".to_string()),
+            Some("octocat".to_string()),
+            Some("token123".to_string()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(val["server"], "ghcr.io");
+        assert_eq!(val["username"], "octocat");
+        assert_eq!(val["password"], "token123");
+
+        let custom = build_registry_payload(
+            None,
+            None,
+            None,
+            Some(r#"{"server": "docker.io", "username": "user"}"#.to_string()),
+        )
+        .unwrap();
+        assert_eq!(custom["server"], "docker.io");
+        assert_eq!(custom["username"], "user");
+
+        assert!(build_registry_payload(None, Some("u".to_string()), None, None).is_err());
+        assert!(build_registry_payload(Some("s".to_string()), None, None, None).is_err());
     }
 }

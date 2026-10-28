@@ -1935,6 +1935,12 @@ r3 <server> cron add <app-id> --cron "0 * * * *" --command "php artisan schedule
 r3 <server> cron run <app-id> <job-id>
 r3 <server> cron delete <app-id> <job-id>
 
+# Container Registries
+r3 <server> registry list
+r3 <server> registry add --server ghcr.io --username user --password token
+r3 <server> registry update <id> [--server ghcr.io] [--username user] [--password token]
+r3 <server> registry delete <id>
+
 # Platform Status & Maintenance
 r3 <server> platform status
 r3 <server> platform metrics

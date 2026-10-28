@@ -84,6 +84,9 @@ enum Command {
     /// Manage outbound webhook integrations.
     #[command(subcommand)]
     Webhook(WebhookCommand),
+    /// Manage container registries for private image pulls.
+    #[command(subcommand)]
+    Registry(RegistryCommand),
     /// Manage scheduled background cron commands for applications.
     #[command(subcommand)]
     Cron(CronCommand),
@@ -753,6 +756,46 @@ pub enum WebhookCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum RegistryCommand {
+    /// Lists configured container registries.
+    #[command(alias = "ls")]
+    List,
+    /// Adds container registry credentials.
+    Add {
+        /// Server URL (e.g. docker.io, ghcr.io).
+        #[arg(long)]
+        server: Option<String>,
+        /// Username for registry authentication.
+        #[arg(short, long)]
+        username: Option<String>,
+        /// Password or personal access token.
+        #[arg(short, long)]
+        password: Option<String>,
+        /// Inline JSON/YAML payload, file path, or '-' for stdin.
+        payload: Option<String>,
+    },
+    /// Updates container registry credentials.
+    Update {
+        /// Registry ID to update.
+        id: String,
+        /// Server URL (e.g. docker.io, ghcr.io).
+        #[arg(long)]
+        server: Option<String>,
+        /// Username for registry authentication.
+        #[arg(short, long)]
+        username: Option<String>,
+        /// Password or personal access token.
+        #[arg(short, long)]
+        password: Option<String>,
+        /// Inline JSON/YAML payload, file path, or '-' for stdin.
+        payload: Option<String>,
+    },
+    /// Deletes a container registry.
+    #[command(alias = "rm")]
+    Delete { id: String },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum CronCommand {
     /// Lists scheduled background commands for an application.
     #[command(alias = "ls")]
@@ -969,6 +1012,7 @@ async fn run_api_platform(api: &api_client::ApiClient, cmd: Command) -> anyhow::
         Command::Dr(c) => run_dr(api, c).await,
         Command::Cron(c) => run_cron(api, c).await,
         Command::Target(c) => run_target(api, c).await,
+        Command::Registry(c) => run_registry(api, c).await,
         other => run_api_system(api, other).await,
     }
 }
@@ -1429,6 +1473,29 @@ async fn run_webhook(api: &api_client::ApiClient, cmd: WebhookCommand) -> anyhow
         WebhookCommand::Add { payload } => api.add_webhook(&payload).await,
         WebhookCommand::Delete { id } => api.delete_webhook(&id).await,
         WebhookCommand::Test { id } => api.test_webhook(&id).await,
+    }
+}
+
+async fn run_registry(api: &api_client::ApiClient, cmd: RegistryCommand) -> anyhow::Result<()> {
+    match cmd {
+        RegistryCommand::List => api.list_registries().await,
+        RegistryCommand::Add {
+            server,
+            username,
+            password,
+            payload,
+        } => api.add_registry(server, username, password, payload).await,
+        RegistryCommand::Update {
+            id,
+            server,
+            username,
+            password,
+            payload,
+        } => {
+            api.update_registry(&id, server, username, password, payload)
+                .await
+        }
+        RegistryCommand::Delete { id } => api.delete_registry(&id).await,
     }
 }
 
