@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.3] - 2026-10-28
+
+### Added
+- Autonomous MCP User Accounts & Auth Tokens Tools: Added first-class Model Context Protocol tools for account and token administration (`list_accounts`, `create_account`, `update_account`, `delete_account`, `list_auth_tokens`, `create_auth_token`, `delete_auth_token`), granting AI agents and automated infrastructure full autonomy over user role assignments, proxy scopes, password rotation, and scoped API tokens.
+- Server RPC Account Dispatch: Wired MCP account mutations directly through server loop RPC methods (`GetAccountList`, `AddAccount`, `UpdateAccount`, `DeleteAccount`, `CreateApiToken`, `DeleteApiToken`) ensuring audit logging and session invalidation.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` documenting user accounts and API token management via MCP.
+
 ## [2.9.2] - 2026-10-28
 
 ### Added
