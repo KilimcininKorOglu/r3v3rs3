@@ -11,6 +11,9 @@ use crate::audit::AuditRecord;
 use crate::server::rpc::access_lists::{
     AddAccessList, DeleteAccessList, GetAccessLists, UpdateAccessList,
 };
+use crate::server::rpc::accounts::{
+    AddAccount, CreateApiToken, DeleteAccount, DeleteApiToken, GetAccountList, UpdateAccount,
+};
 use crate::server::rpc::acme::{
     AddAcme, DeleteAcme, GetAcme, GetAcmeCnameInstructions, GetAcmeList, RequestAcme,
 };
@@ -420,6 +423,50 @@ pub struct ListGitBranchesParams {
     pub id: String,
     /// Full repository name in "owner/repo" format.
     pub repository: String,
+}
+
+/// The arguments of `create_account`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CreateAccountParams {
+    /// Username for the account.
+    pub username: String,
+    /// Password for the account (minimum 8 characters).
+    pub password: String,
+    /// Role of the account: "admin", "editor", or "viewer" (default: "admin").
+    pub role: Option<String>,
+    /// Optional list of proxy IDs the account is restricted to.
+    pub proxies: Option<Vec<String>>,
+    /// Whether to enable TOTP two-factor authentication.
+    pub totp: Option<bool>,
+}
+
+/// The arguments of `update_account`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateAccountParams {
+    /// Username of the account to update.
+    pub username: String,
+    /// Role of the account: "admin", "editor", or "viewer".
+    pub role: String,
+    /// Optional new password. Omitted or empty keeps current password.
+    pub password: Option<String>,
+    /// Optional list of proxy IDs the account is restricted to.
+    pub proxies: Option<Vec<String>>,
+}
+
+/// The arguments of `delete_account`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DeleteAccountParams {
+    /// Username of the account to delete.
+    pub username: String,
+}
+
+/// The arguments of `create_auth_token`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CreateAuthTokenParams {
+    /// Descriptive label for the token (e.g. "CI Deploy Token").
+    pub name: String,
+    /// Token permission scope: "read" or "edit" (default: "read").
+    pub scope: Option<String>,
 }
 
 /// The arguments of `install_store_app`.
@@ -4361,6 +4408,206 @@ impl McpServer {
             .map_err(any_error)?;
         let branches = platform.git_branches(id, &repo).await.map_err(any_error)?;
         json_result(branches)
+    }
+
+    // ==========================================
+    // Group 15: Accounts & Auth Tokens
+    // ==========================================
+
+    /// List all configured user accounts and their roles.
+    #[tool(description = "List all user accounts with their roles and assigned proxy scopes.")]
+    async fn list_accounts(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let accounts = self
+            .state
+            .call(&caller, GetAccountList)
+            .await
+            .map_err(any_error)?;
+        json_result(accounts)
+    }
+
+    /// Create a new user account. Needs the edit scope.
+    #[tool(
+        description = "Create a new user account with role, password, and optional proxy scope. Needs the edit scope."
+    )]
+    async fn create_account(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<CreateAccountParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let role = match params.role.as_deref() {
+            Some("viewer") => r3v3rs3_api::auth::Role::Viewer,
+            Some("editor") => r3v3rs3_api::auth::Role::Editor,
+            _ => r3v3rs3_api::auth::Role::Admin,
+        };
+        let proxies = params.proxies.map(|list| {
+            list.into_iter()
+                .filter_map(|s| s.parse::<ShortId>().ok())
+                .collect::<std::collections::BTreeSet<_>>()
+        });
+        let account = r3v3rs3_api::auth::NewAccount {
+            username: params.username,
+            password: params.password,
+            role,
+            proxies,
+            totp: params.totp.unwrap_or(false),
+        };
+        let res = self
+            .state
+            .call(&caller, AddAccount { account })
+            .await
+            .map_err(any_error)?;
+        json_result(res)
+    }
+
+    /// Update an existing user account. Needs the edit scope.
+    #[tool(
+        description = "Update an existing account's role, password, or proxy scope. Needs the edit scope."
+    )]
+    async fn update_account(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateAccountParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let role = match params.role.as_str() {
+            "viewer" => r3v3rs3_api::auth::Role::Viewer,
+            "editor" => r3v3rs3_api::auth::Role::Editor,
+            _ => r3v3rs3_api::auth::Role::Admin,
+        };
+        let proxies = params.proxies.map(|list| {
+            list.into_iter()
+                .filter_map(|s| s.parse::<ShortId>().ok())
+                .collect::<std::collections::BTreeSet<_>>()
+        });
+        let password = match params.password {
+            Some(p) if !p.is_empty() => Some(p),
+            _ => None,
+        };
+        let update = r3v3rs3_api::auth::AccountUpdate {
+            role,
+            proxies,
+            password,
+        };
+        let method = UpdateAccount {
+            actor: caller.username.clone(),
+            username: params.username,
+            update,
+        };
+        self.state.call(&caller, method).await.map_err(any_error)?;
+        json_result(json!({ "updated": true }))
+    }
+
+    /// Delete a user account. Needs the edit scope.
+    #[tool(
+        description = "Delete a user account and end all its active sessions. Needs the edit scope."
+    )]
+    async fn delete_account(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<DeleteAccountParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let method = DeleteAccount {
+            actor: caller.username.clone(),
+            username: params.username,
+        };
+        self.state.call(&caller, method).await.map_err(any_error)?;
+        json_result(json!({ "deleted": true }))
+    }
+
+    /// List API tokens belonging to the current account.
+    #[tool(
+        description = "List persistent API tokens belonging to the current authenticated account."
+    )]
+    async fn list_auth_tokens(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let accounts = self.state.accounts.borrow();
+        let account = accounts.get(&caller.username).ok_or_else(|| {
+            any_error(Error::AccountNotFound {
+                username: caller.username.clone(),
+            })
+        })?;
+        let tokens: Vec<r3v3rs3_api::auth::ApiTokenInfo> = account
+            .tokens
+            .iter()
+            .map(|tok| r3v3rs3_api::auth::ApiTokenInfo {
+                id: tok.id.clone(),
+                name: tok.name.clone(),
+                scope: tok.scope,
+                created_at: tok.created_at,
+            })
+            .collect();
+        json_result(tokens)
+    }
+
+    /// Create a persistent API token for the current account. Needs the edit scope.
+    #[tool(
+        description = "Create a persistent API token for the current account. Needs the edit scope."
+    )]
+    async fn create_auth_token(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<CreateAuthTokenParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let scope = match params.scope.as_deref() {
+            Some("edit") => r3v3rs3_api::auth::TokenScope::Edit,
+            _ => r3v3rs3_api::auth::TokenScope::Read,
+        };
+        if caller.role == r3v3rs3_api::auth::Role::Viewer
+            && scope == r3v3rs3_api::auth::TokenScope::Edit
+        {
+            return Err(any_error(Error::Forbidden));
+        }
+        let result = self
+            .state
+            .call(
+                &caller,
+                CreateApiToken {
+                    username: caller.username.clone(),
+                    name: params.name,
+                    scope,
+                },
+            )
+            .await
+            .map_err(any_error)?;
+        json_result(result)
+    }
+
+    /// Delete an API token belonging to the current account. Needs the edit scope.
+    #[tool(
+        description = "Revoke and delete an API token belonging to the current account. Needs the edit scope."
+    )]
+    async fn delete_auth_token(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        self.state
+            .call(
+                &caller,
+                DeleteApiToken {
+                    username: caller.username.clone(),
+                    token_id: params.id,
+                },
+            )
+            .await
+            .map_err(any_error)?;
+        json_result(json!({ "deleted": true }))
     }
 }
 
