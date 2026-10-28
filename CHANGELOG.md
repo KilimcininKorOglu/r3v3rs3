@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-10-28
+
+### Fixed
+- Prevent Auto-Quarantine False Positives on Admin API: Removed HTTP 401 (Unauthorized) from default `block_status_codes` in `AutoQuarantineConfig` and exempted `/api/*` endpoints from client status code violation tracking, preventing unauthenticated WebUI page reloads from triggering automatic IP bans.
+- Loopback Protection in IP Ban Tracker: Protected loopback addresses (`127.0.0.1`, `::1`) from ever being banned or recording failures in `IpBanTracker`, ensuring reverse-proxied admin panel traffic is never globally locked out.
+- Real Client IP Extraction on Login: Updated the `/api/login` handler to resolve the real client IP from `X-Forwarded-For` or `X-Real-IP` headers when connections arrive via loopback reverse proxy, ensuring accurate per-client rate limiting and audit trail logging.
+
 ## [3.0.0] - 2026-10-28
 
 ### Added
