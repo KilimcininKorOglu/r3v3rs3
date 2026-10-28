@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.9] - 2026-10-28
+
+### Added
+- Autonomous MCP Scheduled Commands Management Tools: Added first-class Model Context Protocol tools for application cron tasks (`list_app_scheduled_commands`, `add_app_scheduled_command`, `update_app_scheduled_command`, `delete_app_scheduled_command`, `run_app_scheduled_command`), providing AI agents and automation pipelines with complete operational autonomy over in-container scheduled tasks.
+- Tamper-Evident Cron Audit Logging: Integrated audit recording (`AddScheduledCommand`, `UpdateScheduledCommand`, `DeleteScheduledCommand`, `RunScheduledCommand`) across all MCP scheduled command mutation and execution tools.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` documenting autonomous scheduled command MCP operations.
+
 ## [2.8.8] - 2026-10-28
 
 ### Added
