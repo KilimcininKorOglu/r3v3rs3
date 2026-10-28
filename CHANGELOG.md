@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.9] - 2026-10-28
+
+### Added
+- First-Class CLI Update & Test Command Parity: Added `update` subcommands across core CLI resource groups (`r3 port update`, `r3 proxy update`, `r3 app update`, `r3 acme update`, `r3 acl update`, `r3 dns update`, `r3 webhook update`, `r3 cron update`) and added testing aliases (`test` alias for `r3 cron run`), enabling full command-line configuration modifications with support for inline payloads, files, and targeted CLI flags.
+- Dual-Language Documentation: Updated CLI command reference in `configuration.md` and `configuration.tr.md` documenting the new `update` subcommands and scheduled command modifications.
+
 ## [2.9.8] - 2026-10-28
 
 ### Added
