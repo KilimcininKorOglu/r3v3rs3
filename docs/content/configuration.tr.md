@@ -1773,6 +1773,7 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 | **Yönetilen Veritabanları ve Yedekler** | `list_databases`, `list_database_engines`, `create_database`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config` | Otomatik üretilen kimlik bilgileriyle PostgreSQL, MySQL, Redis, MariaDB ve MongoDB sağlama, anlık yedek alma, yedek silme ve S3/SFTP/rsync uzak depolama ayarları. |
 | **Agent Hedef Düğümleri** | `list_targets`, `add_target`, `delete_target` | Çok düğümlü Docker agent altyapısı, tek kullanımlık kayıt token'ı üretme ve hedef düğümleri kaldırma. |
 | **Projeler ve Ortam Grupları** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group` | Proje organizasyonu, çoklu ortam izolasyonu ve paylaşılan ortak ortam değişkeni grupları. |
+| **Dışa Dönük Webhook'lar** | `list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook` | Dışa dönük olay bildirim webhook dağıtıcıları: uç nokta yönetimi, HMAC-SHA256 imza sırrı doğrulaması, ayrıntılı olay abonelikleri ve uçtan uca webhook teslimat testi. |
 | **Felaket Kurtarma** | `list_dr_backups`, `create_dr_backup` | İsteğe bağlı AES-256-GCM şifrelemeli ve otomatik S3 replikasyonlu tam sistem yedek anlık görüntüleri. |
 
 MCP sunucusu varsayılan olarak kapalıdır. Panelin ayarlar sayfası onu sunucu çalışırken açar ve giriş yapmasına izin verilecek client'ları tutar. `config.toml` aynı bölümü taşır:

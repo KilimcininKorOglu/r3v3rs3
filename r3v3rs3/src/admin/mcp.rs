@@ -318,6 +318,51 @@ pub struct AppCommandTargetParams {
     pub command_id: String,
 }
 
+/// The arguments of `add_webhook`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AddWebhookParams {
+    /// Name of the webhook.
+    pub name: String,
+    /// HTTPS delivery endpoint URL.
+    pub url: String,
+    /// Optional shared secret for HMAC-SHA256 signature verification.
+    pub secret: Option<String>,
+    /// Whether the webhook is enabled (default: true).
+    pub enabled: Option<bool>,
+    /// List of event names (e.g. ["deploy.success", "backup.failure", "security.ip_banned"]).
+    pub events: Vec<String>,
+}
+
+/// The arguments of `update_webhook`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateWebhookParams {
+    /// Webhook ID to update.
+    pub id: String,
+    /// Optional updated name.
+    pub name: Option<String>,
+    /// Optional updated HTTPS URL.
+    pub url: Option<String>,
+    /// Optional updated secret (empty string clears secret).
+    pub secret: Option<String>,
+    /// Optional updated enabled flag.
+    pub enabled: Option<bool>,
+    /// Optional updated list of event subscriptions.
+    pub events: Option<Vec<String>>,
+}
+
+/// The arguments of `test_webhook`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TestWebhookParams {
+    /// Optional ID of an existing webhook to test.
+    pub webhook_id: Option<String>,
+    /// Optional direct URL to test (used when testing before saving).
+    pub url: Option<String>,
+    /// Optional secret for signing the test payload.
+    pub secret: Option<String>,
+    /// Optional simulated event type (default: test.ping).
+    pub event: Option<String>,
+}
+
 /// The arguments of `install_store_app`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct InstallStoreAppParams {
@@ -3785,6 +3830,226 @@ impl McpServer {
             "id": params.id,
         }))
     }
+
+    // ==========================================
+    // Group 12: Outbound Webhooks
+    // ==========================================
+
+    /// List all configured outbound webhooks.
+    #[tool(description = "List all configured outbound notification webhooks.")]
+    async fn list_webhooks(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let webhooks = platform.list_outbound_webhooks().await.map_err(any_error)?;
+        json_result(webhooks)
+    }
+
+    /// Get details of an outbound webhook by its id.
+    #[tool(description = "Get details of an outbound webhook by its id.")]
+    async fn get_webhook(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let entry = platform.get_outbound_webhook(id).await.map_err(any_error)?;
+        json_result(entry)
+    }
+
+    /// Create a new outbound notification webhook.
+    #[tool(
+        description = "Create a new outbound notification webhook subscribing to platform events. Needs the edit scope."
+    )]
+    async fn add_webhook(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AddWebhookParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let events = parse_webhook_events(&params.events)?;
+        let request = r3v3rs3_api::webhook::CreateWebhookRequest {
+            name: params.name,
+            url: params.url,
+            secret: params.secret,
+            enabled: params.enabled.unwrap_or(true),
+            events,
+        };
+        request.validate().map_err(any_error)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let entry = platform
+            .create_outbound_webhook(request)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::AddOutboundWebhook)
+            .id(entry.id)
+            .summary(format!("{} ({})", entry.name, entry.url));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(entry)
+    }
+
+    /// Update an existing outbound notification webhook.
+    #[tool(
+        description = "Update an existing outbound notification webhook configuration. Needs the edit scope."
+    )]
+    async fn update_webhook(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateWebhookParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let events = match params.events {
+            Some(evts) => Some(parse_webhook_events(&evts)?),
+            None => None,
+        };
+        let request = r3v3rs3_api::webhook::UpdateWebhookRequest {
+            name: params.name,
+            url: params.url,
+            secret: params.secret,
+            enabled: params.enabled,
+            events,
+        };
+        request.validate().map_err(any_error)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let entry = platform
+            .update_outbound_webhook(id, request)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::UpdateOutboundWebhook)
+            .id(entry.id)
+            .summary(format!("{} ({})", entry.name, entry.url));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(entry)
+    }
+
+    /// Delete an outbound notification webhook by its id.
+    #[tool(
+        description = "Delete an outbound notification webhook by its id. Needs the edit scope."
+    )]
+    async fn delete_webhook(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let entry = platform.get_outbound_webhook(id).await.ok();
+        platform
+            .delete_outbound_webhook(id)
+            .await
+            .map_err(any_error)?;
+        let summary = entry
+            .map(|e| format!("{} ({})", e.name, e.url))
+            .unwrap_or_else(|| id.to_string());
+        let record = AuditRecord::new(AuditAction::DeleteOutboundWebhook)
+            .id(id)
+            .summary(summary);
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(json!({ "deleted": true }))
+    }
+
+    /// Send a test notification payload to an outbound webhook.
+    #[tool(
+        description = "Send a test notification payload to an outbound webhook by id or target URL. Needs the edit scope."
+    )]
+    async fn test_webhook(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<TestWebhookParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let webhook_id = match params.webhook_id {
+            Some(ref id) => Some(parse_id(id)?),
+            None => None,
+        };
+        let event = match params.event {
+            Some(ref e) => Some(
+                e.trim()
+                    .replace('_', ".")
+                    .parse::<r3v3rs3_api::webhook::WebhookEvent>()
+                    .or_else(|_| e.trim().parse::<r3v3rs3_api::webhook::WebhookEvent>())
+                    .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?,
+            ),
+            None => None,
+        };
+        let request = r3v3rs3_api::webhook::TestWebhookRequest {
+            webhook_id,
+            url: params.url,
+            secret: params.secret,
+            event,
+        };
+        let target_summary = request
+            .webhook_id
+            .map(|id| id.to_string())
+            .or_else(|| request.url.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let res = platform
+            .test_outbound_webhook(request)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::TestOutboundWebhook)
+            .summary(format!("{target_summary} -> success={}", res.success));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(res)
+    }
+}
+
+fn parse_webhook_events(
+    events: &[String],
+) -> Result<Vec<r3v3rs3_api::webhook::WebhookEvent>, ErrorData> {
+    events
+        .iter()
+        .map(|e| {
+            e.trim()
+                .replace('_', ".")
+                .parse::<r3v3rs3_api::webhook::WebhookEvent>()
+                .or_else(|_| e.trim().parse::<r3v3rs3_api::webhook::WebhookEvent>())
+                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))
+        })
+        .collect()
 }
 
 #[tool_handler(router = self.tool_router)]
