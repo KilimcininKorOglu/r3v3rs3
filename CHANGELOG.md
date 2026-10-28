@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.6] - 2026-10-28
+
+### Added
+- Dedicated Application Commands Tab: Added a dedicated `Commands` (`/apps/{id}/commands`) tab to the application console navigation bar (`AppTab::Commands`), enabling direct inspection and management of scheduled background tasks and cron jobs.
+- Standalone Commands Page View: Embedded the scheduled commands manager in a full-tab layout with real-time command creation, editing, manual triggering, and execution output logs.
+- Dual-Language Documentation: Updated `platform.md` and `platform.tr.md` documenting scheduled commands management via the dedicated application console tab.
+
+### Changed
+- App Settings De-cluttering: Removed the embedded scheduled commands section from the general application settings view (`/apps/{id}/settings`) in favor of the dedicated console tab.
+
 ## [2.8.5] - 2026-10-28
 
 ### Fixed
