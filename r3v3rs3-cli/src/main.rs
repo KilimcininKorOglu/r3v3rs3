@@ -239,6 +239,10 @@ pub enum TrafficCommand {
     Connections(ConnectionsCommand),
     /// Shows HTTP/2 & HTTP/3 stream priority and adaptive concurrency statistics.
     Priority,
+    /// Shows geographic traffic distribution by country.
+    Geo,
+    /// Replays a captured traffic log entry.
+    Replay { id: u64 },
 }
 
 #[derive(Debug, Subcommand)]
@@ -557,6 +561,26 @@ pub enum BackupCommand {
     },
     /// Shows backup configuration.
     Config,
+    /// Tests decompression and format integrity of a database backup.
+    Test {
+        database_id: String,
+        backup_id: String,
+    },
+    /// Shows available Point-in-Time Recovery window and WAL boundaries.
+    PitrRange { database_id: String },
+    /// Restores a database to a specific point in time (PITR).
+    PitrRestore {
+        database_id: String,
+        target_time: u64,
+        #[arg(long)]
+        new_name: Option<String>,
+        #[arg(long)]
+        host_port: Option<u16>,
+    },
+    /// Forces immediate WAL segment archival from the running database container.
+    WalArchive { database_id: String },
+    /// Lists archived WAL segments for a database.
+    WalSegments { database_id: String },
     /// Manages full platform disaster recovery (.r3bundle) snapshots.
     #[command(subcommand)]
     Dr(DrCommand),
@@ -635,6 +659,10 @@ pub enum TargetCommand {
     },
     /// Generates a new target node enrollment token.
     Token,
+    /// Upgrades the agent binary on a target node.
+    Upgrade { id: String },
+    /// Triggers binary upgrade on all connected agent target nodes.
+    UpgradeAll,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1058,6 +1086,12 @@ pub enum PlatformCommand {
         #[arg(long)]
         max_time_wait: Option<u32>,
     },
+    /// Triggers zero-downtime server binary upgrade to the latest release.
+    #[command(alias = "server-upgrade")]
+    Upgrade,
+    /// Shows the current progress of a running server upgrade.
+    #[command(alias = "server-upgrade-status")]
+    UpgradeStatus,
 }
 
 fn http_client() -> anyhow::Result<reqwest::Client> {
@@ -1137,6 +1171,8 @@ async fn run_traffic(api: &api_client::ApiClient, cmd: TrafficCommand) -> anyhow
     match cmd {
         TrafficCommand::Connections(conn_cmd) => run_traffic_connections(api, conn_cmd).await,
         TrafficCommand::Priority => api.get_traffic_priority_stats().await,
+        TrafficCommand::Geo => api.traffic_geo().await,
+        TrafficCommand::Replay { id } => api.traffic_replay(id).await,
     }
 }
 
@@ -1185,6 +1221,32 @@ async fn run_api_system(api: &api_client::ApiClient, cmd: Command) -> anyhow::Re
     }
 }
 
+async fn run_platform_node_alerts(
+    api: &api_client::ApiClient,
+    cmd: PlatformCommand,
+) -> anyhow::Result<()> {
+    match cmd {
+        PlatformCommand::NodeAlerts => api.get_node_alerts().await,
+        PlatformCommand::SetNodeAlerts {
+            enabled,
+            min_disk_percent,
+            bandwidth_spike,
+            max_fd_percent,
+            max_time_wait,
+        } => {
+            api.set_node_alerts(
+                enabled,
+                min_disk_percent,
+                bandwidth_spike,
+                max_fd_percent,
+                max_time_wait,
+            )
+            .await
+        }
+        _ => unreachable!(),
+    }
+}
+
 async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyhow::Result<()> {
     match cmd {
         PlatformCommand::RotateKey => api.rotate_platform_key().await,
@@ -1225,23 +1287,11 @@ async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyh
         PlatformCommand::VacuumLogs { threshold_mb } => {
             api.vacuum_platform_logs(threshold_mb).await
         }
-        PlatformCommand::NodeAlerts => api.get_node_alerts().await,
-        PlatformCommand::SetNodeAlerts {
-            enabled,
-            min_disk_percent,
-            bandwidth_spike,
-            max_fd_percent,
-            max_time_wait,
-        } => {
-            api.set_node_alerts(
-                enabled,
-                min_disk_percent,
-                bandwidth_spike,
-                max_fd_percent,
-                max_time_wait,
-            )
-            .await
+        alerts @ (PlatformCommand::NodeAlerts | PlatformCommand::SetNodeAlerts { .. }) => {
+            run_platform_node_alerts(api, alerts).await
         }
+        PlatformCommand::Upgrade => api.upgrade_server().await,
+        PlatformCommand::UpgradeStatus => api.get_server_upgrade_status().await,
     }
 }
 
@@ -1497,6 +1547,29 @@ async fn run_db(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<(
     }
 }
 
+async fn run_backup_pitr_wal(
+    api: &api_client::ApiClient,
+    cmd: BackupCommand,
+) -> anyhow::Result<()> {
+    match cmd {
+        BackupCommand::PitrRange { database_id } => api.get_database_pitr_range(&database_id).await,
+        BackupCommand::PitrRestore {
+            database_id,
+            target_time,
+            new_name,
+            host_port,
+        } => {
+            api.restore_database_pitr(&database_id, target_time, new_name.as_deref(), host_port)
+                .await
+        }
+        BackupCommand::WalArchive { database_id } => api.archive_database_wal(&database_id).await,
+        BackupCommand::WalSegments { database_id } => {
+            api.list_database_wal_segments(&database_id).await
+        }
+        _ => unreachable!(),
+    }
+}
+
 async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::Result<()> {
     match cmd {
         BackupCommand::List { database_id } => api.list_backups(&database_id).await,
@@ -1509,8 +1582,16 @@ async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::
             database_id,
             backup_id,
         } => api.delete_backup(&database_id, &backup_id).await,
+        BackupCommand::Test {
+            database_id,
+            backup_id,
+        } => api.test_database_backup(&database_id, &backup_id).await,
         BackupCommand::Config => api.backup_config().await,
         BackupCommand::Dr(c) => run_dr(api, c).await,
+        pitr_wal @ (BackupCommand::PitrRange { .. }
+        | BackupCommand::PitrRestore { .. }
+        | BackupCommand::WalArchive { .. }
+        | BackupCommand::WalSegments { .. }) => run_backup_pitr_wal(api, pitr_wal).await,
     }
 }
 
@@ -1549,6 +1630,8 @@ async fn run_target(api: &api_client::ApiClient, cmd: TargetCommand) -> anyhow::
             api.set_target_region(&id, region.as_deref()).await
         }
         TargetCommand::Token => api.new_target_token().await,
+        TargetCommand::Upgrade { id } => api.upgrade_target(&id).await,
+        TargetCommand::UpgradeAll => api.upgrade_all_targets().await,
     }
 }
 

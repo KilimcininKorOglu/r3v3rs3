@@ -1390,6 +1390,86 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn test_database_backup(
+        &self,
+        database_id: &str,
+        backup_id: &str,
+    ) -> anyhow::Result<()> {
+        let res = self
+            .request(
+                Method::POST,
+                &format!("/api/databases/{database_id}/backups/{backup_id}/test"),
+                None,
+            )
+            .await?;
+        println!("backup/{backup_id} test verification completed for database/{database_id}");
+        print_json(&res)
+    }
+
+    pub async fn get_database_pitr_range(&self, database_id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(
+                Method::GET,
+                &format!("/api/databases/{database_id}/pitr"),
+                None,
+            )
+            .await?;
+        print_json(&res)
+    }
+
+    pub async fn restore_database_pitr(
+        &self,
+        database_id: &str,
+        target_time: u64,
+        new_name: Option<&str>,
+        host_port: Option<u16>,
+    ) -> anyhow::Result<()> {
+        let body = build_pitr_restore_payload(target_time, new_name.map(str::to_string), host_port);
+        let res = self
+            .request(
+                Method::POST,
+                &format!("/api/databases/{database_id}/pitr/restore"),
+                Some(&body),
+            )
+            .await?;
+        println!("database/{database_id} PITR restore initiated to timestamp {target_time}");
+        print_json(&res)
+    }
+
+    pub async fn archive_database_wal(&self, database_id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(
+                Method::POST,
+                &format!("/api/databases/{database_id}/wal/archive"),
+                None,
+            )
+            .await?;
+        println!("database/{database_id} WAL segment archival triggered");
+        print_json(&res)
+    }
+
+    pub async fn list_database_wal_segments(&self, database_id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(
+                Method::GET,
+                &format!("/api/databases/{database_id}/wal/segments"),
+                None,
+            )
+            .await?;
+        if let Some(arr) = res.as_array() {
+            println!("{:<32} {:<14} STATUS", "FILENAME", "BYTES");
+            println!("{:-<32} {:-<14} {:-<10}", "", "", "");
+            for item in arr {
+                let name = item.get("filename").and_then(|v| v.as_str()).unwrap_or("-");
+                let bytes = item.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+                println!("{:<32} {:<14} archived", name, format_cli_bytes(bytes));
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
     // --- Disaster Recovery operations ---
 
     pub async fn list_dr_backups(&self) -> anyhow::Result<()> {
@@ -1729,6 +1809,22 @@ impl ApiClient {
         let res = self
             .request(Method::POST, "/api/targets/token", None)
             .await?;
+        print_json(&res)
+    }
+
+    pub async fn upgrade_target(&self, id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::POST, &format!("/api/targets/{id}/upgrade"), None)
+            .await?;
+        println!("target/{id} binary upgrade initiated");
+        print_json(&res)
+    }
+
+    pub async fn upgrade_all_targets(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::POST, "/api/targets/upgrade", None)
+            .await?;
+        println!("all agent targets binary upgrade initiated");
         print_json(&res)
     }
 
@@ -2626,6 +2722,20 @@ impl ApiClient {
         print_json(&res)
     }
 
+    pub async fn upgrade_server(&self) -> anyhow::Result<()> {
+        let res = self.request(Method::POST, "/api/upgrade", None).await?;
+        println!("server zero-downtime upgrade initiated");
+        print_json(&res)
+    }
+
+    pub async fn get_server_upgrade_status(&self) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::GET, "/api/upgrade/status", None)
+            .await?;
+        println!("server upgrade status: {}", res);
+        Ok(())
+    }
+
     pub async fn platform_prune(&self) -> anyhow::Result<()> {
         let res = self
             .request(Method::POST, "/api/platform/prune/run", None)
@@ -3035,6 +3145,52 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn traffic_geo(&self) -> anyhow::Result<()> {
+        let res = self.request(Method::GET, "/api/traffic/geo", None).await?;
+        if let Some(top) = res.get("top_countries").and_then(|v| v.as_array()) {
+            println!(
+                "{:<6} {:<24} {:<12} PERCENTAGE",
+                "CODE", "COUNTRY", "REQUESTS"
+            );
+            println!("{:-<6} {:-<24} {:-<12} {:-<10}", "", "", "", "");
+            for item in top {
+                let code = item.get("code").and_then(|v| v.as_str()).unwrap_or("-");
+                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
+                let count = item.get("requests").and_then(|v| v.as_u64()).unwrap_or(0);
+                let pct = item
+                    .get("percentage")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                println!("{:<6} {:<24} {:<12} {:.1}%", code, name, count, pct);
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
+    pub async fn traffic_replay(&self, id: u64) -> anyhow::Result<()> {
+        let entry = self
+            .request(Method::GET, &format!("/api/traffic/{id}"), None)
+            .await?;
+        let method = entry
+            .get("method")
+            .and_then(|v| v.as_str())
+            .unwrap_or("GET");
+        let url = entry.get("url").and_then(|v| v.as_str()).unwrap_or("/");
+        let body = serde_json::json!({
+            "method": method,
+            "url": url,
+            "headers": [],
+            "timeout_ms": 10000,
+        });
+        let res = self
+            .request(Method::POST, "/api/traffic/replay", Some(&body))
+            .await?;
+        println!("traffic log entry {id} replayed ({method} {url})");
+        print_json(&res)
+    }
+
     pub async fn get_ct_status(&self) -> anyhow::Result<()> {
         let res = self
             .request(Method::GET, "/api/certs/ct/status", None)
@@ -3278,6 +3434,23 @@ pub fn build_cron_update_payload(
     }))
 }
 
+pub fn build_pitr_restore_payload(
+    target_time: u64,
+    new_name: Option<String>,
+    host_port: Option<u16>,
+) -> Value {
+    let mut obj = serde_json::json!({
+        "target_time": target_time,
+    });
+    if let Some(name) = new_name {
+        obj["new_name"] = serde_json::Value::String(name);
+    }
+    if let Some(port) = host_port {
+        obj["host_port"] = serde_json::Value::Number(port.into());
+    }
+    obj
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3444,5 +3617,18 @@ protocol: http
         assert_eq!(updated["enabled"], true);
 
         assert!(build_cron_update_payload(None, None, None, None, None).is_err());
+    }
+
+    #[test]
+    fn build_pitr_restore_payload_constructs_valid_json() {
+        let val =
+            build_pitr_restore_payload(1700000000000, Some("db-restored".to_string()), Some(5433));
+        assert_eq!(val["target_time"], 1700000000000u64);
+        assert_eq!(val["new_name"], "db-restored");
+        assert_eq!(val["host_port"], 5433);
+
+        let val_minimal = build_pitr_restore_payload(1700000000000, None, None);
+        assert_eq!(val_minimal["target_time"], 1700000000000u64);
+        assert!(val_minimal.get("new_name").is_none());
     }
 }

@@ -1893,11 +1893,16 @@ r3 <server> db replica <id> --name my-db-replica
 r3 <server> db logs <id> [--tail 100]
 r3 <server> db delete <id>
 
-# Yedekler
+# Yedekler, Otomatik Doğrulama, Belirli Bir Ana Geri Yükleme (PITR) ve WAL
 r3 <server> backup config
 r3 <server> backup list <database-id>
 r3 <server> backup create <database-id>
+r3 <server> backup test <database-id> <backup-id>
 r3 <server> backup restore <database-id> <backup-id>
+r3 <server> backup pitr-range <database-id>
+r3 <server> backup pitr-restore <database-id> <timestamp_ms> [--new-name <name>] [--host-port <port>]
+r3 <server> backup wal-archive <database-id>
+r3 <server> backup wal-segments <database-id>
 r3 <server> backup delete <database-id> <backup-id>
 
 # Çoklu Düğüm Agent Hedefleri
@@ -1906,6 +1911,8 @@ r3 <server> target get <id>
 r3 <server> target add --name worker-1 --host 10.0.0.5 --port 46493
 r3 <server> target drain <id>
 r3 <server> target undrain <id>
+r3 <server> target upgrade <id>
+r3 <server> target upgrade-all
 r3 <server> target token
 r3 <server> target delete <id>
 
@@ -1920,6 +1927,13 @@ r3 <server> project delete <id>
 r3 <server> store list
 r3 <server> store refresh
 r3 <server> store install <store-app-id> --name my-service [--domain service.example.com]
+
+# Trafik Telemetrisi ve İstek İnceleme
+r3 <server> traffic connections list [--proxy <id>]
+r3 <server> traffic connections close <connection-id>
+r3 <server> traffic priority
+r3 <server> traffic geo
+r3 <server> traffic replay <log-entry-id>
 
 # Güvenlik, Yasaklı & Karantinalı IP'ler
 r3 <server> security banned-ips
@@ -1971,6 +1985,8 @@ r3 <server> platform status
 r3 <server> platform metrics
 r3 <server> platform prune
 r3 <server> platform vacuum-logs [--threshold-mb 50]
+r3 <server> platform upgrade
+r3 <server> platform upgrade-status
 r3 <server> platform rotate-key
 ```
 
