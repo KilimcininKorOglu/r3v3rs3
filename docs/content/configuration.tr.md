@@ -1949,6 +1949,15 @@ r3 <server> git repos <id> [--search query] [--page 1]
 r3 <server> git branches <id> --repo owner/repo
 r3 <server> git delete <id>
 
+# Kullanıcı Hesapları ve Yetki Token'ları
+r3 <server> account list
+r3 <server> account create --username operator --password <pass> [--role editor]
+r3 <server> account update <username> [--password <pass>] [--role admin]
+r3 <server> account delete <username>
+r3 <server> token list
+r3 <server> token create --name ci-deploy [--scope edit]
+r3 <server> token delete <id>
+
 # Platform Durumu ve Bakım
 r3 <server> platform status
 r3 <server> platform metrics

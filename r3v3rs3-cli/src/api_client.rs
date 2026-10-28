@@ -170,6 +170,63 @@ fn build_git_connection_payload(
     }
 }
 
+fn build_account_create_payload(
+    username: Option<String>,
+    password: Option<String>,
+    role: &str,
+    payload: Option<String>,
+) -> anyhow::Result<Value> {
+    if let Some(p) = payload {
+        load_payload(&p)
+    } else {
+        let u = username
+            .ok_or_else(|| anyhow::anyhow!("--username is required when payload is omitted"))?;
+        let p = password
+            .ok_or_else(|| anyhow::anyhow!("--password is required when payload is omitted"))?;
+        Ok(json!({
+            "username": u,
+            "password": p,
+            "role": role,
+        }))
+    }
+}
+
+fn build_account_update_payload(
+    password: Option<String>,
+    role: Option<String>,
+    payload: Option<String>,
+) -> anyhow::Result<Value> {
+    if let Some(p) = payload {
+        load_payload(&p)
+    } else {
+        let mut map = serde_json::Map::new();
+        if let Some(pwd) = password {
+            map.insert("password".to_string(), json!(pwd));
+        }
+        if let Some(r) = role {
+            map.insert("role".to_string(), json!(r));
+        }
+        Ok(Value::Object(map))
+    }
+}
+
+fn build_token_create_payload(
+    name: Option<String>,
+    scope: &str,
+    payload: Option<String>,
+) -> anyhow::Result<Value> {
+    if let Some(p) = payload {
+        load_payload(&p)
+    } else {
+        let n =
+            name.ok_or_else(|| anyhow::anyhow!("--name is required when payload is omitted"))?;
+        Ok(json!({
+            "name": n,
+            "scope": scope,
+        }))
+    }
+}
+
 impl ApiClient {
     pub fn new(client: reqwest::Client, server: String, token: String) -> Self {
         Self {
@@ -2283,6 +2340,110 @@ impl ApiClient {
         Ok(())
     }
 
+    // --- Account operations ---
+
+    pub async fn list_accounts(&self) -> anyhow::Result<()> {
+        let res = self.request(Method::GET, "/api/accounts", None).await?;
+        if let Some(arr) = res.as_array() {
+            println!("{:<24} {:<12} PROXIES", "USERNAME", "ROLE");
+            println!("{:-<24} {:-<12} {:-<20}", "", "", "");
+            for item in arr {
+                let username = item.get("username").and_then(|v| v.as_str()).unwrap_or("-");
+                let role = item.get("role").and_then(|v| v.as_str()).unwrap_or("-");
+                let proxies = item
+                    .get("proxies")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| format!("{} proxies", arr.len()))
+                    .unwrap_or_else(|| "all".to_string());
+                println!("{:<24} {:<12} {}", username, role, proxies);
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
+    pub async fn create_account(
+        &self,
+        username: Option<String>,
+        password: Option<String>,
+        role: &str,
+        payload: Option<String>,
+    ) -> anyhow::Result<()> {
+        let val = build_account_create_payload(username, password, role, payload)?;
+        let res = self
+            .request(Method::POST, "/api/accounts", Some(&val))
+            .await?;
+        println!("account created");
+        print_json(&res)
+    }
+
+    pub async fn update_account(
+        &self,
+        username: &str,
+        password: Option<String>,
+        role: Option<String>,
+        payload: Option<String>,
+    ) -> anyhow::Result<()> {
+        let val = build_account_update_payload(password, role, payload)?;
+        let res = self
+            .request(
+                Method::PUT,
+                &format!("/api/accounts/{username}"),
+                Some(&val),
+            )
+            .await?;
+        println!("account/{username} updated");
+        print_json(&res)
+    }
+
+    pub async fn delete_account(&self, username: &str) -> anyhow::Result<()> {
+        self.request(Method::DELETE, &format!("/api/accounts/{username}"), None)
+            .await?;
+        println!("account/{username} deleted");
+        Ok(())
+    }
+
+    // --- Token operations ---
+
+    pub async fn list_tokens(&self) -> anyhow::Result<()> {
+        let res = self.request(Method::GET, "/api/auth/tokens", None).await?;
+        if let Some(arr) = res.as_array() {
+            println!("{:<26} {:<24} SCOPE", "ID", "NAME");
+            println!("{:-<26} {:-<24} {:-<10}", "", "", "");
+            for item in arr {
+                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
+                let scope = item.get("scope").and_then(|v| v.as_str()).unwrap_or("-");
+                println!("{:<26} {:<24} {}", id, name, scope);
+            }
+        } else {
+            print_json(&res)?;
+        }
+        Ok(())
+    }
+
+    pub async fn create_token(
+        &self,
+        name: Option<String>,
+        scope: &str,
+        payload: Option<String>,
+    ) -> anyhow::Result<()> {
+        let val = build_token_create_payload(name, scope, payload)?;
+        let res = self
+            .request(Method::POST, "/api/auth/tokens", Some(&val))
+            .await?;
+        println!("token created");
+        print_json(&res)
+    }
+
+    pub async fn delete_token(&self, id: &str) -> anyhow::Result<()> {
+        self.request(Method::DELETE, &format!("/api/auth/tokens/{id}"), None)
+            .await?;
+        println!("token/{id} deleted");
+        Ok(())
+    }
+
     // --- Cron operations ---
 
     pub async fn list_cron(&self, app_id: &str) -> anyhow::Result<()> {
@@ -3095,5 +3256,35 @@ protocol: http
         assert_eq!(val["client_secret"], "secret456");
 
         assert!(build_git_connection_payload(None, None, None, None, None, None).is_err());
+    }
+
+    #[test]
+    fn build_account_and_token_payloads_construct_valid_json() {
+        let acc = build_account_create_payload(
+            Some("alice".to_string()),
+            Some("pw123".to_string()),
+            "admin",
+            None,
+        )
+        .unwrap();
+        assert_eq!(acc["username"], "alice");
+        assert_eq!(acc["password"], "pw123");
+        assert_eq!(acc["role"], "admin");
+
+        let update = build_account_update_payload(
+            Some("newpw".to_string()),
+            Some("viewer".to_string()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(update["password"], "newpw");
+        assert_eq!(update["role"], "viewer");
+
+        let tok = build_token_create_payload(Some("my-token".to_string()), "edit", None).unwrap();
+        assert_eq!(tok["name"], "my-token");
+        assert_eq!(tok["scope"], "edit");
+
+        assert!(build_account_create_payload(None, None, "editor", None).is_err());
+        assert!(build_token_create_payload(None, "read", None).is_err());
     }
 }

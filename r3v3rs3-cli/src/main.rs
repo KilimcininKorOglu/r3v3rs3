@@ -90,6 +90,12 @@ enum Command {
     /// Manage Git provider connections and repositories.
     #[command(subcommand)]
     Git(GitCommand),
+    /// Manage user accounts.
+    #[command(subcommand)]
+    Account(AccountCommand),
+    /// Manage persistent API tokens.
+    #[command(subcommand)]
+    Token(TokenCommand),
     /// Manage scheduled background cron commands for applications.
     #[command(subcommand)]
     Cron(CronCommand),
@@ -850,6 +856,64 @@ pub enum GitCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum AccountCommand {
+    /// Lists all user accounts.
+    #[command(alias = "ls")]
+    List,
+    /// Creates a new user account.
+    Create {
+        /// Username for the new account.
+        #[arg(short, long)]
+        username: Option<String>,
+        /// Password for the new account.
+        #[arg(short, long)]
+        password: Option<String>,
+        /// Role: admin, editor, or viewer.
+        #[arg(short, long, default_value = "editor")]
+        role: String,
+        /// Inline JSON/YAML payload, file path, or '-' for stdin.
+        payload: Option<String>,
+    },
+    /// Updates an existing user account.
+    Update {
+        /// Username of the account to update.
+        username: String,
+        /// New password.
+        #[arg(short, long)]
+        password: Option<String>,
+        /// New role: admin, editor, or viewer.
+        #[arg(short, long)]
+        role: Option<String>,
+        /// Inline JSON/YAML payload, file path, or '-' for stdin.
+        payload: Option<String>,
+    },
+    /// Deletes a user account.
+    #[command(alias = "rm")]
+    Delete { username: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TokenCommand {
+    /// Lists API tokens for the authenticated account.
+    #[command(alias = "ls")]
+    List,
+    /// Creates a persistent API token.
+    Create {
+        /// Human-readable token name or label.
+        #[arg(short, long)]
+        name: Option<String>,
+        /// Permission scope: read or edit.
+        #[arg(short, long, default_value = "read")]
+        scope: String,
+        /// Inline JSON/YAML payload, file path, or '-' for stdin.
+        payload: Option<String>,
+    },
+    /// Deletes an API token.
+    #[command(alias = "rm")]
+    Delete { id: String },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum CronCommand {
     /// Lists scheduled background commands for an application.
     #[command(alias = "ls")]
@@ -1067,6 +1131,16 @@ async fn run_api_platform(api: &api_client::ApiClient, cmd: Command) -> anyhow::
         Command::Cron(c) => run_cron(api, c).await,
         Command::Target(c) => run_target(api, c).await,
         Command::Registry(c) => run_registry(api, c).await,
+        other => run_api_auth(api, other).await,
+    }
+}
+
+async fn run_api_auth(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()> {
+    match cmd {
+        Command::Account(c) => run_account(api, c).await,
+        Command::Token(c) => run_token(api, c).await,
+        Command::Git(c) => run_git(api, c).await,
+        Command::Webhook(c) => run_webhook(api, c).await,
         other => run_api_system(api, other).await,
     }
 }
@@ -1076,8 +1150,6 @@ async fn run_api_system(api: &api_client::ApiClient, cmd: Command) -> anyhow::Re
         Command::Project(c) => run_project(api, c).await,
         Command::Store(c) => run_store(api, c).await,
         Command::Security(c) => run_security(api, c).await,
-        Command::Webhook(c) => run_webhook(api, c).await,
-        Command::Git(c) => run_git(api, c).await,
         Command::Config(c) => run_config(api, c).await,
         Command::Platform(c) => run_platform(api, c).await,
         Command::Apply { file } => run_apply(api, &file).await,
@@ -1574,6 +1646,37 @@ async fn run_git(api: &api_client::ApiClient, cmd: GitCommand) -> anyhow::Result
             api.list_git_repos(&id, search.as_deref(), page).await
         }
         GitCommand::Branches { id, repo } => api.list_git_branches(&id, &repo).await,
+    }
+}
+
+async fn run_account(api: &api_client::ApiClient, cmd: AccountCommand) -> anyhow::Result<()> {
+    match cmd {
+        AccountCommand::List => api.list_accounts().await,
+        AccountCommand::Create {
+            username,
+            password,
+            role,
+            payload,
+        } => api.create_account(username, password, &role, payload).await,
+        AccountCommand::Update {
+            username,
+            password,
+            role,
+            payload,
+        } => api.update_account(&username, password, role, payload).await,
+        AccountCommand::Delete { username } => api.delete_account(&username).await,
+    }
+}
+
+async fn run_token(api: &api_client::ApiClient, cmd: TokenCommand) -> anyhow::Result<()> {
+    match cmd {
+        TokenCommand::List => api.list_tokens().await,
+        TokenCommand::Create {
+            name,
+            scope,
+            payload,
+        } => api.create_token(name, &scope, payload).await,
+        TokenCommand::Delete { id } => api.delete_token(&id).await,
     }
 }
 
