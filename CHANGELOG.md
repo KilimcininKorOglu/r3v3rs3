@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] - 2026-10-28
+
+### Added
+- Autonomous MCP Outbound Webhook Tools: Added complete Model Context Protocol tools for outbound notification webhooks (`list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook`), enabling autonomous event subscription configuration and live delivery testing.
+- Event Subscription Parsing with Snake Case and Dot Notation: Added flexible event name parser supporting both standard dotted notation (`deploy.success`) and snake_case format (`deploy_success`) with signature secret validation.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` documenting outbound webhook management via MCP.
+
 ## [2.8.9] - 2026-10-28
 
 ### Added
