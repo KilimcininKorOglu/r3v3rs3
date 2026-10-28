@@ -1774,6 +1774,7 @@ The admin API exposes its complete tool suite over the Model Context Protocol at
 | **Agent Target Nodes** | `list_targets`, `add_target`, `delete_target` | Multi-node Docker agent infrastructure, one-time enrollment token issuance, and target decommissioning. |
 | **Projects & Env Groups** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group` | Project organization, multi-environment isolation, and shared environment variable groups. |
 | **Outbound Webhooks** | `list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook` | Outbound event notification webhook dispatchers: endpoint management, HMAC-SHA256 signature secret validation, fine-grained event subscriptions, and end-to-end webhook delivery testing. |
+| **Container Registries** | `list_registries`, `add_registry`, `update_registry`, `delete_registry` | Private Docker and OCI container registry credentials: credential storage, secure pull authentication, and server target endpoints. |
 | **Disaster Recovery** | `list_dr_backups`, `create_dr_backup` | Full system snapshot archives with optional AES-256-GCM encryption and automatic S3 replication. |
 
 The MCP server is off by default. The settings page of the panel turns it on while the server runs and holds the clients that may sign in. `config.toml` carries the same section:

@@ -363,6 +363,30 @@ pub struct TestWebhookParams {
     pub event: Option<String>,
 }
 
+/// The arguments of `add_registry`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AddRegistryParams {
+    /// Container registry server address (e.g. "docker.io", "ghcr.io", "registry.gitlab.com").
+    pub server: String,
+    /// Username or service account for authentication.
+    pub username: String,
+    /// Password or personal access token with pull permissions.
+    pub password: Option<String>,
+}
+
+/// The arguments of `update_registry`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateRegistryParams {
+    /// Registry ID to update.
+    pub id: String,
+    /// Container registry server address (e.g. "docker.io", "ghcr.io").
+    pub server: String,
+    /// Username or service account for authentication.
+    pub username: String,
+    /// Optional updated password or token (empty string or omitted keeps current).
+    pub password: Option<String>,
+}
+
 /// The arguments of `install_store_app`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct InstallStoreAppParams {
@@ -4034,6 +4058,113 @@ impl McpServer {
             .record_audit(&caller.username, caller.client, record)
             .await;
         json_result(res)
+    }
+
+    // ==========================================
+    // Group 13: Container Registries
+    // ==========================================
+
+    /// List all configured container registries for image pulls.
+    #[tool(description = "List all configured container registries for image pulls.")]
+    async fn list_registries(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Read)
+            .await
+            .map_err(any_error)?;
+        let registries = platform.registries().await.map_err(any_error)?;
+        json_result(registries)
+    }
+
+    /// Add container registry credentials for private image pulls.
+    #[tool(
+        description = "Add container registry credentials for private image pulls. Needs the edit scope."
+    )]
+    async fn add_registry(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AddRegistryParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request = r3v3rs3_api::platform::RegistryRequest {
+            server: params.server,
+            username: params.username,
+            password: params.password,
+        };
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let entry = platform.add_registry(request).await.map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::AddRegistry)
+            .id(entry.id)
+            .summary(entry.server.clone());
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(entry)
+    }
+
+    /// Update container registry credentials.
+    #[tool(description = "Update container registry credentials by id. Needs the edit scope.")]
+    async fn update_registry(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateRegistryParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let request = r3v3rs3_api::platform::RegistryRequest {
+            server: params.server,
+            username: params.username,
+            password: params.password,
+        };
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let entry = platform
+            .update_registry(id, request)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::UpdateRegistry)
+            .id(id)
+            .summary(entry.server.clone());
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(entry)
+    }
+
+    /// Delete container registry credentials by id.
+    #[tool(description = "Delete container registry credentials by id. Needs the edit scope.")]
+    async fn delete_registry(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        platform.delete_registry(id).await.map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::DeleteRegistry).id(id);
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(json!({ "deleted": true }))
     }
 }
 
