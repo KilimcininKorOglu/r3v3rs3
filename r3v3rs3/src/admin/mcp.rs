@@ -500,6 +500,28 @@ pub struct DeleteBackupParams {
     pub backup_id: String,
 }
 
+/// The arguments of `test_database_backup`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TestBackupParams {
+    /// The database app id.
+    pub db_id: String,
+    /// The backup id to test.
+    pub backup_id: String,
+}
+
+/// The arguments of `restore_database_pitr`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RestoreDatabasePitrParams {
+    /// The database app id.
+    pub id: String,
+    /// Target restore timestamp in unix milliseconds (e.g. 1761642000000).
+    pub target_time: u64,
+    /// Optional database name if restoring as a new branched database (PITR Clone).
+    pub new_name: Option<String>,
+    /// Optional host port if restoring as a new branched database.
+    pub host_port: Option<u16>,
+}
+
 /// The `{ "config": {...} }` argument of `update_backup_config`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateBackupConfigParams {
@@ -1025,6 +1047,42 @@ impl McpServer {
             "app": app_info,
             "workers": workers,
         }))
+    }
+
+    /// Get the current status and step of the server self-upgrade.
+    #[tool(description = "Get the current step and status of the server self-upgrade process.")]
+    async fn get_server_upgrade_status(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let status = super::upgrade::status(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(status.0)
+    }
+
+    /// Run server self-upgrade to the latest release.
+    #[tool(
+        description = "Fetch, download, install and hand over to the newest release of the server binary. Needs the edit scope."
+    )]
+    async fn run_server_upgrade(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        caller.role = r3v3rs3_api::auth::Role::Admin;
+        let started = super::upgrade::upgrade(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(started.0)
     }
 
     /// The settings that the admin API can change.
@@ -3265,6 +3323,146 @@ impl McpServer {
         json_result(json!({ "updated": true }))
     }
 
+    /// Test decompression and format integrity of a database backup snapshot.
+    #[tool(
+        description = "Test decompression and format integrity of a database backup snapshot. Needs the edit scope."
+    )]
+    async fn test_database_backup(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<TestBackupParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.db_id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let report = platform
+            .verify_backup(id, &params.backup_id)
+            .await
+            .map_err(any_error)?;
+        let app = platform.app(id).await.map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::BackupDatabase)
+            .id(id)
+            .summary(format!("{}: test backup {}", app.name, params.backup_id));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(report)
+    }
+
+    /// Get the point-in-time recovery (PITR) window and available WAL segments for a database.
+    #[tool(
+        description = "Get the point-in-time recovery (PITR) window and available WAL segments for a database."
+    )]
+    async fn get_database_pitr_range(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Read)
+            .await
+            .map_err(any_error)?;
+        let range = platform.pitr_range(id).await.map_err(any_error)?;
+        json_result(range)
+    }
+
+    /// Restore a database to a specific point in time (PITR).
+    #[tool(
+        description = "Restore a database to a specific point in time (PITR) with optional branch name. Needs the edit scope."
+    )]
+    async fn restore_database_pitr(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<RestoreDatabasePitrParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let new_name = params
+            .new_name
+            .map(|n| n.parse::<r3v3rs3_api::container::AppName>())
+            .transpose()
+            .map_err(|e| ErrorData::invalid_params(format!("invalid new_name: {e}"), None))?;
+        let request = r3v3rs3_api::platform::PitrRestoreRequest {
+            target_time: params.target_time,
+            new_name,
+            host_port: params.host_port,
+        };
+        let resp = platform
+            .restore_pitr(id, request)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::PitrRestoreDatabase)
+            .id(id)
+            .summary(format!(
+                "{}: PITR target {} (branched: {})",
+                resp.app.name, resp.target_time, resp.branched
+            ));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(resp)
+    }
+
+    /// Archive the current WAL or binary log segment from the running database container.
+    #[tool(
+        description = "Archive the current WAL or binary log segment from the running database container. Needs the edit scope."
+    )]
+    async fn archive_database_wal_segment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let segment = platform.archive_wal(id).await.map_err(any_error)?;
+        let app = platform.app(id).await.map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::ArchiveDatabaseWal)
+            .id(id)
+            .summary(format!("{}: archived WAL {}", app.name, segment.filename));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(segment)
+    }
+
+    /// List archived WAL and binary log segments for a database.
+    #[tool(description = "List archived WAL and binary log segments for a database.")]
+    async fn list_database_wal_segments(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Read)
+            .await
+            .map_err(any_error)?;
+        let segments = platform.list_wal_segments(id).await.map_err(any_error)?;
+        json_result(segments)
+    }
+
     // ==========================================
     // Group 9: Agent Targets & Nodes
     // ==========================================
@@ -3397,6 +3595,79 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         json_result(updated)
+    }
+
+    /// Generate a new enrollment token for an agent target node.
+    #[tool(
+        description = "Generate a new enrollment token for an agent target node. Needs the edit scope."
+    )]
+    async fn generate_target_token(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let created = platform.new_target_token(id).await.map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::NewTargetToken)
+            .id(id)
+            .summary(created.target.name.clone());
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(created)
+    }
+
+    /// Upgrade target agent binary to match the server version.
+    #[tool(
+        description = "Upgrade target agent binary on a remote node to match the server version. Needs the edit scope."
+    )]
+    async fn upgrade_target(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let updated = platform.upgrade_target(id).await.map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::UpgradeTarget)
+            .id(id)
+            .summary(format!("{} -> {}", updated.name, env!("CARGO_PKG_VERSION")));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(updated)
+    }
+
+    /// Upgrade all agent target binaries to match the server version.
+    #[tool(
+        description = "Upgrade all agent target binaries across all remote nodes to match the server version. Needs the edit scope."
+    )]
+    async fn upgrade_all_targets(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Admin)
+            .await
+            .map_err(any_error)?;
+        let upgraded = platform.upgrade_all_targets().await.map_err(any_error)?;
+        json_result(upgraded)
     }
 
     // ==========================================

@@ -622,6 +622,16 @@ async fn assert_mcp_client_tools(addr: SocketAddr, token: &str) -> anyhow::Resul
     assert!(names.contains(&"list_env_groups"), "{names:?}");
     assert!(names.contains(&"list_dr_backups"), "{names:?}");
     assert!(names.contains(&"get_system_metrics"), "{names:?}");
+    assert!(names.contains(&"test_database_backup"), "{names:?}");
+    assert!(names.contains(&"get_database_pitr_range"), "{names:?}");
+    assert!(names.contains(&"restore_database_pitr"), "{names:?}");
+    assert!(names.contains(&"archive_database_wal_segment"), "{names:?}");
+    assert!(names.contains(&"list_database_wal_segments"), "{names:?}");
+    assert!(names.contains(&"generate_target_token"), "{names:?}");
+    assert!(names.contains(&"upgrade_target"), "{names:?}");
+    assert!(names.contains(&"upgrade_all_targets"), "{names:?}");
+    assert!(names.contains(&"get_server_upgrade_status"), "{names:?}");
+    assert!(names.contains(&"run_server_upgrade"), "{names:?}");
 
     let result = client
         .call_tool(CallToolRequestParams::new("server_status"))
