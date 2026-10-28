@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.7] - 2026-10-28
+
+### Added
+- First-Class CLI Git Provider Connection Management (`r3 git`): Added the Git connection command group in `r3v3rs3-cli` with subcommands (`list`, `get`, `add`, `delete`, `repos`, `branches`), allowing operators to manage OAuth integrations (GitLab, Gitea), inspect accessible remote repositories with keyword search and pagination, and enumerate repository branches directly from the command line.
+- Dual-Language Documentation: Updated CLI command reference in `configuration.md` and `configuration.tr.md` documenting Git connection and repository inspection commands.
+
 ## [2.9.6] - 2026-10-28
 
 ### Added
