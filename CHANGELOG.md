@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.8] - 2026-10-28
+
+### Added
+- First-Class CLI User Account & Auth Token Management (`r3 account`, `r3 token`): Added full operational parity in `r3v3rs3-cli` for user accounts (`list`, `create`, `update`, `delete`) with role assignment and proxy scope restrictions, as well as API token management (`list`, `create`, `delete`) with granular capabilities (read, edit_proxies, edit, admin) and TTL/expiration parameters.
+- Dual-Language Documentation: Updated CLI command reference in `configuration.md` and `configuration.tr.md` documenting user account and API token commands.
+
 ## [2.9.7] - 2026-10-28
 
 ### Added
