@@ -1479,6 +1479,7 @@
   "apps.tabs_logs": "Logs",
   "apps.tabs_terminal": "Terminal",
   "apps.tabs_files": "Files",
+  "apps.tabs_commands": "Commands",
   "apps.tabs_settings": "Settings",
   "apps.uptime": "Uptime",
   "apps.live_status": "Live Status",

@@ -12,6 +12,7 @@ pub enum AppTab {
     Logs,
     Terminal,
     Files,
+    Commands,
     Settings,
 }
 
@@ -61,6 +62,11 @@ pub fn app_tabs(props: &Props) -> Html {
             "apps.tabs_terminal",
         ),
         (AppTab::Files, Route::AppFiles { id }, "apps.tabs_files"),
+        (
+            AppTab::Commands,
+            Route::AppCommands { id },
+            "apps.tabs_commands",
+        ),
         (
             AppTab::Settings,
             Route::AppSettings { id },

@@ -910,7 +910,7 @@ Dosyalar sayfası kalıcı volume'ler için kapsamlı yedekleme ve snapshot yön
 
 ### Zamanlanmış Komutlar
 
-Uygulama sayfasında çalışan deployment container'ı içinde düzenli aralıklarla tek seferlik veya periyodik komutlar çalıştırmak için bir **Zamanlanmış Komutlar** bölümü yer alır (veritabanı bakımı, cache temizleme, ısınma görevleri vb.).
+Her uygulama konsolunun üst gezinme çubuğunda, çalışan deployment container'ı içinde düzenli aralıklarla tek seferlik veya periyodik arka plan komutları çalıştırmak için özel bir **Komutlar** (`/apps/{id}/commands`) sekmesi yer alır (veritabanı bakımı, cache temizleme, ısınma görevleri vb.).
 
 Her komut tanımı şunları içerir:
 - **İsim**: Görevi tanımlayan açıklayıcı bir isim.

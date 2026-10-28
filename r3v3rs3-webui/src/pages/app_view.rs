@@ -2,7 +2,6 @@
 //! environment variables.
 
 use super::Route;
-use super::app_commands::AppCommands;
 use super::app_env::AppEnv;
 use super::app_form::{AppForm, FormOptions, fields_view};
 use super::app_git_token::AppGitToken;
@@ -238,7 +237,6 @@ fn edit_extras(
                 <AppGitToken app={entry.clone()} {locale} onchanged={onchanged.clone()} />
             }
             <AppWebhook app={entry.clone()} {locale} {onchanged} />
-            <AppCommands id={entry.id} {locale} />
             <AppEnv id={entry.id} {locale} />
             <div class="mt-8 pt-4 border-t border-neutral-200 dark:border-neutral-700 flex justify-end">
                 <a class={DANGER_LINK_CLASS} onclick={delete}>{locale.t("apps.delete")}</a>

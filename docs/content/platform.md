@@ -910,7 +910,7 @@ The Files page provides complete volume backup and snapshot management for persi
 
 ### Scheduled Commands
 
-The page of an app includes a **Scheduled Commands** section to run scheduled or periodic one-off commands inside the container of the running deployment (e.g. database maintenance, cache clear, warmup tasks).
+Each application console provides a dedicated **Commands** (`/apps/{id}/commands`) tab in the navigation bar to configure and run scheduled or periodic background tasks inside the container of the running deployment (e.g. database maintenance, cache clear, warmup tasks).
 
 Each command configuration specifies:
 - **Name**: A descriptive name for the task.

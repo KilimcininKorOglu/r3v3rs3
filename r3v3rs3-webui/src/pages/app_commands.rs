@@ -4,17 +4,21 @@
 use super::accounts::{HINT_CLASS, INPUT_CLASS};
 use super::settings::{fetch_json, send_request};
 use crate::API_ENDPOINT;
+use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::dialog::{self, Icon};
+use crate::i18n::use_locale;
+use crate::store::SessionStore;
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppScheduledCommand, ScheduledCommandRequest, ScheduledCommandRunResult,
+    AppEntry, AppScheduledCommand, ScheduledCommandRequest, ScheduledCommandRunResult,
 };
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, MouseEvent};
 use yew::prelude::*;
+use yewdux::prelude::*;
 
 #[derive(Clone)]
 struct CommandFormState {
@@ -81,13 +85,80 @@ pub fn app_commands(props: &Props) -> Html {
     };
 
     html! {
-        <div class="mt-8 bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 rounded-md p-4 sm:p-6">
+        <div class="bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 rounded-md p-4 sm:p-6">
             { render_commands_header(locale, &form, toggle_adding) }
             if *form.adding {
                 { render_add_form(locale, &form, on_submit) }
             }
             { render_commands_list(locale, id, &commands, &running_id, &active_output, &editing_cmd) }
             { render_active_modals(locale, id, &active_output, &editing_cmd, on_close_edit, on_saved_edit) }
+        </div>
+    }
+}
+
+#[derive(Properties, PartialEq)]
+pub struct PageProps {
+    pub id: ShortId,
+}
+
+fn load_app(
+    app_id: ShortId,
+    app: &UseStateHandle<Option<AppEntry>>,
+    failed: &UseStateHandle<Option<String>>,
+) {
+    let (app, failed) = (app.clone(), failed.clone());
+    spawn_local(async move {
+        match fetch_json::<AppEntry>(
+            Locale::En,
+            Request::get(&format!("{API_ENDPOINT}/apps/{app_id}")),
+        )
+        .await
+        {
+            Ok(entry) => app.set(Some(entry)),
+            Err(message) => failed.set(Some(message)),
+        }
+    });
+}
+
+#[function_component(AppCommandsPage)]
+pub fn app_commands_page(props: &PageProps) -> Html {
+    use_ensure_auth();
+    let locale = use_locale();
+    let (session, _) = use_store::<SessionStore>();
+    let app = use_state(|| Option::<AppEntry>::None);
+    let failed = use_state(|| Option::<String>::None);
+
+    let signed_in = session.info.is_some();
+    let app_id = props.id;
+    {
+        let (app, failed) = (app.clone(), failed.clone());
+        use_effect_with(signed_in, move |&signed_in| {
+            if signed_in {
+                load_app(app_id, &app, &failed);
+            }
+        });
+    }
+
+    if !signed_in {
+        return html!();
+    }
+
+    html! {
+        <div class="space-y-4">
+            if let Some(a) = (*app).as_ref() {
+                <crate::components::app_tabs::AppTabs
+                    id={a.id}
+                    name={a.name.to_string()}
+                    active={crate::components::app_tabs::AppTab::Commands}
+                    domains={a.spec.domains.clone()}
+                />
+            }
+            if let Some(err) = (*failed).as_ref() {
+                <div class="p-4 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-sm">
+                    {err}
+                </div>
+            }
+            <AppCommands id={app_id} {locale} />
         </div>
     }
 }

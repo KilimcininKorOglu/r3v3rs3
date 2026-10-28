@@ -126,6 +126,8 @@ pub enum Route {
     AppTerminal { id: ShortId },
     #[at("/apps/:id/files")]
     AppFiles { id: ShortId },
+    #[at("/apps/:id/commands")]
+    AppCommands { id: ShortId },
     #[at("/databases")]
     Databases,
     #[at("/databases/:id/backups")]
@@ -183,7 +185,8 @@ impl Route {
             | Route::AppDeployments { .. }
             | Route::AppLog { .. }
             | Route::AppTerminal { .. }
-            | Route::AppFiles { .. } => Some(Route::Apps),
+            | Route::AppFiles { .. }
+            | Route::AppCommands { .. } => Some(Route::Apps),
             Route::AppStore | Route::NewStoreApp { .. } => Some(Route::AppStore),
             Route::Databases | Route::DatabaseBackups { .. } => Some(Route::Databases),
             Route::AccessLists | Route::Security => Some(Route::Security),
@@ -235,6 +238,7 @@ pub fn switch(routes: Route) -> Html {
         Route::AppLog { id } => html! { <app_log::AppLogView {id} /> },
         Route::AppTerminal { id } => html! { <app_terminal::AppTerminal {id} /> },
         Route::AppFiles { id } => html! { <app_files::AppFiles {id} /> },
+        Route::AppCommands { id } => html! { <app_commands::AppCommandsPage {id} /> },
         Route::Targets => html! { <targets::Targets /> },
         Route::GitConnections => html! { <git_connections::GitConnections /> },
         Route::Registries => html! { <registries::Registries /> },

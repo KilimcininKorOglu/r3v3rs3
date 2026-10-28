@@ -1479,6 +1479,7 @@
   "apps.tabs_logs": "Loglar",
   "apps.tabs_terminal": "Terminal",
   "apps.tabs_files": "Dosyalar",
+  "apps.tabs_commands": "Komutlar",
   "apps.tabs_settings": "Ayarlar",
   "apps.uptime": "Çalışma Süresi",
   "apps.live_status": "Canlı Durum",
