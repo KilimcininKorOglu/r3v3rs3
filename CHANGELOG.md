@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.5] - 2026-10-28
+
+### Added
+- Autonomous MCP Advanced Backup, Target Upgrade & Server Upgrade Tools: Added first-class Model Context Protocol tools for database backup verification and PITR recovery (`test_database_backup`, `get_database_pitr_range`, `restore_database_pitr`, `archive_database_wal_segment`, `list_database_wal_segments`), agent target node administration and binary upgrades (`generate_target_token`, `upgrade_target`, `upgrade_all_targets`), and server self-upgrade lifecycle (`get_server_upgrade_status`, `run_server_upgrade`).
+- Tamper-Evident Audit Integration: Bound audit recording across database backup tests, PITR recoveries, WAL archive executions, target token generation, and remote node binary upgrades.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` documenting advanced backup, target node upgrades, and server self-upgrade management via MCP.
+
 ## [2.9.4] - 2026-10-28
 
 ### Added
