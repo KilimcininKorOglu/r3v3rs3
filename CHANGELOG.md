@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-10-28
+
+### Added
+- First-Class CLI Advanced Backup Verification, PITR, WAL, Target Upgrades, Traffic Telemetry & Server Upgrades: Completed 100% operational parity in `r3v3rs3-cli` with subcommands for automated database backup integrity testing (`r3 backup test`), Point-in-Time Recovery inspection and execution (`r3 backup pitr-range`, `r3 backup pitr-restore`), continuous WAL segment archival and listing (`r3 backup wal-archive`, `r3 backup wal-segments`), agent target binary upgrades (`r3 target upgrade`, `r3 target upgrade-all`), geographic traffic analysis and request replaying (`r3 traffic geo`, `r3 traffic replay`), and zero-downtime server upgrades (`r3 platform upgrade`, `r3 platform upgrade-status`).
+- Dual-Language Documentation: Updated CLI command reference in `configuration.md` and `configuration.tr.md` documenting advanced backup, target, traffic telemetry, and platform upgrade commands.
+
 ## [2.9.9] - 2026-10-28
 
 ### Added
