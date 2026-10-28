@@ -537,6 +537,41 @@ pub struct CreateEnvGroupParams {
     pub group: serde_json::Value,
 }
 
+/// The arguments of `create_project_environment`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CreateProjectEnvironmentParams {
+    /// Project ID to create the environment in.
+    pub project_id: String,
+    /// Name of the environment (e.g. "staging", "production", "preview").
+    pub name: String,
+    /// Optional description for the environment.
+    pub description: Option<String>,
+}
+
+/// The arguments of `update_project_env`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateProjectEnvParams {
+    /// Environment ID to update variables for.
+    pub environment_id: String,
+    /// Environment variables as an array of objects (`[{"key": "FOO", "value": "bar", "secret": false}]`).
+    pub variables: Vec<serde_json::Value>,
+}
+
+/// The arguments of `sync_project_env`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SyncProjectEnvParams {
+    /// Project ID owning the environments.
+    pub project_id: String,
+    /// Source environment ID to copy variables from.
+    pub source_env_id: String,
+    /// Target environment ID to receive synchronized variables.
+    pub target_env_id: String,
+    /// Sync mode: "sync_missing" (default), "clone_all", or "selected_keys".
+    pub mode: Option<String>,
+    /// Optional list of specific variable keys when mode is "selected_keys".
+    pub keys: Option<Vec<String>>,
+}
+
 /// The arguments of `create_dr_backup`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateDrBackupParams {
@@ -3482,6 +3517,147 @@ impl McpServer {
             .map_err(any_error)?;
         let deleted = platform.delete_env_group(id).await.map_err(any_error)?;
         json_result(deleted)
+    }
+
+    /// List all environments belonging to a project.
+    #[tool(
+        description = "List all environments belonging to a project with variable and app counts."
+    )]
+    async fn list_project_environments(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Read)
+            .await
+            .map_err(any_error)?;
+        let project = platform.project(id).await.map_err(any_error)?;
+        json_result(project.environments)
+    }
+
+    /// Create a new environment within a project. Needs the edit scope.
+    #[tool(description = "Create a new environment within a project. Needs the edit scope.")]
+    async fn create_project_environment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<CreateProjectEnvironmentParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let project_id: ShortId = parse_id(&params.project_id)?;
+        let spec = r3v3rs3_api::platform::EnvironmentSpec {
+            name: params.name,
+            description: params.description,
+        };
+        spec.validate().map_err(any_error)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let env = platform
+            .create_environment(project_id, spec, crate::clock::unix_ms())
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::AddEnvironment)
+            .id(env.id)
+            .summary(env.name.clone());
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(env)
+    }
+
+    /// Update environment variables for a project environment. Needs the edit scope.
+    #[tool(
+        description = "Update environment variables for a project environment. Needs the edit scope."
+    )]
+    async fn update_project_env(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateProjectEnvParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let env_id: ShortId = parse_id(&params.environment_id)?;
+        let variables: Vec<r3v3rs3_api::platform::EnvEntry> =
+            serde_json::from_value(serde_json::Value::Array(params.variables))
+                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let spec = r3v3rs3_api::platform::EnvironmentEnvSpec { variables };
+        spec.validate().map_err(any_error)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let env = platform
+            .set_environment_env(env_id, spec)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::UpdateEnvironmentEnv)
+            .id(env_id)
+            .summary(env.name.clone());
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(env.variables)
+    }
+
+    /// Synchronize environment variables from source to target environment. Needs the edit scope.
+    #[tool(
+        description = "Synchronize environment variables from source to target environment. Needs the edit scope."
+    )]
+    async fn sync_project_env(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<SyncProjectEnvParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let project_id: ShortId = parse_id(&params.project_id)?;
+        let source_env_id: ShortId = parse_id(&params.source_env_id)?;
+        let target_env_id: ShortId = parse_id(&params.target_env_id)?;
+        let mode = match params.mode.as_deref() {
+            Some("clone_all") => r3v3rs3_api::platform::EnvironmentSyncMode::CloneAll,
+            Some("selected_keys") => r3v3rs3_api::platform::EnvironmentSyncMode::SelectedKeys,
+            _ => r3v3rs3_api::platform::EnvironmentSyncMode::SyncMissing,
+        };
+        let keys = params
+            .keys
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|k| k.parse().ok())
+            .collect();
+        let request = r3v3rs3_api::platform::EnvironmentSyncRequest {
+            source_env_id,
+            target_env_id,
+            mode,
+            keys,
+        };
+        request.validate().map_err(any_error)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let report = platform
+            .sync_environment_env(project_id, request)
+            .await
+            .map_err(any_error)?;
+        let record = AuditRecord::new(AuditAction::SyncEnvironmentEnv)
+            .id(report.target_env_id)
+            .summary(format!(
+                "{} -> {} ({} synced)",
+                report.source_env_id, report.target_env_id, report.synced_count
+            ));
+        self.state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+        json_result(report)
     }
 
     // ==========================================
