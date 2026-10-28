@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.1] - 2026-10-28
+
+### Added
+- Autonomous MCP Container Registry Tools: Added first-class Model Context Protocol tools for private Docker and OCI container registry credentials (`list_registries`, `add_registry`, `update_registry`, `delete_registry`), allowing AI agents and deployment pipelines to autonomously manage secure image pull credentials.
+- Container Registry Audit Logging: Integrated audit recording (`AddRegistry`, `UpdateRegistry`, `DeleteRegistry`) across all registry MCP mutations.
+- Dual-Language Documentation: Updated `configuration.md` and `configuration.tr.md` documenting autonomous container registry management via MCP.
+
 ## [2.9.0] - 2026-10-28
 
 ### Added
