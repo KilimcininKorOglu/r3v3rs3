@@ -829,6 +829,7 @@ pub fn traffic_view() -> Html {
     let selected_proxy = use_state(Option::<ShortId>::default);
     let selected_country = use_state(Option::<String>::default);
     let selected_entry = use_state(Option::<AccessLogEntry>::default);
+    let server_geo = use_state(Option::<TrafficGeoDistribution>::default);
     let table_ref = use_node_ref();
 
     use_initial_traffic_load(&entries);
@@ -836,10 +837,12 @@ pub fn traffic_view() -> Html {
     use_traffic_auto_scroll(&table_ref, &auto_scroll, &entries);
     use_active_connections(&connections, &conns_trigger, *active_tab);
     use_stream_priority_stats(&priority_stats, &priority_trigger, *active_tab);
+    use_traffic_geo(&server_geo, *selected_proxy);
 
     let stats = calculate_stats(&entries);
-    let geo_dist = calculate_geo_distribution(&entries);
-    let available_countries = extract_available_countries(&entries);
+    let geo_dist = resolve_geo_distribution((*server_geo).as_ref(), &entries);
+    let available_countries =
+        extract_available_countries_with_geo(&entries, (*server_geo).as_ref());
     let filtered = filter_traffic_logs(
         &entries,
         &search,
@@ -1572,8 +1575,32 @@ pub fn calculate_geo_distribution(entries: &[AccessLogEntry]) -> TrafficGeoDistr
     }
 }
 
-pub fn extract_available_countries(entries: &[AccessLogEntry]) -> Vec<String> {
+pub fn resolve_geo_distribution(
+    server_geo: Option<&TrafficGeoDistribution>,
+    entries: &[AccessLogEntry],
+) -> TrafficGeoDistribution {
+    if let Some(geo) = server_geo
+        && geo.total_resolved > 0
+    {
+        geo.clone()
+    } else {
+        calculate_geo_distribution(entries)
+    }
+}
+
+pub fn extract_available_countries_with_geo(
+    entries: &[AccessLogEntry],
+    geo: Option<&TrafficGeoDistribution>,
+) -> Vec<String> {
     let mut set = BTreeSet::new();
+    if let Some(geo) = geo {
+        for code in geo.country_counts.keys() {
+            let clean = code.trim().to_uppercase();
+            if !clean.is_empty() {
+                set.insert(clean);
+            }
+        }
+    }
     for entry in entries {
         if let Some(c) = &entry.country {
             let code = c.trim().to_uppercase();
@@ -1583,6 +1610,11 @@ pub fn extract_available_countries(entries: &[AccessLogEntry]) -> Vec<String> {
         }
     }
     set.into_iter().collect()
+}
+
+#[cfg(test)]
+pub fn extract_available_countries(entries: &[AccessLogEntry]) -> Vec<String> {
+    extract_available_countries_with_geo(entries, None)
 }
 
 fn matches_status_cat(entry: &AccessLogEntry, cat: Option<StatusCategory>) -> bool {
@@ -1717,6 +1749,29 @@ fn use_traffic_auto_scroll(
     });
 }
 
+#[hook]
+fn use_traffic_geo(
+    server_geo: &UseStateHandle<Option<TrafficGeoDistribution>>,
+    selected_proxy: Option<ShortId>,
+) {
+    let server_geo = server_geo.clone();
+    use_effect_with(selected_proxy, move |&proxy| {
+        spawn_local(async move {
+            let mut url = format!("{API_ENDPOINT}/traffic/geo");
+            if let Some(id) = proxy {
+                url.push_str(&format!("?resource_id={id}"));
+            }
+            let req = Request::get(&url);
+            if let Ok(res) = req.send().await
+                && let Ok(data) = res.json::<TrafficGeoDistribution>().await
+            {
+                server_geo.set(Some(data));
+            }
+        });
+        || ()
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1796,6 +1851,49 @@ mod tests {
         ];
         let countries = extract_available_countries(&logs);
         assert_eq!(countries, vec!["TR".to_string(), "US".to_string()]);
+    }
+
+    #[test]
+    fn test_resolve_geo_distribution() {
+        let logs = vec![sample_log(200, 10.0, "/api/a", Some("TR"))];
+        let local = resolve_geo_distribution(None, &logs);
+        assert_eq!(local.total_resolved, 1);
+        assert_eq!(local.top_countries[0].country, "TR");
+
+        let mut server = TrafficGeoDistribution {
+            total_resolved: 500,
+            top_countries: vec![CountryTrafficStat {
+                country: "DE".to_string(),
+                count: 500,
+                percentage: 100.0,
+            }],
+            country_counts: std::collections::BTreeMap::from([("DE".to_string(), 500)]),
+        };
+        let resolved = resolve_geo_distribution(Some(&server), &logs);
+        assert_eq!(resolved.total_resolved, 500);
+        assert_eq!(resolved.top_countries[0].country, "DE");
+
+        server.total_resolved = 0;
+        let fallback = resolve_geo_distribution(Some(&server), &logs);
+        assert_eq!(fallback.total_resolved, 1);
+    }
+
+    #[test]
+    fn test_extract_available_countries_with_geo() {
+        let logs = vec![sample_log(200, 10.0, "/api/a", Some("TR"))];
+        let geo = TrafficGeoDistribution {
+            total_resolved: 10,
+            top_countries: Vec::new(),
+            country_counts: std::collections::BTreeMap::from([
+                ("US".to_string(), 5),
+                ("FR".to_string(), 5),
+            ]),
+        };
+        let countries = extract_available_countries_with_geo(&logs, Some(&geo));
+        assert_eq!(
+            countries,
+            vec!["FR".to_string(), "TR".to_string(), "US".to_string()]
+        );
     }
 
     #[test]
