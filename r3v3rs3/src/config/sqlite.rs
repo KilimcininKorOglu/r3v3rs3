@@ -123,7 +123,7 @@ pub struct SqliteStorage {
     dir: PathBuf,
     db_path: PathBuf,
     pool: SqlitePool,
-    secrets: tokio::sync::OnceCell<ClusterKeys>,
+    secrets: tokio::sync::RwLock<Option<std::sync::Arc<ClusterKeys>>>,
 }
 
 impl SqliteStorage {
@@ -141,11 +141,11 @@ impl SqliteStorage {
             dir: dir.to_owned(),
             db_path,
             pool,
-            secrets: tokio::sync::OnceCell::new(),
+            secrets: tokio::sync::RwLock::new(None),
         };
 
         if let Ok(keys) = storage.secret_keys().await {
-            migrate_legacy_files(dir, &storage.pool, keys).await?;
+            migrate_legacy_files(dir, &storage.pool, &keys).await?;
         }
 
         Ok(storage)
@@ -170,18 +170,32 @@ impl SqliteStorage {
         Ok(AppConfig::default())
     }
 
-    async fn secret_keys(&self) -> anyhow::Result<&ClusterKeys> {
-        self.secrets
-            .get_or_try_init(|| async {
-                let key_path = self.dir.join(KEY_FILE);
-                let mut paths = vec![key_path];
-                let old_key_path = self.dir.join("r3v3rs3.key.old");
-                if fs::try_exists(&old_key_path).await? {
-                    paths.push(old_key_path);
-                }
-                load_keys(&paths).await
-            })
-            .await
+    async fn secret_keys(&self) -> anyhow::Result<std::sync::Arc<ClusterKeys>> {
+        {
+            let guard = self.secrets.read().await;
+            if let Some(keys) = guard.as_ref() {
+                return Ok(keys.clone());
+            }
+        }
+        let mut guard = self.secrets.write().await;
+        if let Some(keys) = guard.as_ref() {
+            return Ok(keys.clone());
+        }
+        let key_path = self.dir.join(KEY_FILE);
+        let mut paths = vec![key_path];
+        let old_key_path = self.dir.join("r3v3rs3.key.old");
+        if fs::try_exists(&old_key_path).await? {
+            paths.push(old_key_path);
+        }
+        let loaded = std::sync::Arc::new(load_keys(&paths).await?);
+        *guard = Some(loaded.clone());
+        Ok(loaded)
+    }
+
+    /// Invalidates cached encryption keys so subsequent operations reload them.
+    pub async fn invalidate_secrets(&self) {
+        let mut guard = self.secrets.write().await;
+        *guard = None;
     }
 }
 
@@ -576,6 +590,10 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
+    async fn invalidate_secrets(&self) {
+        self.invalidate_secrets().await;
+    }
+
     async fn save_app_config(&self, config: &AppConfig) -> Result<(), Error> {
         let json = serde_json::to_string(config).map_err(|_| Error::FailedToSaveConfig)?;
         let now = crate::clock::unix_ms() as i64;
@@ -827,7 +845,7 @@ impl Storage for SqliteStorage {
             .secret_keys()
             .await
             .map_err(|_| Error::FailedToSaveConfig)?;
-        let stored = StoredDnsCredential::seal(id, name, provider, keys)
+        let stored = StoredDnsCredential::seal(id, name, provider, &keys)
             .map_err(|_| Error::FailedToSaveConfig)?;
         let now = crate::clock::unix_ms() as i64;
         sqlx::query(
@@ -891,7 +909,7 @@ impl Storage for SqliteStorage {
             .await
             .map_err(|_| Error::FailedToLoadDnsCredentials)?;
         let provider = stored
-            .open(id, keys)
+            .open(id, &keys)
             .map_err(|_| Error::FailedToLoadDnsCredentials)?;
         Ok(Some(provider))
     }

@@ -1773,6 +1773,10 @@ pub async fn rotate_platform_key(
         .rotate_platform_key()
         .await
         .map_err(platform_error)?;
+    let _ = state
+        .sender
+        .send(crate::command::ServerCommand::InvalidateStorageSecrets)
+        .await;
     let record = AuditRecord::new(AuditAction::RotatePlatformKey)
         .summary(format!("new key: {}", report.new_key_id));
     state

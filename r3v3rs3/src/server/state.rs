@@ -498,6 +498,9 @@ impl ServerState {
             ServerCommand::WorkerApply => {
                 self.apply_worker_state().await;
             }
+            ServerCommand::InvalidateStorageSecrets => {
+                self.storage.invalidate_secrets().await;
+            }
             ServerCommand::SuspendListeners => {
                 info!("the workers serve the ports, so this process stops accepting");
                 self.tcp_pool = TcpListenerPool::new();

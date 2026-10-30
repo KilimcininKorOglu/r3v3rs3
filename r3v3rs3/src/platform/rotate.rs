@@ -10,6 +10,7 @@ use super::{KEY_FILE, env_aad, git_token_aad};
 use crate::keys::crypto::ClusterKeys;
 use crate::keys::key_file::{new_key_file, parse_key_file};
 use anyhow::Context;
+use base64::{Engine as _, engine::general_purpose};
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::KeyRotationReport;
 use sqlx::{Row, SqlitePool};
@@ -25,22 +26,45 @@ struct ResealedCounts {
     registries: u32,
     env_groups: u32,
     webhooks: u32,
+    dns_credentials: u32,
+}
+
+struct AppAndGitCounts {
+    app_env: u32,
+    app_secrets: u32,
+    git_connections: u32,
+    github_apps: u32,
+}
+
+async fn reseal_app_and_git(
+    pool: &SqlitePool,
+    keys: &std::sync::RwLock<ClusterKeys>,
+) -> anyhow::Result<AppAndGitCounts> {
+    Ok(AppAndGitCounts {
+        app_env: reseal_app_env(pool, keys).await?,
+        app_secrets: reseal_app_secrets(pool, keys).await?,
+        git_connections: reseal_git_connections(pool, keys).await?,
+        github_apps: reseal_github_apps(pool, keys).await?,
+    })
 }
 
 async fn reseal_all_tables(
     pool: &SqlitePool,
     keys: &std::sync::RwLock<ClusterKeys>,
 ) -> anyhow::Result<ResealedCounts> {
+    let app_git = reseal_app_and_git(pool, keys).await?;
+    let env_count =
+        reseal_env_groups(pool, keys).await? + reseal_project_env_vars(pool, keys).await?;
     Ok(ResealedCounts {
-        app_env: reseal_app_env(pool, keys).await?,
-        app_secrets: reseal_app_secrets(pool, keys).await?,
-        git_connections: reseal_git_connections(pool, keys).await?,
-        github_apps: reseal_github_apps(pool, keys).await?,
+        app_env: app_git.app_env,
+        app_secrets: app_git.app_secrets,
+        git_connections: app_git.git_connections,
+        github_apps: app_git.github_apps,
         settings: reseal_settings(pool, keys).await?,
         registries: reseal_registries(pool, keys).await?,
-        env_groups: reseal_env_groups(pool, keys).await?
-            + reseal_project_env_vars(pool, keys).await?,
+        env_groups: env_count,
         webhooks: reseal_webhooks(pool, keys).await?,
+        dns_credentials: reseal_dns_credentials(pool, keys).await?,
     })
 }
 
@@ -77,6 +101,7 @@ pub(super) async fn run_key_rotation(
         resealed_registries: counts.registries,
         resealed_env_groups: counts.env_groups,
         resealed_webhooks: counts.webhooks,
+        resealed_dns_credentials: counts.dns_credentials,
     })
 }
 
@@ -358,6 +383,48 @@ async fn reseal_webhooks(
     Ok(count)
 }
 
+async fn table_exists(pool: &SqlitePool, name: &str) -> anyhow::Result<bool> {
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?)",
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await?;
+    Ok(exists)
+}
+
+async fn reseal_dns_credentials(
+    pool: &SqlitePool,
+    keys: &std::sync::RwLock<ClusterKeys>,
+) -> anyhow::Result<u32> {
+    if !table_exists(pool, "dns_credentials").await? {
+        return Ok(0);
+    }
+    let rows = sqlx::query("SELECT id, sealed FROM dns_credentials")
+        .fetch_all(pool)
+        .await?;
+    let mut count = 0;
+    for row in rows {
+        let id_str: String = row.try_get("id")?;
+        let id: ShortId = id_str.parse()?;
+        let sealed_b64: String = row.try_get("sealed")?;
+        let Ok(sealed_bytes) = general_purpose::STANDARD.decode(&sealed_b64) else {
+            continue;
+        };
+        let aad = crate::dns_credential::kv_key(id);
+        if let Ok(resealed) = reseal_value(keys, &aad, &sealed_bytes) {
+            let resealed_b64 = general_purpose::STANDARD.encode(resealed);
+            sqlx::query("UPDATE dns_credentials SET sealed = ? WHERE id = ?")
+                .bind(resealed_b64)
+                .bind(id_str)
+                .execute(pool)
+                .await?;
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
 async fn write_key_files(config_dir: &Path, key_text: &str) -> anyhow::Result<()> {
     let key_path = config_dir.join(KEY_FILE);
     let old_key_path = config_dir.join("r3v3rs3.key.old");
@@ -558,6 +625,7 @@ mod tests {
         assert_eq!(report.resealed_registries, 1);
         assert_eq!(report.resealed_env_groups, 0);
         assert_eq!(report.resealed_webhooks, 0);
+        assert_eq!(report.resealed_dns_credentials, 0);
 
         verify_rotated_secrets(&platform, app_id, &webhook_sec).await?;
 
@@ -565,6 +633,36 @@ mod tests {
         assert!(tokio::fs::try_exists(dir.0.join("r3v3rs3.key.old")).await?);
 
         verify_fresh_restart(&dir.0, app_id).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn key_rotation_reseals_dns_credentials_and_reloads_in_storage() -> anyhow::Result<()> {
+        use crate::config::storage::Storage;
+        let (platform, dir) = platform().await?;
+        let storage = crate::config::sqlite::SqliteStorage::open(&dir.0).await?;
+
+        let cred_id: ShortId = "dns1".parse()?;
+        let provider = r3v3rs3_api::acme::DnsProvider::Token(r3v3rs3_api::acme::TokenProvider {
+            provider: r3v3rs3_api::acme::TokenApi::Cloudflare,
+            api_token: "mock-cf-token-12345".into(),
+            api_url: None,
+        });
+        storage
+            .save_dns_credential(cred_id, "Cloudflare DNS", &provider)
+            .await?;
+
+        let report = platform.rotate_platform_key().await?;
+        assert_eq!(report.resealed_dns_credentials, 1);
+
+        storage.invalidate_secrets().await;
+
+        let loaded = storage
+            .dns_provider_of(cred_id)
+            .await?
+            .context("missing credential")?;
+        assert_eq!(loaded, provider);
+
         Ok(())
     }
 }

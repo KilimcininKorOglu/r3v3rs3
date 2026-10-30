@@ -26,6 +26,9 @@ pub trait Storage: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Invalidates cached encryption keys so subsequent operations reload them.
+    async fn invalidate_secrets(&self) {}
+
     async fn save_app_config(&self, config: &AppConfig) -> Result<(), Error>;
     async fn load_app_config(&self) -> AppConfig;
     async fn save_ports(&self, entries: &[PortEntry]) -> Result<(), Error>;

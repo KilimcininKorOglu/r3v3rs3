@@ -264,6 +264,8 @@ pub struct KeyRotationReport {
     pub resealed_env_groups: u32,
     #[serde(default)]
     pub resealed_webhooks: u32,
+    #[serde(default)]
+    pub resealed_dns_credentials: u32,
 }
 
 /// A container registry credential entry for private image pulls.

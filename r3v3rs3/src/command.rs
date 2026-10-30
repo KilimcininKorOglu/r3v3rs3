@@ -75,6 +75,8 @@ pub enum ServerCommand {
         pid: u32,
         status: Option<crate::server::ipc::WorkerStatus>,
     },
+    /// Master key was rotated, so cached encryption keys in storage must be invalidated.
+    InvalidateStorageSecrets,
 }
 
 impl std::fmt::Debug for ServerCommand {
@@ -131,6 +133,9 @@ impl std::fmt::Debug for ServerCommand {
                 .field("event", &notification.event)
                 .finish(),
             Self::WorkerApply => f.debug_struct("WorkerApply").finish(),
+            Self::InvalidateStorageSecrets => {
+                f.debug_struct("InvalidateStorageSecrets").finish()
+            }
             Self::SuspendListeners => f.debug_struct("SuspendListeners").finish(),
             Self::WorkerConfigSnapshot { .. } => f.debug_struct("WorkerConfigSnapshot").finish(),
             Self::SetWorkerStatus { pid, status } => f
