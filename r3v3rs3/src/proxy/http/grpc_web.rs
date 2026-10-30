@@ -10,6 +10,7 @@ use hyper::header::{
     CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderValue, ORIGIN, TE,
 };
 use hyper::{Method, Request, Response, StatusCode};
+use r3v3rs3_api::vhost::VirtualHost;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -35,24 +36,88 @@ pub fn is_grpc_web_preflight<B>(req: &Request<B>) -> bool {
     {
         return headers_str.contains("grpc-web") || headers_str.contains("x-grpc-web");
     }
-    req.headers().contains_key(ORIGIN)
+    false
+}
+
+fn is_local_host(host: &str) -> bool {
+    host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+fn matches_vhosts(origin_clean: &str, vhosts: &[VirtualHost]) -> bool {
+    if vhosts.is_empty() {
+        return false;
+    }
+    if vhosts.iter().any(|vhost| vhost.test(origin_clean)) {
+        return true;
+    }
+    let is_origin_local = is_local_host(origin_clean);
+    is_origin_local
+        && vhosts
+            .iter()
+            .any(|v| v.test("localhost") || v.test("127.0.0.1") || v.test("::1"))
+}
+
+fn matches_request_host(origin_clean: &str, req_host: &str) -> bool {
+    let req_clean = req_host.split(':').next().unwrap_or(req_host);
+    let req_clean = req_clean.trim_start_matches('[').trim_end_matches(']');
+    if origin_clean.eq_ignore_ascii_case(req_clean) {
+        return true;
+    }
+    is_local_host(origin_clean) && is_local_host(req_clean)
+}
+
+fn parse_origin_host(origin_str: &str) -> Option<String> {
+    if origin_str == "null" || origin_str.trim().is_empty() {
+        return None;
+    }
+    let parsed = url::Url::parse(origin_str).ok()?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return None;
+    }
+    let host = parsed.host_str()?;
+    Some(host.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase())
+}
+
+/// Checks if an origin is permitted by the route's virtual hosts or request host.
+pub fn is_allowed_origin(
+    origin_str: &str,
+    vhosts: &[VirtualHost],
+    req_host: Option<&str>,
+) -> bool {
+    let Some(origin_clean) = parse_origin_host(origin_str) else {
+        return false;
+    };
+    matches_vhosts(&origin_clean, vhosts)
+        || req_host.is_some_and(|h| matches_request_host(&origin_clean, h))
+}
+
+fn forbidden_response() -> Response<Full<Bytes>> {
+    let mut res = Response::new(Full::new(Bytes::new()));
+    *res.status_mut() = StatusCode::FORBIDDEN;
+    res
 }
 
 /// Creates a CORS preflight response for gRPC-Web clients.
-pub fn cors_preflight_response(headers: &HeaderMap) -> Response<Full<Bytes>> {
-    let origin = headers
-        .get(ORIGIN)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("*");
+pub fn cors_preflight_response(
+    headers: &HeaderMap,
+    vhosts: &[VirtualHost],
+    req_host: Option<&str>,
+) -> Response<Full<Bytes>> {
+    let Some(origin) = headers.get(ORIGIN).and_then(|v| v.to_str().ok()) else {
+        return forbidden_response();
+    };
+    if !is_allowed_origin(origin, vhosts, req_host) {
+        return forbidden_response();
+    }
+    let Ok(origin_val) = HeaderValue::from_str(origin) else {
+        return forbidden_response();
+    };
 
     let mut res = Response::new(Full::new(Bytes::new()));
     *res.status_mut() = StatusCode::NO_CONTENT;
 
     let h = res.headers_mut();
-    h.insert(
-        ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_str(origin).unwrap_or(HeaderValue::from_static("*")),
-    );
+    h.insert(ACCESS_CONTROL_ALLOW_ORIGIN, origin_val);
     h.insert(
         ACCESS_CONTROL_ALLOW_METHODS,
         HeaderValue::from_static("POST, OPTIONS"),
@@ -92,14 +157,15 @@ pub fn apply_grpc_web_response_headers(headers: &mut HeaderMap, origin: Option<&
     {
         *ct = HeaderValue::from_static("application/grpc-web+proto");
     }
-    headers.insert(
-        ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_str(origin.unwrap_or("*")).unwrap_or(HeaderValue::from_static("*")),
-    );
-    headers.insert(
-        ACCESS_CONTROL_EXPOSE_HEADERS,
-        HeaderValue::from_static("grpc-status,grpc-message"),
-    );
+    if let Some(origin) = origin
+        && let Ok(val) = HeaderValue::from_str(origin)
+    {
+        headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, val);
+        headers.insert(
+            ACCESS_CONTROL_EXPOSE_HEADERS,
+            HeaderValue::from_static("grpc-status,grpc-message"),
+        );
+    }
 }
 
 /// Encodes HTTP trailers into a gRPC-Web trailer frame (flag 0x80 + 4-byte BE length + payload).
@@ -252,15 +318,67 @@ mod tests {
     }
 
     #[test]
-    fn test_cors_preflight_response() {
+    fn test_cors_preflight_response_allowed() {
         let mut h = HeaderMap::new();
         h.insert(ORIGIN, HeaderValue::from_static("http://localhost:3000"));
-        let res = cors_preflight_response(&h);
+        let vhosts: Vec<VirtualHost> = vec!["localhost".parse().unwrap()];
+        let res = cors_preflight_response(&h, &vhosts, Some("localhost"));
         assert_eq!(res.status(), StatusCode::NO_CONTENT);
         assert_eq!(
             res.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(),
             "http://localhost:3000"
         );
         assert!(res.headers().contains_key(ACCESS_CONTROL_ALLOW_METHODS));
+    }
+
+    #[test]
+    fn test_cors_preflight_response_rejected() {
+        let mut h = HeaderMap::new();
+        h.insert(ORIGIN, HeaderValue::from_static("https://evil.com"));
+        let vhosts: Vec<VirtualHost> = vec!["localhost".parse().unwrap()];
+        let res = cors_preflight_response(&h, &vhosts, Some("localhost"));
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert!(!res.headers().contains_key(ACCESS_CONTROL_ALLOW_ORIGIN));
+
+        // Test null origin
+        let mut h_null = HeaderMap::new();
+        h_null.insert(ORIGIN, HeaderValue::from_static("null"));
+        let res_null = cors_preflight_response(&h_null, &vhosts, Some("localhost"));
+        assert_eq!(res_null.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn test_is_allowed_origin_rules() {
+        let vhosts: Vec<VirtualHost> = vec!["example.com".parse().unwrap()];
+        assert!(is_allowed_origin("https://example.com", &vhosts, None));
+        assert!(is_allowed_origin("http://example.com:8080", &vhosts, None));
+        assert!(!is_allowed_origin("https://evil.com", &vhosts, None));
+        assert!(!is_allowed_origin("null", &vhosts, None));
+        assert!(!is_allowed_origin("file:///etc/passwd", &vhosts, None));
+        assert!(!is_allowed_origin("", &vhosts, None));
+    }
+
+    #[test]
+    fn test_is_grpc_web_preflight() {
+        let plain_options = Request::builder()
+            .method(Method::OPTIONS)
+            .header(ORIGIN, "http://localhost:3000")
+            .body(())
+            .unwrap();
+        assert!(!is_grpc_web_preflight(&plain_options));
+
+        let grpc_header_options = Request::builder()
+            .method(Method::OPTIONS)
+            .header("x-grpc-web", "1")
+            .body(())
+            .unwrap();
+        assert!(is_grpc_web_preflight(&grpc_header_options));
+
+        let cors_req_header_options = Request::builder()
+            .method(Method::OPTIONS)
+            .header(ACCESS_CONTROL_REQUEST_HEADERS, "content-type,x-grpc-web")
+            .body(())
+            .unwrap();
+        assert!(is_grpc_web_preflight(&cors_req_header_options));
     }
 }

@@ -1229,7 +1229,14 @@ where
             return (*proxied, response_rewriter, Some(resource_id), client.ip);
         }
     };
-    if let Some(response) = handle_purge_or_fixed(route, &req, info, &client, &action) {
+    if let Some(response) = check_post_auth_early_response(
+        route,
+        &req,
+        request_host.as_deref(),
+        info,
+        &client,
+        &action,
+    ) {
         return (
             ProxiedRequest::Respond(response),
             response_rewriter,
@@ -1303,10 +1310,6 @@ fn check_route_access<B>(
         return Err(EarlyExit::Respond(Box::new(response)));
     }
     if let Some(response) = check_dictionary_request(route, req) {
-        return Err(EarlyExit::Respond(Box::new(response)));
-    }
-    if route.grpc_web && grpc_web::is_grpc_web_preflight(req) {
-        let response = grpc_web::cors_preflight_response(req.headers());
         return Err(EarlyExit::Respond(Box::new(response)));
     }
     if route.bot_blocker && is_bot_request(req.headers()) {
@@ -1449,6 +1452,9 @@ where
             .headers()
             .get(hyper::header::ORIGIN)
             .and_then(|v| v.to_str().ok())
+            .filter(|o| {
+                grpc_web::is_allowed_origin(o, &route.filter.vhosts, request_host.as_deref())
+            })
             .map(String::from);
         grpc_web::prepare_grpc_request(req.headers_mut());
         response_rewriter.grpc_web(origin)
@@ -1974,6 +1980,24 @@ fn build_purge_response(status: StatusCode, msg: String) -> Response<Full<Bytes>
         HeaderValue::from_static("text/plain; charset=utf-8"),
     );
     response
+}
+
+fn check_post_auth_early_response<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    request_host: Option<&str>,
+    info: &RequestInfo<'_>,
+    client: &client_ip::ClientAddr,
+    action: &str,
+) -> Option<Response<Full<Bytes>>> {
+    if route.grpc_web && grpc_web::is_grpc_web_preflight(req) {
+        return Some(grpc_web::cors_preflight_response(
+            req.headers(),
+            &route.filter.vhosts,
+            request_host,
+        ));
+    }
+    handle_purge_or_fixed(route, req, info, client, action)
 }
 
 fn handle_purge_or_fixed<B>(

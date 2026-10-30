@@ -1,3 +1,4 @@
+use argon2::{Argon2, PasswordHasher};
 use axum::Router;
 use axum::body::Bytes;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -197,6 +198,175 @@ async fn test_grpc_web_route_override() -> anyhow::Result<()> {
             .await?;
         assert_eq!(res.status(), StatusCode::NO_CONTENT);
         assert!(res.headers().contains_key("access-control-allow-origin"));
+
+        Ok(())
+    })
+    .await
+}
+
+fn test_basic_auth(realm: &str, user: &str, pass: &str) -> r3v3rs3_api::policy::AuthPolicy {
+    let password_hash = Argon2::default()
+        .hash_password(pass.as_bytes())
+        .unwrap()
+        .to_string();
+    r3v3rs3_api::policy::AuthPolicy::Basic(r3v3rs3_api::policy::BasicAuth {
+        realm: realm.into(),
+        user_file: None,
+        users: vec![r3v3rs3_api::policy::BasicAuthUser {
+            username: user.into(),
+            password: String::new(),
+            password_hash,
+            password_set: false,
+        }],
+    })
+}
+
+async fn check_preflight_status(
+    client: &reqwest::Client,
+    url: reqwest::Url,
+    origin: &str,
+    expected_status: StatusCode,
+) -> anyhow::Result<()> {
+    let res = client
+        .request(reqwest::Method::OPTIONS, url)
+        .header("Host", "localhost")
+        .header("Origin", origin)
+        .header("Access-Control-Request-Method", "POST")
+        .header(
+            "Access-Control-Request-Headers",
+            "content-type,x-grpc-web,x-user-agent",
+        )
+        .send()
+        .await?;
+    assert_eq!(res.status(), expected_status);
+    if expected_status != StatusCode::NO_CONTENT {
+        assert!(!res.headers().contains_key("access-control-allow-origin"));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_grpc_web_cors_preflight_rejected_origins() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let dummy_upstream = "http://127.0.0.1:9";
+
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![http_route("/", dummy_upstream, None)],
+        grpc_web: true,
+        ..Default::default()
+    };
+
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &port)])
+        .proxies(vec![http_proxy_entry("grpcrej", "http", proxy)])
+        .build();
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::new();
+        let url = port.http_url("/helloworld.Greeter/SayHello");
+
+        check_preflight_status(&client, url.clone(), "https://evil.com", StatusCode::FORBIDDEN).await?;
+        check_preflight_status(&client, url.clone(), "null", StatusCode::FORBIDDEN).await?;
+        check_preflight_status(&client, url, "file:///etc/passwd", StatusCode::FORBIDDEN).await?;
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_grpc_web_cors_preflight_requires_auth() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let dummy_upstream = "http://127.0.0.1:9";
+
+    let mut route = http_route("/", dummy_upstream, None);
+    route.auth = Some(test_basic_auth("test", "alice", "secret123"));
+
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![route],
+        grpc_web: true,
+        ..Default::default()
+    };
+
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &port)])
+        .proxies(vec![http_proxy_entry("grpcauth", "http", proxy)])
+        .build();
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::new();
+        let url = port.http_url("/helloworld.Greeter/SayHello");
+
+        check_preflight_status(&client, url.clone(), "http://localhost:3000", StatusCode::UNAUTHORIZED).await?;
+
+        let auth_res = client
+            .request(reqwest::Method::OPTIONS, url)
+            .header("Host", "localhost")
+            .header("Origin", "http://localhost:3000")
+            .header("Access-Control-Request-Method", "POST")
+            .header(
+                "Access-Control-Request-Headers",
+                "content-type,x-grpc-web,x-user-agent",
+            )
+            .basic_auth("alice", Some("secret123"))
+            .send()
+            .await?;
+        assert_eq!(auth_res.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            auth_res.headers().get("access-control-allow-origin").unwrap(),
+            "http://localhost:3000"
+        );
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_grpc_web_post_untrusted_origin_not_reflected() -> anyhow::Result<()> {
+    let app = Router::new().route(
+        "/helloworld.Greeter/SayHello",
+        post(|_headers: HeaderMap, body: Bytes| async move {
+            let mut res_headers = HeaderMap::new();
+            res_headers.insert("content-type", HeaderValue::from_static("application/grpc"));
+            res_headers.insert("grpc-status", HeaderValue::from_static("0"));
+            (res_headers, body).into_response()
+        }),
+    );
+
+    let upstream = serve_http_upstream(app).await?;
+    let port = alloc_tcp_port().await?;
+
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![http_route("/", upstream.as_str(), None)],
+        grpc_web: true,
+        ..Default::default()
+    };
+
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &port)])
+        .proxies(vec![http_proxy_entry("grpcpost", "http", proxy)])
+        .build();
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::new();
+        let url = port.http_url("/helloworld.Greeter/SayHello");
+
+        let res = client
+            .post(url)
+            .header("Host", "localhost")
+            .header("Origin", "https://evil.com")
+            .header("Content-Type", "application/grpc-web+proto")
+            .header("x-grpc-web", "1")
+            .body(vec![0x00, 0x00, 0x00, 0x00, 0x05, b'h', b'e', b'l', b'l', b'o'])
+            .send()
+            .await?;
+
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(!res.headers().contains_key("access-control-allow-origin"));
 
         Ok(())
     })
