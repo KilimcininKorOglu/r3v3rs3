@@ -1166,62 +1166,11 @@ pub async fn check_app_update(
 
 /// Opens a WebSocket terminal into the running container of an app. Binary frames carry the
 /// terminal data both ways, and a text frame with `{"cols":N,"rows":N}` resizes the terminal.
-fn matches_host_or_local(origin_host: &str, req_host: &str) -> bool {
-    let req_clean = req_host.split(':').next().unwrap_or(req_host);
-    if origin_host.eq_ignore_ascii_case(req_clean) {
-        return true;
-    }
-    let is_origin_local =
-        origin_host == "localhost" || origin_host == "127.0.0.1" || origin_host == "::1";
-    let is_req_local = req_clean == "localhost" || req_clean == "127.0.0.1" || req_clean == "::1";
-    is_origin_local && is_req_local
-}
-
-fn matches_public_url(origin_host: &str, public_url: Option<&str>) -> bool {
-    let Some(pub_url) = public_url else {
-        return false;
-    };
-    let Ok(parsed) = url::Url::parse(pub_url) else {
-        return false;
-    };
-    parsed
-        .host_str()
-        .is_some_and(|h| origin_host.eq_ignore_ascii_case(h))
-}
-
 fn verify_websocket_origin(
     headers: &axum::http::HeaderMap,
     public_url: Option<&str>,
 ) -> Result<(), AppError> {
-    let Some(origin_val) = headers.get(axum::http::header::ORIGIN) else {
-        if headers.contains_key(axum::http::header::COOKIE) {
-            return Err(Error::Unauthorized.into());
-        }
-        return Ok(());
-    };
-    let Ok(origin_str) = origin_val.to_str() else {
-        return Err(Error::Unauthorized.into());
-    };
-    let Ok(origin_url) = url::Url::parse(origin_str) else {
-        return Err(Error::Unauthorized.into());
-    };
-    let Some(origin_host) = origin_url.host_str() else {
-        return Err(Error::Unauthorized.into());
-    };
-
-    if let Some(host_val) = headers
-        .get(axum::http::header::HOST)
-        .and_then(|v| v.to_str().ok())
-        && matches_host_or_local(origin_host, host_val)
-    {
-        return Ok(());
-    }
-
-    if matches_public_url(origin_host, public_url) {
-        return Ok(());
-    }
-
-    Err(Error::Unauthorized.into())
+    super::auth::verify_origin(headers, public_url).map_err(Into::into)
 }
 
 #[utoipa::path(

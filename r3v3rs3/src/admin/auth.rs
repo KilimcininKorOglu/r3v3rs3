@@ -572,6 +572,67 @@ fn is_valid_origin(origin_str: &str, expected_rp_id: &str) -> bool {
     is_origin_local && is_rp_local
 }
 
+pub(crate) fn matches_host_or_local(origin_host: &str, req_host: &str) -> bool {
+    let req_clean = req_host.split(':').next().unwrap_or(req_host);
+    if origin_host.eq_ignore_ascii_case(req_clean) {
+        return true;
+    }
+    let is_origin_local =
+        origin_host == "localhost" || origin_host == "127.0.0.1" || origin_host == "::1";
+    let is_req_local = req_clean == "localhost" || req_clean == "127.0.0.1" || req_clean == "::1";
+    is_origin_local && is_req_local
+}
+
+pub(crate) fn matches_public_url(origin_host: &str, public_url: Option<&str>) -> bool {
+    let Some(pub_url) = public_url else {
+        return false;
+    };
+    let Ok(parsed) = url::Url::parse(pub_url) else {
+        return false;
+    };
+    parsed
+        .host_str()
+        .is_some_and(|h| origin_host.eq_ignore_ascii_case(h))
+}
+
+pub(crate) fn verify_origin(
+    headers: &axum::http::HeaderMap,
+    public_url: Option<&str>,
+) -> Result<(), Error> {
+    let origin_val = headers
+        .get(axum::http::header::ORIGIN)
+        .or_else(|| headers.get(axum::http::header::REFERER));
+    let Some(origin_val) = origin_val else {
+        if headers.contains_key(axum::http::header::COOKIE) {
+            return Err(Error::Unauthorized);
+        }
+        return Ok(());
+    };
+    let Ok(origin_str) = origin_val.to_str() else {
+        return Err(Error::Unauthorized);
+    };
+    let Ok(origin_url) = url::Url::parse(origin_str) else {
+        return Err(Error::Unauthorized);
+    };
+    let Some(origin_host) = origin_url.host_str() else {
+        return Err(Error::Unauthorized);
+    };
+
+    if let Some(host_val) = headers
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        && matches_host_or_local(origin_host, host_val)
+    {
+        return Ok(());
+    }
+
+    if matches_public_url(origin_host, public_url) {
+        return Ok(());
+    }
+
+    Err(Error::Unauthorized)
+}
+
 pub async fn verify_and_consume_challenge(
     state: &AppState,
     client_data_b64: &str,

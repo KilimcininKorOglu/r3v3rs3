@@ -252,6 +252,15 @@ async fn db_load_tokens(pool: &SqlitePool, now: i64) -> anyhow::Result<LoadedTok
     Ok((tokens, refresh, by_id))
 }
 
+const CONSENT_CSRF_LIFETIME: Duration = Duration::from_secs(600);
+
+#[derive(Debug, Clone)]
+struct ConsentCsrf {
+    username: String,
+    session_token_hash: String,
+    expires_at: u64,
+}
+
 /// The codes and tokens of the signed-in MCP clients, in memory and backed by SQLite.
 #[derive(Default)]
 pub struct McpAuthorizations {
@@ -262,6 +271,7 @@ pub struct McpAuthorizations {
     by_id: HashMap<String, String>,
     /// The clients that registered themselves through RFC 7591.
     clients: HashMap<String, McpClientConfig>,
+    csrf_tokens: HashMap<String, ConsentCsrf>,
 }
 
 /// The limit of the dynamically registered clients, like `MAX_GRANTS` for the tokens.
@@ -295,6 +305,7 @@ impl McpAuthorizations {
             refresh,
             by_id,
             clients,
+            csrf_tokens: HashMap::new(),
         })
     }
 
@@ -461,12 +472,50 @@ impl McpAuthorizations {
             .filter(|grant| grant.expires_at > unix_now())
     }
 
+    /// Issues an anti-CSRF token for the OAuth consent page, bound to the user session.
+    pub fn issue_consent_csrf(&mut self, username: &str, session_token: &str) -> String {
+        self.cleanup();
+        let token = new_token();
+        self.csrf_tokens.insert(
+            token.clone(),
+            ConsentCsrf {
+                username: username.to_string(),
+                session_token_hash: hash_token(session_token),
+                expires_at: unix_now() + CONSENT_CSRF_LIFETIME.as_secs(),
+            },
+        );
+        token
+    }
+
+    /// Verifies and consumes a single-use anti-CSRF token.
+    pub fn verify_and_consume_csrf(
+        &mut self,
+        csrf_token: &str,
+        username: &str,
+        session_token: Option<&str>,
+    ) -> bool {
+        let Some(csrf) = self.csrf_tokens.remove(csrf_token) else {
+            return false;
+        };
+        if csrf.expires_at <= unix_now() || csrf.username != username {
+            return false;
+        }
+        if let Some(session) = session_token
+            && !session.is_empty()
+            && csrf.session_token_hash != hash_token(session)
+        {
+            return false;
+        }
+        true
+    }
+
     /// Drops the expired codes and tokens.
     fn cleanup(&mut self) {
+        let now = unix_now();
+        self.csrf_tokens.retain(|_, csrf| csrf.expires_at > now);
         if self.codes.len() + self.tokens.len() < MAX_GRANTS {
             return;
         }
-        let now = unix_now();
         self.codes.retain(|_, grant| grant.expires_at > now);
         let expired: Vec<String> = self
             .tokens
@@ -525,6 +574,9 @@ pub struct ConsentForm {
     pub scope: String,
     /// The name of the submit button. A refusal also submits the form.
     pub decision: String,
+    /// The anti-CSRF token generated on consent page render.
+    #[serde(default)]
+    pub csrf_token: String,
 }
 
 /// The form of the token request.
@@ -707,7 +759,8 @@ pub async fn authorize(
     RawQuery(raw_query): RawQuery,
     Query(query): Query<AuthorizeQuery>,
 ) -> Result<Response, AppError> {
-    let caller = match jar.get("token") {
+    let session_cookie = jar.get("token");
+    let caller = match session_cookie {
         Some(cookie) => super::auth::session_caller(&state, cookie.value())
             .await
             .ok(),
@@ -716,13 +769,15 @@ pub async fn authorize(
     let Some(caller) = caller else {
         return Ok(login_redirect(raw_query.as_deref()));
     };
-    let data = state.data.lock().await;
+    let session_token = session_cookie.map(|c| c.value()).unwrap_or_default();
+    let mut data = state.data.lock().await;
     let config = data.config.mcp.clone();
     let dynamic = data.mcp.dynamic_client(&query.client_id);
     let client = validate_authorize(&config, dynamic.as_ref(), &query)?;
+    let csrf_token = data.mcp.issue_consent_csrf(&caller.username, session_token);
     drop(data);
     let scopes = scopes_of(&query.scope);
-    let body = render_consent_page(&client, &caller, &query, &scopes);
+    let body = render_consent_page(&client, &caller, &query, &scopes, &csrf_token);
     let mut response = Html(body).into_response();
     response.headers_mut().insert(
         header::REFERRER_POLICY,
@@ -985,6 +1040,7 @@ fn render_consent_page(
     caller: &Caller,
     query: &AuthorizeQuery,
     scopes: &[String],
+    csrf_token: &str,
 ) -> String {
     let scope_value = scopes.join(" ");
     let scopes_html = render_scopes_list(scopes);
@@ -1028,6 +1084,7 @@ fn render_consent_page(
          </div>\
          <p class=\"security-notice\">Ensure you trust <strong>{name}</strong> before approving. It will act on behalf of your account.</p>\
          <form method=\"post\" action=\"/oauth/authorize\">\
+         <input type=\"hidden\" name=\"csrf_token\" value=\"{csrf_token}\">\
          <input type=\"hidden\" name=\"client_id\" value=\"{client_id}\">\
          <input type=\"hidden\" name=\"redirect_uri\" value=\"{redirect_uri}\">\
          <input type=\"hidden\" name=\"state\" value=\"{state_value}\">\
@@ -1042,6 +1099,7 @@ fn render_consent_page(
         id = html_escape(&client.id),
         username = html_escape(&caller.username),
         scope = html_escape(&scope_value),
+        csrf_token = html_escape(csrf_token),
         client_id = html_escape(&query.client_id),
         redirect_uri = html_escape(&query.redirect_uri),
         state_value = html_escape(&query.state),
@@ -1059,6 +1117,33 @@ fn html_escape(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+async fn get_platform_public_url(state: &AppState) -> Option<String> {
+    if let Ok(platform) = state.call_system(GetPlatform).await
+        && let Ok(platform) = platform.get()
+    {
+        platform.public_url().map(|u| u.to_string())
+    } else {
+        None
+    }
+}
+
+fn consent_redirect_uri(
+    redirect_uri: &str,
+    state: &str,
+    code: Option<&str>,
+    error: Option<&str>,
+) -> String {
+    let separator = if redirect_uri.contains('?') { '&' } else { '?' };
+    let mut query = format!("{}state={}", separator, urlencoding_escape(state));
+    if let Some(code) = code {
+        query.push_str(&format!("&code={}", urlencoding_escape(code)));
+    }
+    if let Some(error) = error {
+        query.push_str(&format!("&error={}", urlencoding_escape(error)));
+    }
+    format!("{redirect_uri}{query}")
+}
+
 /// Issues the authorization code and sends the browser to the redirect URI.
 #[utoipa::path(
     post,
@@ -1070,10 +1155,23 @@ fn html_escape(value: &str) -> String {
 )]
 pub async fn consent(
     State(state): State<AppState>,
+    jar: CookieJar,
+    headers: HeaderMap,
     axum::Extension(caller): axum::Extension<Caller>,
     Form(form): Form<ConsentForm>,
 ) -> Result<Response, AppError> {
-    let data = state.data.lock().await;
+    let public_url = get_platform_public_url(&state).await;
+    super::auth::verify_origin(&headers, public_url.as_deref())?;
+
+    let session_token = jar.get("token").map(|c| c.value());
+    let mut data = state.data.lock().await;
+    if !data
+        .mcp
+        .verify_and_consume_csrf(&form.csrf_token, &caller.username, session_token)
+    {
+        return Err(Error::Unauthorized.into());
+    }
+
     let config = data.config.mcp.clone();
     let dynamic = data.mcp.dynamic_client(&form.client_id);
     let client = validate_authorize(
@@ -1091,15 +1189,11 @@ pub async fn consent(
     )?;
     drop(data);
     if form.decision != "approve" {
-        let separator = if form.redirect_uri.contains('?') {
-            '&'
-        } else {
-            '?'
-        };
-        return Ok(Redirect::to(&format!(
-            "{}{separator}state={}&error=access_denied",
-            form.redirect_uri,
-            urlencoding_escape(&form.state)
+        return Ok(Redirect::to(&consent_redirect_uri(
+            &form.redirect_uri,
+            &form.state,
+            None,
+            Some("access_denied"),
         ))
         .into_response());
     }
@@ -1121,16 +1215,11 @@ pub async fn consent(
         )
         .await;
     info!(client = %client.id, "an MCP client was approved");
-    let separator = if form.redirect_uri.contains('?') {
-        '&'
-    } else {
-        '?'
-    };
-    Ok(Redirect::to(&format!(
-        "{}{separator}code={}&state={}",
-        form.redirect_uri,
-        urlencoding_escape(&code),
-        urlencoding_escape(&form.state)
+    Ok(Redirect::to(&consent_redirect_uri(
+        &form.redirect_uri,
+        &form.state,
+        Some(&code),
+        None,
     ))
     .into_response())
 }

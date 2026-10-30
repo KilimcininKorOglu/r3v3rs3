@@ -242,9 +242,22 @@ async fn an_authenticated_authorization_request_renders_the_consent_page() -> an
         assert!(text.contains("Permissions Requested"), "{text}");
         assert!(text.contains("value=\"approve\""), "{text}");
         assert!(text.contains("value=\"deny\""), "{text}");
+        assert!(text.contains("name=\"csrf_token\""), "{text}");
         Ok(())
     })
     .await
+}
+
+fn extract_csrf_token(html: &str) -> anyhow::Result<String> {
+    let marker = "name=\"csrf_token\" value=\"";
+    let start = html
+        .find(marker)
+        .context("consent page does not contain csrf_token input")?
+        + marker.len();
+    let end = html[start..]
+        .find('"')
+        .context("unterminated csrf_token attribute in consent form")?;
+    Ok(html[start..start + end].to_string())
 }
 
 #[tokio::test]
@@ -270,9 +283,25 @@ async fn authorize_and_get_code(
     cookie: &str,
     challenge: &str,
 ) -> anyhow::Result<String> {
+    let client = Client::new();
+    let url = format!(
+        "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
+         &redirect_uri={REDIRECT_URI}&state=st4te&code_challenge={challenge}\
+         &code_challenge_method=S256&scope=read%20edit"
+    );
+    let page = client
+        .get(&url)
+        .header("cookie", cookie)
+        .send()
+        .await?
+        .text()
+        .await?;
+    let csrf_token = extract_csrf_token(&page)?;
+
     let consent = no_redirect()
         .post(format!("http://{addr}/oauth/authorize"))
         .header("cookie", cookie)
+        .header("origin", format!("http://{addr}"))
         .form(&[
             ("client_id", CLIENT_ID),
             ("redirect_uri", REDIRECT_URI),
@@ -280,6 +309,7 @@ async fn authorize_and_get_code(
             ("code_challenge", challenge),
             ("scope", "read edit"),
             ("decision", "approve"),
+            ("csrf_token", &csrf_token),
         ])
         .send()
         .await?;
@@ -392,9 +422,24 @@ async fn a_denied_consent_sends_an_access_denied_error() -> anyhow::Result<()> {
         let client = Client::new();
         let cookie = session(&client, &addr).await?;
         let (_, challenge) = pkce();
+        let url = format!(
+            "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
+             &redirect_uri={REDIRECT_URI}&state=s9&code_challenge={challenge}\
+             &code_challenge_method=S256&scope=read"
+        );
+        let page = client
+            .get(&url)
+            .header("cookie", &cookie)
+            .send()
+            .await?
+            .text()
+            .await?;
+        let csrf_token = extract_csrf_token(&page)?;
+
         let consent = no_redirect()
             .post(format!("http://{addr}/oauth/authorize"))
             .header("cookie", &cookie)
+            .header("origin", format!("http://{addr}"))
             .form(&[
                 ("client_id", CLIENT_ID),
                 ("redirect_uri", REDIRECT_URI),
@@ -402,6 +447,7 @@ async fn a_denied_consent_sends_an_access_denied_error() -> anyhow::Result<()> {
                 ("code_challenge", challenge.as_str()),
                 ("scope", "read"),
                 ("decision", "deny"),
+                ("csrf_token", &csrf_token),
             ])
             .send()
             .await?;
@@ -413,60 +459,95 @@ async fn a_denied_consent_sends_an_access_denied_error() -> anyhow::Result<()> {
     .await
 }
 
+async fn register_dcr_client(client: &Client, addr: SocketAddr) -> anyhow::Result<String> {
+    let registered: Value = client
+        .post(format!("http://{addr}/oauth/register"))
+        .json(&json!({
+            "client_name": "Claude Code",
+            "redirect_uris": ["http://127.0.0.1:49153/callback"],
+        }))
+        .send()
+        .await?
+        .json()
+        .await?;
+    let client_id = registered["client_id"]
+        .as_str()
+        .context("the registration returned no client_id")?
+        .to_string();
+    assert!(client_id.starts_with("mcp-"), "{client_id}");
+    assert_eq!(registered["client_name"], json!("Claude Code"));
+    Ok(client_id)
+}
+
+async fn approve_dcr_client(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    client_id: &str,
+    redirect_uri: &str,
+    challenge: &str,
+) -> anyhow::Result<String> {
+    let url = format!(
+        "http://{addr}/oauth/authorize?response_type=code&client_id={client_id}\
+         &redirect_uri={redirect_uri}&state=dcr&code_challenge={challenge}\
+         &code_challenge_method=S256&scope=read"
+    );
+    let page = client
+        .get(&url)
+        .header("cookie", cookie)
+        .send()
+        .await?
+        .text()
+        .await?;
+    let csrf_token = extract_csrf_token(&page)?;
+
+    let consent = no_redirect()
+        .post(format!("http://{addr}/oauth/authorize"))
+        .header("cookie", cookie)
+        .header("origin", format!("http://{addr}"))
+        .form(&[
+            ("client_id", client_id),
+            ("redirect_uri", redirect_uri),
+            ("state", "dcr"),
+            ("code_challenge", challenge),
+            ("scope", "read"),
+            ("decision", "approve"),
+            ("csrf_token", &csrf_token),
+        ])
+        .send()
+        .await?;
+    assert_eq!(consent.status(), StatusCode::SEE_OTHER);
+    let location = consent.headers().get("location").unwrap().to_str()?;
+    assert!(location.starts_with(redirect_uri), "{location}");
+    let code = location
+        .split("code=")
+        .nth(1)
+        .and_then(|rest| rest.split('&').next())
+        .unwrap()
+        .to_string();
+    Ok(code)
+}
+
 #[tokio::test]
 async fn a_dynamically_registered_client_runs_the_flow() -> anyhow::Result<()> {
     let dir = TempDir::new("mcp-dcr")?;
     with_admin(&dir.0, |addr| async move {
         let client = Client::new();
-        // The registration needs no session and returns a fresh client id.
-        let registered: Value = client
-            .post(format!("http://{addr}/oauth/register"))
-            .json(&json!({
-                "client_name": "Claude Code",
-                "redirect_uris": ["http://127.0.0.1:49153/callback"],
-            }))
-            .send()
-            .await?
-            .json()
-            .await?;
-        let client_id = registered["client_id"]
-            .as_str()
-            .context("the registration returned no client_id")?
-            .to_string();
-        assert!(client_id.starts_with("mcp-"), "{client_id}");
-        assert_eq!(registered["client_name"], json!("Claude Code"));
+        let client_id = register_dcr_client(&client, addr).await?;
 
         // The registered client runs the same consent flow as a configured one.
         let cookie = session(&client, &addr).await?;
         let (verifier, challenge) = pkce();
         let redirect_uri = "http://127.0.0.1:49153/callback";
-        let consent = no_redirect()
-            .post(format!("http://{addr}/oauth/authorize"))
-            .header("cookie", &cookie)
-            .form(&[
-                ("client_id", client_id.as_str()),
-                ("redirect_uri", redirect_uri),
-                ("state", "dcr"),
-                ("code_challenge", challenge.as_str()),
-                ("scope", "read"),
-                ("decision", "approve"),
-            ])
-            .send()
-            .await?;
-        assert_eq!(
-            consent.status(),
-            StatusCode::SEE_OTHER,
-            "{}",
-            consent.text().await.unwrap_or_default()
-        );
-        let location = consent.headers().get("location").unwrap().to_str()?;
-        assert!(location.starts_with(redirect_uri), "{location}");
-        let code = location
-            .split("code=")
-            .nth(1)
-            .and_then(|rest| rest.split('&').next())
-            .unwrap()
-            .to_string();
+        let code = approve_dcr_client(
+            &client,
+            addr,
+            &cookie,
+            &client_id,
+            redirect_uri,
+            &challenge,
+        )
+        .await?;
 
         // The code trades for tokens under the dynamic client id.
         let tokens: Value = client
@@ -512,9 +593,24 @@ async fn access_token(addr: &SocketAddr) -> anyhow::Result<String> {
     let client = Client::new();
     let cookie = session(&client, addr).await?;
     let (verifier, challenge) = pkce();
+    let url = format!(
+        "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
+         &redirect_uri={REDIRECT_URI}&state=st&code_challenge={challenge}\
+         &code_challenge_method=S256&scope=read%20edit"
+    );
+    let page = client
+        .get(&url)
+        .header("cookie", &cookie)
+        .send()
+        .await?
+        .text()
+        .await?;
+    let csrf_token = extract_csrf_token(&page)?;
+
     let consent = no_redirect()
         .post(format!("http://{addr}/oauth/authorize"))
         .header("cookie", &cookie)
+        .header("origin", format!("http://{addr}"))
         .form(&[
             ("client_id", CLIENT_ID),
             ("redirect_uri", REDIRECT_URI),
@@ -522,6 +618,7 @@ async fn access_token(addr: &SocketAddr) -> anyhow::Result<String> {
             ("code_challenge", challenge.as_str()),
             ("scope", "read edit"),
             ("decision", "approve"),
+            ("csrf_token", &csrf_token),
         ])
         .send()
         .await?;
@@ -873,6 +970,146 @@ async fn changing_password_revokes_mcp_access_token() -> anyhow::Result<()> {
             .await?;
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn consent_rejects_cross_origin_request() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-csrf-origin")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let cookie = session(&client, &addr).await?;
+        let (_, challenge) = pkce();
+        let url = format!(
+            "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
+             &redirect_uri={REDIRECT_URI}&state=s1&code_challenge={challenge}\
+             &code_challenge_method=S256&scope=read"
+        );
+        let page = client
+            .get(&url)
+            .header("cookie", &cookie)
+            .send()
+            .await?
+            .text()
+            .await?;
+        let csrf_token = extract_csrf_token(&page)?;
+
+        let consent = no_redirect()
+            .post(format!("http://{addr}/oauth/authorize"))
+            .header("cookie", &cookie)
+            .header("origin", "http://evil.com")
+            .form(&[
+                ("client_id", CLIENT_ID),
+                ("redirect_uri", REDIRECT_URI),
+                ("state", "s1"),
+                ("code_challenge", challenge.as_str()),
+                ("scope", "read"),
+                ("decision", "approve"),
+                ("csrf_token", &csrf_token),
+            ])
+            .send()
+            .await?;
+        assert_eq!(consent.status(), StatusCode::UNAUTHORIZED);
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn consent_rejects_missing_or_invalid_csrf_token() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-csrf-invalid")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let cookie = session(&client, &addr).await?;
+        let (_, challenge) = pkce();
+
+        let consent_missing = no_redirect()
+            .post(format!("http://{addr}/oauth/authorize"))
+            .header("cookie", &cookie)
+            .header("origin", format!("http://{addr}"))
+            .form(&[
+                ("client_id", CLIENT_ID),
+                ("redirect_uri", REDIRECT_URI),
+                ("state", "s1"),
+                ("code_challenge", challenge.as_str()),
+                ("scope", "read"),
+                ("decision", "approve"),
+            ])
+            .send()
+            .await?;
+        assert_eq!(consent_missing.status(), StatusCode::UNAUTHORIZED);
+
+        let consent_bad = no_redirect()
+            .post(format!("http://{addr}/oauth/authorize"))
+            .header("cookie", &cookie)
+            .header("origin", format!("http://{addr}"))
+            .form(&[
+                ("client_id", CLIENT_ID),
+                ("redirect_uri", REDIRECT_URI),
+                ("state", "s1"),
+                ("code_challenge", challenge.as_str()),
+                ("scope", "read"),
+                ("decision", "approve"),
+                ("csrf_token", "invalid_forged_token"),
+            ])
+            .send()
+            .await?;
+        assert_eq!(consent_bad.status(), StatusCode::UNAUTHORIZED);
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn consent_rejects_replayed_csrf_token() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-csrf-replay")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let cookie = session(&client, &addr).await?;
+        let (_, challenge) = pkce();
+        let url = format!(
+            "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
+             &redirect_uri={REDIRECT_URI}&state=s1&code_challenge={challenge}\
+             &code_challenge_method=S256&scope=read"
+        );
+        let page = client
+            .get(&url)
+            .header("cookie", &cookie)
+            .send()
+            .await?
+            .text()
+            .await?;
+        let csrf_token = extract_csrf_token(&page)?;
+
+        let form_data = [
+            ("client_id", CLIENT_ID),
+            ("redirect_uri", REDIRECT_URI),
+            ("state", "s1"),
+            ("code_challenge", challenge.as_str()),
+            ("scope", "read"),
+            ("decision", "approve"),
+            ("csrf_token", &csrf_token),
+        ];
+
+        let consent1 = no_redirect()
+            .post(format!("http://{addr}/oauth/authorize"))
+            .header("cookie", &cookie)
+            .header("origin", format!("http://{addr}"))
+            .form(&form_data)
+            .send()
+            .await?;
+        assert_eq!(consent1.status(), StatusCode::SEE_OTHER);
+
+        let consent2 = no_redirect()
+            .post(format!("http://{addr}/oauth/authorize"))
+            .header("cookie", &cookie)
+            .header("origin", format!("http://{addr}"))
+            .form(&form_data)
+            .send()
+            .await?;
+        assert_eq!(consent2.status(), StatusCode::UNAUTHORIZED);
         Ok(())
     })
     .await
