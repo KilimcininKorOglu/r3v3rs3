@@ -656,17 +656,18 @@ pub async fn verify(
 }
 
 async fn bearer_caller(state: &AppState, token: &str) -> Result<Caller, Error> {
-    let username = {
+    let (username, created_at) = {
         let data = state.data.lock().await;
         if !data.config.mcp.enabled {
             return Err(Error::Unauthorized);
         }
         match data.mcp.verify(token) {
-            Some(grant) => grant.username().to_string(),
+            Some(grant) => (grant.username().to_string(), grant.created_at()),
             None => return Err(Error::Unauthorized),
         }
     };
-    let record = crate::sessions::SessionRecord::new(&username);
+    let mut record = crate::sessions::SessionRecord::new(&username);
+    record.started_at = created_at;
     state
         .accounts
         .borrow()

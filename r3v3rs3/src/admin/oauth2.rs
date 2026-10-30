@@ -94,6 +94,11 @@ impl AccessToken {
     pub fn username(&self) -> &str {
         &self.username
     }
+
+    /// The timestamp in seconds at which the grant was created.
+    pub fn created_at(&self) -> u64 {
+        self.created_at
+    }
 }
 
 async fn db_save_client(pool: &SqlitePool, client: &McpClientConfig) -> anyhow::Result<()> {
@@ -1420,14 +1425,19 @@ pub async fn verify_bearer(
     else {
         return unauthorized(&origin);
     };
-    let (username, scope) = {
+    let (username, scope, created_at) = {
         let data = state.data.lock().await;
         match data.mcp.verify(token) {
-            Some(grant) => (grant.username.clone(), grant.scope.clone()),
+            Some(grant) => (
+                grant.username.clone(),
+                grant.scope.clone(),
+                grant.created_at,
+            ),
             None => return unauthorized(&origin),
         }
     };
-    let record = crate::sessions::SessionRecord::new(&username);
+    let mut record = crate::sessions::SessionRecord::new(&username);
+    record.started_at = created_at;
     let Some(mut caller) = state.accounts.borrow().caller(&record) else {
         return unauthorized(&origin);
     };

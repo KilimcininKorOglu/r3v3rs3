@@ -836,3 +836,44 @@ async fn the_mcp_sessions_survive_server_restart_and_can_be_revoked() -> anyhow:
     })
     .await
 }
+
+#[tokio::test]
+async fn changing_password_revokes_mcp_access_token() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-pwd-revoke")?;
+    with_admin(&dir.0, |addr| async move {
+        let (access, _) = obtain_tokens_in_flow(addr).await?;
+        let client = Client::new();
+
+        let res = client
+            .post(format!("http://{addr}/api/mcp"))
+            .header("Authorization", format!("Bearer {access}"))
+            .header("Accept", "application/json, text/event-stream")
+            .json(&json!({ "jsonrpc": "2.0", "method": "tools/list", "id": 1 }))
+            .send()
+            .await?;
+        assert_ne!(res.status(), StatusCode::UNAUTHORIZED);
+
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        let cookie = session(&client, &addr).await?;
+        let update = json!({"role": "admin", "password": "new-password"});
+        let put_res = client
+            .put(format!("http://{addr}/api/accounts/admin"))
+            .header("Cookie", &cookie)
+            .json(&update)
+            .send()
+            .await?;
+        assert_eq!(put_res.status(), StatusCode::OK);
+
+        let res = client
+            .post(format!("http://{addr}/api/mcp"))
+            .header("Authorization", format!("Bearer {access}"))
+            .header("Accept", "application/json, text/event-stream")
+            .json(&json!({ "jsonrpc": "2.0", "method": "tools/list", "id": 1 }))
+            .send()
+            .await?;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        Ok(())
+    })
+    .await
+}
