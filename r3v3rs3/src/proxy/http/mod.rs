@@ -32,7 +32,7 @@ use hyper::{
     },
     http::{
         HeaderValue,
-        uri::{Parts, Scheme},
+        uri::{Parts, PathAndQuery, Scheme},
     },
     service::service_fn,
 };
@@ -1104,6 +1104,26 @@ fn no_route_fallback<B>(
     )
 }
 
+fn normalize_request_path<B>(req: &mut Request<B>) {
+    let uri = req.uri();
+    let path = uri.path();
+    let normalized = filter::normalize_path(path);
+    if normalized == path {
+        return;
+    }
+    let new_path_and_query = match uri.query() {
+        Some(query) => format!("{normalized}?{query}"),
+        None => normalized,
+    };
+    if let Ok(pq) = new_path_and_query.parse::<PathAndQuery>() {
+        let mut parts = req.uri().clone().into_parts();
+        parts.path_and_query = Some(pq);
+        if let Ok(new_uri) = Uri::from_parts(parts) {
+            *req.uri_mut() = new_uri;
+        }
+    }
+}
+
 /// Matches the request to a route, applies the route policies and prepares
 /// the request for the upstream server.
 async fn route_request<B>(
@@ -1120,6 +1140,7 @@ where
     B: Body<Data = Bytes>,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
+    normalize_request_path(&mut req);
     if let Some(early_resp) = validate_early_data(&mut req, info) {
         return (
             ProxiedRequest::Respond(early_resp),

@@ -437,3 +437,67 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn dot_segments_in_path_match_protected_route() -> anyhow::Result<()> {
+    let proxy_port = alloc_tcp_port().await?;
+    let mut server = mockito::Server::new_async().await;
+
+    let mock_admin = server
+        .mock("GET", "/admin_upstream")
+        .with_status(200)
+        .with_body("admin_protected")
+        .create_async()
+        .await;
+
+    let admin_url = format!("{}/admin_upstream", server.url()).parse().unwrap();
+    let public_url = format!("{}/public_upstream", server.url()).parse().unwrap();
+    let config = TestStorage::builder()
+        .ports(vec![PortEntry {
+            id: "port".parse().unwrap(),
+            port: Port {
+                active: true,
+                name: String::new(),
+                listen: proxy_port.multiaddr_http(),
+                opts: Default::default(),
+            },
+        }])
+        .proxies(vec![ProxyEntry {
+            id: "proxy".parse().unwrap(),
+            source: None,
+            proxy: Proxy {
+                ports: vec!["port".parse().unwrap()],
+                kind: ProxyKind::Http(Box::new(HttpProxy {
+                    vhosts: vec!["localhost".parse().unwrap()],
+                    routes: vec![
+                        Route {
+                            path: "/admin".into(),
+                            servers: vec![r3v3rs3_api::proxy::Server::new(admin_url)],
+                            ..Default::default()
+                        },
+                        Route {
+                            path: "/".into(),
+                            servers: vec![r3v3rs3_api::proxy::Server::new(public_url)],
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        }])
+        .build();
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::builder().build()?;
+        let resp = client.get(proxy_port.http_url("/./admin")).send().await?;
+        assert_eq!(resp.status(), 200);
+        let text = resp.text().await?;
+        assert_eq!(text, "admin_protected");
+        mock_admin.assert_async().await;
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}

@@ -44,7 +44,8 @@ impl RequestFilter {
     /// Returns the rank of the route for the request, or `None` when the route does not match.
     pub fn rank<T>(&self, req: &Request<T>, host: Option<&str>) -> Option<MatchRank> {
         let host = self.host_match(host)?;
-        let matched = request_segments(req)
+        let path = normalize_path(req.uri().path());
+        let matched = request_segments(&path)
             .zip(self.path.iter())
             .take_while(|(a, b)| a == b)
             .count();
@@ -57,8 +58,9 @@ impl RequestFilter {
     /// Returns the path segments of the request after the path of the route. Call it only for a
     /// route whose [`RequestFilter::rank`] is `Some`.
     pub fn result<T>(&self, req: &Request<T>) -> FilterResult {
+        let path = normalize_path(req.uri().path());
         FilterResult {
-            path_segments: request_segments(req)
+            path_segments: request_segments(&path)
                 .skip(self.path.len())
                 .map(str::to_string)
                 .collect(),
@@ -90,8 +92,50 @@ fn vhost_match(vhost: &VirtualHost) -> HostMatch {
     }
 }
 
-fn request_segments<T>(req: &Request<T>) -> std::str::Split<'_, char> {
-    req.uri().path().trim_start_matches('/').split('/')
+fn is_single_dot(segment: &str) -> bool {
+    segment.eq_ignore_ascii_case(".") || segment.eq_ignore_ascii_case("%2e")
+}
+
+fn is_double_dot(segment: &str) -> bool {
+    matches!(
+        segment.to_ascii_lowercase().as_str(),
+        ".." | ".%2e" | "%2e." | "%2e%2e"
+    )
+}
+
+fn needs_trailing_slash(path: &str, last_was_dot: bool, result: &str) -> bool {
+    (path.ends_with('/') || last_was_dot) && !result.ends_with('/')
+}
+
+/// Resolves `.` and `..` (including percent-encoded `%2e`) segments according to RFC 3986.
+pub fn normalize_path(path: &str) -> String {
+    let mut normalized = Vec::new();
+    let mut last_was_dot = false;
+    for segment in path.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        if is_single_dot(segment) {
+            last_was_dot = true;
+            continue;
+        }
+        if is_double_dot(segment) {
+            normalized.pop();
+            last_was_dot = true;
+            continue;
+        }
+        last_was_dot = false;
+        normalized.push(segment);
+    }
+    let mut result = format!("/{}", normalized.join("/"));
+    if needs_trailing_slash(path, last_was_dot, &result) {
+        result.push('/');
+    }
+    result
+}
+
+fn request_segments(path: &str) -> std::str::Split<'_, char> {
+    path.trim_start_matches('/').split('/')
 }
 
 #[derive(Debug)]
@@ -155,5 +199,30 @@ mod tests {
             None
         );
         assert!(filter(&[], "/").rank(&req, None).is_some());
+    }
+
+    #[test]
+    fn dot_segments_are_normalized() {
+        let req1 = request("/./admin");
+        let req2 = request("/%2e/admin");
+        let req3 = request("/foo/../admin");
+        let req4 = request("/foo/%2e%2e/admin");
+        let admin_filter = filter(&[], "/admin");
+
+        assert!(admin_filter.rank(&req1, None).is_some());
+        assert!(admin_filter.rank(&req2, None).is_some());
+        assert!(admin_filter.rank(&req3, None).is_some());
+        assert!(admin_filter.rank(&req4, None).is_some());
+
+        assert_eq!(admin_filter.result(&req1).path_segments, Vec::<String>::new());
+        assert_eq!(admin_filter.result(&req2).path_segments, Vec::<String>::new());
+        assert_eq!(admin_filter.result(&req3).path_segments, Vec::<String>::new());
+        assert_eq!(admin_filter.result(&req4).path_segments, Vec::<String>::new());
+
+        let req_sub = request("/./admin/users");
+        assert_eq!(
+            admin_filter.result(&req_sub).path_segments,
+            vec!["users".to_string()]
+        );
     }
 }
