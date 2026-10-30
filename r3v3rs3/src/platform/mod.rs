@@ -527,17 +527,25 @@ impl Platform {
         self.store.replace_env(id, &stored).await
     }
 
-    /// Copies all environment variables from one app to another, re-sealing them with the target app's AAD.
-    pub(super) async fn copy_app_env(&self, from: ShortId, to: ShortId) -> anyhow::Result<()> {
+    /// Copies non-secret environment variables from one app to another, re-sealing them with the target app's AAD.
+    /// Secret environment variables are omitted to prevent leakage to preview environments.
+    pub(super) async fn copy_non_secret_app_env(
+        &self,
+        from: ShortId,
+        to: ShortId,
+    ) -> anyhow::Result<()> {
         let source_vars = self.store.env(from).await?;
         let mut new_vars = Vec::with_capacity(source_vars.len());
         for var in source_vars {
+            if var.secret {
+                continue;
+            }
             let value = self.open_value(from, &var)?;
             let sealed = self.keys().seal(&env_aad(to, &var.key), value.as_bytes())?;
             new_vars.push(crate::platform::store::StoredEnv {
                 key: var.key,
                 sealed,
-                secret: var.secret,
+                secret: false,
             });
         }
         self.store.replace_env(to, &new_vars).await

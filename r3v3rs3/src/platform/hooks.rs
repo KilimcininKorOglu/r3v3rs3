@@ -786,6 +786,8 @@ fn preview_app_spec(parent: &AppEntry, pr: &PrPayload, domain: SubjectName) -> A
     spec.tag_trigger = None;
     spec.auto_deploy = false;
     spec.preview = None;
+    spec.environment_id = None;
+    spec.env_groups = Vec::new();
     spec.preview_of = Some(PreviewParent {
         parent_id: parent.id,
         pr_number: pr.number,
@@ -898,18 +900,6 @@ impl Platform {
         }))
     }
 
-    async fn copy_git_token(
-        &self,
-        from: ShortId,
-        to: ShortId,
-        has_token: bool,
-    ) -> anyhow::Result<()> {
-        if has_token && let Some(token) = self.git_token(from).await? {
-            self.set_git_token(to, &token).await?;
-        }
-        Ok(())
-    }
-
     async fn create_preview_app(
         self: &Arc<Self>,
         parent: &AppEntry,
@@ -924,9 +914,7 @@ impl Platform {
             spec,
         };
         let preview_app = self.add_app(request, crate::clock::unix_ms()).await?;
-        self.copy_app_env(parent.id, preview_app.id).await?;
-        self.copy_git_token(parent.id, preview_app.id, parent.git_token_set)
-            .await?;
+        self.copy_non_secret_app_env(parent.id, preview_app.id).await?;
         Ok(preview_app)
     }
 
@@ -1416,16 +1404,53 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn github_pull_request_open_and_sync() -> anyhow::Result<()> {
-        let (platform, _dir) = platform().await?;
+    async fn setup_parent_app_with_secrets(
+        platform: &Platform,
+    ) -> anyhow::Result<(AppEntry, r3v3rs3_api::platform::WebhookSecret)> {
         let mut req = git_request("main-app");
         req.spec.preview = Some(r3v3rs3_api::platform::PreviewConfig {
             enabled: true,
             domain_template: None,
         });
         let parent = platform.add_app(req, 1).await?;
+        let env_entries = vec![
+            r3v3rs3_api::platform::EnvEntry {
+                key: "PUBLIC_CONFIG".parse().expect("valid key"),
+                value: Some("public".to_string()),
+                secret: false,
+            },
+            r3v3rs3_api::platform::EnvEntry {
+                key: "API_SECRET".parse().expect("valid key"),
+                value: Some("secret123".to_string()),
+                secret: true,
+            },
+        ];
+        platform.set_env(parent.id, env_entries).await?;
+        platform
+            .set_git_token(parent.id, "private-repo-token")
+            .await?;
         let (_, secret) = platform.new_webhook_secret(parent.id).await?;
+        Ok((parent, secret))
+    }
+
+    async fn assert_preview_secrets_isolated(
+        platform: &Platform,
+        preview: &AppEntry,
+    ) -> anyhow::Result<()> {
+        let preview_env = platform.env(preview.id).await?;
+        assert_eq!(preview_env.len(), 1);
+        assert_eq!(preview_env[0].key.as_str(), "PUBLIC_CONFIG");
+        assert!(!preview_env[0].secret);
+        assert!(platform.git_token(preview.id).await?.is_none());
+        assert!(preview.spec.environment_id.is_none());
+        assert!(preview.spec.env_groups.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn github_pull_request_open_and_sync() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let (parent, secret) = setup_parent_app_with_secrets(&platform).await?;
         let signed = |event, body: &[u8]| github(&secret.secret, event, body);
 
         // PR Opened
@@ -1447,6 +1472,7 @@ mod tests {
             .await?
             .expect("preview app must exist");
         assert_eq!(preview.name.as_str(), "main-app-pr-42");
+        assert_preview_secrets_isolated(&platform, &preview).await?;
         wait_deployments(&platform, preview.id).await?;
 
         // PR Synchronize
