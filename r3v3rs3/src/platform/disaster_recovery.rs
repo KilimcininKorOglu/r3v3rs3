@@ -12,6 +12,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use r3v3rs3_api::platform::DisasterRecoveryBackupEntry;
 use sha2::{Digest, Sha256};
+use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -26,15 +27,11 @@ pub const DISASTER_RECOVERY_DIR: &str = "disaster-recovery";
 const ROOT_CONFIG_FILES: &[&str] = &[
     "r3v3rs3.key",
     "r3v3rs3.db",
-    "r3v3rs3.db-wal",
-    "r3v3rs3.db-shm",
     "cdn-ranges.json",
     "app-store.json",
     "engines.json",
     "platform.key",
     "platform.db",
-    "platform.db-wal",
-    "platform.db-shm",
     "config.toml",
     "ports.toml",
     "proxies.toml",
@@ -129,10 +126,25 @@ pub fn decrypt_dr_bundle(bundle: &[u8], passphrase: &str) -> anyhow::Result<Vec<
     Ok(body)
 }
 
+async fn checkpoint_db(db_path: &Path) {
+    if !db_path.is_file() {
+        return;
+    }
+    let options = SqliteConnectOptions::new()
+        .filename(db_path)
+        .busy_timeout(std::time::Duration::from_secs(5));
+    if let Ok(pool) = SqlitePool::connect_with(options).await {
+        let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&pool)
+            .await;
+        let _ = pool.close().await;
+    }
+}
+
 /// Collects root files and subdirectories from `config_dir` for the bundle.
-pub fn collect_bundle_files(config_dir: &Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+pub async fn collect_bundle_files(config_dir: &Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     let mut files = Vec::new();
-    collect_root_files(config_dir, &mut files);
+    collect_root_files(config_dir, &mut files).await;
     for subdir in SUBDIRS {
         let dir_path = config_dir.join(subdir);
         if dir_path.is_dir() {
@@ -142,9 +154,12 @@ pub fn collect_bundle_files(config_dir: &Path) -> anyhow::Result<Vec<(String, Ve
     Ok(files)
 }
 
-fn collect_root_files(config_dir: &Path, files: &mut Vec<(String, Vec<u8>)>) {
+async fn collect_root_files(config_dir: &Path, files: &mut Vec<(String, Vec<u8>)>) {
     for filename in ROOT_CONFIG_FILES {
         let path = config_dir.join(filename);
+        if filename.ends_with(".db") {
+            checkpoint_db(&path).await;
+        }
         if path.is_file()
             && let Ok(bytes) = fs::read(&path)
         {
@@ -205,6 +220,7 @@ fn is_allowed_dr_path(path: &Path) -> bool {
     let first_str = first_str.to_string_lossy();
     if components.next().is_none() {
         ROOT_CONFIG_FILES.contains(&first_str.as_ref())
+            || (first_str.ends_with(".db-wal") && !first_str.ends_with("-shm"))
     } else {
         SUBDIRS.contains(&first_str.as_ref())
     }
@@ -330,7 +346,7 @@ pub async fn create_dr_backup(
     upload_s3: bool,
     platform: Option<&crate::platform::Platform>,
 ) -> anyhow::Result<DisasterRecoveryBackupEntry> {
-    let files = collect_bundle_files(config_dir)?;
+    let files = collect_bundle_files(config_dir).await?;
     let files_count = files.len();
     let tar_gz = pack_tar_gz(&files)?;
     let pass = passphrase.unwrap_or("");
@@ -466,7 +482,7 @@ pub async fn run_cli_backup(
     passphrase: &str,
     _upload_s3: bool,
 ) -> anyhow::Result<(DisasterRecoveryBackupEntry, PathBuf)> {
-    let files = collect_bundle_files(config_dir)?;
+    let files = collect_bundle_files(config_dir).await?;
     let files_count = files.len();
     let tar_gz = pack_tar_gz(&files)?;
     let encrypted = encrypt_dr_bundle(&tar_gz, passphrase)?;
@@ -583,6 +599,37 @@ mod tests {
             tar.into_inner().unwrap().finish().unwrap();
         }
         assert!(unpack_tar_gz(&tar_bytes, &temp_dir).is_err());
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_atomic_db_snapshot_and_collect_bundle_files() {
+        let temp_dir = std::env::temp_dir().join(format!("r3dr_test_db_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let db_path = temp_dir.join("r3v3rs3.db");
+        let options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true);
+        let pool = SqlitePool::connect_with(options).await.unwrap();
+        sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE test_data (id INTEGER PRIMARY KEY, val TEXT)").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO test_data (val) VALUES ('uncheckpointed_wal_row')").execute(&pool).await.unwrap();
+        let _ = pool.close().await;
+
+        // Create a dummy .db-shm file and config.toml
+        fs::write(temp_dir.join("r3v3rs3.db-shm"), b"dummy shm").unwrap();
+        fs::write(temp_dir.join("config.toml"), b"key = 'val'").unwrap();
+
+        let files = collect_bundle_files(&temp_dir).await.unwrap();
+        let filenames: Vec<String> = files.into_iter().map(|(name, _)| name).collect();
+
+        assert!(filenames.contains(&"r3v3rs3.db".to_string()));
+        assert!(filenames.contains(&"config.toml".to_string()));
+        assert!(!filenames.contains(&"r3v3rs3.db-shm".to_string()));
+        assert!(!filenames.contains(&"r3v3rs3.db-wal".to_string()));
+
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }
