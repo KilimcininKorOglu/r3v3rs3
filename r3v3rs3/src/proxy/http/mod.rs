@@ -671,12 +671,97 @@ async fn proxied_response(
     mapped
 }
 
+const SENSITIVE_KEYWORDS: &[&str] = &[
+    "password",
+    "secret",
+    "token",
+    "apikey",
+    "api_key",
+    "credential",
+];
+
+fn is_sensitive_header_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "authorization"
+            | "proxy-authorization"
+            | "cookie"
+            | "set-cookie"
+            | "x-api-key"
+            | "api-key"
+            | "x-auth-token"
+            | "x-csrf-token"
+            | "x-xsrf-token"
+    )
+}
+
+fn is_sensitive_field_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    SENSITIVE_KEYWORDS.iter().any(|&k| lower.contains(k))
+}
+
+fn redact_json_value(val: &mut serde_json::Value) {
+    match val {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                if is_sensitive_field_name(k) {
+                    *v = serde_json::Value::String("[REDACTED]".to_string());
+                } else {
+                    redact_json_value(v);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                redact_json_value(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_form_data(body: &str) -> String {
+    if !body.contains('=') {
+        return body.to_string();
+    }
+    let mut parts = Vec::new();
+    for pair in body.split('&') {
+        if let Some((k, _)) = pair.split_once('=') {
+            if is_sensitive_field_name(k) {
+                parts.push(format!("{k}=[REDACTED]"));
+            } else {
+                parts.push(pair.to_string());
+            }
+        } else {
+            parts.push(pair.to_string());
+        }
+    }
+    parts.join("&")
+}
+
+fn sanitize_body_preview(body: Option<String>) -> Option<String> {
+    let body = body?;
+    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&body) {
+        redact_json_value(&mut json);
+        return serde_json::to_string(&json).ok();
+    }
+    Some(redact_form_data(&body))
+}
+
 fn extract_headers(headers: &hyper::HeaderMap) -> Vec<r3v3rs3_api::traffic::HeaderEntry> {
     headers
         .iter()
-        .map(|(k, v)| r3v3rs3_api::traffic::HeaderEntry {
-            name: k.to_string(),
-            value: v.to_str().unwrap_or_default().to_string(),
+        .map(|(k, v)| {
+            let value = if is_sensitive_header_name(k.as_str()) {
+                "[REDACTED]".to_string()
+            } else {
+                v.to_str().unwrap_or_default().to_string()
+            };
+            r3v3rs3_api::traffic::HeaderEntry {
+                name: k.to_string(),
+                value,
+            }
         })
         .collect()
 }
@@ -699,7 +784,7 @@ async fn buffer_request_body(
     if should_buffer {
         if let Ok(collected) = incoming.collect().await {
             let bytes = collected.to_bytes();
-            let preview = String::from_utf8(bytes.to_vec()).ok();
+            let preview = sanitize_body_preview(String::from_utf8(bytes.to_vec()).ok());
             let full = Full::new(bytes)
                 .map_err(|e: std::convert::Infallible| -> BodyStreamError { match e {} });
             return (Request::from_parts(parts, BoxBody::new(full)), preview);
@@ -1858,5 +1943,63 @@ fn handle_purge_or_fixed<B>(
             .response
             .as_ref()
             .map(|resp| fixed::respond(resp, req))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyper::HeaderMap;
+    use hyper::header::{AUTHORIZATION, COOKIE, HeaderValue, SET_COOKIE, USER_AGENT};
+
+    #[test]
+    fn test_extract_headers_redaction() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer secret-token-xyz"),
+        );
+        headers.insert(COOKIE, HeaderValue::from_static("session_id=abcdef123456"));
+        headers.insert(
+            SET_COOKIE,
+            HeaderValue::from_static("jwt=header.payload.sig"),
+        );
+        headers.insert(
+            HeaderName::from_static("x-api-key"),
+            HeaderValue::from_static("key-999"),
+        );
+        headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0"));
+
+        let extracted = extract_headers(&headers);
+        for entry in extracted {
+            match entry.name.to_ascii_lowercase().as_str() {
+                "authorization" | "cookie" | "set-cookie" | "x-api-key" => {
+                    assert_eq!(entry.value, "[REDACTED]");
+                }
+                "user-agent" => {
+                    assert_eq!(entry.value, "Mozilla/5.0");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn test_sanitize_json_body_preview() {
+        let json_body = r#"{"username":"admin","password":"secret_pass_123","nested":{"token":"jwt-123","ok":true}}"#;
+        let sanitized = sanitize_body_preview(Some(json_body.to_string())).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&sanitized).unwrap();
+
+        assert_eq!(parsed["username"], "admin");
+        assert_eq!(parsed["password"], "[REDACTED]");
+        assert_eq!(parsed["nested"]["token"], "[REDACTED]");
+        assert_eq!(parsed["nested"]["ok"], true);
+    }
+
+    #[test]
+    fn test_sanitize_form_body_preview() {
+        let form_body = "username=admin&password=my_password&action=login";
+        let sanitized = sanitize_body_preview(Some(form_body.to_string())).unwrap();
+        assert_eq!(sanitized, "username=admin&password=[REDACTED]&action=login");
     }
 }
