@@ -102,6 +102,13 @@ impl ProxyKind {
     }
 }
 
+fn validate_http_features(http: &HttpProxy) -> Result<(), Error> {
+    http.maintenance.validate()?;
+    http.compression.validate()?;
+    http.cache.validate()?;
+    http.headers.validate()
+}
+
 /// The upstream part of an HTTP proxy: its own settings and the settings of every route.
 fn validate_http_upstream(http: &HttpProxy) -> Result<(), Error> {
     validate_access_lists(http)?;
@@ -109,8 +116,7 @@ fn validate_http_upstream(http: &HttpProxy) -> Result<(), Error> {
     http.circuit_breaker.validate()?;
     http.sticky.validate()?;
     http.redirects.iter().try_for_each(RedirectRule::validate)?;
-    http.maintenance.validate()?;
-    http.compression.validate()?;
+    validate_http_features(http)?;
     http.error_pages
         .iter()
         .try_for_each(CustomErrorPage::validate)?;
@@ -123,6 +129,7 @@ fn validate_route(route: &Route) -> Result<(), Error> {
     validate_route_target(route)?;
     validate_weights(route.servers.iter().map(|server| server.weight))?;
     route.mirror.iter().try_for_each(Mirror::validate)?;
+    route.headers.iter().try_for_each(HeaderRules::validate)?;
     route.rewrite.validate()
 }
 
@@ -793,5 +800,51 @@ mod tests {
             body: "a".repeat(70000),
         };
         assert!(too_large.validate().is_err());
+    }
+
+    #[test]
+    fn proxy_validation_checks_headers_and_cache() {
+        use crate::header_rules::HeaderRule;
+
+        let http = HttpProxy {
+            cache: CacheConfig {
+                enabled: true,
+                max_size: 100,
+                max_entry_size: 200,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let proxy = ProxyKind::Http(Box::new(http));
+        assert!(matches!(proxy.validate_upstream(), Err(Error::InvalidCacheSize)));
+
+        let http = HttpProxy {
+            headers: HeaderRules {
+                request: vec![HeaderRule::Set {
+                    name: "Host".into(),
+                    value: "evil.com".into(),
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let proxy = ProxyKind::Http(Box::new(http));
+        assert!(matches!(proxy.validate_upstream(), Err(Error::ProtectedHeader { .. })));
+
+        let http = HttpProxy {
+            routes: vec![Route {
+                headers: Some(HeaderRules {
+                    response: vec![HeaderRule::Set {
+                        name: "Transfer-Encoding".into(),
+                        value: "chunked".into(),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let proxy = ProxyKind::Http(Box::new(http));
+        assert!(matches!(proxy.validate_upstream(), Err(Error::ProtectedHeader { .. })));
     }
 }
