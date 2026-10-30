@@ -1925,8 +1925,25 @@ fn dictionary_response(
     res
 }
 
-fn handle_purge_request<B>(route: &FilteredRoute, req: &Request<B>) -> Response<Full<Bytes>> {
-    let (status, msg) = if let Some(cache) = &route.cache {
+fn is_purge_authorized(has_auth: bool, client: &client_ip::ClientAddr) -> bool {
+    client.peer.is_loopback()
+        || client.ip.is_loopback()
+        || client.trusted_peer
+        || has_auth
+}
+
+fn handle_purge_request<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    client: &client_ip::ClientAddr,
+) -> (StatusCode, String) {
+    if !is_purge_authorized(route.auth.is_some(), client) {
+        return (
+            StatusCode::FORBIDDEN,
+            "Forbidden: cache purge requires authentication or trusted client IP\n".to_string(),
+        );
+    }
+    if let Some(cache) = &route.cache {
         let path = req.uri().path_and_query().map_or("/", |p| p.as_str());
         let count = cache.purge_path(path);
         (
@@ -1938,7 +1955,10 @@ fn handle_purge_request<B>(route: &FilteredRoute, req: &Request<B>) -> Response<
             StatusCode::BAD_REQUEST,
             "Cache is not enabled for this proxy\n".to_string(),
         )
-    };
+    }
+}
+
+fn build_purge_response(status: StatusCode, msg: String) -> Response<Full<Bytes>> {
     let mut response = Response::new(Full::new(Bytes::from(msg)));
     *response.status_mut() = status;
     response.headers_mut().insert(
@@ -1955,10 +1975,20 @@ fn handle_purge_or_fixed<B>(
     client: &client_ip::ClientAddr,
     action: &str,
 ) -> Option<Response<Full<Bytes>>> {
-    if req.method().as_str() == "PURGE" {
+    if route.cache.is_some() && req.method().as_str() == "PURGE" {
+        let (status, msg) = handle_purge_request(route, req, client);
         let resource_id = route.resource_id;
-        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, status = 200);
-        Some(handle_purge_request(route, req))
+        info!(
+            target: "r3v3rs3::access_log",
+            %resource_id,
+            remote = %info.remote,
+            peer = %info.peer,
+            client = %client.ip,
+            local = %info.local,
+            action,
+            status = status.as_u16(),
+        );
+        Some(build_purge_response(status, msg))
     } else {
         route
             .response
@@ -2022,5 +2052,38 @@ mod tests {
         let form_body = "username=admin&password=my_password&action=login";
         let sanitized = sanitize_body_preview(Some(form_body.to_string())).unwrap();
         assert_eq!(sanitized, "username=admin&password=[REDACTED]&action=login");
+    }
+
+    #[test]
+    fn test_purge_authorization() {
+        let loopback_addr = client_ip::ClientAddr {
+            peer: "127.0.0.1".parse().unwrap(),
+            ip: "127.0.0.1".parse().unwrap(),
+            trusted_peer: false,
+        };
+        assert!(is_purge_authorized(false, &loopback_addr));
+        assert!(is_purge_authorized(true, &loopback_addr));
+
+        let ipv6_loopback = client_ip::ClientAddr {
+            peer: "::1".parse().unwrap(),
+            ip: "::1".parse().unwrap(),
+            trusted_peer: false,
+        };
+        assert!(is_purge_authorized(false, &ipv6_loopback));
+
+        let trusted_peer_addr = client_ip::ClientAddr {
+            peer: "198.51.100.10".parse().unwrap(),
+            ip: "203.0.113.5".parse().unwrap(),
+            trusted_peer: true,
+        };
+        assert!(is_purge_authorized(false, &trusted_peer_addr));
+
+        let remote_addr = client_ip::ClientAddr {
+            peer: "198.51.100.1".parse().unwrap(),
+            ip: "198.51.100.1".parse().unwrap(),
+            trusted_peer: false,
+        };
+        assert!(!is_purge_authorized(false, &remote_addr));
+        assert!(is_purge_authorized(true, &remote_addr));
     }
 }
