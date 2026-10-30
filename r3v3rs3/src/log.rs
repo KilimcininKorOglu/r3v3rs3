@@ -2,6 +2,7 @@ use clap::ValueEnum;
 use dashmap::DashMap;
 use sqlx::{ConnectOptions, SqlitePool, sqlite::SqliteConnectOptions};
 use std::fs;
+use std::sync::Arc;
 use std::time::Duration;
 use std::{
     collections::HashMap,
@@ -100,10 +101,11 @@ where
     }
 }
 
+#[derive(Clone)]
 pub struct DatabaseLayer {
     pool: SqlitePool,
     handle: Handle,
-    span_map: DashMap<span::Id, String>,
+    span_map: Arc<DashMap<span::Id, String>>,
     level_filter: LevelFilter,
 }
 
@@ -136,7 +138,7 @@ impl DatabaseLayer {
         Ok(Self {
             pool,
             handle: Handle::current(),
-            span_map: DashMap::new(),
+            span_map: Arc::new(DashMap::new()),
             level_filter,
         })
     }
@@ -161,6 +163,10 @@ where
         if let Some(resource_id) = visitor.values.remove("resource_id") {
             self.span_map.insert(id.clone(), resource_id);
         }
+    }
+
+    fn on_close(&self, id: span::Id, _ctx: Context<'_, S>) {
+        self.span_map.remove(&id);
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
@@ -259,5 +265,29 @@ mod tests {
     #[test]
     fn a_path_without_a_name_keeps_the_default_name() {
         assert_eq!(location("/"), ("/".into(), "r3v3rs3.log".into()));
+    }
+
+    #[tokio::test]
+    async fn database_layer_evicts_span_on_close() {
+        use r3v3rs3_api::id::ShortId;
+        use tracing_subscriber::layer::SubscriberExt;
+        let temp_dir = std::env::temp_dir().join(format!("r3-log-test-{}", ShortId::new()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db_path = temp_dir.join("test.db");
+        let layer = super::DatabaseLayer::new(&db_path, super::LevelFilter::INFO)
+            .await
+            .unwrap();
+
+        let subscriber = tracing_subscriber::registry().with(layer.clone());
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(layer.span_map.is_empty());
+            {
+                let span = tracing::info_span!("request", resource_id = "res-123");
+                let _enter = span.enter();
+                assert_eq!(layer.span_map.len(), 1);
+            }
+            assert!(layer.span_map.is_empty());
+        });
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
