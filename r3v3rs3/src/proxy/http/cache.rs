@@ -102,20 +102,12 @@ impl HttpCache {
         entry: &CachedResponse,
         headers: &HeaderMap,
     ) -> Arc<CachedResponse> {
-        let mut head = entry.head.clone();
-        for name in headers.keys().filter(|name| **name != CONTENT_LENGTH) {
-            head.headers.remove(name);
-            for value in headers.get_all(name) {
-                head.headers.append(name, value.clone());
-            }
-        }
-        head.initial_age = age(headers);
-        head.freshness = freshness(&head.headers, self.config.default_ttl);
-        let refreshed = Arc::new(CachedResponse {
-            head,
-            body: entry.body.clone(),
-            stored_at: Instant::now(),
-        });
+        let refreshed = Arc::new(merge_304_headers(
+            entry,
+            headers,
+            self.config.default_ttl,
+            true,
+        ));
         self.entries.insert(key.to_string(), refreshed.clone());
         refreshed
     }
@@ -593,13 +585,64 @@ struct RevalidationTask {
     req_headers: HeaderMap,
 }
 
+fn merge_304_headers(
+    entry: &CachedResponse,
+    headers: &HeaderMap,
+    default_ttl: Duration,
+    filter_cookie: bool,
+) -> CachedResponse {
+    let mut head = entry.head.clone();
+    for name in headers
+        .keys()
+        .filter(|name| **name != CONTENT_LENGTH && (!filter_cookie || **name != SET_COOKIE))
+    {
+        head.headers.remove(name);
+        for value in headers.get_all(name) {
+            head.headers.append(name, value.clone());
+        }
+    }
+    head.initial_age = age(headers);
+    head.freshness = freshness(&head.headers, default_ttl);
+    CachedResponse {
+        head,
+        body: entry.body.clone(),
+        stored_at: Instant::now(),
+    }
+}
+
+fn is_storable_304(headers: &HeaderMap, authorized: bool) -> bool {
+    if has_directive(headers, CACHE_CONTROL, "no-store")
+        || has_directive(headers, CACHE_CONTROL, "private")
+        || headers.contains_key(SET_COOKIE)
+    {
+        return false;
+    }
+    !authorized || allows_authorized(headers)
+}
+
+fn handle_304(
+    cache: &CacheRequest,
+    entry: &CachedResponse,
+    headers: &HeaderMap,
+) -> Response<ProxyBody> {
+    if is_storable_304(headers, cache.authorized) {
+        let refreshed = cache.refresh(entry, headers);
+        cache.respond(&refreshed)
+    } else {
+        let transient = merge_304_headers(entry, headers, cache.cache.config.default_ttl, false);
+        cache.respond(&transient)
+    }
+}
+
 async fn run_background_revalidation(task: RevalidationTask) {
     let Ok(res) = task.upstream.request(task.reval_req).await else {
         return;
     };
     if res.status() == StatusCode::NOT_MODIFIED {
-        task.cache
-            .refresh_entry(&task.key, &task.stored_entry, res.headers());
+        if is_storable_304(res.headers(), task.authorized) {
+            task.cache
+                .refresh_entry(&task.key, &task.stored_entry, res.headers());
+        }
         return;
     }
     if !is_storable(res.status(), res.headers(), task.authorized) || task.head {
@@ -655,8 +698,7 @@ pub async fn fetch(
     let res = upstream.request(req).await?;
     match stored {
         Some(entry) if res.status() == StatusCode::NOT_MODIFIED => {
-            let entry = cache.refresh(&entry, res.headers());
-            Ok(cache.respond(&entry))
+            Ok(handle_304(&cache, &entry, res.headers()))
         }
         _ => Ok(cache.store(res)),
     }

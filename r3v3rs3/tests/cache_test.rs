@@ -347,3 +347,90 @@ async fn stale_while_revalidate_and_purge() -> anyhow::Result<()> {
     })
     .await
 }
+
+#[tokio::test]
+async fn revalidation_304_does_not_cache_set_cookie_or_private() -> anyhow::Result<()> {
+    let mut upstream = mockito::Server::new_async().await;
+    let port = alloc_tcp_port().await?;
+
+    let mock_stale = upstream
+        .mock("GET", "/session-stale")
+        .match_header("if-none-match", Matcher::Missing)
+        .with_header("cache-control", "no-cache")
+        .with_header("etag", "\"v1\"")
+        .with_body("session body")
+        .expect(1)
+        .create_async()
+        .await;
+
+    let mock_revalidate_cookie = upstream
+        .mock("GET", "/session-stale")
+        .match_header("if-none-match", "\"v1\"")
+        .with_status(304)
+        .with_header("cache-control", "no-cache")
+        .with_header("set-cookie", "session=secret123; Path=/")
+        .with_header("etag", "\"v1\"")
+        .expect(1)
+        .create_async()
+        .await;
+
+    let mock_revalidate_next = upstream
+        .mock("GET", "/session-stale")
+        .match_header("if-none-match", "\"v1\"")
+        .with_status(304)
+        .with_header("cache-control", "no-cache")
+        .with_header("etag", "\"v1\"")
+        .expect(1)
+        .create_async()
+        .await;
+
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![http_route("/", &upstream.url(), None)],
+        upgrade_insecure: false,
+        cache: CacheConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("cache", &port)])
+        .proxies(vec![http_proxy_entry("proxy1", "cache", proxy)])
+        .build();
+
+    with_server(config, |_channels| async move {
+        let client = reqwest::Client::new();
+        let get = |path: &'static str| client.get(port.http_url(path));
+
+        let resp1 = get("/session-stale").send().await?;
+        assert_eq!(x_cache(&resp1), Some("MISS"));
+        assert_eq!(resp1.text().await?, "session body");
+
+        let resp2 = get("/session-stale").send().await?;
+        assert_eq!(
+            resp2
+                .headers()
+                .get("set-cookie")
+                .and_then(|v| v.to_str().ok()),
+            Some("session=secret123; Path=/")
+        );
+        assert_eq!(resp2.text().await?, "session body");
+
+        let resp3 = get("/session-stale").send().await?;
+        assert!(
+            !resp3.headers().contains_key("set-cookie"),
+            "Client B received leaked Set-Cookie from Client A: {:?}",
+            resp3.headers().get("set-cookie")
+        );
+        assert_eq!(resp3.text().await?, "session body");
+
+        Ok(())
+    })
+    .await?;
+
+    mock_stale.assert_async().await;
+    mock_revalidate_cookie.assert_async().await;
+    mock_revalidate_next.assert_async().await;
+    Ok(())
+}
