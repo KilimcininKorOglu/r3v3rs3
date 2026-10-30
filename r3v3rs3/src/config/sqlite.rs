@@ -38,7 +38,7 @@ use std::{
     sync::Arc,
 };
 use tokio::fs;
-use tracing::info;
+use tracing::{error, info};
 
 const SCHEMA: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS server_config (
@@ -612,13 +612,20 @@ impl Storage for SqliteStorage {
     async fn load_app_config(&self) -> AppConfig {
         let row = sqlx::query("SELECT data FROM server_config WHERE id = 1")
             .fetch_optional(&self.pool)
-            .await;
+            .await
+            .unwrap_or_else(|err| {
+                error!(%err, "failed to query server_config from database");
+                panic!("failed to query server_config: {err}");
+            });
         match row {
-            Ok(Some(r)) => {
+            Some(r) => {
                 let data: String = r.get(0);
-                serde_json::from_str(&data).unwrap_or_default()
+                serde_json::from_str(&data).unwrap_or_else(|err| {
+                    error!(%err, "corrupted server_config in database: {data}");
+                    panic!("failed to parse server_config: {err}");
+                })
             }
-            _ => AppConfig::default(),
+            None => AppConfig::default(),
         }
     }
 
@@ -944,14 +951,19 @@ impl Storage for SqliteStorage {
         let rows = sqlx::query("SELECT username, data FROM accounts")
             .fetch_all(&self.pool)
             .await
-            .map_err(|_| Error::FailedToLoadAccounts)?;
+            .map_err(|err| {
+                error!(%err, "failed to query accounts table");
+                Error::FailedToLoadAccounts
+            })?;
         let mut map = HashMap::new();
         for r in rows {
             let username: String = r.get(0);
             let data: String = r.get(1);
-            if let Ok(acc) = serde_json::from_str::<Account>(&data) {
-                map.insert(username, acc);
-            }
+            let acc = serde_json::from_str::<Account>(&data).map_err(|err| {
+                error!(username = %username, %err, "corrupted account record in database");
+                Error::FailedToLoadAccounts
+            })?;
+            map.insert(username, acc);
         }
         Ok(map)
     }
@@ -1066,17 +1078,19 @@ impl Storage for SqliteStorage {
 }
 
 async fn load_json_list<T: DeserializeOwned>(pool: &SqlitePool, query: &'static str) -> Vec<T> {
-    let rows = sqlx::query(query).fetch_all(pool).await;
-    match rows {
-        Ok(rows) => rows
-            .into_iter()
-            .filter_map(|r| {
-                let data: String = r.get(0);
-                serde_json::from_str(&data).ok()
+    let rows = sqlx::query(query).fetch_all(pool).await.unwrap_or_else(|err| {
+        error!(query, %err, "failed to query database for records");
+        panic!("failed to execute {query}: {err}");
+    });
+    rows.into_iter()
+        .map(|r| {
+            let data: String = r.get(0);
+            serde_json::from_str(&data).unwrap_or_else(|err| {
+                error!(query, %err, "corrupted or forward-incompatible JSON record in database: {data}");
+                panic!("failed to parse database record for {query}: {err}");
             })
-            .collect(),
-        Err(_) => Vec::new(),
-    }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1262,6 +1276,34 @@ mod tests {
         prepare_legacy_files(&dir).await?;
         let storage = SqliteStorage::open(&dir).await?;
         verify_migrated_state(&dir, &storage).await?;
+        let _ = fs::remove_dir_all(&dir).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_storage_corrupted_json_handling() -> anyhow::Result<()> {
+        let dir = temp_test_dir("corrupted");
+        let storage = SqliteStorage::open(&dir).await?;
+
+        sqlx::query("INSERT INTO accounts (username, data, updated_at) VALUES ('bad', '{not-json}', 1)")
+            .execute(&storage.pool)
+            .await?;
+        assert!(matches!(
+            storage.load_accounts().await,
+            Err(Error::FailedToLoadAccounts)
+        ));
+
+        sqlx::query("INSERT INTO ports (id, listen_addr, name, data, updated_at) VALUES ('p_bad', '127.0.0.1:80', 'bad', '{corrupted}', 1)")
+            .execute(&storage.pool)
+            .await?;
+        let res = tokio::spawn({
+            let storage = SqliteStorage::open(&dir).await?;
+            async move { storage.load_ports().await }
+        })
+        .await;
+        assert!(res.is_err());
+        assert!(res.unwrap_err().is_panic());
+
         let _ = fs::remove_dir_all(&dir).await;
         Ok(())
     }
