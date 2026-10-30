@@ -100,12 +100,23 @@ impl Platform {
             .set_status(job.deployment, DeploymentStatus::Deploying)
             .await?;
         let name = project_name(job.app)?;
-        let result = job.runner.up(&project(&name, &dir, &files, job.env)).await;
-        // The services can use the new checkout now, even when `up` failed halfway.
-        if let Err(err) = job.runner.retain(&app_dir, &dir).await {
-            error!(app = %job.app, "failed to remove the old checkouts: {err:#}");
-        }
-        result
+        job.runner.up(&project(&name, &dir, &files, job.env)).await
+    }
+
+    /// Re-starts the previous Compose checkout without re-fetching or rebuilding.
+    pub(super) async fn rollback_compose(&self, job: &ComposeJob<'_>) -> anyhow::Result<()> {
+        let app_dir = self.compose_dir.join(job.app.to_string());
+        let dir = app_dir.join(job.deployment.to_string());
+        let files = if tokio::fs::try_exists(&dir).await.unwrap_or(false) {
+            let checkout = dir.join("src");
+            let file = Self::resolve_compose_file(&checkout, job).await?;
+            let override_file = dir.join(OVERRIDE_FILE);
+            vec![file, override_file]
+        } else {
+            self.prepare_compose(job, &dir).await?
+        };
+        let name = project_name(job.app)?;
+        job.runner.up(&project(&name, &dir, &files, job.env)).await
     }
 
     /// Checks out the source, writes the override file and validates the files. Returns the files

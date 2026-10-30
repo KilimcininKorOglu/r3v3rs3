@@ -3,7 +3,7 @@
 //! the new container and the old container stops after a drain period. A Compose app deploys by
 //! recreate instead (`compose.rs`).
 
-use super::build::GitBuild;
+use super::build::{GitBuild, remove_dir};
 use super::compose::{ComposeBuild, ComposeJob, SourceRevision};
 use super::notices::DeploymentRef;
 use super::store::{NewDeployment, StoredEnv};
@@ -65,6 +65,15 @@ impl Default for Timing {
             stop_timeout: Duration::from_secs(10),
         }
     }
+}
+
+struct PreviousCompose {
+    deployment: ShortId,
+    source: ComposeBuild,
+    port: u16,
+    env: Vec<EnvVar>,
+    container: ContainerName,
+    targets: Vec<ShortId>,
 }
 
 /// What one deployment runs. The pipeline reads only this snapshot, so an edit of the app during
@@ -465,6 +474,8 @@ impl Platform {
         };
         let name = proxy::container_name(job.app, job.deployment)?;
         let env = self.effective_env(job).await?;
+        let previous = self.previous_compose(job.app).await;
+        let mut started = false;
         for target in job.spec.targets_or_default(job.app_target) {
             let backend = self.backend(target);
             let compose = ComposeJob {
@@ -476,11 +487,76 @@ impl Platform {
                 env: &env,
                 container: &name,
             };
-            self.compose_up(&compose).await?;
-            self.wait_healthy(&*backend.runtime, &name, &job.spec)
-                .await?;
+            if let Err(err) = self.compose_up(&compose).await {
+                if started {
+                    self.rollback_previous_compose(job.app, &previous).await;
+                }
+                return Err(err);
+            }
+            started = true;
+            if let Err(err) = self.wait_healthy(&*backend.runtime, &name, &job.spec).await {
+                self.rollback_previous_compose(job.app, &previous).await;
+                let dir = self
+                    .compose_dir
+                    .join(job.app.to_string())
+                    .join(job.deployment.to_string());
+                let _ = remove_dir(&dir).await;
+                return Err(err);
+            }
         }
         Ok(name)
+    }
+
+    async fn previous_compose(&self, app: ShortId) -> Option<PreviousCompose> {
+        let prev_id = self.store.running_deployment(app).await.ok().flatten()?;
+        let prev_entry = self.store.deployment(prev_id).await.ok().flatten()?;
+        let (prev_spec, prev_stored_env) =
+            self.store.deployment_snapshot(prev_id).await.ok().flatten()?;
+        let JobImage::Compose(source) = JobImage::rollback(&prev_spec, &prev_entry).ok()? else {
+            return None;
+        };
+        let container = proxy::container_name(app, prev_id).ok()?;
+        let env = self
+            .effective_env_for(app, prev_id, &prev_spec, &prev_stored_env)
+            .await
+            .ok()?;
+        let app_entry = self.app(app).await.ok()?;
+        let targets = prev_spec.targets_or_default(app_entry.target);
+        Some(PreviousCompose {
+            deployment: prev_id,
+            source,
+            port: prev_spec.port,
+            env,
+            container,
+            targets,
+        })
+    }
+
+    async fn rollback_previous_compose(&self, app: ShortId, previous: &Option<PreviousCompose>) {
+        let Some(prev) = previous else {
+            return;
+        };
+        for &target in &prev.targets {
+            let backend = self.backend(target);
+            let compose = ComposeJob {
+                runner: &*backend.compose,
+                app,
+                deployment: prev.deployment,
+                port: prev.port,
+                source: &prev.source,
+                env: &prev.env,
+                container: &prev.container,
+            };
+            if let Err(err) = self.rollback_compose(&compose).await {
+                error!(
+                    app = %app,
+                    deployment = %prev.deployment,
+                    target = %target,
+                    "failed to rollback compose deployment: {err:#}"
+                );
+            }
+        }
+        self.publish().await;
     }
 
     /// Starts the new container on all target nodes and waits for health checks.
@@ -730,23 +806,34 @@ impl Platform {
     }
 
     async fn effective_env(&self, job: &Job) -> anyhow::Result<Vec<EnvVar>> {
-        let mut vars = if let Some(config) = &job.spec.git_config {
-            self.fetch_git_config_env(job.app, job.deployment, &job.spec, config)
+        self.effective_env_for(job.app, job.deployment, &job.spec, &job.env)
+            .await
+    }
+
+    async fn effective_env_for(
+        &self,
+        app: ShortId,
+        deployment: ShortId,
+        spec: &AppSpec,
+        stored_env: &[StoredEnv],
+    ) -> anyhow::Result<Vec<EnvVar>> {
+        let mut vars = if let Some(config) = &spec.git_config {
+            self.fetch_git_config_env(app, deployment, spec, config)
                 .await?
         } else {
             Vec::new()
         };
-        for &group_id in &job.spec.env_groups {
+        for &group_id in &spec.env_groups {
             let group_stored = self.store.env_group_vars(group_id).await?;
             let group_vars = self.open_env(group_id, &group_stored)?;
             merge_env_vars(&mut vars, group_vars);
         }
-        if let Some(env_id) = job.spec.environment_id {
+        if let Some(env_id) = spec.environment_id {
             let env_stored = self.store.environment_vars(env_id).await?;
             let env_vars = self.open_env(env_id, &env_stored)?;
             merge_env_vars(&mut vars, env_vars);
         }
-        let panel_env = self.open_env(job.app, &job.env)?;
+        let panel_env = self.open_env(app, stored_env)?;
         merge_env_vars(&mut vars, panel_env);
         Ok(vars)
     }
@@ -1055,6 +1142,13 @@ impl Platform {
             if let Err(err) = self.remove_old(&backend, job.app, name, compose).await {
                 // The deployment serves already, so only the log shows the failed cleanup.
                 error!(app = %job.app, target = %target, "failed to remove the old containers: {err:#}");
+            }
+            if compose {
+                let app_dir = self.compose_dir.join(job.app.to_string());
+                let dir = app_dir.join(job.deployment.to_string());
+                if let Err(err) = backend.compose.retain(&app_dir, &dir).await {
+                    error!(app = %job.app, target = %target, "failed to remove the old checkouts: {err:#}");
+                }
             }
         }
         Ok(())
@@ -1432,6 +1526,27 @@ mod tests {
                 .exists()
         );
         assert!(setup.runtime.state().pruned.contains(&(project, false)));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_failed_compose_deployment_rolls_back_to_previous_checkout_and_container(
+    ) -> anyhow::Result<()> {
+        let setup = setup_with(compose_request()?).await?;
+        let first = deploy_mode(&setup, "blue").await?;
+        assert_eq!(first.status, DeploymentStatus::Running);
+        assert_eq!(setup.runtime.names(), [container_of(&setup, &first)]);
+        assert!(checkout_dir(&setup, &first).exists());
+
+        setup.runtime.state().host_port = app_server(503).await?;
+        let failed = deploy_mode(&setup, "green").await?;
+        assert_eq!(failed.status, DeploymentStatus::Failed);
+
+        let first = setup.platform.deployment(first.id).await?;
+        assert_eq!(first.status, DeploymentStatus::Running);
+        assert_eq!(setup.runtime.names(), [container_of(&setup, &first)]);
+        assert!(checkout_dir(&setup, &first).exists());
+        assert!(!checkout_dir(&setup, &failed).exists());
         Ok(())
     }
 
