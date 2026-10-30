@@ -554,6 +554,16 @@ impl FileStorage {
         self.read_entries::<AcmeAccount, _>(path).await
     }
 
+    fn previous_credentials_changed_at(doc: &DocumentMut, name: &str) -> u64 {
+        if let Some(item) = doc.get(name)
+            && let Some(val) = item.get("credentials_changed_at")
+            && let Some(int) = val.as_integer()
+        {
+            return int as u64;
+        }
+        0
+    }
+
     async fn add_account_impl(
         &self,
         name: &str,
@@ -570,8 +580,10 @@ impl FileStorage {
             Err(_) => DocumentMut::default(),
         };
 
+        let prev = Self::previous_credentials_changed_at(&doc, name);
         let mut account = account::new_account(password, totp)?;
         account.role = role;
+        account.credentials_changed_at = account.credentials_changed_at.max(prev);
         doc[name].clone_from(toml_edit::ser::to_document(&account)?.as_item());
 
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
@@ -1017,6 +1029,18 @@ mod test {
         let storage = FileStorage::new(&dir);
         let res = storage.load_document_or_new(&path).await;
         assert!(res.is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn add_account_on_existing_account_preserves_revocation_time() {
+        let dir = std::env::temp_dir().join(format!("r33-add-user-revocation-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = FileStorage::new(&dir);
+        let acc1 = storage.add_account("bob", "password123", false, Role::Viewer).await.unwrap();
+        assert!(acc1.credentials_changed_at > 0);
+        let acc2 = storage.add_account("bob", "newpassword123", false, Role::Viewer).await.unwrap();
+        assert!(acc2.credentials_changed_at >= acc1.credentials_changed_at);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

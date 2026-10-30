@@ -20,6 +20,7 @@ pub fn new_account(password: &str, totp: bool) -> anyhow::Result<Account> {
     Ok(Account {
         password,
         totp: totp.then(|| Totp::default().secret().to_base32()),
+        credentials_changed_at: crate::clock::unix_secs(),
         ..Default::default()
     })
 }
@@ -374,5 +375,11 @@ mod tests {
         assert!(check_auth_data(&bad_auth, 0, Some("localhost")).is_err());
 
         Ok(())
+    }
+
+    #[test]
+    fn new_account_sets_credentials_changed_at_to_current_time() {
+        let account = new_account("test-password-123", false).unwrap();
+        assert!(account.credentials_changed_at > 0);
     }
 }

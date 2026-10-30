@@ -904,9 +904,14 @@ impl Storage for SqliteStorage {
         role: Role,
     ) -> Result<Account, Error> {
         let mut accounts = self.load_accounts().await?;
+        let existing = accounts.get(name);
         let mut account =
             account::new_account(password, totp).map_err(|_| Error::FailedToCreateAccount)?;
         account.role = role;
+        if let Some(prev) = existing {
+            account.credentials_changed_at =
+                account.credentials_changed_at.max(prev.credentials_changed_at);
+        }
         accounts.insert(name.to_string(), account.clone());
         self.save_accounts(&accounts).await?;
         Ok(account)
@@ -1115,6 +1120,8 @@ mod tests {
             .await?;
         let accounts = storage.load_accounts().await?;
         assert!(accounts.contains_key("admin"));
+        let prev_changed = accounts["admin"].credentials_changed_at;
+        assert!(prev_changed > 0);
 
         let login_res = storage
             .verify_account(LoginRequest {
@@ -1126,6 +1133,34 @@ mod tests {
             })
             .await?;
         assert!(matches!(login_res, LoginResponse::Success));
+
+        storage
+            .add_account("admin", "new-secret-pass", false, Role::Admin)
+            .await?;
+        let updated_accounts = storage.load_accounts().await?;
+        assert!(updated_accounts["admin"].credentials_changed_at >= prev_changed);
+
+        let old_login = storage
+            .verify_account(LoginRequest {
+                username: "admin".into(),
+                method: LoginMethod::Password {
+                    password: "super-secret-pass".into(),
+                },
+                insecure: false,
+            })
+            .await;
+        assert!(matches!(old_login, Err(Error::InvalidLoginCredentials)));
+
+        let new_login = storage
+            .verify_account(LoginRequest {
+                username: "admin".into(),
+                method: LoginMethod::Password {
+                    password: "new-secret-pass".into(),
+                },
+                insecure: false,
+            })
+            .await?;
+        assert!(matches!(new_login, LoginResponse::Success));
         Ok(())
     }
 
