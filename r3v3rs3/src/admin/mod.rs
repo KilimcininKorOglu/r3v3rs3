@@ -341,6 +341,12 @@ fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
 /// The largest webhook event. A push of many commits stays far below it.
 const MAX_HOOK_BODY: usize = 5 * 1024 * 1024;
 
+/// Maximum body limit for application file uploads (100MB).
+const MAX_APP_FILE_BODY: usize = 100 * 1024 * 1024;
+
+/// Maximum body limit for volume archives and disaster recovery bundles (512MB).
+const MAX_ARCHIVE_BODY: usize = 512 * 1024 * 1024;
+
 /// The routes without a session. They share one rate limit per client address.
 fn public_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
     let governor_conf = GovernorConfigBuilder::default()
@@ -526,7 +532,8 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(platform::terminal))
                 .routes(routes!(app_files::list))
                 .routes(routes!(app_files::download))
-                .routes(routes!(app_files::upload, app_files::delete))
+                .routes(routes!(app_files::upload).layer(DefaultBodyLimit::max(MAX_APP_FILE_BODY)))
+                .routes(routes!(app_files::delete))
                 .routes(routes!(
                     app_files::list_volume_backups,
                     app_files::create_volume_backup
@@ -536,10 +543,11 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     app_files::restore_volume_backup,
                     app_files::delete_volume_backup
                 ))
-                .routes(routes!(
-                    app_files::export_volume_archive,
-                    app_files::import_volume_archive
-                )),
+                .routes(routes!(app_files::export_volume_archive))
+                .routes(
+                    routes!(app_files::import_volume_archive)
+                        .layer(DefaultBodyLimit::max(MAX_ARCHIVE_BODY)),
+                ),
         )
         .nest(
             "/deployments",
@@ -586,7 +594,10 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(disaster_recovery::download))
                 .routes(routes!(disaster_recovery::delete))
                 .routes(routes!(disaster_recovery::restore))
-                .routes(routes!(disaster_recovery::restore_upload)),
+                .routes(
+                    routes!(disaster_recovery::restore_upload)
+                        .layer(DefaultBodyLimit::max(MAX_ARCHIVE_BODY)),
+                ),
         )
         .nest(
             "/git/connections",
