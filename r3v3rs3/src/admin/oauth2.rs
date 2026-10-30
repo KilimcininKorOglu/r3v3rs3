@@ -195,6 +195,18 @@ type LoadedTokens = (
     HashMap<String, String>,
 );
 
+fn hash_token(token: &str) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(token.as_bytes())))
+}
+
+fn ensure_token_hash(token: &str) -> String {
+    if token.starts_with("sha256:") {
+        token.to_string()
+    } else {
+        hash_token(token)
+    }
+}
+
 fn row_to_token(
     row: &sqlx::sqlite::SqliteRow,
 ) -> Result<(String, String, AccessToken), sqlx::Error> {
@@ -204,6 +216,8 @@ fn row_to_token(
     let expires_at: i64 = row.try_get("expires_at")?;
     let refresh_expires_at: i64 = row.try_get("refresh_expires_at")?;
     let created_at: i64 = row.try_get("created_at")?;
+    let access_hash = ensure_token_hash(&access_token);
+    let refresh_hash = ensure_token_hash(&refresh_token);
     let grant = AccessToken {
         id,
         expires_at: expires_at as u64,
@@ -211,10 +225,10 @@ fn row_to_token(
         client_id: row.try_get("client_id")?,
         username: row.try_get("username")?,
         scope: row.try_get("scope")?,
-        refresh_token: refresh_token.clone(),
+        refresh_token: refresh_hash.clone(),
         created_at: created_at as u64,
     };
-    Ok((access_token, refresh_token, grant))
+    Ok((access_hash, refresh_hash, grant))
 }
 
 async fn db_load_tokens(pool: &SqlitePool, now: i64) -> anyhow::Result<LoadedTokens> {
@@ -383,6 +397,8 @@ impl McpAuthorizations {
     async fn issue_tokens(&mut self, client_id: &str, scope: &str, username: &str) -> IssuedTokens {
         let access_token = new_token();
         let refresh_token = new_token();
+        let access_hash = hash_token(&access_token);
+        let refresh_hash = hash_token(&refresh_token);
         let now = unix_now();
         let session_id = format!(
             "mcp-{}",
@@ -395,18 +411,18 @@ impl McpAuthorizations {
             client_id: client_id.to_string(),
             username: username.to_string(),
             scope: scope.to_string(),
-            refresh_token: refresh_token.clone(),
+            refresh_token: refresh_hash.clone(),
             created_at: now,
         };
         if let Some(pool) = &self.pool
-            && let Err(err) = db_save_token(pool, &grant, &access_token).await
+            && let Err(err) = db_save_token(pool, &grant, &access_hash).await
         {
             tracing::warn!(err = %err, "failed to persist issued MCP token");
         }
-        self.tokens.insert(access_token.clone(), grant);
+        self.tokens.insert(access_hash.clone(), grant);
         self.refresh
-            .insert(refresh_token.clone(), access_token.clone());
-        self.by_id.insert(session_id, access_token.clone());
+            .insert(refresh_hash, access_hash.clone());
+        self.by_id.insert(session_id, access_hash);
         IssuedTokens {
             access_token,
             token_type: "Bearer",
@@ -418,11 +434,12 @@ impl McpAuthorizations {
 
     /// Rotates the tokens of a refresh token: both tokens get fresh values.
     async fn refresh_tokens(&mut self, refresh_token: &str) -> Option<IssuedTokens> {
-        let access = self.refresh.remove(refresh_token)?;
+        let ref_hash = hash_token(refresh_token);
+        let access = self.refresh.remove(&ref_hash)?;
         let grant = self.tokens.remove(&access)?;
         self.by_id.remove(&grant.id);
         if let Some(pool) = &self.pool
-            && let Err(err) = db_delete_token(pool, refresh_token).await
+            && let Err(err) = db_delete_token(pool, &ref_hash).await
         {
             tracing::warn!(err = %err, "failed to delete rotated MCP refresh token");
         }
@@ -438,8 +455,9 @@ impl McpAuthorizations {
 
     /// Validates an access token and returns the client that it belongs to.
     pub fn verify(&self, token: &str) -> Option<&AccessToken> {
+        let hash = hash_token(token);
         self.tokens
-            .get(token)
+            .get(&hash)
             .filter(|grant| grant.expires_at > unix_now())
     }
 
@@ -1505,5 +1523,36 @@ mod tests {
         let client = validate_registration(&body).unwrap();
         assert_eq!(client.name, "Claude Code");
         assert_eq!(client.redirect_uris.len(), 1);
+    }
+
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn tokens_are_stored_as_hashes_in_database() -> anyhow::Result<()> {
+        let dir = TempDir(std::env::temp_dir().join(format!("mcp-tok-{}", rand::random::<u64>())));
+        std::fs::create_dir_all(&dir.0)?;
+        let db_path = dir.0.join("tokens.db");
+        let mut auth = McpAuthorizations::open(&db_path).await?;
+        let issued = auth.issue_tokens("test-client", "read", "admin").await;
+
+        assert!(auth.verify(&issued.access_token).is_some());
+
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_path.display())).await?;
+        let row = sqlx::query("SELECT access_token, refresh_token FROM mcp_tokens")
+            .fetch_one(&pool)
+            .await?;
+        let db_access: String = row.try_get("access_token")?;
+        let db_refresh: String = row.try_get("refresh_token")?;
+
+        assert!(db_access.starts_with("sha256:"));
+        assert!(db_refresh.starts_with("sha256:"));
+        assert_ne!(db_access, issued.access_token);
+        assert_ne!(db_refresh, issued.refresh_token);
+        Ok(())
     }
 }
