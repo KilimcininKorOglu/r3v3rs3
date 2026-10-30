@@ -393,6 +393,8 @@ async fn the_admin_api_answers_403_to_an_action_that_the_role_does_not_allow() -
             (Method::GET, "/api/config", 403),
             (Method::POST, "/api/cdn/refresh", 403),
             (Method::GET, "/api/certs/abc/download", 403),
+            (Method::POST, "/api/grpc/reflect", 403),
+            (Method::POST, "/api/grpc/health", 403),
         ];
         for (method, path, expected) in checks {
             let actual = status(&client, addr, method.clone(), path, &viewer).await?;
@@ -404,6 +406,8 @@ async fn the_admin_api_answers_403_to_an_action_that_the_role_does_not_allow() -
             (Method::GET, "/api/certs", 200),
             (Method::POST, "/api/ports", 403),
             (Method::GET, "/api/config", 403),
+            (Method::POST, "/api/grpc/reflect", 403),
+            (Method::POST, "/api/grpc/health", 403),
         ];
         for (method, path, expected) in checks {
             let actual = status(&client, addr, method.clone(), path, &editor).await?;
@@ -501,6 +505,62 @@ async fn the_event_stream_holds_only_the_proxies_of_the_account_and_ends_when_th
         });
         rest.await
             .map_err(|_| anyhow::anyhow!("the event stream did not end"))??;
+        Ok(())
+    })
+    .await?;
+
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn standalone_grpc_endpoints_require_edit_permission() -> anyhow::Result<()> {
+    let dir = log_dir("grpc-roles").await?;
+    let addr = alloc_tcp_port().await?.socket_addr();
+    let storage = TestStorage::builder()
+        .account("viewer", "viewer-secret", Role::Viewer, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    let app_info = new_appinfo(&dir, &dir);
+    with_server(storage, |channels| async move {
+        tokio::spawn(start_admin(
+            app_info,
+            addr,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+            channels.accounts.clone(),
+        ));
+        wait_for_listener(addr).await?;
+        let client = Client::new();
+
+        let viewer = session_cookie(addr, "viewer", "viewer-secret").await?;
+        let editor = session_cookie(addr, "editor", "editor-secret").await?;
+
+        let invoke_payload = serde_json::json!({
+            "target_url": "http://127.0.0.1:9090",
+            "service": "test.Service",
+            "method": "TestMethod",
+            "payload": {}
+        });
+
+        let res_v = client
+            .post(format!("http://{addr}/api/grpc/invoke"))
+            .header(COOKIE, &viewer)
+            .json(&invoke_payload)
+            .send()
+            .await?;
+        assert_eq!(res_v.status(), StatusCode::FORBIDDEN);
+
+        let res_e = client
+            .post(format!("http://{addr}/api/grpc/invoke"))
+            .header(COOKIE, &editor)
+            .json(&invoke_payload)
+            .send()
+            .await?;
+        assert_eq!(res_e.status(), StatusCode::FORBIDDEN);
+
         Ok(())
     })
     .await?;

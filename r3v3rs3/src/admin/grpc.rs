@@ -2,7 +2,7 @@
 
 use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
-use crate::accounts::Caller;
+use crate::accounts::{Caller, Permission};
 use crate::server::rpc::proxies::GetProxy;
 use axum::{
     Extension, Json,
@@ -177,9 +177,10 @@ pub async fn health_proxy(
 )]
 pub async fn reflect_standalone(
     State(_state): State<AppState>,
-    Extension(_caller): Extension<Caller>,
+    Extension(caller): Extension<Caller>,
     Json(req): Json<GrpcReflectRequest>,
 ) -> Result<Json<GrpcReflectResponse>, AppError> {
+    caller.authorize(Permission::Edit)?;
     let target = req.target_url.ok_or_else(|| Error::GrpcError {
         reason: "target_url is required".to_string(),
     })?;
@@ -206,9 +207,10 @@ pub async fn reflect_standalone(
 )]
 pub async fn invoke_standalone(
     State(_state): State<AppState>,
-    Extension(_caller): Extension<Caller>,
+    Extension(caller): Extension<Caller>,
     Json(req): Json<GrpcInvokeRequest>,
 ) -> Result<Json<GrpcInvokeResponse>, AppError> {
+    caller.authorize(Permission::Edit)?;
     let target = req.target_url.as_deref().ok_or_else(|| Error::GrpcError {
         reason: "target_url is required".to_string(),
     })?;
@@ -235,9 +237,10 @@ pub async fn invoke_standalone(
 )]
 pub async fn health_standalone(
     State(_state): State<AppState>,
-    Extension(_caller): Extension<Caller>,
+    Extension(caller): Extension<Caller>,
     Json(req): Json<GrpcHealthCheckRequest>,
 ) -> Result<Json<GrpcHealthCheckResponse>, AppError> {
+    caller.authorize(Permission::Edit)?;
     let target = req.target_url.as_deref().ok_or_else(|| Error::GrpcError {
         reason: "target_url is required".to_string(),
     })?;
