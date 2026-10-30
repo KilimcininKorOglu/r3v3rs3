@@ -86,6 +86,9 @@ pub fn inject_cache_mounts(dockerfile: &str, config: &BuildKitConfig) -> String 
         }
     }
     for custom in &config.custom_cache_paths {
+        if !r3v3rs3_api::platform::is_valid_cache_path(custom) {
+            continue;
+        }
         let id = format!("custom_{}", sanitize_path_id(custom));
         mounts.push(format!("--mount=type=cache,id={id},target={custom}"));
     }
@@ -170,5 +173,28 @@ mod tests {
         let injected = inject_cache_mounts(df, &config);
         assert!(injected.contains("--mount=type=cache,id=custom_root_npm,target=/root/.npm"));
         assert_eq!(injected.matches("# syntax=").count(), 1);
+    }
+
+    #[test]
+    fn test_inject_custom_cache_paths_rejects_injection() {
+        let df = "RUN build\n";
+        let config = BuildKitConfig {
+            enabled: true,
+            remote_addr: None,
+            cache_mounts: Vec::new(),
+            custom_cache_paths: vec![
+                "/cache --mount=type=bind,source=/,target=/host_root".to_string(),
+                "/cache,source=/".to_string(),
+                "/cache\nRUN id".to_string(),
+                "relative/path".to_string(),
+            ],
+            cache_from: None,
+            cache_to: None,
+        };
+        let injected = inject_cache_mounts(df, &config);
+        assert!(!injected.contains("bind"));
+        assert!(!injected.contains("host_root"));
+        assert!(!injected.contains("id"));
+        assert_eq!(injected, "RUN build\n");
     }
 }

@@ -1336,6 +1336,13 @@ impl AppSpec {
                 "BuildKit can only be enabled for Git-based applications",
             ));
         }
+        for path in &buildkit.custom_cache_paths {
+            if !is_valid_cache_path(path) {
+                return Err(invalid(
+                    "custom cache path must be an absolute path without whitespace, commas, or injection characters",
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -1625,6 +1632,24 @@ fn invalid(reason: &str) -> Error {
     Error::InvalidContainerSpec {
         reason: reason.to_string(),
     }
+}
+
+fn has_invalid_cache_char(c: char) -> bool {
+    c.is_whitespace() || c.is_control() || matches!(c, ',' | '"' | '\'' | '`' | '\\' | '=' | ';')
+}
+
+/// Validates whether a custom cache path is safe for BuildKit mount injection.
+/// Must be an absolute path and free of commas, whitespace, newlines, and injection characters.
+pub fn is_valid_cache_path(path: &str) -> bool {
+    if !path.starts_with('/') || path.len() < 2 || path.contains("..") {
+        return false;
+    }
+    for c in path.chars() {
+        if has_invalid_cache_char(c) {
+            return false;
+        }
+    }
+    true
 }
 
 /// The body that creates a database. The version is one image tag of the catalog entry of
@@ -3024,5 +3049,20 @@ EMPTY_VAL=
         let summary: AppDashboardSummary =
             serde_json::from_str(raw).expect("failed to deserialize real server payload");
         assert_eq!(summary.app.id.to_string(), "hrs-tdv");
+    }
+
+    #[test]
+    fn test_custom_cache_path_validation() {
+        assert!(is_valid_cache_path("/root/.cache"));
+        assert!(is_valid_cache_path("/var/cache/app_1"));
+        assert!(!is_valid_cache_path("relative/path"));
+        assert!(!is_valid_cache_path("/"));
+        assert!(!is_valid_cache_path("/cache/../escape"));
+        assert!(!is_valid_cache_path(
+            "/cache --mount=type=bind,source=/,target=/host_root"
+        ));
+        assert!(!is_valid_cache_path("/cache,target=/etc"));
+        assert!(!is_valid_cache_path("/cache\nRUN id"));
+        assert!(!is_valid_cache_path("/cache;rm -rf /"));
     }
 }
