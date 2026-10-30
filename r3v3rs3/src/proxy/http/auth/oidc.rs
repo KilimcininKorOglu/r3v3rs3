@@ -12,8 +12,11 @@ use hyper::{
     header::{CACHE_CONTROL, CONTENT_TYPE, HeaderName, HeaderValue, LOCATION, PRAGMA, SET_COOKIE},
 };
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+use aws_lc_rs::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
+use hmac::{Hmac, KeyInit, Mac};
 use r3v3rs3_api::policy::{OidcAuth, default_oidc_scopes, is_email_allowed};
 use rand::distr::{Alphanumeric, SampleString};
+use sha2::Sha256;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_rustls::rustls::ClientConfig;
@@ -208,16 +211,14 @@ impl OidcAuthenticator {
             .map_err(|e| e.to_string())?;
 
         let token_json = self.execute_request(req).await?;
-        if let Some(id_token) = token_json.get("id_token").and_then(|v| v.as_str())
-            && let Some(user) = decode_jwt_user(id_token)
-        {
-            return Ok(user);
-        }
-        if let Some(user) = extract_user_from_json(&token_json) {
-            return Ok(user);
+        if let Some(id_token) = token_json.get("id_token").and_then(|v| v.as_str()) {
+            return self.verify_and_decode_id_token(id_token).await;
         }
         if let Some(access_token) = token_json.get("access_token").and_then(|v| v.as_str()) {
             return self.fetch_userinfo(access_token).await;
+        }
+        if let Some(user) = extract_user_from_json(&token_json) {
+            return Ok(user);
         }
         Err("No user identity found in OIDC token response".to_string())
     }
@@ -293,6 +294,92 @@ impl OidcAuthenticator {
             response.headers_mut().append(SET_COOKIE, val);
         }
         response
+    }
+
+    async fn fetch_jwks(&self) -> Result<serde_json::Value, String> {
+        let endpoint = resolve_jwks_endpoint(&self.config);
+        if endpoint.is_empty() {
+            return Err("no JWKS endpoint configured".to_string());
+        }
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri(&endpoint)
+            .header("accept", "application/json")
+            .body(Full::new(Bytes::new()))
+            .map_err(|e| e.to_string())?;
+        self.execute_request(req).await
+    }
+
+    async fn verify_jwt_signature(
+        &self,
+        alg: &str,
+        kid: Option<&str>,
+        message: &[u8],
+        sig_bytes: &[u8],
+    ) -> Result<(), String> {
+        match alg {
+            "none" => Err("algorithm 'none' is forbidden for ID tokens".to_string()),
+            "HS256" => self.verify_hs256_signature(message, sig_bytes),
+            "RS256" => self.verify_rs256_signature(kid, message, sig_bytes).await,
+            other => Err(format!("unsupported ID token algorithm: {other}")),
+        }
+    }
+
+    fn verify_hs256_signature(&self, message: &[u8], sig_bytes: &[u8]) -> Result<(), String> {
+        if self.config.client_secret.is_empty() {
+            return Err("client_secret required for HS256 verification".to_string());
+        }
+        if verify_hs256(message, sig_bytes, self.config.client_secret.as_bytes()) {
+            Ok(())
+        } else {
+            Err("invalid HS256 signature".to_string())
+        }
+    }
+
+    async fn verify_rs256_signature(
+        &self,
+        kid: Option<&str>,
+        message: &[u8],
+        sig_bytes: &[u8],
+    ) -> Result<(), String> {
+        let jwks = self.fetch_jwks().await?;
+        let keys = jwks
+            .get("keys")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| "invalid JWKS keys array".to_string())?;
+        let verified = keys.iter().any(|k| {
+            if let Some(expected_kid) = kid
+                && k.get("kid").and_then(|v| v.as_str()) != Some(expected_kid)
+            {
+                return false;
+            }
+            verify_rs256_jwk(message, sig_bytes, k)
+        });
+        if verified {
+            Ok(())
+        } else {
+            Err("invalid RS256 signature".to_string())
+        }
+    }
+
+    async fn verify_and_decode_id_token(&self, jwt: &str) -> Result<String, String> {
+        let (header_b64, payload_b64, sig_b64) = parse_jwt_parts(jwt)?;
+        let header = parse_jwt_header(header_b64)?;
+        let alg = header
+            .get("alg")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing alg in header".to_string())?;
+        let kid = header.get("kid").and_then(|v| v.as_str());
+
+        let sig_bytes =
+            b64_decode(sig_b64).ok_or_else(|| "invalid base64 signature".to_string())?;
+        let message = format!("{header_b64}.{payload_b64}");
+
+        self.verify_jwt_signature(alg, kid, message.as_bytes(), &sig_bytes)
+            .await?;
+
+        let payload = parse_jwt_payload(payload_b64)?;
+        validate_jwt_claims(&payload, &self.config)
     }
 }
 
@@ -412,16 +499,166 @@ fn read_state_cookie(headers: &HeaderMap) -> Option<(String, String)> {
     Some((state.to_string(), target.to_string()))
 }
 
-fn decode_jwt_user(jwt: &str) -> Option<String> {
+fn resolve_jwks_endpoint(config: &OidcAuth) -> String {
+    let issuer = config.issuer_url.trim_end_matches('/');
+    if issuer.contains("accounts.google.com") {
+        "https://www.googleapis.com/oauth2/v3/certs".to_string()
+    } else if !issuer.is_empty() {
+        format!("{issuer}/.well-known/jwks.json")
+    } else {
+        String::new()
+    }
+}
+
+fn b64_decode(input: &str) -> Option<Vec<u8>> {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(input)
+        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(input))
+        .ok()
+}
+
+fn parse_jwt_parts(jwt: &str) -> Result<(&str, &str, &str), String> {
     let mut parts = jwt.split('.');
-    let _header = parts.next()?;
-    let payload = parts.next()?;
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(payload))
-        .ok()?;
-    let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    extract_user_from_json(&json)
+    let header = parts.next().ok_or("missing header")?;
+    let payload = parts.next().ok_or("missing payload")?;
+    let signature = parts.next().ok_or("missing signature")?;
+    if parts.next().is_some() {
+        return Err("too many JWT segments".to_string());
+    }
+    Ok((header, payload, signature))
+}
+
+fn parse_jwt_header(header_b64: &str) -> Result<serde_json::Value, String> {
+    let bytes = b64_decode(header_b64).ok_or("invalid base64 header")?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("invalid header json: {e}"))
+}
+
+fn parse_jwt_payload(payload_b64: &str) -> Result<serde_json::Value, String> {
+    let bytes = b64_decode(payload_b64).ok_or("invalid base64 payload")?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("invalid payload json: {e}"))
+}
+
+fn validate_jwt_claims(payload: &serde_json::Value, config: &OidcAuth) -> Result<String, String> {
+    validate_exp(payload)?;
+    validate_iss(payload, config)?;
+    validate_aud(payload, config)?;
+    extract_user_from_json(payload).ok_or_else(|| "no user identity in ID token".to_string())
+}
+
+fn validate_exp(payload: &serde_json::Value) -> Result<(), String> {
+    let now = crate::clock::unix_ms() / 1000;
+    if let Some(exp) = payload.get("exp").and_then(|v| v.as_i64())
+        && exp + 60 < now as i64
+    {
+        return Err("ID token has expired".to_string());
+    }
+    Ok(())
+}
+
+fn validate_iss(payload: &serde_json::Value, config: &OidcAuth) -> Result<(), String> {
+    if config.issuer_url.is_empty() {
+        return Ok(());
+    }
+    let Some(iss) = payload.get("iss").and_then(|v| v.as_str()) else {
+        return Err("missing iss claim in ID token".to_string());
+    };
+    if iss.trim_end_matches('/') != config.issuer_url.trim_end_matches('/') {
+        return Err(format!(
+            "ID token issuer mismatch: expected {}, got {iss}",
+            config.issuer_url
+        ));
+    }
+    Ok(())
+}
+
+fn validate_aud(payload: &serde_json::Value, config: &OidcAuth) -> Result<(), String> {
+    if config.client_id.is_empty() {
+        return Ok(());
+    }
+    let Some(aud) = payload.get("aud") else {
+        return Err("missing aud claim in ID token".to_string());
+    };
+    let matches = match aud {
+        serde_json::Value::String(s) => s == &config.client_id,
+        serde_json::Value::Array(arr) => arr.iter().any(|v| v.as_str() == Some(&config.client_id)),
+        _ => false,
+    };
+    if !matches {
+        return Err(format!(
+            "ID token audience mismatch: expected {}",
+            config.client_id
+        ));
+    }
+    Ok(())
+}
+
+fn verify_hs256(message: &[u8], sig_bytes: &[u8], secret: &[u8]) -> bool {
+    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret) else {
+        return false;
+    };
+    mac.update(message);
+    mac.verify_slice(sig_bytes).is_ok()
+}
+
+fn verify_rs256_jwk(message: &[u8], sig_bytes: &[u8], jwk: &serde_json::Value) -> bool {
+    let Some(n_b64) = jwk.get("n").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    let Some(e_b64) = jwk.get("e").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    let Some(n) = b64_decode(n_b64) else {
+        return false;
+    };
+    let Some(e) = b64_decode(e_b64) else {
+        return false;
+    };
+    let der = rsa_pkcs1_der_from_jwk_n_e(&n, &e);
+    let verifier = UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, &der);
+    verifier.verify(message, sig_bytes).is_ok()
+}
+
+fn encode_asn1_int(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(0x02);
+    let pad = usize::from(!bytes.is_empty() && (bytes[0] & 0x80) != 0);
+    let len = bytes.len() + pad;
+    if len < 128 {
+        out.push(len as u8);
+    } else if len < 256 {
+        out.push(0x81);
+        out.push(len as u8);
+    } else {
+        out.push(0x82);
+        out.push((len >> 8) as u8);
+        out.push((len & 0xff) as u8);
+    }
+    if pad == 1 {
+        out.push(0x00);
+    }
+    out.extend_from_slice(bytes);
+    out
+}
+
+fn rsa_pkcs1_der_from_jwk_n_e(n: &[u8], e: &[u8]) -> Vec<u8> {
+    let mut seq = Vec::new();
+    seq.extend_from_slice(&encode_asn1_int(n));
+    seq.extend_from_slice(&encode_asn1_int(e));
+    let mut der = Vec::new();
+    der.push(0x30);
+    let len = seq.len();
+    if len < 128 {
+        der.push(len as u8);
+    } else if len < 256 {
+        der.push(0x81);
+        der.push(len as u8);
+    } else {
+        der.push(0x82);
+        der.push((len >> 8) as u8);
+        der.push((len & 0xff) as u8);
+    }
+    der.extend_from_slice(&seq);
+    der
 }
 
 fn extract_user_from_json(json: &serde_json::Value) -> Option<String> {
@@ -521,4 +758,73 @@ fn redirect_response(
         res.headers_mut().insert(SET_COOKIE, val);
     }
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_test_jwt(header: &serde_json::Value, payload: &serde_json::Value, secret: &str) -> String {
+        let b64 = &base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let h = b64.encode(header.to_string());
+        let p = b64.encode(payload.to_string());
+        let message = format!("{h}.{p}");
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(message.as_bytes());
+        let sig = b64.encode(mac.finalize().into_bytes());
+        format!("{message}.{sig}")
+    }
+
+    #[test]
+    fn validate_jwt_claims_checks_exp_iss_and_aud() {
+        let config = OidcAuth {
+            issuer_url: "https://auth.example.com".to_string(),
+            client_id: "my-app".to_string(),
+            ..Default::default()
+        };
+
+        let valid = serde_json::json!({
+            "sub": "user1",
+            "iss": "https://auth.example.com",
+            "aud": "my-app",
+            "exp": (crate::clock::unix_ms() / 1000) + 3600
+        });
+        assert_eq!(validate_jwt_claims(&valid, &config).unwrap(), "user1");
+
+        let expired = serde_json::json!({
+            "sub": "user1",
+            "iss": "https://auth.example.com",
+            "aud": "my-app",
+            "exp": (crate::clock::unix_ms() / 1000) - 100
+        });
+        assert!(validate_jwt_claims(&expired, &config).is_err());
+
+        let wrong_iss = serde_json::json!({
+            "sub": "user1",
+            "iss": "https://evil.com",
+            "aud": "my-app",
+            "exp": (crate::clock::unix_ms() / 1000) + 3600
+        });
+        assert!(validate_jwt_claims(&wrong_iss, &config).is_err());
+
+        let wrong_aud = serde_json::json!({
+            "sub": "user1",
+            "iss": "https://auth.example.com",
+            "aud": "other-app",
+            "exp": (crate::clock::unix_ms() / 1000) + 3600
+        });
+        assert!(validate_jwt_claims(&wrong_aud, &config).is_err());
+    }
+
+    #[test]
+    fn hs256_signature_verification_succeeds_for_valid_key() {
+        let header = serde_json::json!({ "alg": "HS256", "typ": "JWT" });
+        let payload = serde_json::json!({ "sub": "alice" });
+        let jwt = build_test_jwt(&header, &payload, "secret-key");
+        let (h, p, s) = parse_jwt_parts(&jwt).unwrap();
+        let message = format!("{h}.{p}");
+        let sig = b64_decode(s).unwrap();
+        assert!(verify_hs256(message.as_bytes(), &sig, b"secret-key"));
+        assert!(!verify_hs256(message.as_bytes(), &sig, b"wrong-secret"));
+    }
 }
