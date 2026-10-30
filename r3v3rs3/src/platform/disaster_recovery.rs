@@ -194,21 +194,96 @@ pub fn pack_tar_gz(files: &[(String, Vec<u8>)]) -> anyhow::Result<Vec<u8>> {
     Ok(buf)
 }
 
+fn is_allowed_dr_path(path: &Path) -> bool {
+    let mut components = path.components();
+    let Some(first) = components.next() else {
+        return false;
+    };
+    let std::path::Component::Normal(first_str) = first else {
+        return false;
+    };
+    let first_str = first_str.to_string_lossy();
+    if components.next().is_none() {
+        ROOT_CONFIG_FILES.contains(&first_str.as_ref())
+    } else {
+        SUBDIRS.contains(&first_str.as_ref())
+    }
+}
+
+fn validate_no_symlinks_in_path(base: &Path, rel: &Path) -> anyhow::Result<()> {
+    let mut current = base.to_path_buf();
+    for comp in rel.components() {
+        if let std::path::Component::Normal(c) = comp {
+            current.push(c);
+            if let Ok(meta) = fs::symlink_metadata(&current)
+                && meta.file_type().is_symlink()
+            {
+                anyhow::bail!(
+                    "symlink detected in destination path: {}",
+                    current.display()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_entry_type(entry: &tar::Entry<impl std::io::Read>) -> anyhow::Result<bool> {
+    let entry_type = entry.header().entry_type();
+    if !entry_type.is_file() && !entry_type.is_dir() {
+        anyhow::bail!("disallowed archive entry type: {:?}", entry_type);
+    }
+    if entry.link_name()?.is_some() {
+        anyhow::bail!("links are forbidden in disaster recovery archive");
+    }
+    Ok(entry_type.is_dir())
+}
+
+fn resolve_target_path(canonical_dest: &Path, rel_path: &Path) -> anyhow::Result<PathBuf> {
+    let clean = sanitize_relative_path(rel_path)?;
+    if !is_allowed_dr_path(&clean) {
+        anyhow::bail!("disallowed disaster recovery file: {}", clean.display());
+    }
+    let target = canonical_dest.join(&clean);
+    if !target.starts_with(canonical_dest) {
+        anyhow::bail!("path traversal detected: {}", clean.display());
+    }
+    validate_no_symlinks_in_path(canonical_dest, &clean)?;
+    Ok(target)
+}
+
+fn extract_entry(
+    mut entry: tar::Entry<impl std::io::Read>,
+    target: &Path,
+    is_dir: bool,
+) -> anyhow::Result<bool> {
+    if is_dir {
+        fs::create_dir_all(target)?;
+        return Ok(false);
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    entry.unpack(target)?;
+    Ok(true)
+}
+
 /// Unpacks a gzipped tar archive into `dest_dir` with path traversal protections.
 pub fn unpack_tar_gz(archive_bytes: &[u8], dest_dir: &Path) -> anyhow::Result<usize> {
+    let canonical_dest = dest_dir
+        .canonicalize()
+        .unwrap_or_else(|_| dest_dir.to_path_buf());
     let dec = GzDecoder::new(archive_bytes);
     let mut tar = tar::Archive::new(dec);
     let mut count = 0;
     for entry in tar.entries()? {
-        let mut entry = entry?;
+        let entry = entry?;
+        let is_dir = validate_entry_type(&entry)?;
         let rel_path = entry.path()?.to_path_buf();
-        let clean = sanitize_relative_path(&rel_path)?;
-        let target = dest_dir.join(clean);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)?;
+        let target = resolve_target_path(&canonical_dest, &rel_path)?;
+        if extract_entry(entry, &target, is_dir)? {
+            count += 1;
         }
-        entry.unpack(&target)?;
-        count += 1;
     }
     Ok(count)
 }
@@ -480,6 +555,34 @@ mod tests {
             fs::read_to_string(temp_dir.join("certs/site.pem")).unwrap(),
             "CERT DATA"
         );
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_dr_bundle_rejects_symlink_and_unauthorized_files() {
+        let temp_dir = std::env::temp_dir().join(format!("r3dr_test_sec_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        // 1. Unauthorized path outside whitelist
+        let files = vec![("cron.d/malicious".to_string(), b"echo evil".to_vec())];
+        let archive = pack_tar_gz(&files).unwrap();
+        assert!(unpack_tar_gz(&archive, &temp_dir).is_err());
+
+        // 2. Symlink creation attempt
+        let mut tar_bytes = Vec::new();
+        {
+            let enc = flate2::write::GzEncoder::new(&mut tar_bytes, flate2::Compression::default());
+            let mut tar = tar::Builder::new(enc);
+            let mut header = tar::Header::new_old();
+            header.set_entry_type(tar::EntryType::Symlink);
+            header.set_size(0);
+            header.set_cksum();
+            tar.append_link(&mut header, "certs/symlink", "/etc")
+                .unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        assert!(unpack_tar_gz(&tar_bytes, &temp_dir).is_err());
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }
