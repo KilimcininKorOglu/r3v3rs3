@@ -63,13 +63,11 @@ impl ClientIpResolver {
         let Some(trust) = self.trust(direct.peer, table) else {
             return direct;
         };
-        let provider_ip = match trust {
+        let ip = match trust {
             Trust::Cdn(provider) => provider_header_ip(provider, headers),
-            Trust::Proxy => None,
-        };
-        let ip = provider_ip
-            .or_else(|| self.forwarded_for_ip(headers, table))
-            .unwrap_or(direct.peer);
+            Trust::Proxy => self.forwarded_for_ip(headers, table),
+        }
+        .unwrap_or(direct.peer);
         ClientAddr {
             peer: direct.peer,
             ip,
@@ -265,13 +263,13 @@ mod tests {
     }
 
     #[test]
-    fn fastly_edge_falls_back_to_forwarded_for() {
+    fn cdn_edge_does_not_fall_back_to_forwarded_for() {
         let headers = headers(&[
             ("fastly-client-ip", "1.2.3.4"),
             ("x-forwarded-for", "203.0.113.9"),
         ]);
         let client = resolver(true, &[]).resolve(ip(FASTLY_EDGE), &headers, &table());
-        assert_eq!(client.ip, ip("203.0.113.9"));
+        assert_eq!(client.ip, ip(FASTLY_EDGE));
     }
 
     #[test]
