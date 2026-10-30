@@ -167,6 +167,7 @@ impl RpcMethod for AddProxy {
         validate_proxy(&self.entry, state)?;
         ensure_access_lists(&self.entry, state)?;
         ensure_no_unseen_host_overlap(&self.entry, None, caller, state)?;
+        ensure_no_unseen_port_conflict(&self.entry, None, caller, state)?;
         let proxy = seal(self.entry).await?;
         let id = state.generate_id();
         // The account gets the id first, so a failed account save adds no proxy that its creator
@@ -215,6 +216,7 @@ impl RpcMethod for UpdateProxy {
         validate_proxy(&proxy, state)?;
         ensure_access_lists(&proxy, state)?;
         ensure_no_unseen_host_overlap(&proxy, Some(self.entry.id), caller, state)?;
+        ensure_no_unseen_port_conflict(&proxy, Some(self.entry.id), caller, state)?;
         let proxy = seal(proxy).await?;
         let previous = proxy_entries(state);
         if state.proxies.set((self.entry.id, proxy).into()) {
@@ -346,6 +348,29 @@ fn ensure_no_unseen_host_overlap(
         if shares_any_port(&proxy.ports, &unseen.proxy.ports)
             && http_proxies_overlap(http, unseen_http)
         {
+            return Err(Error::Forbidden);
+        }
+    }
+    Ok(())
+}
+
+fn ensure_no_unseen_port_conflict(
+    proxy: &Proxy,
+    proxy_id: Option<ShortId>,
+    caller: &Caller,
+    state: &ServerState,
+) -> Result<(), Error> {
+    let Some(allowed) = &caller.proxies else {
+        return Ok(());
+    };
+    let ProxyKind::Tcp(_) = &proxy.kind else {
+        return Ok(());
+    };
+    for unseen in state.proxies.entries() {
+        if Some(unseen.id) == proxy_id || allowed.contains(&unseen.id) {
+            continue;
+        }
+        if shares_any_port(&proxy.ports, &unseen.proxy.ports) {
             return Err(Error::Forbidden);
         }
     }

@@ -250,6 +250,61 @@ async fn a_restricted_editor_cannot_overlap_hosts_of_an_unseen_proxy() -> anyhow
     .await
 }
 
+fn tcp_proxy_with_port(port: ShortId) -> Proxy {
+    Proxy {
+        kind: ProxyKind::Tcp(r3v3rs3_api::proxy::TcpProxy::default()),
+        ports: vec![port],
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn a_restricted_editor_cannot_take_tcp_port_of_an_unseen_proxy() -> anyhow::Result<()> {
+    let p1: ShortId = "p1".parse().unwrap();
+    let p2: ShortId = "p2".parse().unwrap();
+    let web_id: ShortId = "web".parse().unwrap();
+    let other_id: ShortId = "other".parse().unwrap();
+
+    let storage = TestStorage::builder()
+        .proxies(vec![
+            ProxyEntry {
+                id: web_id,
+                proxy: tcp_proxy_with_port(p1),
+                source: None,
+            },
+            ProxyEntry {
+                id: other_id,
+                proxy: tcp_proxy_with_port(p2),
+                source: None,
+            },
+        ])
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    with_server(storage, |mut channels| async move {
+        let editor = caller(Role::Editor, web_only());
+
+        // 1. Updating 'web' with port p2 (held by unseen proxy 'other') is rejected
+        assert_update_rejected(&mut channels, editor.clone(), web_id, tcp_proxy_with_port(p2)).await;
+
+        // 2. Adding a new proxy with port p2 is rejected
+        assert_add_rejected(&mut channels, editor.clone(), tcp_proxy_with_port(p2)).await;
+
+        // 3. An admin can add a proxy on p2
+        let admin = caller(Role::Admin, None);
+        let add_admin = AddProxy {
+            entry: tcp_proxy_with_port(p2),
+            owner: None,
+        };
+        let res = call_as(&mut channels, admin, add_admin).await.expect("rpc call");
+        assert!(res.is_ok(), "{res:?}");
+
+        Ok(())
+    })
+    .await
+}
+
 async fn status(
     client: &Client,
     addr: SocketAddr,
