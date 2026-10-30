@@ -304,7 +304,7 @@ impl FileStorage {
     ) -> anyhow::Result<()> {
         let keys = self.secret_keys().await?;
         let stored = StoredDnsCredential::seal(id, name, provider, keys)?;
-        let mut doc = self.load_document_or_new(path).await;
+        let mut doc = self.load_document_or_new(path).await?;
         doc[&id.to_string()].clone_from(toml_edit::ser::to_document(&stored)?.as_item());
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
         write_private(path, doc.to_string()).await?;
@@ -312,7 +312,7 @@ impl FileStorage {
     }
 
     async fn delete_dns_credential_impl(&self, path: &Path, id: ShortId) -> anyhow::Result<()> {
-        let mut doc = self.load_document_or_new(path).await;
+        let mut doc = self.load_document_or_new(path).await?;
         doc.remove(&id.to_string());
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
         write_private(path, doc.to_string()).await?;
@@ -398,15 +398,12 @@ impl FileStorage {
         Ok(content.parse::<DocumentMut>()?)
     }
 
-    /// Reads the file as a document. A file that cannot be read starts an empty one.
-    async fn load_document_or_new(&self, path: &Path) -> DocumentMut {
-        match self.load_document(path).await {
-            Ok(doc) => doc,
-            Err(err) => {
-                warn!(?path, %err, "failed to load config");
-                DocumentMut::new()
-            }
+    /// Reads the file as a document. A missing file starts an empty one.
+    async fn load_document_or_new(&self, path: &Path) -> anyhow::Result<DocumentMut> {
+        if !fs::try_exists(path).await? {
+            return Ok(DocumentMut::new());
         }
+        self.load_document(path).await
     }
 
     /// Writes every entry by its id and drops the keys the file no longer holds. The comments and
@@ -418,7 +415,7 @@ impl FileStorage {
     ) -> anyhow::Result<()> {
         create_parent(path).await?;
         info!(?path, "save config");
-        let mut doc = self.load_document_or_new(path).await;
+        let mut doc = self.load_document_or_new(path).await?;
 
         let mut unused = doc
             .as_table()
@@ -510,7 +507,7 @@ impl FileStorage {
     async fn save_acme_impl(&self, path: &Path, acme: &AcmeEntry) -> anyhow::Result<()> {
         create_parent(path).await?;
         info!(?path, "save config");
-        let mut doc = self.load_document_or_new(path).await;
+        let mut doc = self.load_document_or_new(path).await?;
 
         let (id, entry): (ShortId, AcmeAccount) = acme.clone().into();
         let id = id.to_string();
@@ -523,7 +520,7 @@ impl FileStorage {
 
     async fn delete_acme_impl(&self, path: &Path, id: ShortId) -> anyhow::Result<()> {
         info!(?path, "delete acme");
-        let mut doc = self.load_document_or_new(path).await;
+        let mut doc = self.load_document_or_new(path).await?;
 
         doc.remove(&id.to_string());
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
@@ -677,15 +674,10 @@ impl Storage for FileStorage {
     }
 
     async fn load_ports(&self) -> Vec<PortEntry> {
-        let dir = &self.dir;
-        let path = dir.join("ports.toml");
-        match self.load_ports_impl(&path).await {
-            Ok(ports) => ports,
-            Err(err) => {
-                warn!(?path, "failed to load: {err}");
-                Default::default()
-            }
-        }
+        let path = self.dir.join("ports.toml");
+        if_exists(&path, self.load_ports_impl(&path))
+            .await
+            .unwrap_or_else(|err| panic!("failed to load {}: {err}", path.display()))
     }
 
     async fn save_proxies(&self, proxies: &[ProxyEntry]) -> Result<(), Error> {
@@ -695,15 +687,10 @@ impl Storage for FileStorage {
     }
 
     async fn load_proxies(&self) -> Vec<ProxyEntry> {
-        let dir = &self.dir;
-        let path = dir.join("proxies.toml");
-        match self.load_proxies_impl(&path).await {
-            Ok(proxies) => proxies,
-            Err(err) => {
-                warn!(?path, "failed to load: {err}");
-                Default::default()
-            }
-        }
+        let path = self.dir.join("proxies.toml");
+        if_exists(&path, self.load_proxies_impl(&path))
+            .await
+            .unwrap_or_else(|err| panic!("failed to load {}: {err}", path.display()))
     }
 
     async fn load_access_lists(&self) -> Vec<AccessListEntry> {
@@ -1018,6 +1005,18 @@ mod test {
         std::fs::create_dir_all(&dir).unwrap();
         let storage = FileStorage::new(&dir);
         assert!(storage.load_dns_credentials().await.unwrap().is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn malformed_config_file_returns_error_instead_of_empty() {
+        let dir = std::env::temp_dir().join(format!("r33-malformed-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("invalid.toml");
+        std::fs::write(&path, "this is = [invalid toml").unwrap();
+        let storage = FileStorage::new(&dir);
+        let res = storage.load_document_or_new(&path).await;
+        assert!(res.is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -424,9 +424,9 @@ impl ServerState {
         {
             error!(%err, "failed to adopt the listeners of the master");
         }
-        log_save_error(self.update_ports().await);
+        self.sync_port_pools().await;
         self.update_certs().await;
-        log_save_error(self.update_proxies().await);
+        self.publish_proxies();
         self.update_acmes().await;
         self.reload_proxies().await;
         if role == ServerRole::Master {
@@ -1124,9 +1124,8 @@ impl ServerState {
         Ok(())
     }
 
-    /// Applies the port list to the listeners. The callers save the ports before they change the
-    /// list. An error means that the proxies without the removed ports were not saved.
-    pub async fn update_ports(&mut self) -> Result<(), Error> {
+    /// Synchronizes listener pools with the configured ports without modifying or saving proxies.
+    pub async fn sync_port_pools(&mut self) {
         let entries = self.ports.entries().cloned().collect::<Vec<_>>();
         self.tcp_pool
             .remove_unused_ports(self.ports.as_slice())
@@ -1140,6 +1139,16 @@ impl ServerState {
         self.tcp_pool.update(self.ports.as_mut_slice()).await;
         self.udp_pool.update(self.ports.as_mut_slice()).await;
         self.quic_pool.update(self.ports.as_mut_slice()).await;
+        let _ = self
+            .br_sender
+            .send(ServerEvent::PortTableUpdated { entries });
+    }
+
+    /// Applies the port list to the listeners. The callers save the ports before they change the
+    /// list. An error means that the proxies without the removed ports were not saved.
+    pub async fn update_ports(&mut self) -> Result<(), Error> {
+        self.sync_port_pools().await;
+        let entries = self.ports.entries().cloned().collect::<Vec<_>>();
         let saved = if self.proxies.remove_incompatible_ports(&entries) {
             self.update_proxies().await
         } else {
@@ -1148,9 +1157,6 @@ impl ServerState {
         if self.refresh_discovery().await {
             self.publish_proxies();
         }
-        let _ = self
-            .br_sender
-            .send(ServerEvent::PortTableUpdated { entries });
         if self.broadcast_events {
             for (entry, ctx) in self.ports.entries().cloned().zip(self.ports.as_slice()) {
                 let _ = self.br_sender.send(ServerEvent::PortStatusUpdated {

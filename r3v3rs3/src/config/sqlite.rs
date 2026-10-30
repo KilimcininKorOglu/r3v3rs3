@@ -5,6 +5,7 @@
 //! in a single unified SQLite database (`r3v3rs3.db`).
 
 use super::{account, storage::Storage};
+use anyhow::Context as _;
 use crate::audit::AuditStore;
 use crate::cdn::CdnRanges;
 use crate::certs::{Cert, acme::AcmeEntry};
@@ -272,17 +273,17 @@ async fn migrate_config_file(dir: &Path, pool: &SqlitePool) -> anyhow::Result<()
         return Ok(());
     }
     let content = fs::read_to_string(&file).await?;
-    if let Ok(doc) = toml::from_str::<Versioned<AppConfig>>(&content) {
-        let json = serde_json::to_string(&doc.data)?;
-        let now = crate::clock::unix_ms() as i64;
-        sqlx::query("INSERT OR REPLACE INTO server_config (id, data, updated_at) VALUES (1, ?, ?)")
-            .bind(json)
-            .bind(now)
-            .execute(pool)
-            .await?;
-        let _ = fs::rename(&file, dir.join("config.toml.migrated")).await;
-        info!("migrated config.toml to database");
-    }
+    let doc = toml::from_str::<Versioned<AppConfig>>(&content)
+        .with_context(|| format!("failed to parse {}", file.display()))?;
+    let json = serde_json::to_string(&doc.data)?;
+    let now = crate::clock::unix_ms() as i64;
+    sqlx::query("INSERT OR REPLACE INTO server_config (id, data, updated_at) VALUES (1, ?, ?)")
+        .bind(json)
+        .bind(now)
+        .execute(pool)
+        .await?;
+    let _ = fs::rename(&file, dir.join("config.toml.migrated")).await;
+    info!("migrated config.toml to database");
     Ok(())
 }
 
@@ -292,25 +293,25 @@ async fn migrate_ports_file(dir: &Path, pool: &SqlitePool) -> anyhow::Result<()>
         return Ok(());
     }
     let content = fs::read_to_string(&file).await?;
-    if let Ok(table) = toml::from_str::<Versioned<IndexMap<ShortId, Port>>>(&content) {
-        let now = crate::clock::unix_ms() as i64;
-        for (id, port) in table.data {
-            let entry = PortEntry::from((id, port));
-            let json = serde_json::to_string(&entry)?;
-            sqlx::query(
-                "INSERT OR REPLACE INTO ports (id, listen_addr, name, data, updated_at) VALUES (?, ?, ?, ?, ?)",
-            )
-            .bind(entry.id.to_string())
-            .bind(entry.port.listen.to_string())
-            .bind(&entry.port.name)
-            .bind(json)
-            .bind(now)
-            .execute(pool)
-            .await?;
-        }
-        let _ = fs::rename(&file, dir.join("ports.toml.migrated")).await;
-        info!("migrated ports.toml to database");
+    let table = toml::from_str::<Versioned<IndexMap<ShortId, Port>>>(&content)
+        .with_context(|| format!("failed to parse {}", file.display()))?;
+    let now = crate::clock::unix_ms() as i64;
+    for (id, port) in table.data {
+        let entry = PortEntry::from((id, port));
+        let json = serde_json::to_string(&entry)?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO ports (id, listen_addr, name, data, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(entry.id.to_string())
+        .bind(entry.port.listen.to_string())
+        .bind(&entry.port.name)
+        .bind(json)
+        .bind(now)
+        .execute(pool)
+        .await?;
     }
+    let _ = fs::rename(&file, dir.join("ports.toml.migrated")).await;
+    info!("migrated ports.toml to database");
     Ok(())
 }
 
@@ -320,24 +321,24 @@ async fn migrate_proxies_file(dir: &Path, pool: &SqlitePool) -> anyhow::Result<(
         return Ok(());
     }
     let content = fs::read_to_string(&file).await?;
-    if let Ok(table) = toml::from_str::<Versioned<IndexMap<ShortId, Proxy>>>(&content) {
-        let now = crate::clock::unix_ms() as i64;
-        for (id, proxy) in table.data {
-            let entry = ProxyEntry::from((id, proxy));
-            let json = serde_json::to_string(&entry)?;
-            sqlx::query(
-                "INSERT OR REPLACE INTO proxies (id, name, data, updated_at) VALUES (?, ?, ?, ?)",
-            )
-            .bind(entry.id.to_string())
-            .bind(&entry.proxy.name)
-            .bind(json)
-            .bind(now)
-            .execute(pool)
-            .await?;
-        }
-        let _ = fs::rename(&file, dir.join("proxies.toml.migrated")).await;
-        info!("migrated proxies.toml to database");
+    let table = toml::from_str::<Versioned<IndexMap<ShortId, Proxy>>>(&content)
+        .with_context(|| format!("failed to parse {}", file.display()))?;
+    let now = crate::clock::unix_ms() as i64;
+    for (id, proxy) in table.data {
+        let entry = ProxyEntry::from((id, proxy));
+        let json = serde_json::to_string(&entry)?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO proxies (id, name, data, updated_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind(entry.id.to_string())
+        .bind(&entry.proxy.name)
+        .bind(json)
+        .bind(now)
+        .execute(pool)
+        .await?;
     }
+    let _ = fs::rename(&file, dir.join("proxies.toml.migrated")).await;
+    info!("migrated proxies.toml to database");
     Ok(())
 }
 
