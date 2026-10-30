@@ -262,7 +262,7 @@ pub async fn create_replica(
         .add_app(app_req, unix_ms())
         .await
         .map_err(platform_error)?;
-    let password = sync_replica_password(&platform, &primary, &app, &info).await?;
+    sync_replica_password(&platform, &primary, &app, &info).await?;
     platform
         .deploy(app.id, &caller.username, DeploymentTrigger::Manual)
         .await
@@ -270,7 +270,7 @@ pub async fn create_replica(
     record_replica_audit(&state, &caller, &app, &primary).await;
     Ok(Json(DatabaseCreated {
         app,
-        password,
+        password: None,
         host_port,
         user: info.user,
         database: info.default_db,
@@ -282,10 +282,10 @@ async fn sync_replica_password(
     primary: &AppEntry,
     replica: &AppEntry,
     info: &EngineInfo,
-) -> Result<Option<String>, AppError> {
+) -> Result<(), AppError> {
     use r3v3rs3_api::platform::EnvEntry;
     if info.password_env.is_empty() {
-        return Ok(None);
+        return Ok(());
     }
     let primary_password = platform
         .open_password(primary.id, info)
@@ -293,14 +293,14 @@ async fn sync_replica_password(
         .map_err(platform_error)?;
     let entry = EnvEntry {
         key: info.password_env.parse().map_err(into_app_error)?,
-        value: Some(primary_password.clone()),
+        value: Some(primary_password),
         secret: true,
     };
     platform
         .set_env(replica.id, vec![entry])
         .await
         .map_err(platform_error)?;
-    Ok(Some(primary_password))
+    Ok(())
 }
 
 fn replica_app_request(
