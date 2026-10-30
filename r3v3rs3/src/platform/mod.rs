@@ -62,8 +62,8 @@ use r3v3rs3_api::git::GitRef;
 use r3v3rs3_api::git_connection::PublicUrl;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
-    AppDashboardSummary, AppEntry, AppLog, AppRequest, ComposeServiceStatus, ComposeTopology,
-    DeploymentEntry, EnvEntry, EnvGroup, EnvGroupSpec, EnvGroupSummary, FileEntry,
+    AppDashboardSummary, AppEntry, AppLog, AppRequest, AppSpec, ComposeServiceStatus,
+    ComposeTopology, DeploymentEntry, EnvEntry, EnvGroup, EnvGroupSpec, EnvGroupSummary, FileEntry,
     ImageUpdateStatus, LOCAL_TARGET, PlatformConfig, PreviewParent, parse_compose_topology,
 };
 use rand::seq::IndexedRandom;
@@ -1166,10 +1166,80 @@ impl Platform {
             return Err(not_found(request.target));
         }
         Self::check_env_groups(&self.store, &request.spec.env_groups).await?;
+        Self::check_boundaries(&self.store, &request.spec).await?;
         if let Some(preview) = &request.spec.preview_of {
             Self::check_preview_parent(&self.store, preview).await?;
         }
         self.hook_target(&request.spec).await
+    }
+
+    async fn check_boundaries(store: &PlatformStore, spec: &AppSpec) -> anyhow::Result<()> {
+        Self::check_project_and_env(store, spec).await?;
+        Self::check_uses_database(store, spec).await?;
+        Self::check_replica_of(store, spec).await
+    }
+
+    async fn check_project_and_env(store: &PlatformStore, spec: &AppSpec) -> anyhow::Result<()> {
+        if let Some(project_id) = spec.project_id
+            && store.project(project_id).await?.is_none()
+        {
+            return Err(not_found(project_id));
+        }
+        if let Some(env_id) = spec.environment_id {
+            let Some(env) = store.environment(env_id).await? else {
+                return Err(not_found(env_id));
+            };
+            if Some(env.project_id) != spec.project_id {
+                return Err(anyhow!("environment does not belong to the app's project"));
+            }
+        }
+        Ok(())
+    }
+
+    async fn check_uses_database(store: &PlatformStore, spec: &AppSpec) -> anyhow::Result<()> {
+        let Some(db_id) = spec.uses_database else {
+            return Ok(());
+        };
+        let Some(db) = store.app(db_id).await? else {
+            return Err(not_found(db_id));
+        };
+        if db.spec.database.is_none() {
+            return Err(anyhow!("the referenced app {db_id} is not a database"));
+        }
+        if db.spec.project_id != spec.project_id {
+            return Err(anyhow!(
+                "referenced database belongs to a different project"
+            ));
+        }
+        if db.spec.environment_id != spec.environment_id {
+            return Err(anyhow!(
+                "referenced database belongs to a different environment"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn check_replica_of(store: &PlatformStore, spec: &AppSpec) -> anyhow::Result<()> {
+        let Some(primary_id) = spec.replica_of else {
+            return Ok(());
+        };
+        let Some(primary) = store.app(primary_id).await? else {
+            return Err(not_found(primary_id));
+        };
+        if primary.spec.database.is_none() {
+            return Err(anyhow!("referenced primary {primary_id} is not a database"));
+        }
+        if primary.spec.project_id != spec.project_id {
+            return Err(anyhow!(
+                "referenced primary database belongs to a different project"
+            ));
+        }
+        if primary.spec.environment_id != spec.environment_id {
+            return Err(anyhow!(
+                "referenced primary database belongs to a different environment"
+            ));
+        }
+        Ok(())
     }
 
     fn stored_env(
@@ -1652,7 +1722,8 @@ mod tests {
         ));
         let mut config = AppConfig::default();
         let handle =
-            PlatformHandle::start(&config, &dir, command.clone(), &events, audit.clone(), None).await;
+            PlatformHandle::start(&config, &dir, command.clone(), &events, audit.clone(), None)
+                .await;
         assert!(matches!(handle.get(), Err(Error::PlatformDisabled)));
 
         config.platform.enabled = true;
@@ -1870,6 +1941,65 @@ mod tests {
 
         let updated = platform.update_app(shop.id, malicious_request, 2).await?;
         assert!(updated.spec.preview_of.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn foreign_environment_is_rejected() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let (proj_a, _) = setup_test_project_and_env(&platform).await?;
+
+        let spec_b = r3v3rs3_api::platform::ProjectSpec {
+            name: "Project B".to_string(),
+            description: None,
+            default_environments: vec!["production".to_string()],
+        };
+        let project_b = platform.create_project(spec_b, 1000).await?;
+        let env_b = project_b.environments[0].id;
+
+        let mut app_req = request("app-a");
+        app_req.spec.project_id = Some(proj_a);
+        app_req.spec.environment_id = Some(env_b);
+        let err = platform.add_app(app_req, 1000).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("environment does not belong to the app's project")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cross_project_database_is_rejected() -> anyhow::Result<()> {
+        let catalog: r3v3rs3_api::platform::EnginesCatalog =
+            serde_json::from_str(include_str!("../../data/engines.json")).unwrap();
+        r3v3rs3_api::platform::install_engines(catalog);
+
+        let (platform, _dir) = platform().await?;
+        let (proj_a, env_a) = setup_test_project_and_env(&platform).await?;
+
+        let spec_b = r3v3rs3_api::platform::ProjectSpec {
+            name: "Project B".to_string(),
+            description: None,
+            default_environments: vec!["production".to_string()],
+        };
+        let project_b = platform.create_project(spec_b, 1000).await?;
+
+        let mut db_req = request("db-a");
+        db_req.spec.database = Some("postgres".to_string());
+        db_req.spec.host_port = Some(15432);
+        db_req.spec.project_id = Some(proj_a);
+        db_req.spec.environment_id = Some(env_a);
+        let db_a = platform.add_app(db_req, 1000).await?;
+
+        let mut app_b_req = request("app-b");
+        app_b_req.spec.project_id = Some(project_b.id);
+        app_b_req.spec.environment_id = Some(project_b.environments[0].id);
+        app_b_req.spec.uses_database = Some(db_a.id);
+        let err = platform.add_app(app_b_req, 1000).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("referenced database belongs to a different project")
+        );
         Ok(())
     }
 }

@@ -1298,6 +1298,7 @@ impl AppSpec {
         if self.port == 0 {
             return Err(invalid("the port must be between 1 and 65535"));
         }
+        self.validate_project_and_environment()?;
         self.validate_domains()?;
         self.validate_compose()?;
         self.validate_runtime_policies()?;
@@ -1305,6 +1306,15 @@ impl AppSpec {
         self.validate_volumes()?;
         self.validate_database()?;
         self.validate_targets()
+    }
+
+    fn validate_project_and_environment(&self) -> Result<(), Error> {
+        if self.environment_id.is_some() && self.project_id.is_none() {
+            return Err(invalid(
+                "an environment cannot be specified without a project",
+            ));
+        }
+        Ok(())
     }
 
     fn validate_runtime_policies(&self) -> Result<(), Error> {
@@ -3066,5 +3076,21 @@ EMPTY_VAL=
         assert!(!is_valid_cache_path("/cache,target=/etc"));
         assert!(!is_valid_cache_path("/cache\nRUN id"));
         assert!(!is_valid_cache_path("/cache;rm -rf /"));
+    }
+
+    #[test]
+    fn test_environment_without_project_rejected() {
+        let env_id = "env-123".parse::<ShortId>().unwrap();
+        let result = spec(json!({
+            "source": { "type": "image", "image": "nginx:alpine" },
+            "port": 80,
+            "environment_id": env_id,
+        }));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .contains("an environment cannot be specified without a project")
+        );
     }
 }

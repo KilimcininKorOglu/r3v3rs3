@@ -510,8 +510,12 @@ impl Platform {
     async fn previous_compose(&self, app: ShortId) -> Option<PreviousCompose> {
         let prev_id = self.store.running_deployment(app).await.ok().flatten()?;
         let prev_entry = self.store.deployment(prev_id).await.ok().flatten()?;
-        let (prev_spec, prev_stored_env) =
-            self.store.deployment_snapshot(prev_id).await.ok().flatten()?;
+        let (prev_spec, prev_stored_env) = self
+            .store
+            .deployment_snapshot(prev_id)
+            .await
+            .ok()
+            .flatten()?;
         let JobImage::Compose(source) = JobImage::rollback(&prev_spec, &prev_entry).ok()? else {
             return None;
         };
@@ -810,6 +814,21 @@ impl Platform {
             .await
     }
 
+    async fn resolve_environment_vars(&self, spec: &AppSpec) -> anyhow::Result<Vec<EnvVar>> {
+        let Some(env_id) = spec.environment_id else {
+            return Ok(Vec::new());
+        };
+        if let Some(env) = self.store.environment(env_id).await? {
+            if Some(env.project_id) != spec.project_id {
+                bail!("environment does not match app project");
+            }
+        } else {
+            bail!("environment not found");
+        }
+        let env_stored = self.store.environment_vars(env_id).await?;
+        self.open_env(env_id, &env_stored)
+    }
+
     async fn effective_env_for(
         &self,
         app: ShortId,
@@ -828,11 +847,8 @@ impl Platform {
             let group_vars = self.open_env(group_id, &group_stored)?;
             merge_env_vars(&mut vars, group_vars);
         }
-        if let Some(env_id) = spec.environment_id {
-            let env_stored = self.store.environment_vars(env_id).await?;
-            let env_vars = self.open_env(env_id, &env_stored)?;
-            merge_env_vars(&mut vars, env_vars);
-        }
+        let env_vars = self.resolve_environment_vars(spec).await?;
+        merge_env_vars(&mut vars, env_vars);
         let panel_env = self.open_env(app, stored_env)?;
         merge_env_vars(&mut vars, panel_env);
         Ok(vars)
@@ -936,6 +952,7 @@ impl Platform {
             return Ok(Vec::new());
         };
         let db = self.app(db_id).await?;
+        Self::check_database_scope(&db, job)?;
         let Some(engine) = db.spec.database else {
             bail!("the app {} is not a database", db.name);
         };
@@ -955,6 +972,18 @@ impl Platform {
             });
         }
         Ok(env)
+    }
+
+    fn check_database_scope(db: &AppEntry, job: &Job) -> anyhow::Result<()> {
+        if db.spec.project_id != job.spec.project_id
+            || db.spec.environment_id != job.spec.environment_id
+        {
+            bail!(
+                "the database {} belongs to a different project or environment",
+                db.name
+            );
+        }
+        Ok(())
     }
 
     /// Opens the password of the database, which its creation stored as a secret variable.
@@ -1530,8 +1559,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_failed_compose_deployment_rolls_back_to_previous_checkout_and_container(
-    ) -> anyhow::Result<()> {
+    async fn a_failed_compose_deployment_rolls_back_to_previous_checkout_and_container()
+    -> anyhow::Result<()> {
         let setup = setup_with(compose_request()?).await?;
         let first = deploy_mode(&setup, "blue").await?;
         assert_eq!(first.status, DeploymentStatus::Running);
