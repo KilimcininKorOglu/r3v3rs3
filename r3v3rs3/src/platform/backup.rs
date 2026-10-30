@@ -1772,6 +1772,17 @@ fn ping_heartbeat(url_opt: &Option<String>) {
     }
 }
 
+/// Maximum consecutive retry attempts for a scheduled backup in the same window.
+pub const MAX_BACKUP_RETRIES: u32 = 3;
+
+fn calculate_backoff_ms(attempts: u32) -> i64 {
+    match attempts {
+        1 => 60_000,
+        2 => 300_000,
+        _ => 900_000,
+    }
+}
+
 impl Platform {
     async fn dispatch_backup_failure(&self, app_name: &str, app_id: ShortId, err: &anyhow::Error) {
         let summary = format!("Scheduled backup failed for database '{app_name}'");
@@ -1788,6 +1799,41 @@ impl Platform {
         .await;
     }
 
+    pub fn is_backup_due(&self, app_id: ShortId, slot: i64, now: i64) -> bool {
+        let guard = match self.backup_attempts.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let Some(&(attempt_slot, count, next_at)) = guard.get(&app_id) else {
+            return true;
+        };
+        if attempt_slot != slot {
+            return true;
+        }
+        count < MAX_BACKUP_RETRIES && now >= next_at
+    }
+
+    pub fn record_backup_failure(&self, app_id: ShortId, slot: i64, now: i64) {
+        let mut guard = match self.backup_attempts.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let count = match guard.get(&app_id) {
+            Some(&(s, c, _)) if s == slot => c + 1,
+            _ => 1,
+        };
+        let backoff_ms = calculate_backoff_ms(count);
+        guard.insert(app_id, (slot, count, now + backoff_ms));
+    }
+
+    pub fn record_backup_success(&self, app_id: ShortId) {
+        let mut guard = match self.backup_attempts.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        guard.remove(&app_id);
+    }
+
     /// Takes the backup of every managed database that the schedule is due for.
     async fn run_scheduled_backups(&self) -> anyhow::Result<()> {
         let config = self.backup_config().await?;
@@ -1799,29 +1845,56 @@ impl Platform {
             if app.spec.database.is_none() {
                 continue;
             }
-            let last = self
-                .list_backups(app.id)
-                .await?
-                .first()
-                .map(|entry| entry.created_at);
-            if now >= slot && last.is_none_or(|created_at| created_at < slot) {
-                match self.run_backup(app.id).await {
-                    Ok(_) => ping_heartbeat(&config.heartbeat_url),
-                    Err(err) => {
-                        tracing::error!(
-                            err = format!("{err:#}"),
-                            database = %app.name,
-                            "the scheduled backup failed"
-                        );
-                        self.dispatch_backup_failure(app.name.as_str(), app.id, &err)
-                            .await;
-                    }
-                }
-            } else if config.restore_test_enabled {
-                self.verify_untested_backup(app.id).await;
-            }
+            self.check_app_backup(&app, slot, now, &config).await?;
         }
         Ok(())
+    }
+
+    async fn check_app_backup(
+        &self,
+        app: &AppEntry,
+        slot: i64,
+        now: i64,
+        config: &BackupConfig,
+    ) -> anyhow::Result<()> {
+        let last = self
+            .list_backups(app.id)
+            .await?
+            .first()
+            .map(|entry| entry.created_at);
+        if now >= slot && last.is_none_or(|created_at| created_at < slot) {
+            if self.is_backup_due(app.id, slot, now) {
+                self.execute_scheduled_backup(app, slot, now, config).await;
+            }
+        } else if config.restore_test_enabled {
+            self.verify_untested_backup(app.id).await;
+        }
+        Ok(())
+    }
+
+    async fn execute_scheduled_backup(
+        &self,
+        app: &AppEntry,
+        slot: i64,
+        now: i64,
+        config: &BackupConfig,
+    ) {
+        match self.run_backup(app.id).await {
+            Ok(_) => {
+                self.record_backup_success(app.id);
+                ping_heartbeat(&config.heartbeat_url);
+            }
+            Err(err) => {
+                self.record_backup_failure(app.id, slot, now);
+                tracing::error!(
+                    err = format!("{err:#}"),
+                    database = %app.name,
+                    "the scheduled backup failed"
+                );
+                self.dispatch_backup_failure(app.name.as_str(), app.id, &err)
+                    .await;
+            }
+        }
     }
 
     async fn verify_untested_backup(&self, db_id: ShortId) {
@@ -2446,5 +2519,42 @@ mod tests {
         assert_ne!(source_wal, target_wal);
         assert!(source_wal.ends_with("shop-db/wal"));
         assert!(target_wal.ends_with("shop-clone/wal"));
+    }
+
+    #[tokio::test]
+    async fn test_scheduled_backup_retry_backoff_and_limit() {
+        let (platform, _dir) = crate::platform::tests::platform().await.unwrap();
+        let app = platform
+            .add_app(crate::platform::tests::request("retry-db"), 1)
+            .await
+            .unwrap();
+        let slot = 1_000_000_000i64;
+
+        // Initially due
+        assert!(platform.is_backup_due(app.id, slot, slot));
+
+        // 1st failure: 1 min backoff
+        platform.record_backup_failure(app.id, slot, slot);
+        assert!(!platform.is_backup_due(app.id, slot, slot + 30_000));
+        assert!(platform.is_backup_due(app.id, slot, slot + 60_000));
+
+        // 2nd failure: 5 min backoff
+        let t1 = slot + 60_000;
+        platform.record_backup_failure(app.id, slot, t1);
+        assert!(!platform.is_backup_due(app.id, slot, t1 + 60_000));
+        assert!(platform.is_backup_due(app.id, slot, t1 + 300_000));
+
+        // 3rd failure: limit reached (3 attempts max)
+        let t2 = t1 + 300_000;
+        platform.record_backup_failure(app.id, slot, t2);
+        assert!(!platform.is_backup_due(app.id, slot, t2 + 10_000_000));
+
+        // Tomorrow's slot resets retry tracking
+        let next_slot = slot + 86_400_000;
+        assert!(platform.is_backup_due(app.id, next_slot, next_slot));
+
+        // Success clears failure record
+        platform.record_backup_success(app.id);
+        assert!(platform.is_backup_due(app.id, slot, slot));
     }
 }

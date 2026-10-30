@@ -198,6 +198,8 @@ pub struct Platform {
     busy: std::sync::Mutex<HashSet<ShortId>>,
     /// Scheduled command IDs that are currently executing.
     running_commands: std::sync::Mutex<HashSet<ShortId>>,
+    /// Scheduled backup retry tracking per app: (slot, attempts, next_attempt_at).
+    pub(super) backup_attempts: std::sync::Mutex<HashMap<ShortId, (i64, u32, i64)>>,
     /// The apps that a webhook request deploys again after their running pipeline, with optional git ref.
     queued: std::sync::Mutex<HashMap<ShortId, Option<GitRef>>>,
     timing: deploy::Timing,
@@ -281,6 +283,7 @@ impl Platform {
             sent: Mutex::new(None),
             busy: std::sync::Mutex::new(HashSet::new()),
             running_commands: std::sync::Mutex::new(HashSet::new()),
+            backup_attempts: std::sync::Mutex::new(HashMap::new()),
             queued: std::sync::Mutex::new(HashMap::new()),
             timing: deploy::Timing::default(),
             fetcher: Arc::new(GitFetcher),
