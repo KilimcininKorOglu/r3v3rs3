@@ -503,7 +503,7 @@ fn session_token(headers: &HeaderMap) -> Option<&str> {
 }
 
 /// Removes the session cookie, so the upstream server never receives the session token.
-fn remove_session_cookie(headers: &mut HeaderMap) {
+pub(crate) fn remove_session_cookie(headers: &mut HeaderMap) {
     remove_cookie(headers, COOKIE_NAME);
 }
 

@@ -1512,6 +1512,7 @@ where
 
     apply_stream_priority(route, &mut req);
 
+    auth::remove_auth_cookies(req.headers_mut());
     shared
         .header_rewriter
         .pre_process(req.headers_mut(), client, header_host, info.proto);

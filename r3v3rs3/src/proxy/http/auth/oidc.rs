@@ -108,8 +108,9 @@ impl OidcAuthenticator {
         let auth_url = self.build_authorization_url(ctx, &state);
         let state_val = format!("{state}:{target}");
         let secure = secure_attr(ctx);
+        let path = cookie_path(ctx);
         let cookie = format!(
-            "{STATE_COOKIE_NAME}={state_val}; Path=/; Max-Age=300; HttpOnly; SameSite=Lax{secure}"
+            "{STATE_COOKIE_NAME}={state_val}; Path={path}; Max-Age=300; HttpOnly; SameSite=Lax{secure}"
         );
         redirect_response(StatusCode::FOUND, &auth_url, Some(&cookie))
     }
@@ -158,8 +159,10 @@ impl OidcAuthenticator {
             self.sessions.remove_proxy_session(&token).await;
         }
         let secure = secure_attr(ctx);
-        let cookie = format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax{secure}");
-        redirect_response(StatusCode::FOUND, "/", Some(&cookie))
+        let path = cookie_path(ctx);
+        let cookie = format!("{COOKIE_NAME}=; Path={path}; Max-Age=0; HttpOnly; SameSite=Lax{secure}");
+        let target = if ctx.base_path.is_empty() { "/" } else { ctx.base_path };
+        redirect_response(StatusCode::FOUND, target, Some(&cookie))
     }
 
     fn build_authorization_url(&self, ctx: &AuthContext<'_>, state: &str) -> String {
@@ -279,12 +282,13 @@ impl OidcAuthenticator {
             }
         };
         let secure = secure_attr(ctx);
+        let path = cookie_path(ctx);
         let session_cookie = format!(
-            "{COOKIE_NAME}={token}; Path=/; Max-Age={}; HttpOnly; SameSite=Lax{secure}",
+            "{COOKIE_NAME}={token}; Path={path}; Max-Age={}; HttpOnly; SameSite=Lax{secure}",
             expiry.as_secs()
         );
         let clear_state =
-            format!("{STATE_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax{secure}");
+            format!("{STATE_COOKIE_NAME}=; Path={path}; Max-Age=0; HttpOnly; SameSite=Lax{secure}");
         let mut response = redirect_response(
             StatusCode::SEE_OTHER,
             safe_redirect(target),
@@ -447,12 +451,21 @@ fn resolve_userinfo_endpoint(config: &OidcAuth) -> String {
 
 fn callback_uri(ctx: &AuthContext<'_>) -> String {
     format!(
-        "{}://{}/{}/{}/oidc/callback",
+        "{}://{}{}/{}/{}/oidc/callback",
         ctx.proto,
         ctx.host.unwrap_or("localhost"),
+        ctx.base_path,
         ENDPOINT_PREFIX[0],
         ENDPOINT_PREFIX[1]
     )
+}
+
+fn cookie_path<'a>(ctx: &'a AuthContext<'_>) -> &'a str {
+    if ctx.base_path.is_empty() {
+        "/"
+    } else {
+        ctx.base_path
+    }
 }
 
 fn new_random_string(len: usize) -> String {
@@ -469,8 +482,9 @@ fn oidc_token(headers: &HeaderMap) -> Option<String> {
         .map(str::to_string)
 }
 
-fn remove_oidc_cookie(headers: &mut HeaderMap) {
+pub(crate) fn remove_oidc_cookie(headers: &mut HeaderMap) {
     remove_cookie(headers, COOKIE_NAME);
+    remove_cookie(headers, STATE_COOKIE_NAME);
 }
 
 fn inject_user_headers(headers: &mut HeaderMap, user: &str) {

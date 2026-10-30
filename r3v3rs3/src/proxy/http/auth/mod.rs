@@ -2,7 +2,7 @@ use super::error::ProxyError;
 use super::page::PagePreferences;
 use bytes::Bytes;
 use http_body_util::Full;
-use hyper::{Request, Response, body::Body};
+use hyper::{HeaderMap, Request, Response, body::Body};
 use r3v3rs3_api::{id::ShortId, policy::AuthPolicy};
 use std::{error::Error, fmt, net::IpAddr, ops::ControlFlow, sync::Arc};
 use tokio_rustls::rustls::ClientConfig;
@@ -19,6 +19,12 @@ use forward::ForwardAuthenticator;
 use oidc::OidcAuthenticator;
 use session::SessionAuthenticator;
 pub use session::SessionService;
+
+/// Strips internal proxy authentication cookies so upstream servers never receive them.
+pub(crate) fn remove_auth_cookies(headers: &mut HeaderMap) {
+    oidc::remove_oidc_cookie(headers);
+    session::remove_session_cookie(headers);
+}
 
 /// Authenticates the requests of a route.
 #[derive(Debug)]

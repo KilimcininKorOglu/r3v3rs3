@@ -354,3 +354,119 @@ async fn oidc_auth_flow_rejects_forged_or_expired_tokens() -> anyhow::Result<()>
     })
     .await
 }
+
+fn extract_set_cookie(resp: &reqwest::Response, prefix: &str) -> String {
+    for val in resp.headers().get_all(SET_COOKIE) {
+        if let Ok(s) = val.to_str()
+            && s.starts_with(prefix)
+            && (!prefix.ends_with('=') || !s.contains("Max-Age=0"))
+        {
+            return s.to_string();
+        }
+    }
+    panic!("cookie {prefix} not found");
+}
+
+#[tokio::test]
+async fn oidc_cookie_scoped_to_base_path_and_stripped_on_unprotected_route() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let mut oidc_server = mockito::Server::new_async().await;
+    let mut upstream = mockito::Server::new_async().await;
+
+    let auth_endpoint = format!("{}/oauth/authorize", oidc_server.url());
+    let token_endpoint = format!("{}/oauth/token", oidc_server.url());
+
+    let id_token = make_test_jwt(
+        r#"{"email":"bob@example.com","sub":"sub456","aud":"test-client-id","exp":9999999999}"#,
+        "test-client-secret",
+    );
+    let token_body = serde_json::json!({
+        "access_token": "mock_access_token",
+        "id_token": id_token,
+        "token_type": "Bearer"
+    })
+    .to_string();
+
+    let _mock_token = oidc_server
+        .mock("POST", "/oauth/token")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(token_body)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let mock_public = upstream
+        .mock("GET", "/hello")
+        .match_header("cookie", "legit=true")
+        .with_body("public response ok")
+        .expect(1)
+        .create_async()
+        .await;
+
+    let mut internal_route = http_route("/internal", &upstream.url(), None);
+    internal_route.auth = Some(AuthPolicy::Oidc(Box::new(OidcAuth {
+        issuer_url: String::new(),
+        authorization_url: auth_endpoint,
+        token_url: token_endpoint,
+        userinfo_url: String::new(),
+        client_id: "test-client-id".into(),
+        client_secret: "test-client-secret".into(),
+        client_secret_set: true,
+        scopes: vec!["openid".into(), "email".into()],
+        allowed_emails: vec!["bob@example.com".into()],
+    })));
+
+    let public_route = http_route("/public", &upstream.url(), None);
+
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![internal_route, public_route],
+        ..Default::default()
+    };
+
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("oidcscp", &port)])
+        .proxies(vec![http_proxy_entry("oidcscp", "oidcscp", proxy)])
+        .build();
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .build()?;
+
+        let login_url = format!("{}/internal/.r3v3rs3/auth/oidc/login?redirect=%2Finternal%2Fsecret", port.http_url(""));
+        let resp = client.get(&login_url).send().await?;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        let state_hdr = extract_set_cookie(&resp, "r3v3rs3_oidc_state=");
+        assert!(state_hdr.contains("Path=/internal"), "state cookie must be scoped: {state_hdr}");
+
+        let state_val = state_hdr.split(';').next().unwrap().trim_start_matches("r3v3rs3_oidc_state=");
+        let (state_token, _) = state_val.split_once(':').unwrap();
+
+        let callback_url = format!(
+            "{}/internal/.r3v3rs3/auth/oidc/callback?code=mock_code_123&state={state_token}",
+            port.http_url("")
+        );
+        let resp = client
+            .get(&callback_url)
+            .header(COOKIE, format!("r3v3rs3_oidc_state={state_val}"))
+            .send()
+            .await?;
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let session_hdr = extract_set_cookie(&resp, "r3v3rs3_oidc=");
+        assert!(session_hdr.contains("Path=/internal"), "session cookie must be scoped: {session_hdr}");
+
+        let resp = client
+            .get(port.http_url("/public/hello"))
+            .header(COOKIE, "r3v3rs3_oidc=leaked_proxy_token; legit=true")
+            .send()
+            .await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.text().await?, "public response ok");
+        mock_public.assert_async().await;
+
+        Ok(())
+    })
+    .await
+}
