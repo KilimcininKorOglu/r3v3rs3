@@ -155,10 +155,21 @@ pub fn decode_p256_public_key(input: &str) -> Option<Vec<u8>> {
     }
 }
 
-fn check_auth_data(auth_data: &[u8], stored_counter: u32) -> Result<u32, Error> {
+fn check_auth_data(
+    auth_data: &[u8],
+    stored_counter: u32,
+    expected_rp_id: Option<&str>,
+) -> Result<u32, Error> {
     if auth_data.len() < 37 {
         error!("authenticator data too short: {}", auth_data.len());
         return Err(Error::InvalidLoginCredentials);
+    }
+    if let Some(rp_id) = expected_rp_id {
+        let expected_hash = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, rp_id.as_bytes());
+        if &auth_data[..32] != expected_hash.as_ref() {
+            error!("rpIdHash mismatch in authenticator data");
+            return Err(Error::InvalidLoginCredentials);
+        }
     }
     let flags = auth_data[32];
     if (flags & 0x01) == 0 {
@@ -217,7 +228,15 @@ fn verify_passkey_credential(
         decode_base64_or_hex(client_data_b64).ok_or(Error::InvalidLoginCredentials)?;
     let sig_bytes = decode_base64_or_hex(sig_b64).ok_or(Error::InvalidLoginCredentials)?;
 
-    let counter = check_auth_data(&auth_data, credential.counter)?;
+    let client_data_val: Option<serde_json::Value> = serde_json::from_slice(&client_data).ok();
+    let expected_rp_id = client_data_val
+        .as_ref()
+        .and_then(|v| v.get("origin"))
+        .and_then(|v| v.as_str())
+        .and_then(|o| url::Url::parse(o).ok())
+        .and_then(|u| u.host_str().map(|h| h.to_string()));
+
+    let counter = check_auth_data(&auth_data, credential.counter, expected_rp_id.as_deref())?;
     verify_p256_signature(&credential.public_key, &auth_data, &client_data, &sig_bytes)?;
 
     let updated = if counter > credential.counter {
@@ -257,12 +276,15 @@ mod tests {
             ..Default::default()
         };
 
+        let rp_id = "localhost";
+        let rp_hash = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, rp_id.as_bytes());
         // Simulated authenticatorData: 32 bytes rpIdHash + 1 byte flags (0x01 UP) + 4 bytes counter
-        let mut auth_data = vec![0x42; 32];
+        let mut auth_data = rp_hash.as_ref().to_vec();
         auth_data.push(0x01); // UP flag set
         auth_data.extend_from_slice(&10u32.to_be_bytes()); // counter = 10
 
-        let client_data_json = br#"{"type":"webauthn.get","challenge":"abc"}"#;
+        let client_data_json =
+            br#"{"type":"webauthn.get","challenge":"abc","origin":"http://localhost:46492"}"#;
         let client_hash = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, client_data_json);
 
         let mut signed = Vec::new();
@@ -296,7 +318,7 @@ mod tests {
         assert_eq!(accounts["admin"].passkeys[0].counter, 10);
 
         // 2. Successful usernameless login (resident key) with incremented counter = 11
-        let mut auth_data2 = vec![0x42; 32];
+        let mut auth_data2 = rp_hash.as_ref().to_vec();
         auth_data2.push(0x01);
         auth_data2.extend_from_slice(&11u32.to_be_bytes()); // counter = 11
 
@@ -325,7 +347,7 @@ mod tests {
         assert_eq!(accounts["admin"].passkeys[0].counter, 11);
 
         // 3. Counter replay detection: lower or same counter should fail
-        let mut stale_auth_data = vec![0x42; 32];
+        let mut stale_auth_data = rp_hash.as_ref().to_vec();
         stale_auth_data.push(0x01);
         stale_auth_data.extend_from_slice(&11u32.to_be_bytes()); // counter still 11, stored is 11
         let stale_auth_b64 = URL_SAFE_NO_PAD.encode(&stale_auth_data);
@@ -344,6 +366,12 @@ mod tests {
             },
         );
         assert!(res.is_err());
+
+        // 4. rpIdHash mismatch rejected
+        let mut bad_auth = vec![0x99; 32];
+        bad_auth.push(0x01);
+        bad_auth.extend_from_slice(&20u32.to_be_bytes());
+        assert!(check_auth_data(&bad_auth, 0, Some("localhost")).is_err());
 
         Ok(())
     }

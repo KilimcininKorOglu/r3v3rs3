@@ -358,9 +358,10 @@ pub async fn register_passkey(
     if crate::config::account::decode_p256_public_key(&request.public_key).is_none() {
         return Err(Error::InvalidPasskey.into());
     }
-    if let Some(client_data) = &request.client_data_json
-        && !verify_and_consume_challenge(&state, client_data, "webauthn.create").await
-    {
+    let Some(client_data) = &request.client_data_json else {
+        return Err(Error::InvalidPasskey.into());
+    };
+    if !verify_and_consume_challenge(&state, client_data, "webauthn.create").await {
         return Err(Error::InvalidPasskey.into());
     }
 
@@ -548,6 +549,28 @@ async fn extract_rp_id(state: &AppState, headers: &axum::http::HeaderMap) -> Str
     "localhost".to_string()
 }
 
+fn is_valid_origin(origin_str: &str, expected_rp_id: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(origin_str) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    let origin_clean = host.trim_start_matches('[').trim_end_matches(']');
+    let rp_clean = expected_rp_id.trim_start_matches('[').trim_end_matches(']');
+
+    if origin_clean.eq_ignore_ascii_case(rp_clean) {
+        return true;
+    }
+    if origin_clean.ends_with(&format!(".{rp_clean}")) {
+        return true;
+    }
+    let is_origin_local =
+        origin_clean == "localhost" || origin_clean == "127.0.0.1" || origin_clean == "::1";
+    let is_rp_local = rp_clean == "localhost" || rp_clean == "127.0.0.1" || rp_clean == "::1";
+    is_origin_local && is_rp_local
+}
+
 pub async fn verify_and_consume_challenge(
     state: &AppState,
     client_data_b64: &str,
@@ -560,6 +583,13 @@ pub async fn verify_and_consume_challenge(
         return false;
     };
     if client_data.get("type").and_then(|v| v.as_str()) != Some(expected_type) {
+        return false;
+    }
+    let Some(origin) = client_data.get("origin").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    let rp_id = extract_rp_id(state, &axum::http::HeaderMap::new()).await;
+    if !is_valid_origin(origin, &rp_id) {
         return false;
     }
     let Some(challenge) = client_data.get("challenge").and_then(|v| v.as_str()) else {
@@ -784,5 +814,19 @@ mod tests {
         attempts.clear(&key("admin"));
         attempts.record_failure(key("admin"), 2, reset, now);
         assert!(!attempts.is_blocked(&key("admin"), reset, now));
+    }
+
+    #[test]
+    fn origin_validation_rules() {
+        assert!(is_valid_origin("http://localhost:46492", "localhost"));
+        assert!(is_valid_origin("http://127.0.0.1:46492", "localhost"));
+        assert!(is_valid_origin("https://admin.example.com", "example.com"));
+        assert!(is_valid_origin("https://example.com", "example.com"));
+        assert!(!is_valid_origin("https://evil.com", "example.com"));
+        assert!(!is_valid_origin(
+            "https://attacker-example.com",
+            "example.com"
+        ));
+        assert!(!is_valid_origin("not-a-url", "example.com"));
     }
 }
