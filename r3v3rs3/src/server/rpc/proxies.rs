@@ -7,7 +7,9 @@ use crate::server::state::ServerState;
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyKind, ProxyStatus};
+use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, ProxyStatus};
+use r3v3rs3_api::subject_name::SubjectName;
+use r3v3rs3_api::vhost::VirtualHost;
 
 pub struct GetProxyList;
 
@@ -154,8 +156,17 @@ impl RpcMethod for AddProxy {
     const PERMISSION: Permission = Permission::EditProxies;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        self.call_with_caller(state, &Caller::system()).await
+    }
+
+    async fn call_with_caller(
+        self,
+        state: &mut ServerState,
+        caller: &Caller,
+    ) -> Result<Self::Output, Error> {
         validate_proxy(&self.entry, state)?;
         ensure_access_lists(&self.entry, state)?;
+        ensure_no_unseen_host_overlap(&self.entry, None, caller, state)?;
         let proxy = seal(self.entry).await?;
         let id = state.generate_id();
         // The account gets the id first, so a failed account save adds no proxy that its creator
@@ -186,8 +197,16 @@ impl RpcMethod for UpdateProxy {
     const MUTATES: bool = true;
     const PERMISSION: Permission = Permission::EditProxies;
 
-    /// A user or a token without a new secret keeps its current hash.
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        self.call_with_caller(state, &Caller::system()).await
+    }
+
+    /// A user or a token without a new secret keeps its current hash.
+    async fn call_with_caller(
+        self,
+        state: &mut ServerState,
+        caller: &Caller,
+    ) -> Result<Self::Output, Error> {
         ensure_manual(state, self.entry.id)?;
         let mut proxy = self.entry.proxy;
         if let Some(ctx) = state.proxies.get(self.entry.id) {
@@ -195,6 +214,7 @@ impl RpcMethod for UpdateProxy {
         }
         validate_proxy(&proxy, state)?;
         ensure_access_lists(&proxy, state)?;
+        ensure_no_unseen_host_overlap(&proxy, Some(self.entry.id), caller, state)?;
         let proxy = seal(proxy).await?;
         let previous = proxy_entries(state);
         if state.proxies.set((self.entry.id, proxy).into()) {
@@ -250,4 +270,84 @@ fn ensure_access_lists(proxy: &Proxy, state: &ServerState) -> Result<(), Error> 
 pub fn validate_proxy(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
     proxy.kind.validate_upstream()?;
     upstream_client_config(&state.certs, proxy.kind.client_cert()).map(|_| ())
+}
+
+fn subject_names_overlap(a: &SubjectName, b: &SubjectName) -> bool {
+    match (a, b) {
+        (SubjectName::DnsName(n1), SubjectName::DnsName(n2)) => n1.eq_ignore_ascii_case(n2),
+        (SubjectName::IPAddress(ip1), SubjectName::IPAddress(ip2)) => ip1 == ip2,
+        (SubjectName::WildcardDnsName(w1), SubjectName::WildcardDnsName(w2)) => {
+            w1.eq_ignore_ascii_case(w2)
+        }
+        (SubjectName::WildcardDnsName(_), SubjectName::DnsName(d)) => a.test(d),
+        (SubjectName::DnsName(d), SubjectName::WildcardDnsName(_)) => b.test(d),
+        _ => false,
+    }
+}
+
+fn vhosts_overlap(a: &VirtualHost, b: &VirtualHost) -> bool {
+    match (a, b) {
+        (VirtualHost::SubjectName(s1), VirtualHost::SubjectName(s2)) => {
+            subject_names_overlap(s1, s2)
+        }
+        (VirtualHost::Regex(r), VirtualHost::SubjectName(s))
+        | (VirtualHost::SubjectName(s), VirtualHost::Regex(r)) => match s {
+            SubjectName::DnsName(name) => r.is_match(name),
+            SubjectName::IPAddress(ip) => r.is_match(&ip.to_string()),
+            SubjectName::WildcardDnsName(name) => {
+                r.as_str() == name || r.is_match(&format!("sub.{name}"))
+            }
+        },
+        (VirtualHost::Regex(r1), VirtualHost::Regex(r2)) => r1.as_str() == r2.as_str(),
+    }
+}
+
+fn has_vhost_overlap(vhosts_a: &[VirtualHost], vhosts_b: &[VirtualHost]) -> bool {
+    for a in vhosts_a {
+        for b in vhosts_b {
+            if vhosts_overlap(a, b) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn http_proxies_overlap(a: &HttpProxy, b: &HttpProxy) -> bool {
+    if a.vhosts.is_empty() || b.vhosts.is_empty() {
+        return true;
+    }
+    has_vhost_overlap(&a.vhosts, &b.vhosts)
+}
+
+fn shares_any_port(a: &[ShortId], b: &[ShortId]) -> bool {
+    a.iter().any(|p| b.contains(p))
+}
+
+fn ensure_no_unseen_host_overlap(
+    proxy: &Proxy,
+    proxy_id: Option<ShortId>,
+    caller: &Caller,
+    state: &ServerState,
+) -> Result<(), Error> {
+    let Some(allowed) = &caller.proxies else {
+        return Ok(());
+    };
+    let ProxyKind::Http(http) = &proxy.kind else {
+        return Ok(());
+    };
+    for unseen in state.proxies.entries() {
+        if Some(unseen.id) == proxy_id || allowed.contains(&unseen.id) {
+            continue;
+        }
+        let ProxyKind::Http(unseen_http) = &unseen.proxy.kind else {
+            continue;
+        };
+        if shares_any_port(&proxy.ports, &unseen.proxy.ports)
+            && http_proxies_overlap(http, unseen_http)
+        {
+            return Err(Error::Forbidden);
+        }
+    }
+    Ok(())
 }

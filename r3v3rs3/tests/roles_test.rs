@@ -23,6 +23,7 @@ use tokio::sync::mpsc;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
+use r3v3rs3::server::ServerChannels;
 use common::{
     TestStorage, alloc_tcp_port, call, call_as, http_route, port_entry, session_cookie,
     wait_for_listener, with_server,
@@ -153,6 +154,97 @@ async fn an_editor_with_a_proxy_list_sees_and_changes_only_its_proxies() -> anyh
 
         call(&mut channels, DeleteProxy { id: created }).await??;
         assert_eq!(storage.load_accounts().await?["editor"].proxies, web_only());
+        Ok(())
+    })
+    .await
+}
+
+fn port_vhost_proxy(port: ShortId, vhost: &str, upstream: &str) -> Proxy {
+    let mut proxy = http_proxy(upstream);
+    proxy.ports = vec![port];
+    if let ProxyKind::Http(http) = &mut proxy.kind {
+        http.vhosts = vec![vhost.parse().expect("valid vhost")];
+    }
+    proxy
+}
+
+async fn assert_update_rejected(
+    channels: &mut ServerChannels,
+    caller: Caller,
+    proxy_id: ShortId,
+    conflicting: Proxy,
+) {
+    let update = UpdateProxy {
+        entry: (proxy_id, conflicting).into(),
+    };
+    let res = call_as(channels, caller, update).await.expect("rpc call");
+    assert!(matches!(res, Err(Error::Forbidden)));
+}
+
+async fn assert_add_rejected(
+    channels: &mut ServerChannels,
+    caller: Caller,
+    conflicting: Proxy,
+) {
+    let add = AddProxy {
+        entry: conflicting,
+        owner: Some("editor".into()),
+    };
+    let res = call_as(channels, caller, add).await.expect("rpc call");
+    assert!(matches!(res, Err(Error::Forbidden)));
+}
+
+#[tokio::test]
+async fn a_restricted_editor_cannot_overlap_hosts_of_an_unseen_proxy() -> anyhow::Result<()> {
+    let port_id: ShortId = "p1".parse().unwrap();
+    let web_id: ShortId = "web".parse().unwrap();
+    let other_id: ShortId = "other".parse().unwrap();
+
+    let other_proxy = port_vhost_proxy(port_id, "app.example.com", "http://127.0.0.1:1/");
+    let web_proxy = port_vhost_proxy(port_id, "web.example.com", "http://127.0.0.1:2/");
+
+    let storage = TestStorage::builder()
+        .proxies(vec![
+            ProxyEntry {
+                id: web_id,
+                proxy: web_proxy,
+                source: None,
+            },
+            ProxyEntry {
+                id: other_id,
+                proxy: other_proxy,
+                source: None,
+            },
+        ])
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    with_server(storage, |mut channels| async move {
+        let editor = caller(Role::Editor, web_only());
+
+        // 1. Updating 'web' with 'app.example.com' (host of unseen proxy 'other') is rejected
+        let conflicting = port_vhost_proxy(port_id, "app.example.com", "http://127.0.0.1:3/");
+        assert_update_rejected(&mut channels, editor.clone(), web_id, conflicting).await;
+
+        // 2. Adding a new proxy on port_id with 'app.example.com' is rejected
+        let new_conflicting = port_vhost_proxy(port_id, "app.example.com", "http://127.0.0.1:4/");
+        assert_add_rejected(&mut channels, editor.clone(), new_conflicting).await;
+
+        // 3. Adding a new proxy with wildcard '*.example.com' that overlaps 'app.example.com' is rejected
+        let wildcard = port_vhost_proxy(port_id, "*.example.com", "http://127.0.0.1:5/");
+        assert_add_rejected(&mut channels, editor.clone(), wildcard).await;
+
+        // 4. An admin can add with the same host
+        let admin = caller(Role::Admin, None);
+        let admin_proxy = port_vhost_proxy(port_id, "app.example.com", "http://127.0.0.1:6/");
+        let add_admin = AddProxy {
+            entry: admin_proxy,
+            owner: None,
+        };
+        let res = call_as(&mut channels, admin, add_admin).await.expect("rpc call");
+        assert!(res.is_ok(), "{res:?}");
+
         Ok(())
     })
     .await

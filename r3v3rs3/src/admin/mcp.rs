@@ -1823,12 +1823,13 @@ impl McpServer {
         let proxy: Proxy = serde_json::from_value(params.proxy)
             .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
         let name = proxy.name.clone();
+        let owner = caller.proxies.is_some().then(|| caller.username.clone());
         self.state
             .call(
                 &caller,
                 AddProxy {
                     entry: proxy,
-                    owner: None,
+                    owner,
                 },
             )
             .await

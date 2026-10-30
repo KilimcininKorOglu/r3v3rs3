@@ -21,7 +21,7 @@ pub mod quarantine;
 pub mod workers;
 
 #[async_trait::async_trait]
-pub trait RpcMethod: Any + Send + Sync {
+pub trait RpcMethod: Any + Send + Sync + Sized {
     type Output: Any + Send + Sync;
     /// Whether the method changes the stored state. Such a method runs only when the storage can
     /// write.
@@ -33,7 +33,17 @@ pub trait RpcMethod: Any + Send + Sync {
     } else {
         Permission::Read
     };
-    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error>;
+    async fn call(self, _state: &mut ServerState) -> Result<Self::Output, Error> {
+        unimplemented!()
+    }
+
+    async fn call_with_caller(
+        self,
+        state: &mut ServerState,
+        _caller: &Caller,
+    ) -> Result<Self::Output, Error> {
+        self.call(state).await
+    }
 
     /// The proxy that the method reads or changes. The method fails with `IdNotFound` for a caller
     /// that does not see the proxy.
@@ -76,7 +86,7 @@ where
         caller: &Caller,
     ) -> Result<Box<dyn Any + Send + Sync>, Error> {
         let this = self.inner.take().ok_or(Error::FailedToInvokeRpc)?;
-        <T as RpcMethod>::call(this, state)
+        <T as RpcMethod>::call_with_caller(this, state, caller)
             .await
             .map(|output| Box::new(T::restrict(output, caller)) as Box<dyn Any + Send + Sync>)
     }
