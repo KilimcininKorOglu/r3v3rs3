@@ -84,6 +84,22 @@ pub fn default_builtin_themes() -> Vec<ErrorPageTheme> {
         .collect()
 }
 
+/// Escapes special HTML characters (`&`, `<`, `>`, `"`, `'`) in a string to prevent XSS.
+pub fn escape_html(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for c in input.chars() {
+        match c {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#x27;"),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
+}
+
 /// Replaces dynamic variables in an error page body.
 /// Supported placeholders:
 /// - `{{status}}`: HTTP status code (e.g. 502)
@@ -99,21 +115,26 @@ pub fn substitute_error_page_variables(
     host: &str,
     client_ip: &str,
 ) -> String {
+    let req_id_escaped = if request_id.is_empty() {
+        "-".to_string()
+    } else {
+        escape_html(request_id)
+    };
+    let host_escaped = if host.is_empty() {
+        "-".to_string()
+    } else {
+        escape_html(host)
+    };
+    let client_ip_escaped = if client_ip.is_empty() {
+        "-".to_string()
+    } else {
+        escape_html(client_ip)
+    };
     let mut out = body.replace("{{status}}", &status.to_string());
-    out = out.replace("{{message}}", message);
-    out = out.replace(
-        "{{request_id}}",
-        if request_id.is_empty() {
-            "-"
-        } else {
-            request_id
-        },
-    );
-    out = out.replace("{{host}}", if host.is_empty() { "-" } else { host });
-    out = out.replace(
-        "{{client_ip}}",
-        if client_ip.is_empty() { "-" } else { client_ip },
-    );
+    out = out.replace("{{message}}", &escape_html(message));
+    out = out.replace("{{request_id}}", &req_id_escaped);
+    out = out.replace("{{host}}", &host_escaped);
+    out = out.replace("{{client_ip}}", &client_ip_escaped);
     out
 }
 
@@ -143,6 +164,22 @@ mod tests {
         let template = "Req: {{request_id}}, Host: {{host}}, IP: {{client_ip}}";
         let rendered = substitute_error_page_variables(template, 404, "Not Found", "", "", "");
         assert_eq!(rendered, "Req: -, Host: -, IP: -");
+    }
+
+    #[test]
+    fn test_substitute_error_page_variables_escapes_xss() {
+        let template = "<h1>Error on {{host}}</h1><p>{{message}}</p>";
+        let rendered = substitute_error_page_variables(
+            template,
+            502,
+            "Bad <Gateway>",
+            "req-1",
+            "evil.com\"><script>alert('xss')</script>",
+            "1.2.3.4",
+        );
+        assert!(!rendered.contains("<script>"));
+        assert!(rendered.contains("evil.com&quot;&gt;&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;"));
+        assert!(rendered.contains("Bad &lt;Gateway&gt;"));
     }
 
     #[test]
