@@ -322,14 +322,14 @@ fn dr_backup_id() -> String {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let rand_suffix: String = (0..6)
-        .map(|_| {
-            let idx = (aws_lc_rs::rand::SystemRandom::new()
-                .fill(&mut [0u8; 1])
-                .map(|_| 0)
-                .unwrap_or(0)) as usize;
-            char::from(b'a' + (idx % 26) as u8)
-        })
+    let mut bytes = [0u8; 6];
+    let rng = SystemRandom::new();
+    if rng.fill(&mut bytes).is_err() {
+        bytes = rand::random();
+    }
+    let rand_suffix: String = bytes
+        .iter()
+        .map(|b| char::from(b'a' + (b % 26)))
         .collect();
     format!("dr-{now}-{rand_suffix}")
 }
@@ -631,5 +631,20 @@ mod tests {
         assert!(!filenames.contains(&"r3v3rs3.db-wal".to_string()));
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_dr_backup_id_is_random_and_unique() {
+        let id1 = dr_backup_id();
+        let id2 = dr_backup_id();
+        assert_ne!(id1, id2);
+        assert!(id1.starts_with("dr-"));
+        let suffix1 = id1.split('-').nth(2).unwrap();
+        let suffix2 = id2.split('-').nth(2).unwrap();
+        assert_eq!(suffix1.len(), 6);
+        assert_eq!(suffix2.len(), 6);
+        assert_ne!(suffix1, "aaaaaa");
+        assert_ne!(suffix2, "aaaaaa");
+        assert!(suffix1.chars().all(|c| c.is_ascii_lowercase()));
     }
 }
