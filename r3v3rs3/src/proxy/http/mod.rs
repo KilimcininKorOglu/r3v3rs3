@@ -811,26 +811,71 @@ struct AccessLogMeta {
     is_websocket: bool,
 }
 
+fn emit_completed_access_log(
+    meta: &AccessLogMeta,
+    status: u16,
+    latency_ms: f64,
+    bytes_sent: u64,
+    error: Option<&str>,
+) {
+    if let Some(err) = error {
+        info!(
+            target: "r3v3rs3::access_log",
+            resource_id = ?meta.resource_id,
+            client = %meta.client_ip,
+            method = %meta.method,
+            host = %meta.host,
+            uri = %meta.uri,
+            status,
+            latency_ms,
+            bytes_sent,
+            error = %err,
+            "request completed with error"
+        );
+    } else {
+        info!(
+            target: "r3v3rs3::access_log",
+            resource_id = ?meta.resource_id,
+            client = %meta.client_ip,
+            method = %meta.method,
+            host = %meta.host,
+            uri = %meta.uri,
+            status,
+            latency_ms,
+            bytes_sent,
+            "request completed"
+        );
+    }
+}
+
 fn record_access_log<B>(
     meta: AccessLogMeta,
     duration: std::time::Duration,
     mapped: &Result<Response<B>, anyhow::Error>,
 ) {
-    let (status, error, response_headers) = match mapped {
+    let (status, error, response_headers, bytes_sent) = match mapped {
         Ok(res) => {
-            if let Some(cl) = res
+            let bytes = res
                 .headers()
                 .get(hyper::header::CONTENT_LENGTH)
                 .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok())
-            {
+                .and_then(|v| v.parse::<u64>().ok());
+            if let Some(cl) = bytes {
                 crate::proxy::stats::record_tx_bytes(cl);
             }
-            (res.status().as_u16(), None, extract_headers(res.headers()))
+            (
+                res.status().as_u16(),
+                None,
+                extract_headers(res.headers()),
+                bytes.unwrap_or(0),
+            )
         }
-        Err(err) => (502, Some(err.to_string()), Vec::new()),
+        Err(err) => (502, Some(err.to_string()), Vec::new(), 0),
     };
     crate::proxy::stats::record_http_response(status);
+    let latency_ms = duration.as_secs_f64() * 1000.0;
+    emit_completed_access_log(&meta, status, latency_ms, bytes_sent, error.as_deref());
+
     crate::proxy::access_log::record(r3v3rs3_api::traffic::AccessLogEntry {
         id: 0,
         timestamp: time::OffsetDateTime::now_utc(),
@@ -841,7 +886,7 @@ fn record_access_log<B>(
         host: meta.host,
         uri: meta.uri,
         status,
-        latency_ms: duration.as_secs_f64() * 1000.0,
+        latency_ms,
         proto: meta.proto,
         error,
         request_headers: meta.request_headers,
