@@ -337,8 +337,9 @@ pub async fn list_apps(
 pub async fn add_app(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Json(request): Json<AppRequest>,
+    Json(mut request): Json<AppRequest>,
 ) -> Result<Json<AppEntry>, AppError> {
+    request.spec.preview_of = None;
     let platform = state.platform(&caller, Permission::Edit).await?;
     let app = platform
         .add_app(request, unix_ms())
@@ -389,9 +390,11 @@ pub async fn update_app(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
-    Json(request): Json<AppRequest>,
+    Json(mut request): Json<AppRequest>,
 ) -> Result<Json<AppEntry>, AppError> {
     let platform = state.platform(&caller, Permission::Edit).await?;
+    let current = platform.app(id).await.map_err(platform_error)?;
+    request.spec.preview_of = current.spec.preview_of;
     let app = platform
         .update_app(id, request, unix_ms())
         .await

@@ -2524,8 +2524,9 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let request: r3v3rs3_api::platform::AppRequest = serde_json::from_value(params.app)
+        let mut request: r3v3rs3_api::platform::AppRequest = serde_json::from_value(params.app)
             .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        request.spec.preview_of = None;
         let platform = self
             .state
             .platform(&caller, Permission::Edit)
@@ -2548,13 +2549,15 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let request: r3v3rs3_api::platform::AppRequest = serde_json::from_value(params.app)
+        let mut request: r3v3rs3_api::platform::AppRequest = serde_json::from_value(params.app)
             .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
         let platform = self
             .state
             .platform(&caller, Permission::Edit)
             .await
             .map_err(any_error)?;
+        let current = platform.app(id).await.map_err(any_error)?;
+        request.spec.preview_of = current.spec.preview_of;
         let app = platform
             .update_app(id, request, crate::clock::unix_ms())
             .await

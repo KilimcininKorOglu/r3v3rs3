@@ -64,7 +64,7 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppDashboardSummary, AppEntry, AppLog, AppRequest, ComposeServiceStatus, ComposeTopology,
     DeploymentEntry, EnvEntry, EnvGroup, EnvGroupSpec, EnvGroupSummary, FileEntry,
-    ImageUpdateStatus, LOCAL_TARGET, PlatformConfig, parse_compose_topology,
+    ImageUpdateStatus, LOCAL_TARGET, PlatformConfig, PreviewParent, parse_compose_topology,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -380,11 +380,12 @@ impl Platform {
     pub async fn update_app(
         &self,
         id: ShortId,
-        request: AppRequest,
+        mut request: AppRequest,
         now: u64,
     ) -> anyhow::Result<AppEntry> {
-        let hook = self.check_request(&request).await?;
         let current = self.app(id).await?;
+        request.spec.preview_of = current.spec.preview_of;
+        let hook = self.check_request(&request).await?;
         // The containers of the deployments run on the old target.
         if request.target != current.target && !self.store.deployments(id, 1).await?.is_empty() {
             return Err(Error::AppTargetFixed {
@@ -1059,6 +1060,28 @@ impl Platform {
             .ok_or_else(|| not_found(id))
     }
 
+    async fn check_preview_parent(
+        store: &PlatformStore,
+        preview: &PreviewParent,
+    ) -> anyhow::Result<()> {
+        let Some(parent) = store.app(preview.parent_id).await? else {
+            return Err(not_found(preview.parent_id));
+        };
+        if parent.spec.preview.is_none() {
+            return Err(anyhow!("parent app has no preview configuration"));
+        }
+        Ok(())
+    }
+
+    async fn check_env_groups(store: &PlatformStore, groups: &[ShortId]) -> anyhow::Result<()> {
+        for group_id in groups {
+            if store.env_group(*group_id).await?.is_none() {
+                return Err(not_found(*group_id));
+            }
+        }
+        Ok(())
+    }
+
     /// Checks a request and returns the webhook target of its connection.
     async fn check_request(
         &self,
@@ -1073,10 +1096,9 @@ impl Platform {
         if !self.store.has_target(request.target).await? {
             return Err(not_found(request.target));
         }
-        for group_id in &request.spec.env_groups {
-            if self.store.env_group(*group_id).await?.is_none() {
-                return Err(not_found(*group_id));
-            }
+        Self::check_env_groups(&self.store, &request.spec.env_groups).await?;
+        if let Some(preview) = &request.spec.preview_of {
+            Self::check_preview_parent(&self.store, preview).await?;
         }
         self.hook_target(&request.spec).await
     }
@@ -1761,6 +1783,24 @@ mod tests {
         let app = platform.add_app(request("my-app"), 1000).await?;
         let services = platform.app_services(app.id).await?;
         assert!(services.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_app_ignores_preview_of_mass_assignment() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let shop = platform.add_app(request("shop"), 1).await?;
+        assert!(shop.spec.preview_of.is_none());
+
+        let fake_parent = new_id()?;
+        let mut malicious_request = request("shop");
+        malicious_request.spec.preview_of = Some(PreviewParent {
+            parent_id: fake_parent,
+            pr_number: 42,
+        });
+
+        let updated = platform.update_app(shop.id, malicious_request, 2).await?;
+        assert!(updated.spec.preview_of.is_none());
         Ok(())
     }
 }
