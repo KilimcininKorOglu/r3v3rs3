@@ -1,5 +1,5 @@
 use crate::proxy::dns::DnsResolver;
-use crate::proxy::health::{Permit, UpstreamGroup};
+use crate::proxy::health::{ConnGuard, Permit, UpstreamGroup};
 use crate::proxy::http::error::ProxyError;
 use crate::proxy::http::{HTTP2_MAX_FRAME_SIZE, hyper_tls::client::HttpsConnector};
 use crate::proxy::tls::upstream_client_config;
@@ -21,8 +21,10 @@ use r3v3rs3_api::{error::Error, id::ShortId, proxy::Server};
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::IpAddr;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::{Arc, PoisonError};
+use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{fmt, io};
 use tokio_rustls::rustls::ClientConfig;
@@ -37,6 +39,39 @@ use super::rewriter::ResponseRewriter;
 
 type ProxyBody = BoxBody<Bytes, anyhow::Error>;
 type ProxyClient = Client<HttpsConnector<HttpConnector<DnsResolver>>, ProxyBody>;
+
+#[derive(Clone)]
+struct UpgradeGuardSender(
+    Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Option<ConnGuard>>>>>,
+);
+
+pin_project_lite::pin_project! {
+    struct ConnGuardedBody<B> {
+        #[pin]
+        inner: B,
+        _guard: ConnGuard,
+    }
+}
+
+impl<B: Body> Body for ConnGuardedBody<B> {
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+        self.project().inner.poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.inner.size_hint()
+    }
+}
 
 /// Marks a request for a plain HTTP upstream server that accepts HTTP/2 with prior knowledge.
 #[derive(Debug, Clone, Copy)]
@@ -139,7 +174,11 @@ impl ConnectionPool {
                     .body(empty_body())
                     .map_err(SendError::other)?;
                 cloned_res.headers_mut().clone_from(res.headers());
-                tokio::spawn(upgrade_connection(upgrading_req, res));
+                let (guard_tx, guard_rx) = tokio::sync::oneshot::channel();
+                cloned_res.extensions_mut().insert(UpgradeGuardSender(
+                    Arc::new(std::sync::Mutex::new(Some(guard_tx))),
+                ));
+                tokio::spawn(upgrade_connection(upgrading_req, res, guard_rx));
                 Ok(cloned_res)
             }
             _ => Ok(res),
@@ -467,20 +506,49 @@ impl Upstream {
         permit: Permit,
     ) -> Result<Response<ProxyBody>, SendError> {
         let result = self.pool.send(req, self.request_timeout).await;
-        if let Ok(ref res) = result
-            && let Some(cl) = res.headers().get(hyper::header::CONTENT_LENGTH)
-            && let Ok(bytes) = cl.to_str().unwrap_or_default().parse::<u64>()
+        let guard = record_response_permit(&result, permit);
+        result.map(|res| attach_guard_or_upgrade(res, guard))
+    }
+}
+
+fn attach_guard_or_upgrade(
+    mut res: Response<ProxyBody>,
+    guard: Option<ConnGuard>,
+) -> Response<ProxyBody> {
+    if let Some(sender) = res.extensions_mut().remove::<UpgradeGuardSender>() {
+        if let Ok(mut lock) = sender.0.lock()
+            && let Some(tx) = lock.take()
         {
-            permit.record_bytes(bytes);
+            let _ = tx.send(guard);
         }
-        match &result {
-            Ok(res) if is_gateway_error(res.status()) => {
-                permit.error_response(&format!("the server answered {}", res.status()))
-            }
-            Ok(_) => permit.success(),
-            Err(err) => permit.failure(&err.error.to_string()),
+        res
+    } else if let Some(guard) = guard {
+        res.map(|body| BoxBody::new(ConnGuardedBody { inner: body, _guard: guard }))
+    } else {
+        res
+    }
+}
+
+fn record_response_permit(
+    result: &Result<Response<ProxyBody>, SendError>,
+    permit: Permit,
+) -> Option<ConnGuard> {
+    if let Ok(res) = result
+        && let Some(cl) = res.headers().get(hyper::header::CONTENT_LENGTH)
+        && let Ok(bytes) = cl.to_str().unwrap_or_default().parse::<u64>()
+    {
+        permit.record_bytes(bytes);
+    }
+    match result {
+        Ok(res) if is_gateway_error(res.status()) => {
+            permit.error_response(&format!("the server answered {}", res.status()));
+            None
         }
-        result
+        Ok(_) => Some(permit.success_keep()),
+        Err(err) => {
+            permit.failure(&err.error.to_string());
+            None
+        }
     }
 }
 
@@ -774,7 +842,11 @@ fn full_body(data: Bytes) -> ProxyBody {
     BoxBody::new(Full::new(data).map_err(Into::into))
 }
 
-async fn upgrade_connection(req: Request<ProxyBody>, res: Response<ProxyBody>) {
+async fn upgrade_connection(
+    req: Request<ProxyBody>,
+    res: Response<ProxyBody>,
+    mut guard_rx: tokio::sync::oneshot::Receiver<Option<ConnGuard>>,
+) {
     let is_ws = req
         .headers()
         .get(hyper::header::UPGRADE)
@@ -792,8 +864,14 @@ async fn upgrade_connection(req: Request<ProxyBody>, res: Response<ProxyBody>) {
         .to_string();
     let upstream_addr = req.uri().to_string();
 
+    let early_guard = guard_rx.try_recv().ok().flatten();
+
     match tokio::try_join!(hyper::upgrade::on(req), hyper::upgrade::on(res)) {
         Ok((req, res)) => {
+            let _conn_guard = match early_guard {
+                Some(g) => Some(g),
+                None => guard_rx.await.ok().flatten(),
+            };
             let mut req = TokioIo::new(req);
             let mut res = TokioIo::new(res);
 
