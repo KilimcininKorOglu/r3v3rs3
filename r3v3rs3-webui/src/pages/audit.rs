@@ -387,10 +387,22 @@ pub fn export_audit_csv(entries: &[AuditEntry], locale: Locale) -> String {
 }
 
 fn escape_csv(field: &str) -> String {
-    if field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r') {
-        format!("\"{}\"", field.replace('"', "\"\""))
+    let trimmed = field.trim_start();
+    let needs_quote = trimmed.starts_with(['=', '+', '-', '@', '\t', '\r'])
+        || field.starts_with(['\t', '\r']);
+    let escaped = if needs_quote {
+        format!("'{field}")
     } else {
         field.to_string()
+    };
+    if escaped.contains(',')
+        || escaped.contains('"')
+        || escaped.contains('\n')
+        || escaped.contains('\r')
+    {
+        format!("\"{}\"", escaped.replace('"', "\"\""))
+    } else {
+        escaped
     }
 }
 
@@ -497,5 +509,23 @@ mod tests {
         assert!(csv.contains("\"admin,special\""));
         assert!(csv.contains("\"res\"\"1\"\"\""));
         assert!(csv.contains("\"line1\nline2\""));
+    }
+
+    #[test]
+    fn export_audit_csv_sanitizes_formula_injection() {
+        let entry = AuditEntry {
+            time: 1_000,
+            username: "=CMD|' /C calc'!A0".into(),
+            client: None,
+            action: AuditAction::LoginFailed,
+            resource_id: Some("+12345".into()),
+            summary: "@SUM(1,2)".into(),
+            node: "\t-evil".into(),
+        };
+        let csv = export_audit_csv(&[entry], Locale::En);
+        assert!(csv.contains("'=CMD|' /C calc'!A0"));
+        assert!(csv.contains("'+12345"));
+        assert!(csv.contains("\"'@SUM(1,2)\""));
+        assert!(csv.contains("'\t-evil"));
     }
 }
