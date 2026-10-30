@@ -170,6 +170,13 @@ impl PlatformHandle {
             platform.dispatch_webhook_event(event, summary, data).await;
         }
     }
+
+    /// Closes the underlying database connection pool and sets the handle to disabled.
+    pub async fn close(&mut self) {
+        if let Self::Ready(platform) = std::mem::replace(self, Self::Disabled) {
+            platform.close().await;
+        }
+    }
 }
 
 /// The runtime and the Compose runner of one target.
@@ -285,6 +292,11 @@ impl Platform {
             public_url: std::sync::RwLock::new(public_url),
             agent_upgrade_attempts: std::sync::Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Closes the platform database connection pool.
+    pub async fn close(&self) {
+        self.store.pool().close().await;
     }
 
     pub(crate) fn keys(&self) -> std::sync::RwLockReadGuard<'_, ClusterKeys> {

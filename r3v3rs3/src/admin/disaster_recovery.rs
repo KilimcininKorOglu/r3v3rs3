@@ -3,6 +3,9 @@ use super::platform::platform_error;
 use super::{AppError, AppState};
 use crate::accounts::{Caller, Permission};
 use crate::audit::AuditRecord;
+use crate::command::ServerCommand;
+use crate::config::sqlite::SqliteStorage;
+use crate::platform::PlatformHandle;
 use crate::platform::disaster_recovery::{
     create_dr_backup, delete_dr_backup, download_dr_backup, list_dr_backups, restore_dr_backup,
     restore_dr_bytes,
@@ -16,6 +19,7 @@ use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::platform::{
     CreateDisasterRecoveryRequest, DisasterRecoveryBackupEntry, RestoreDisasterRecoveryRequest,
 };
+use std::sync::Arc;
 
 /// Lists all disaster recovery backups.
 #[utoipa::path(
@@ -128,6 +132,55 @@ pub async fn delete(
     Ok(Json(()))
 }
 
+async fn execute_restore_and_reconnect<F>(
+    state: &AppState,
+    restore_future: F,
+) -> Result<usize, AppError>
+where
+    F: std::future::Future<Output = anyhow::Result<usize>>,
+{
+    let (config_dir, audit, config) = {
+        let mut data = state.data.lock().await;
+        data.platform.close().await;
+        (
+            data.app_info.config_path.clone(),
+            data.audit.clone(),
+            data.config.clone(),
+        )
+    };
+
+    let restored = restore_future.await.map_err(platform_error)?;
+
+    let reloaded_config = SqliteStorage::read_local_config(&config_dir)
+        .await
+        .unwrap_or(config);
+    let audit_for_platform = audit.unwrap_or_else(|| {
+        Arc::new(crate::audit::AuditLog::new(
+            Arc::new(crate::audit::MemoryAuditStore::default()),
+            String::new(),
+        ))
+    });
+    let new_handle = PlatformHandle::start(
+        &reloaded_config,
+        &config_dir,
+        state.sender.clone(),
+        &state.event,
+        audit_for_platform,
+    )
+    .await;
+
+    {
+        let mut data = state.data.lock().await;
+        data.config = reloaded_config;
+        data.platform = new_handle;
+    }
+
+    let _ = state.sender.send(ServerCommand::WorkerApply).await;
+    let _ = state.upgrade.try_send(());
+
+    Ok(restored)
+}
+
 /// Restores platform state from a local disaster recovery backup ID.
 #[utoipa::path(
     post,
@@ -146,9 +199,14 @@ pub async fn restore(
 ) -> Result<Json<usize>, AppError> {
     caller.authorize_platform(Permission::Admin)?;
     let config_dir = state.data.lock().await.app_info.config_path.clone();
-    let restored = restore_dr_backup(&config_dir, &id, request.passphrase.as_deref())
-        .await
-        .map_err(platform_error)?;
+    let id_clone = id.clone();
+    let restored = execute_restore_and_reconnect(
+        &state,
+        async move {
+            restore_dr_backup(&config_dir, &id_clone, request.passphrase.as_deref()).await
+        },
+    )
+    .await?;
 
     let record = AuditRecord::new(AuditAction::RestoreDisasterRecoveryBackup)
         .id(&id)
@@ -175,11 +233,18 @@ pub async fn restore_upload(
     body: Bytes,
 ) -> Result<Json<usize>, AppError> {
     caller.authorize_platform(Permission::Admin)?;
-    let passphrase = headers.get("x-passphrase").and_then(|v| v.to_str().ok());
+    let passphrase = headers
+        .get("x-passphrase")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
     let config_dir = state.data.lock().await.app_info.config_path.clone();
-    let restored = restore_dr_bytes(&config_dir, &body, passphrase)
-        .await
-        .map_err(platform_error)?;
+    let restored = execute_restore_and_reconnect(
+        &state,
+        async move {
+            restore_dr_bytes(&config_dir, &body, passphrase.as_deref()).await
+        },
+    )
+    .await?;
 
     let record = AuditRecord::new(AuditAction::RestoreDisasterRecoveryBackup)
         .summary(format!("{restored} files restored from upload"));
