@@ -305,6 +305,47 @@ async fn a_restricted_editor_cannot_take_tcp_port_of_an_unseen_proxy() -> anyhow
     .await
 }
 
+#[tokio::test]
+async fn a_restricted_editor_cannot_use_stored_client_certificates() -> anyhow::Result<()> {
+    let pki = common::pki::Pki::new();
+    let cert_id = pki.client.id;
+    let web_id: ShortId = "web".parse().unwrap();
+
+    let storage = TestStorage::builder()
+        .certs(pki.certs())
+        .proxies(vec![proxy_entry("web", "http://127.0.0.1:1/")])
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    with_server(storage, |mut channels| async move {
+        let editor = caller(Role::Editor, web_only());
+
+        let mut with_cert = http_proxy("http://127.0.0.1:2/");
+        if let ProxyKind::Http(http) = &mut with_cert.kind {
+            http.client_cert = Some(cert_id);
+        }
+
+        // 1. Updating 'web' with client_cert is rejected with Forbidden
+        assert_update_rejected(&mut channels, editor.clone(), web_id, with_cert.clone()).await;
+
+        // 2. Adding a new proxy with client_cert is rejected with Forbidden
+        assert_add_rejected(&mut channels, editor.clone(), with_cert.clone()).await;
+
+        // 3. Admin can add a proxy with client_cert
+        let admin = caller(Role::Admin, None);
+        let add_admin = AddProxy {
+            entry: with_cert,
+            owner: None,
+        };
+        let res = call_as(&mut channels, admin, add_admin).await.expect("rpc call");
+        assert!(res.is_ok(), "{res:?}");
+
+        Ok(())
+    })
+    .await
+}
+
 async fn status(
     client: &Client,
     addr: SocketAddr,

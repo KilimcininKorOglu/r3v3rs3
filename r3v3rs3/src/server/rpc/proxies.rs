@@ -164,10 +164,7 @@ impl RpcMethod for AddProxy {
         state: &mut ServerState,
         caller: &Caller,
     ) -> Result<Self::Output, Error> {
-        validate_proxy(&self.entry, state)?;
-        ensure_access_lists(&self.entry, state)?;
-        ensure_no_unseen_host_overlap(&self.entry, None, caller, state)?;
-        ensure_no_unseen_port_conflict(&self.entry, None, caller, state)?;
+        validate_proxy_rules(&self.entry, None, caller, state)?;
         let proxy = seal(self.entry).await?;
         let id = state.generate_id();
         // The account gets the id first, so a failed account save adds no proxy that its creator
@@ -213,10 +210,7 @@ impl RpcMethod for UpdateProxy {
         if let Some(ctx) = state.proxies.get(self.entry.id) {
             restore_secrets(&mut proxy, &ctx.entry.proxy);
         }
-        validate_proxy(&proxy, state)?;
-        ensure_access_lists(&proxy, state)?;
-        ensure_no_unseen_host_overlap(&proxy, Some(self.entry.id), caller, state)?;
-        ensure_no_unseen_port_conflict(&proxy, Some(self.entry.id), caller, state)?;
+        validate_proxy_rules(&proxy, Some(self.entry.id), caller, state)?;
         let proxy = seal(proxy).await?;
         let previous = proxy_entries(state);
         if state.proxies.set((self.entry.id, proxy).into()) {
@@ -267,11 +261,31 @@ fn ensure_access_lists(proxy: &Proxy, state: &ServerState) -> Result<(), Error> 
     }
 }
 
+fn validate_proxy_rules(
+    proxy: &Proxy,
+    proxy_id: Option<ShortId>,
+    caller: &Caller,
+    state: &ServerState,
+) -> Result<(), Error> {
+    validate_proxy(proxy, state)?;
+    ensure_access_lists(proxy, state)?;
+    ensure_client_cert_allowed(proxy, caller)?;
+    ensure_no_unseen_host_overlap(proxy, proxy_id, caller, state)?;
+    ensure_no_unseen_port_conflict(proxy, proxy_id, caller, state)
+}
+
 /// Checks the upstream timeouts and the health check, and that the upstream client certificate of
 /// the proxy is a client certificate with a private key.
 pub fn validate_proxy(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
     proxy.kind.validate_upstream()?;
     upstream_client_config(&state.certs, proxy.kind.client_cert()).map(|_| ())
+}
+
+fn ensure_client_cert_allowed(proxy: &Proxy, caller: &Caller) -> Result<(), Error> {
+    if proxy.kind.client_cert().is_some() {
+        caller.authorize(Permission::Edit)?;
+    }
+    Ok(())
 }
 
 fn subject_names_overlap(a: &SubjectName, b: &SubjectName) -> bool {
