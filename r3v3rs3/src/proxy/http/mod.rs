@@ -27,8 +27,8 @@ use hyper::{
     Method, Request, Response, StatusCode, Uri,
     body::{Body, Frame, Incoming},
     header::{
-        AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, ETAG, HOST, HeaderName,
-        LOCATION,
+        AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ETAG, HOST,
+        HeaderName, LOCATION,
     },
     http::{
         HeaderValue,
@@ -1124,6 +1124,14 @@ fn normalize_request_path<B>(req: &mut Request<B>) {
     }
 }
 
+fn is_authorized_request_headers(headers: &hyper::HeaderMap, has_auth: bool) -> bool {
+    headers.contains_key(AUTHORIZATION) || headers.contains_key(COOKIE) || has_auth
+}
+
+fn is_request_authorized<B>(req: &Request<B>, route: &FilteredRoute) -> bool {
+    is_authorized_request_headers(req.headers(), route.auth.is_some())
+}
+
 /// Matches the request to a route, applies the route policies and prepares
 /// the request for the upstream server.
 async fn route_request<B>(
@@ -1201,7 +1209,7 @@ where
 
     // Authentication removes the credentials, so the cache reads them before. The cache key uses
     // the client host and path, so the selected upstream server does not split the cache.
-    let authorized = req.headers().contains_key(AUTHORIZATION);
+    let authorized = is_request_authorized(&req, route);
     let cache_key = format!(
         "{} {}",
         request_host.as_deref().unwrap_or_default(),
@@ -2085,5 +2093,20 @@ mod tests {
         };
         assert!(!is_purge_authorized(false, &remote_addr));
         assert!(is_purge_authorized(true, &remote_addr));
+    }
+
+    #[test]
+    fn test_authorized_request_headers() {
+        let empty = HeaderMap::new();
+        assert!(!is_authorized_request_headers(&empty, false));
+        assert!(is_authorized_request_headers(&empty, true));
+
+        let mut cookie_headers = HeaderMap::new();
+        cookie_headers.insert(COOKIE, HeaderValue::from_static("session_id=abc123456"));
+        assert!(is_authorized_request_headers(&cookie_headers, false));
+
+        let mut auth_headers = HeaderMap::new();
+        auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer token123"));
+        assert!(is_authorized_request_headers(&auth_headers, false));
     }
 }

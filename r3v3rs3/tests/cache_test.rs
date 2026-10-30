@@ -434,3 +434,59 @@ async fn revalidation_304_does_not_cache_set_cookie_or_private() -> anyhow::Resu
     mock_revalidate_next.assert_async().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn cookie_authenticated_requests_are_not_cached_without_public() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let mut upstream = mockito::Server::new_async().await;
+
+    let mock_profile = upstream
+        .mock("GET", "/profile")
+        .with_header("content-type", "text/plain")
+        .with_header("cache-control", "max-age=60")
+        .with_body("user private profile")
+        .expect(2)
+        .create_async()
+        .await;
+
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![http_route("/", &upstream.url(), None)],
+        upgrade_insecure: false,
+        cache: CacheConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("cache", &port)])
+        .proxies(vec![http_proxy_entry("proxy1", "cache", proxy)])
+        .build();
+
+    with_server(config, |_channels| async move {
+        let client = reqwest::Client::new();
+        let base_url = port.http_url("/profile");
+
+        let resp1 = client
+            .get(base_url.clone())
+            .header("cookie", "session_user_a=secret1")
+            .send()
+            .await?;
+        assert_eq!(resp1.status(), StatusCode::OK);
+        assert_eq!(resp1.text().await?, "user private profile");
+
+        let resp2 = client
+            .get(base_url)
+            .header("cookie", "session_user_b=secret2")
+            .send()
+            .await?;
+        assert_eq!(resp2.status(), StatusCode::OK);
+        assert_ne!(x_cache(&resp2), Some("HIT"));
+        assert_eq!(resp2.text().await?, "user private profile");
+
+        mock_profile.assert_async().await;
+        Ok(())
+    })
+    .await
+}

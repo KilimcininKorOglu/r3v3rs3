@@ -12,7 +12,7 @@ use hyper::{
     body::Body,
     header::{
         ALLOW, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderMap, HeaderValue,
-        LOCATION, REFERRER_POLICY, SET_COOKIE,
+        LOCATION, PRAGMA, REFERRER_POLICY, SET_COOKIE,
     },
 };
 use r3v3rs3_api::{
@@ -567,6 +567,12 @@ fn redirect_response(
     cookie: Option<&str>,
 ) -> Response<Full<Bytes>> {
     let mut res = text_response(status, "");
+    res.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-store, must-revalidate, private"),
+    );
+    res.headers_mut()
+        .insert(PRAGMA, HeaderValue::from_static("no-cache"));
     for (name, value) in [(LOCATION, Some(location)), (SET_COOKIE, cookie)] {
         let Some(value) = value else {
             continue;

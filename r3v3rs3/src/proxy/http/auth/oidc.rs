@@ -9,7 +9,7 @@ use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
     HeaderMap, Method, Request, Response, StatusCode,
     body::Body,
-    header::{CONTENT_TYPE, HeaderName, HeaderValue, LOCATION, SET_COOKIE},
+    header::{CACHE_CONTROL, CONTENT_TYPE, HeaderName, HeaderValue, LOCATION, PRAGMA, SET_COOKIE},
 };
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use r3v3rs3_api::policy::{OidcAuth, default_oidc_scopes, is_email_allowed};
@@ -506,6 +506,12 @@ fn redirect_response(
 ) -> Response<Full<Bytes>> {
     let mut res = Response::new(Full::new(Bytes::new()));
     *res.status_mut() = status;
+    res.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-store, must-revalidate, private"),
+    );
+    res.headers_mut()
+        .insert(PRAGMA, HeaderValue::from_static("no-cache"));
     if let Ok(val) = HeaderValue::from_str(location) {
         res.headers_mut().insert(LOCATION, val);
     }
