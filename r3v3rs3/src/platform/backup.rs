@@ -17,7 +17,7 @@ use r3v3rs3_api::platform::{
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 /// The settings row of the backup configuration in the platform database.
 pub const BACKUP_CONFIG: &str = "backup_config";
@@ -241,9 +241,11 @@ impl Platform {
         })
     }
 
-    /// Dumps the database of the local target into the backup directory, and applies the
-    /// retention of the settings.
-    pub async fn run_backup(&self, db_id: ShortId) -> anyhow::Result<BackupEntry> {
+    async fn capture_database_dump(
+        &self,
+        db_id: ShortId,
+        dump_path: &std::path::Path,
+    ) -> anyhow::Result<(AppEntry, String, u64, String)> {
         let (app, container, runtime) = self.database_container(db_id).await?;
         let engine = app
             .spec
@@ -253,42 +255,53 @@ impl Platform {
         let info = r3v3rs3_api::platform::engine_info(&engine)
             .context("the engine is not in the database catalog")?;
         let password = self.database_password(db_id, &info).await?;
-        let dump = take_dump(&runtime, &container, dump_plan(&engine, &info, &password)?).await?;
-        let compressed = gzip(&dump).await?;
+        let plan = dump_plan(&engine, &info, &password)?;
+        let dump = take_dump(&runtime, &container, plan).await?;
+        let (size, sha256) = write_compressed_dump(&dump, dump_path).await?;
+        Ok((app, engine, size, sha256))
+    }
+
+    /// Dumps the database of the local target into the backup directory, and applies the
+    /// retention of the settings.
+    pub async fn run_backup(&self, db_id: ShortId) -> anyhow::Result<BackupEntry> {
+        let dir = self.backup_dir(db_id).await?;
+        tokio::fs::create_dir_all(&dir).await?;
+        let id = backup_id();
+        let dump_path = dir.join(format!("{id}.dump.gz"));
+        let (app, engine, size, sha256) =
+            self.capture_database_dump(db_id, &dump_path).await?;
+
         let entry = BackupEntry {
-            id: backup_id(),
+            id,
             app: db_id,
             name: app.name.to_string(),
             engine,
-            size: compressed.len() as u64,
-            sha256: hex::encode(Sha256::digest(&compressed)),
+            size,
+            sha256,
             created_at: unix_ms() as i64,
             verified_at: None,
             verification_status: None,
             drill: None,
         };
-        self.store_backup(db_id, &entry, compressed).await?;
+        self.store_backup(db_id, &entry, &dump_path).await?;
         self.apply_retention(db_id).await?;
         Ok(entry)
     }
 
-    /// Writes one backup file with its manifest, uploads it to remote targets, and runs initial
+    /// Writes one backup file manifest, uploads it to remote targets, and runs initial
     /// restore testing when enabled.
     async fn store_backup(
         &self,
         db_id: ShortId,
         entry: &BackupEntry,
-        compressed: Vec<u8>,
+        dump_path: &std::path::Path,
     ) -> anyhow::Result<()> {
         let dir = self.backup_dir(db_id).await?;
-        tokio::fs::create_dir_all(&dir).await?;
-        let dump_path = dir.join(format!("{}.dump.gz", entry.id));
         let manifest_path = dir.join(format!("{}.json", entry.id));
-        tokio::fs::write(&dump_path, &compressed).await?;
         let manifest = serde_json::to_vec(entry)?;
         tokio::fs::write(&manifest_path, manifest).await?;
 
-        self.dispatch_remote_backups(entry, &compressed, &dump_path, &manifest_path)
+        self.dispatch_remote_backups(entry, dump_path, &manifest_path)
             .await;
 
         let summary = format!(
@@ -319,11 +332,10 @@ impl Platform {
     async fn dispatch_remote_backups(
         &self,
         entry: &BackupEntry,
-        compressed: &[u8],
         dump_path: &std::path::Path,
         manifest_path: &std::path::Path,
     ) {
-        if let Err(err) = self.upload_to_s3(entry, compressed.to_vec()).await {
+        if let Err(err) = self.upload_to_s3(entry, dump_path).await {
             tracing::error!(
                 err = format!("{err:#}"),
                 "failed to upload the backup to S3"
@@ -1004,7 +1016,11 @@ impl Platform {
     }
 
     /// Uploads one backup to the configured S3 bucket. Does nothing without a target.
-    async fn upload_to_s3(&self, entry: &BackupEntry, content: Vec<u8>) -> anyhow::Result<()> {
+    async fn upload_to_s3(
+        &self,
+        entry: &BackupEntry,
+        dump_path: &std::path::Path,
+    ) -> anyhow::Result<()> {
         let config = self.backup_config().await?;
         let Some(s3) = config.s3 else {
             return Ok(());
@@ -1016,6 +1032,7 @@ impl Platform {
             secret_key: secret,
             ..s3
         };
+        let content = tokio::fs::read(dump_path).await?;
         super::s3::upload(self.http().await?, &s3, entry, content).await
     }
 
@@ -1137,6 +1154,65 @@ impl Platform {
         Ok(())
     }
 
+    async fn verify_backup_checksum(
+        &self,
+        dir: &std::path::Path,
+        entry: &mut BackupEntry,
+        dump_path: &std::path::Path,
+        db_id: ShortId,
+    ) -> anyhow::Result<Option<r3v3rs3_api::platform::BackupVerifyReport>> {
+        let digest = match compute_file_sha256(dump_path).await {
+            Ok(d) => d,
+            Err(err) => {
+                let msg = format!("checksum calculation failed: {err:#}");
+                self.save_verification_result(dir, entry, false, &msg, None)
+                    .await?;
+                self.dispatch_verification_failed(db_id, entry, &msg).await;
+                return Ok(Some(self.build_verify_report(
+                    &entry.id,
+                    false,
+                    0,
+                    "read_error",
+                    msg,
+                    None,
+                )));
+            }
+        };
+
+        if digest != entry.sha256 {
+            let msg = format!(
+                "checksum mismatch: expected {}, got {}",
+                entry.sha256, digest
+            );
+            self.save_verification_result(dir, entry, false, &msg, None)
+                .await?;
+            self.dispatch_verification_failed(db_id, entry, &msg).await;
+            return Ok(Some(self.build_verify_report(
+                &entry.id, false, 0, "unknown", msg, None,
+            )));
+        }
+        Ok(None)
+    }
+
+    fn build_verify_report(
+        &self,
+        id: &str,
+        verified: bool,
+        uncompressed_size: u64,
+        format_detected: &str,
+        message: String,
+        drill: Option<BackupDrillDetails>,
+    ) -> r3v3rs3_api::platform::BackupVerifyReport {
+        r3v3rs3_api::platform::BackupVerifyReport {
+            backup_id: id.to_string(),
+            verified,
+            uncompressed_size,
+            format_detected: format_detected.to_string(),
+            message,
+            drill,
+        }
+    }
+
     /// Tests decompression, integrity, and runs a simulated restore drill on a backup dump.
     pub async fn verify_backup(
         &self,
@@ -1146,47 +1222,34 @@ impl Platform {
         let mut entry = self.backup_entry(db_id, backup_id).await?;
         let dir = self.backup_dir(db_id).await?;
         let dump_path = dir.join(format!("{}.dump.gz", entry.id));
-        let compressed = tokio::fs::read(&dump_path).await?;
         let started_at = std::time::Instant::now();
 
-        let digest = hex::encode(Sha256::digest(&compressed));
-        if digest != entry.sha256 {
-            let msg = format!(
-                "checksum mismatch: expected {}, got {}",
-                entry.sha256, digest
-            );
-            self.save_verification_result(&dir, &mut entry, false, &msg, None)
-                .await?;
-            self.dispatch_verification_failed(db_id, &entry, &msg).await;
-            return Ok(r3v3rs3_api::platform::BackupVerifyReport {
-                backup_id: entry.id,
-                verified: false,
-                uncompressed_size: 0,
-                format_detected: "unknown".into(),
-                message: msg,
-                drill: None,
-            });
+        if let Some(report) = self
+            .verify_backup_checksum(&dir, &mut entry, &dump_path, db_id)
+            .await?
+        {
+            return Ok(report);
         }
 
-        let plain = match ungzip(&compressed).await {
-            Ok(p) => p,
-            Err(err) => {
-                let msg = format!("decompression failed: {err:#}");
-                self.save_verification_result(&dir, &mut entry, false, &msg, None)
-                    .await?;
-                self.dispatch_verification_failed(db_id, &entry, &msg).await;
-                return Ok(r3v3rs3_api::platform::BackupVerifyReport {
-                    backup_id: entry.id,
-                    verified: false,
-                    uncompressed_size: 0,
-                    format_detected: "corrupt_gzip".into(),
-                    message: msg,
-                    drill: None,
-                });
-            }
-        };
+        let (drill, uncompressed_size) =
+            match stream_verify_drill(&entry.engine, &dump_path, started_at).await {
+                Ok(res) => res,
+                Err(err) => {
+                    let msg = format!("decompression failed: {err:#}");
+                    self.save_verification_result(&dir, &mut entry, false, &msg, None)
+                        .await?;
+                    self.dispatch_verification_failed(db_id, &entry, &msg).await;
+                    return Ok(self.build_verify_report(
+                        &entry.id,
+                        false,
+                        0,
+                        "corrupt_gzip",
+                        msg,
+                        None,
+                    ));
+                }
+            };
 
-        let drill = simulate_restore_drill(&entry.engine, &plain, started_at);
         let valid = drill.integrity_check_passed;
         let msg = drill.summary.clone();
         self.save_verification_result(&dir, &mut entry, valid, &msg, Some(drill.clone()))
@@ -1196,14 +1259,15 @@ impl Platform {
             self.dispatch_verification_failed(db_id, &entry, &msg).await;
         }
 
-        Ok(r3v3rs3_api::platform::BackupVerifyReport {
-            backup_id: entry.id,
-            verified: valid,
-            uncompressed_size: plain.len() as u64,
-            format_detected: drill.drill_mode.clone(),
-            message: msg,
-            drill: Some(drill),
-        })
+        let format_detected = drill.drill_mode.clone();
+        Ok(self.build_verify_report(
+            &entry.id,
+            valid,
+            uncompressed_size,
+            &format_detected,
+            msg,
+            Some(drill),
+        ))
     }
 
     async fn dispatch_verification_failed(
@@ -2006,6 +2070,7 @@ fn is_sql_integrity_valid(scan: &SqlDumpScan, len: usize, has_engine_hint: bool)
 }
 
 /// Analyzes an SQL text dump (Postgres, MySQL, MariaDB, SQLite) for schema structure, objects and data.
+#[cfg(test)]
 fn analyze_sql_dump(plain: &[u8], engine: &str) -> BackupDrillDetails {
     let text = String::from_utf8_lossy(plain);
     let mut scan = SqlDumpScan::default();
@@ -2038,6 +2103,7 @@ fn analyze_sql_dump(plain: &[u8], engine: &str) -> BackupDrillDetails {
 }
 
 /// Analyzes a Redis RDB binary dump file for magic bytes, version, and structure.
+#[cfg(test)]
 fn analyze_redis_rdb(plain: &[u8]) -> BackupDrillDetails {
     let valid_magic = plain.starts_with(b"REDIS");
     let version = if plain.len() >= 9 {
@@ -2071,6 +2137,7 @@ fn analyze_redis_rdb(plain: &[u8]) -> BackupDrillDetails {
 }
 
 /// Analyzes an SQLite 3 binary database file header.
+#[cfg(test)]
 fn analyze_sqlite_file(plain: &[u8]) -> BackupDrillDetails {
     let valid_magic = plain.starts_with(b"SQLite format 3\0");
     let page_size = if plain.len() >= 18 {
@@ -2103,6 +2170,7 @@ fn analyze_sqlite_file(plain: &[u8]) -> BackupDrillDetails {
 }
 
 /// Simulates a dry-run restore drill to verify schema, table objects, and data integrity.
+#[cfg(test)]
 fn simulate_restore_drill(
     engine: &str,
     plain: &[u8],
@@ -2166,6 +2234,255 @@ async fn ungzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut plain = Vec::new();
     decoder.read_to_end(&mut plain).await?;
     Ok(plain)
+}
+
+/// Calculates the SHA-256 hex checksum of a file without buffering it in memory.
+async fn compute_file_sha256(path: &std::path::Path) -> anyhow::Result<String> {
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Compresses a database dump directly to disk and computes its size and SHA-256.
+async fn write_compressed_dump(
+    dump: &[u8],
+    path: &std::path::Path,
+) -> anyhow::Result<(u64, String)> {
+    let file = tokio::fs::File::create(path).await?;
+    let mut encoder = async_compression::tokio::write::GzipEncoder::new(file);
+    encoder.write_all(dump).await?;
+    encoder.shutdown().await?;
+    let size = tokio::fs::metadata(path).await?.len();
+    let sha256 = compute_file_sha256(path).await?;
+    Ok((size, sha256))
+}
+
+async fn read_stream_header<R: tokio::io::AsyncRead + Unpin>(
+    reader: &mut R,
+    target: &mut [u8],
+) -> anyhow::Result<usize> {
+    let mut total = 0;
+    while total < target.len() {
+        let n = reader.read(&mut target[total..]).await?;
+        if n == 0 {
+            break;
+        }
+        total += n;
+    }
+    Ok(total)
+}
+
+fn detect_drill_format(header: &[u8], engine: &str) -> &'static str {
+    if header.starts_with(b"REDIS") || engine == "redis" {
+        "redis"
+    } else if header.starts_with(b"SQLite format 3\0") {
+        "sqlite"
+    } else {
+        "sql"
+    }
+}
+
+fn build_redis_drill_details(
+    version: String,
+    total_bytes: u64,
+    has_eof: bool,
+    valid_magic: bool,
+) -> BackupDrillDetails {
+    let integrity_check_passed = valid_magic && total_bytes >= 9;
+    let summary = format!(
+        "valid Redis RDB v{}, size: {} bytes, eof marker: {}",
+        version,
+        total_bytes,
+        if has_eof { "present" } else { "clean" }
+    );
+    let sample = if total_bytes > 9 {
+        vec!["keyspace_0".to_string()]
+    } else {
+        Vec::new()
+    };
+    let count = if total_bytes > 9 { 1 } else { 0 };
+
+    BackupDrillDetails {
+        drill_mode: "redis_rdb_drill".to_string(),
+        table_count: count,
+        tables_sample: sample,
+        has_data: total_bytes > 9,
+        integrity_check_passed,
+        schema_objects_count: count,
+        drill_duration_ms: 0,
+        summary,
+    }
+}
+
+async fn stream_analyze_redis<R: tokio::io::AsyncRead + Unpin>(
+    header: &[u8],
+    mut stream: R,
+) -> anyhow::Result<(BackupDrillDetails, u64)> {
+    let valid_magic = header.starts_with(b"REDIS");
+    let version = if header.len() >= 9 {
+        String::from_utf8_lossy(&header[5..9]).to_string()
+    } else {
+        "unknown".to_string()
+    };
+    let mut total_bytes = header.len() as u64;
+    let mut buf = [0u8; 65536];
+    let mut last_bytes: Vec<u8> = header.to_vec();
+    if last_bytes.len() > 16 {
+        let overflow = last_bytes.len() - 16;
+        last_bytes.drain(..overflow);
+    }
+
+    loop {
+        let n = stream.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        total_bytes += n as u64;
+        last_bytes.extend_from_slice(&buf[..n]);
+        if last_bytes.len() > 16 {
+            let overflow = last_bytes.len() - 16;
+            last_bytes.drain(..overflow);
+        }
+    }
+
+    let has_eof = last_bytes.contains(&0xFF);
+    let drill = build_redis_drill_details(version, total_bytes, has_eof, valid_magic);
+    Ok((drill, total_bytes))
+}
+
+async fn stream_analyze_sqlite<R: tokio::io::AsyncRead + Unpin>(
+    header: &[u8],
+    mut stream: R,
+) -> anyhow::Result<(BackupDrillDetails, u64)> {
+    let valid_magic = header.starts_with(b"SQLite format 3\0");
+    let page_size = if header.len() >= 18 {
+        u16::from_be_bytes([header[16], header[17]])
+    } else {
+        0
+    };
+    let is_valid_page = page_size == 1 || (page_size >= 512 && page_size.is_power_of_two());
+
+    let mut total_bytes = header.len() as u64;
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = stream.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        total_bytes += n as u64;
+    }
+
+    let integrity_check_passed = valid_magic && (is_valid_page || total_bytes >= 100);
+    let summary = format!(
+        "valid SQLite 3 database file, size: {} bytes, page size: {}",
+        total_bytes,
+        if page_size == 1 {
+            65536
+        } else {
+            page_size as u32
+        }
+    );
+
+    Ok((
+        BackupDrillDetails {
+            drill_mode: "sqlite_file_drill".to_string(),
+            table_count: 1,
+            tables_sample: vec!["main".to_string()],
+            has_data: total_bytes > 100,
+            integrity_check_passed,
+            schema_objects_count: 1,
+            drill_duration_ms: 0,
+            summary,
+        },
+        total_bytes,
+    ))
+}
+
+async fn stream_analyze_sql<R: tokio::io::AsyncRead + Unpin>(
+    engine: &str,
+    header: &[u8],
+    stream: R,
+) -> anyhow::Result<(BackupDrillDetails, u64)> {
+    let chained = tokio::io::AsyncReadExt::chain(header, stream);
+    let mut reader = tokio::io::BufReader::new(chained);
+    let mut line_bytes = Vec::new();
+    let mut scan = SqlDumpScan::default();
+    let mut total_bytes = 0u64;
+    let mut engine_hint = false;
+
+    loop {
+        line_bytes.clear();
+        let n = reader.read_until(b'\n', &mut line_bytes).await?;
+        if n == 0 {
+            break;
+        }
+        total_bytes += n as u64;
+        let line = String::from_utf8_lossy(&line_bytes);
+        if !engine_hint && check_sql_engine_hint(&line) {
+            engine_hint = true;
+        }
+        process_sql_line(&line, &mut scan);
+        if line_bytes.capacity() > 1_000_000 {
+            line_bytes = Vec::new();
+        }
+    }
+
+    let integrity_check_passed =
+        is_sql_integrity_valid(&scan, total_bytes as usize, engine_hint);
+
+    let summary = format!(
+        "verified {} uncompressed bytes, {} tables found, {} schema objects, data: {}",
+        total_bytes,
+        scan.table_count,
+        scan.schema_objects_count,
+        if scan.has_data { "present" } else { "none" }
+    );
+
+    Ok((
+        BackupDrillDetails {
+            drill_mode: format!("{engine}_schema_drill"),
+            table_count: scan.table_count,
+            tables_sample: scan.tables,
+            has_data: scan.has_data,
+            integrity_check_passed,
+            schema_objects_count: scan.schema_objects_count,
+            drill_duration_ms: 0,
+            summary,
+        },
+        total_bytes,
+    ))
+}
+
+async fn stream_verify_drill(
+    engine: &str,
+    dump_path: &std::path::Path,
+    started_at: std::time::Instant,
+) -> anyhow::Result<(BackupDrillDetails, u64)> {
+    let file = tokio::fs::File::open(dump_path).await?;
+    let buf_reader = tokio::io::BufReader::new(file);
+    let decoder = async_compression::tokio::bufread::GzipDecoder::new(buf_reader);
+    let mut stream = tokio::io::BufReader::new(decoder);
+
+    let mut header_buf = [0u8; 128];
+    let header_len = read_stream_header(&mut stream, &mut header_buf).await?;
+    let header = &header_buf[..header_len];
+
+    let format = detect_drill_format(header, engine);
+    let (mut drill, uncompressed_size) = match format {
+        "redis" => stream_analyze_redis(header, stream).await?,
+        "sqlite" => stream_analyze_sqlite(header, stream).await?,
+        _ => stream_analyze_sql(engine, header, stream).await?,
+    };
+    drill.drill_duration_ms = started_at.elapsed().as_millis().max(1) as u64;
+    Ok((drill, uncompressed_size))
 }
 
 fn is_gzipped(bytes: &[u8]) -> bool {
@@ -2556,5 +2873,40 @@ mod tests {
         // Success clears failure record
         platform.record_backup_success(app.id);
         assert!(platform.is_backup_due(app.id, slot, slot));
+    }
+
+    #[tokio::test]
+    async fn test_streaming_backup_and_verification() {
+        let temp = crate::platform::tests::TempDir(
+            std::env::temp_dir().join(format!("r3v3rs3-test-{}", ShortId::new())),
+        );
+        tokio::fs::create_dir_all(&temp.0).await.unwrap();
+        let dump_path = temp.0.join("test.dump.gz");
+
+        let postgres_dump = b"-- PostgreSQL database dump\n\
+                             CREATE TABLE users (id int);\n\
+                             INSERT INTO users VALUES (1);\n\
+                             -- PostgreSQL database dump complete\n";
+
+        let (size, sha256) = write_compressed_dump(postgres_dump, &dump_path)
+            .await
+            .unwrap();
+        assert!(size > 0);
+        assert!(!sha256.is_empty());
+
+        let file_sha = compute_file_sha256(&dump_path).await.unwrap();
+        assert_eq!(sha256, file_sha);
+
+        let started = std::time::Instant::now();
+        let (drill, uncompressed_size) =
+            stream_verify_drill("postgres", &dump_path, started)
+                .await
+                .unwrap();
+
+        assert!(drill.integrity_check_passed);
+        assert_eq!(drill.drill_mode, "postgres_schema_drill");
+        assert_eq!(drill.table_count, 1);
+        assert!(drill.has_data);
+        assert_eq!(uncompressed_size, postgres_dump.len() as u64);
     }
 }
