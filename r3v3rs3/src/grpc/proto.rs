@@ -4,6 +4,8 @@ use bytes::Bytes;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
+const MAX_RECURSION_DEPTH: usize = 32;
+
 /// Writes an unsigned 64-bit integer as a Protobuf varint.
 pub fn write_varint(buf: &mut Vec<u8>, mut val: u64) {
     while val >= 0x80 {
@@ -77,11 +79,25 @@ pub fn decode_framed_grpc_message(buf: &[u8]) -> Option<(u8, &[u8])> {
     }
 }
 
+fn encode_json_number(buf: &mut Vec<u8>, tag_num: u32, num: &serde_json::Number) {
+    if let Some(i) = num.as_i64() {
+        write_tag(buf, tag_num, 0);
+        write_varint(buf, i as u64);
+    } else if let Some(u) = num.as_u64() {
+        write_tag(buf, tag_num, 0);
+        write_varint(buf, u);
+    } else if let Some(f) = num.as_f64() {
+        write_tag(buf, tag_num, 1);
+        buf.extend_from_slice(&f.to_bits().to_le_bytes());
+    }
+}
+
 fn encode_json_field(
     buf: &mut Vec<u8>,
     tag_num: u32,
     val: &Value,
     schema: Option<&HashMap<String, u32>>,
+    depth: usize,
 ) {
     match val {
         Value::String(s) => write_string_field(buf, tag_num, s),
@@ -89,25 +105,16 @@ fn encode_json_field(
             write_tag(buf, tag_num, 0);
             write_varint(buf, if *b { 1 } else { 0 });
         }
-        Value::Number(num) => {
-            if let Some(i) = num.as_i64() {
-                write_tag(buf, tag_num, 0);
-                write_varint(buf, i as u64);
-            } else if let Some(u) = num.as_u64() {
-                write_tag(buf, tag_num, 0);
-                write_varint(buf, u);
-            } else if let Some(f) = num.as_f64() {
-                write_tag(buf, tag_num, 1); // 64-bit double
-                buf.extend_from_slice(&f.to_bits().to_le_bytes());
-            }
-        }
+        Value::Number(num) => encode_json_number(buf, tag_num, num),
         Value::Object(_) => {
-            let sub = json_to_protobuf(val, schema);
-            write_bytes_field(buf, tag_num, &sub);
+            if depth < MAX_RECURSION_DEPTH {
+                let sub = json_to_protobuf_depth(val, schema, depth + 1);
+                write_bytes_field(buf, tag_num, &sub);
+            }
         }
         Value::Array(items) => {
             for item in items {
-                encode_json_field(buf, tag_num, item, schema);
+                encode_json_field(buf, tag_num, item, schema, depth);
             }
         }
         Value::Null => {}
@@ -116,6 +123,17 @@ fn encode_json_field(
 
 /// Converts a JSON Value into Protobuf wire bytes.
 pub fn json_to_protobuf(val: &Value, schema: Option<&HashMap<String, u32>>) -> Vec<u8> {
+    json_to_protobuf_depth(val, schema, 0)
+}
+
+fn json_to_protobuf_depth(
+    val: &Value,
+    schema: Option<&HashMap<String, u32>>,
+    depth: usize,
+) -> Vec<u8> {
+    if depth >= MAX_RECURSION_DEPTH {
+        return Vec::new();
+    }
     let mut buf = Vec::new();
     let Value::Object(map) = val else {
         return buf;
@@ -131,27 +149,105 @@ pub fn json_to_protobuf(val: &Value, schema: Option<&HashMap<String, u32>>) -> V
             .unwrap_or((idx + 1) as u32);
 
         if let Some(field_val) = map.get(key) {
-            encode_json_field(&mut buf, tag_num, field_val, schema);
+            encode_json_field(&mut buf, tag_num, field_val, schema, depth);
         }
     }
     buf
 }
 
-fn decode_length_delimited(bytes: &[u8]) -> Value {
+fn decode_varint_value(val: u64) -> Value {
+    let signed = val as i64;
+    if signed < 0 {
+        Value::from(signed)
+    } else {
+        Value::from(val)
+    }
+}
+
+fn decode_fixed64(data: &[u8], offset: &mut usize) -> Option<Value> {
+    if *offset + 8 > data.len() {
+        return None;
+    }
+    let bits = u64::from_le_bytes(data[*offset..*offset + 8].try_into().ok()?);
+    *offset += 8;
+    Some(Value::from(f64::from_bits(bits)))
+}
+
+fn decode_fixed32(data: &[u8], offset: &mut usize) -> Option<Value> {
+    if *offset + 4 > data.len() {
+        return None;
+    }
+    let bits = u32::from_le_bytes(data[*offset..*offset + 4].try_into().ok()?);
+    *offset += 4;
+    Some(Value::from(f32::from_bits(bits)))
+}
+
+fn decode_length_delimited_field(
+    data: &[u8],
+    offset: &mut usize,
+    depth: usize,
+) -> Option<Value> {
+    let len = read_varint(data, offset)? as usize;
+    if *offset + len > data.len() {
+        return None;
+    }
+    let bytes = &data[*offset..*offset + len];
+    *offset += len;
+    Some(decode_length_delimited(bytes, depth + 1))
+}
+
+fn parse_wire_field(
+    data: &[u8],
+    offset: &mut usize,
+    depth: usize,
+) -> Option<(u32, Value)> {
+    let tag = read_varint(data, offset)?;
+    let field_num = (tag >> 3) as u32;
+    if field_num == 0 {
+        return None;
+    }
+    let wire_type = (tag & 0x07) as u8;
+    let val = match wire_type {
+        0 => decode_varint_value(read_varint(data, offset)?),
+        1 => decode_fixed64(data, offset)?,
+        2 => decode_length_delimited_field(data, offset, depth)?,
+        5 => decode_fixed32(data, offset)?,
+        _ => return None,
+    };
+    Some((field_num, val))
+}
+
+fn try_decode_submessage(data: &[u8], depth: usize) -> Option<Value> {
+    if data.is_empty() || depth >= MAX_RECURSION_DEPTH {
+        return None;
+    }
+    let mut map = Map::new();
+    let mut offset = 0;
+
+    while offset < data.len() {
+        let (field_num, val) = parse_wire_field(data, &mut offset, depth)?;
+        insert_json_field(&mut map, field_num.to_string(), val);
+    }
+
+    if offset == data.len() && !map.is_empty() {
+        Some(Value::Object(map))
+    } else {
+        None
+    }
+}
+
+fn decode_length_delimited(bytes: &[u8], depth: usize) -> Value {
     if bytes.is_empty() {
         return Value::String(String::new());
+    }
+    if depth < MAX_RECURSION_DEPTH && let Some(sub) = try_decode_submessage(bytes, depth) {
+        return sub;
     }
     if let Ok(s) = std::str::from_utf8(bytes)
         && s.chars()
             .all(|c| !c.is_control() || c == '\n' || c == '\r' || c == '\t')
     {
         return Value::String(s.to_string());
-    }
-    let sub = protobuf_to_json(bytes, None);
-    if let Value::Object(sub_map) = &sub
-        && !sub_map.is_empty()
-    {
-        return sub;
     }
     Value::String(hex::encode(bytes))
 }
@@ -172,57 +268,28 @@ fn insert_json_field(map: &mut Map<String, Value>, key: String, val: Value) {
 
 /// Decodes Protobuf wire bytes into a JSON Value.
 pub fn protobuf_to_json(data: &[u8], schema: Option<&HashMap<u32, String>>) -> Value {
+    protobuf_to_json_depth(data, schema, 0)
+}
+
+fn protobuf_to_json_depth(
+    data: &[u8],
+    schema: Option<&HashMap<u32, String>>,
+    depth: usize,
+) -> Value {
+    if depth >= MAX_RECURSION_DEPTH {
+        return Value::Object(Map::new());
+    }
     let mut map = Map::new();
     let mut offset = 0;
 
     while offset < data.len() {
-        let Some(tag_varint) = read_varint(data, &mut offset) else {
+        let Some((field_num, val)) = parse_wire_field(data, &mut offset, depth) else {
             break;
         };
-        let field_num = (tag_varint >> 3) as u32;
-        let wire_type = (tag_varint & 0x07) as u8;
-
         let key = schema
             .and_then(|s| s.get(&field_num).cloned())
             .unwrap_or_else(|| field_num.to_string());
-
-        match wire_type {
-            0 => {
-                let Some(val) = read_varint(data, &mut offset) else {
-                    break;
-                };
-                insert_json_field(&mut map, key, Value::from(val));
-            }
-            1 => {
-                if offset + 8 > data.len() {
-                    break;
-                }
-                let bits = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
-                offset += 8;
-                insert_json_field(&mut map, key, Value::from(f64::from_bits(bits)));
-            }
-            2 => {
-                let Some(len) = read_varint(data, &mut offset) else {
-                    break;
-                };
-                let len = len as usize;
-                if offset + len > data.len() {
-                    break;
-                }
-                let bytes = &data[offset..offset + len];
-                offset += len;
-                insert_json_field(&mut map, key, decode_length_delimited(bytes));
-            }
-            5 => {
-                if offset + 4 > data.len() {
-                    break;
-                }
-                let bits = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
-                offset += 4;
-                insert_json_field(&mut map, key, Value::from(f32::from_bits(bits)));
-            }
-            _ => break,
-        }
+        insert_json_field(&mut map, key, val);
     }
 
     Value::Object(map)
@@ -273,5 +340,73 @@ mod tests {
 
         assert_eq!(decoded["name"], "Alice");
         assert_eq!(decoded["age"], 30);
+    }
+
+    #[test]
+    fn test_negative_varint_round_trip() {
+        let schema = HashMap::from([("count".to_string(), 1), ("offset".to_string(), 2)]);
+        let rev_schema = HashMap::from([(1, "count".to_string()), (2, "offset".to_string())]);
+
+        let input = serde_json::json!({
+            "count": -42,
+            "offset": -1
+        });
+
+        let encoded = json_to_protobuf(&input, Some(&schema));
+        let decoded = protobuf_to_json(&encoded, Some(&rev_schema));
+
+        assert_eq!(decoded["count"], -42);
+        assert_eq!(decoded["offset"], -1);
+    }
+
+    #[test]
+    fn test_submessage_and_string_discrimination() {
+        let schema = HashMap::from([
+            ("sub".to_string(), 1),
+            ("greeting".to_string(), 2),
+        ]);
+        let rev_schema = HashMap::from([
+            (1, "sub".to_string()),
+            (2, "greeting".to_string()),
+        ]);
+
+        let input = serde_json::json!({
+            "sub": {
+                "id": 100,
+                "label": "submessage_ok"
+            },
+            "greeting": "hello world"
+        });
+
+        let encoded = json_to_protobuf(&input, Some(&schema));
+        let decoded = protobuf_to_json(&encoded, Some(&rev_schema));
+
+        assert_eq!(decoded["sub"]["1"], 100);
+        assert_eq!(decoded["sub"]["2"], "submessage_ok");
+        assert_eq!(decoded["greeting"], "hello world");
+    }
+
+    #[test]
+    fn test_recursion_depth_limit() {
+        let mut deeply_nested = serde_json::json!("leaf");
+        for _ in 0..50 {
+            deeply_nested = serde_json::json!({ "nested": deeply_nested });
+        }
+
+        let encoded = json_to_protobuf(&deeply_nested, None);
+        assert!(!encoded.is_empty());
+
+        let decoded = protobuf_to_json(&encoded, None);
+        assert!(decoded.is_object());
+    }
+
+    #[test]
+    fn test_binary_hex_fallback() {
+        let binary_payload = vec![0x00, 0xff, 0xaa, 0x12];
+        let mut buf = Vec::new();
+        write_bytes_field(&mut buf, 1, &binary_payload);
+
+        let decoded = protobuf_to_json(&buf, None);
+        assert_eq!(decoded["1"], hex::encode(&binary_payload));
     }
 }
