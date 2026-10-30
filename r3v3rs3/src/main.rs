@@ -78,10 +78,16 @@ async fn agent(args: AgentArgs) -> anyhow::Result<()> {
     let client = AgentClient::new(args.master, data_dir, AgentTiming::default(), executor);
     let identity = client.identity(token.as_ref()).await?;
     info!(target = %identity.target, "the agent starts");
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .context("failed to install the SIGTERM handler")?;
     tokio::select! {
         result = client.run(&identity) => result,
         _ = tokio::signal::ctrl_c() => {
             info!("received ctrl-c signal");
+            Ok(())
+        }
+        _ = sigterm.recv() => {
+            info!("received sigterm signal");
             Ok(())
         }
     }
@@ -327,6 +333,8 @@ async fn serve_admin(
 ) -> anyhow::Result<()> {
     let mut upgrade = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined2())
         .context("failed to install the SIGUSR2 handler")?;
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .context("failed to install the SIGTERM handler")?;
     // The signal loop outlives failed upgrades: a failed handover returns to the loop and
     // this process keeps serving.
     let signals = async {
@@ -346,6 +354,10 @@ async fn serve_admin(
                 }
                 _ = tokio::signal::ctrl_c() => {
                     info!("received ctrl-c signal");
+                    return;
+                }
+                _ = sigterm.recv() => {
+                    info!("received sigterm signal");
                     return;
                 }
             }
