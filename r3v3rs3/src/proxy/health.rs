@@ -97,7 +97,7 @@ impl ServerLiveMetrics {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct ServerHealth {
     failures: u32,
     unhealthy_until: Option<Instant>,
@@ -112,7 +112,7 @@ impl ServerHealth {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 enum Circuit {
     #[default]
     Closed,
@@ -123,7 +123,7 @@ enum Circuit {
 }
 
 /// The circuit of a server, and the requests of the current window of a closed circuit.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Breaker {
     circuit: Circuit,
     window_start: Option<Instant>,
@@ -510,6 +510,7 @@ impl GroupRegistry {
         circuit_breaker: CircuitBreaker,
         probe: Probe,
     ) -> Arc<UpstreamGroup> {
+        let previous = self.groups.get(&key);
         let mut created = false;
         let group = self.groups.get_or_create(
             key,
@@ -521,10 +522,13 @@ impl GroupRegistry {
             },
             || {
                 created = true;
-                Arc::new(
+                let mut new_group =
                     UpstreamGroup::new(members.clone(), policy, health_check.clone())
-                        .with_circuit_breaker(circuit_breaker),
-                )
+                        .with_circuit_breaker(circuit_breaker);
+                if let Some(prev) = previous {
+                    new_group.inherit_state(&prev);
+                }
+                Arc::new(new_group)
             },
         );
         group.set_probe(probe);
@@ -605,6 +609,45 @@ impl UpstreamGroup {
     fn with_circuit_breaker(mut self, circuit_breaker: CircuitBreaker) -> Self {
         self.circuit_breaker = circuit_breaker;
         self
+    }
+
+    fn inherit_state(&mut self, previous: &UpstreamGroup) {
+        for new_idx in 0..self.members.len() {
+            let prev_idx = previous
+                .members
+                .iter()
+                .position(|m| m.addr == self.members[new_idx].addr);
+            if let Some(prev_idx) = prev_idx {
+                self.inherit_member_state(previous, new_idx, prev_idx);
+            }
+        }
+    }
+
+    fn inherit_member_state(&mut self, previous: &UpstreamGroup, new_idx: usize, prev_idx: usize) {
+        if let (Some(prev_h), Some(new_h)) =
+            (previous.servers.get(prev_idx), self.servers.get(new_idx))
+        {
+            *new_h.lock().unwrap_or_else(PoisonError::into_inner) =
+                prev_h.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        }
+        if let (Some(prev_b), Some(new_b)) =
+            (previous.breakers.get(prev_idx), self.breakers.get(new_idx))
+        {
+            *new_b.lock().unwrap_or_else(PoisonError::into_inner) =
+                prev_b.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        }
+        if let (Some(prev_c), Some(new_c)) = (
+            previous.active_conns.get(prev_idx),
+            self.active_conns.get_mut(new_idx),
+        ) {
+            *new_c = Arc::clone(prev_c);
+        }
+        if let (Some(prev_m), Some(new_m)) = (
+            previous.metrics.get(prev_idx),
+            self.metrics.get_mut(new_idx),
+        ) {
+            *new_m = Arc::clone(prev_m);
+        }
     }
 
     fn set_probe(&self, probe: Probe) {
@@ -1377,6 +1420,35 @@ mod tests {
 
         let reweighted = group(&registry, &[1, 3], LoadBalancing::Random);
         assert!(!Arc::ptr_eq(&changed, &reweighted));
+    }
+
+    #[test]
+    fn reweighted_group_preserves_health_and_circuit_breaker() {
+        let registry = GroupRegistry::default();
+        let key = ("group".parse().unwrap(), Some(0));
+        let group = |weights: &[u16]| {
+            registry.group(
+                key,
+                members(weights),
+                LoadBalancing::First,
+                no_passive_check(),
+                CircuitBreaker::default(),
+                Probe::Connect(Vec::new()),
+            )
+        };
+        let first = group(&[1, 1]);
+        first.record_check(1, Err("connection failed".into()));
+        assert!(first.health(0).unwrap().is_healthy(Instant::now()));
+        assert!(!first.health(1).unwrap().is_healthy(Instant::now()));
+
+        let reweighted = group(&[1, 5]);
+        assert_eq!(reweighted.weight(1), 5);
+        assert!(reweighted.health(0).unwrap().is_healthy(Instant::now()));
+        assert!(!reweighted.health(1).unwrap().is_healthy(Instant::now()));
+        assert_eq!(
+            reweighted.health(1).unwrap().last_error.as_deref(),
+            Some("connection failed")
+        );
     }
 
     #[test]
