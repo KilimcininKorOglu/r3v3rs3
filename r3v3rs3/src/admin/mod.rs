@@ -252,13 +252,24 @@ async fn load_server_state(app_state: &AppState) -> anyhow::Result<()> {
 /// other endpoints under `/api` except sign-in and sign-out.
 fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
     let verify = middleware::from_fn_with_state(app_state.clone(), auth::verify);
+    let register_governor = GovernorConfigBuilder::default()
+        .per_second(2)
+        .burst_size(5)
+        .key_extractor(Prefix64KeyExtractor)
+        .finish()
+        .ok_or_else(|| anyhow::anyhow!("invalid mcp register rate limit config"))?;
+    let register_limit =
+        GovernorLayer::new(Arc::new(register_governor)).error_handler(|error| match error {
+            GovernorError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS.into_response(),
+            _ => AppError::Anyhow(anyhow::anyhow!(error)).into_response(),
+        });
     // The authorization endpoint redirects to the sign-in page when signed out; the consent
     // submission requires an active session. The token and metadata endpoints are public.
     let mcp_oauth = OpenApiRouter::new()
         .routes(routes!(oauth2::authorize))
         .routes(routes!(oauth2::consent).layer(verify.clone()))
         .routes(routes!(oauth2::token))
-        .routes(routes!(oauth2::register));
+        .routes(routes!(oauth2::register).layer(register_limit));
     let (api, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api", auth_routes()?)
         .nest("/api", resource_routes().route_layer(verify.clone()))

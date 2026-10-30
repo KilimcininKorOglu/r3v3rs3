@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{Row as _, SqlitePool};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tracing::info;
 
@@ -159,6 +159,24 @@ async fn db_delete_session(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn db_delete_client(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM mcp_clients WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+async fn db_purge_expired_clients(pool: &SqlitePool, cutoff: i64) -> anyhow::Result<()> {
+    sqlx::query(
+        "DELETE FROM mcp_clients WHERE created_at <= ? AND id NOT IN (SELECT DISTINCT client_id FROM mcp_tokens)",
+    )
+    .bind(cutoff)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 async fn db_purge_expired(pool: &SqlitePool, now: i64) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM mcp_tokens WHERE refresh_expires_at <= ?")
         .bind(now)
@@ -167,22 +185,36 @@ async fn db_purge_expired(pool: &SqlitePool, now: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn db_load_clients(pool: &SqlitePool) -> anyhow::Result<HashMap<String, McpClientConfig>> {
-    let rows = sqlx::query("SELECT id, name, redirect_uris FROM mcp_clients")
-        .fetch_all(pool)
-        .await?;
+async fn db_load_clients(
+    pool: &SqlitePool,
+    now: i64,
+) -> anyhow::Result<HashMap<String, DynamicClientEntry>> {
+    let cutoff = now.saturating_sub(UNAUTH_CLIENT_TTL.as_secs() as i64);
+    let rows = sqlx::query(
+        "SELECT id, name, redirect_uris, created_at FROM mcp_clients \
+         WHERE created_at > ? OR id IN (SELECT DISTINCT client_id FROM mcp_tokens)",
+    )
+    .bind(cutoff)
+    .fetch_all(pool)
+    .await?;
     let mut clients = HashMap::new();
     for row in rows {
         let id: String = row.try_get("id")?;
         let name: String = row.try_get("name")?;
         let uris_raw: String = row.try_get("redirect_uris")?;
+        let created_at: i64 = row.try_get("created_at")?;
         let redirect_uris = serde_json::from_str(&uris_raw).unwrap_or_default();
+        let created = created_at as u64;
         clients.insert(
             id.clone(),
-            McpClientConfig {
-                id,
-                name,
-                redirect_uris,
+            DynamicClientEntry {
+                config: McpClientConfig {
+                    id,
+                    name,
+                    redirect_uris,
+                },
+                created_at: created,
+                seq: 0,
             },
         );
     }
@@ -253,6 +285,15 @@ async fn db_load_tokens(pool: &SqlitePool, now: i64) -> anyhow::Result<LoadedTok
 }
 
 const CONSENT_CSRF_LIFETIME: Duration = Duration::from_secs(600);
+const DYNAMIC_CLIENT_TTL: Duration = Duration::from_secs(7 * 86400);
+const UNAUTH_CLIENT_TTL: Duration = Duration::from_secs(86400);
+
+#[derive(Debug, Clone)]
+pub struct DynamicClientEntry {
+    pub config: McpClientConfig,
+    pub created_at: u64,
+    pub seq: u64,
+}
 
 #[derive(Debug, Clone)]
 struct ConsentCsrf {
@@ -270,8 +311,9 @@ pub struct McpAuthorizations {
     refresh: HashMap<String, String>,
     by_id: HashMap<String, String>,
     /// The clients that registered themselves through RFC 7591.
-    clients: HashMap<String, McpClientConfig>,
+    clients: HashMap<String, DynamicClientEntry>,
     csrf_tokens: HashMap<String, ConsentCsrf>,
+    client_seq: u64,
 }
 
 /// The limit of the dynamically registered clients, like `MAX_GRANTS` for the tokens.
@@ -296,7 +338,10 @@ impl McpAuthorizations {
         sqlx::query(SCHEMA_TOKENS).execute(&pool).await?;
         let now = unix_now() as i64;
         let _ = db_purge_expired(&pool, now).await;
-        let clients = db_load_clients(&pool).await.unwrap_or_default();
+        let client_cutoff = now.saturating_sub(UNAUTH_CLIENT_TTL.as_secs() as i64);
+        let _ = db_purge_expired_clients(&pool, client_cutoff).await;
+        let clients = db_load_clients(&pool, now).await.unwrap_or_default();
+        let client_seq = clients.len() as u64;
         let (tokens, refresh, by_id) = db_load_tokens(&pool, now).await.unwrap_or_default();
         Ok(Self {
             pool: Some(pool),
@@ -306,6 +351,7 @@ impl McpAuthorizations {
             by_id,
             clients,
             csrf_tokens: HashMap::new(),
+            client_seq,
         })
     }
 
@@ -317,7 +363,7 @@ impl McpAuthorizations {
             if grant.refresh_expires_at > now {
                 let client_name = McpClientConfig::find(config_clients, &grant.client_id)
                     .map(|c| c.name.clone())
-                    .or_else(|| self.clients.get(&grant.client_id).map(|c| c.name.clone()))
+                    .or_else(|| self.clients.get(&grant.client_id).map(|c| c.config.name.clone()))
                     .unwrap_or_else(|| grant.client_id.clone());
                 sessions.push(McpSession {
                     id: grant.id.clone(),
@@ -350,24 +396,117 @@ impl McpAuthorizations {
     }
 
     /// Registers a client of the dynamic registration and returns its `client_id`.
+    /// Evicts the oldest idle client if the client table has reached MAX_CLIENTS.
     pub async fn register_client(&mut self, mut client: McpClientConfig) -> Option<String> {
+        self.cleanup_clients().await;
         if self.clients.len() >= MAX_CLIENTS {
-            return None;
+            let evict_id = self.find_eviction_candidate()?;
+            self.evict_client(&evict_id).await;
         }
         let id = format!("mcp-{}", new_token().to_lowercase());
         client.id = id.clone();
+        let now = unix_now();
+        let seq = self.client_seq;
+        self.client_seq = self.client_seq.wrapping_add(1);
         if let Some(pool) = &self.pool
             && let Err(err) = db_save_client(pool, &client).await
         {
             tracing::warn!(err = %err, "failed to persist registered MCP client");
         }
-        self.clients.insert(id.clone(), client);
+        self.clients.insert(
+            id.clone(),
+            DynamicClientEntry {
+                config: client,
+                created_at: now,
+                seq,
+            },
+        );
         Some(id)
+    }
+
+    fn active_clients(&self, now: u64) -> HashSet<String> {
+        self.codes
+            .values()
+            .filter(|c| c.expires_at > now)
+            .map(|c| c.client_id.clone())
+            .chain(
+                self.tokens
+                    .values()
+                    .filter(|t| t.refresh_expires_at > now)
+                    .map(|t| t.client_id.clone()),
+            )
+            .collect()
+    }
+
+    fn find_eviction_candidate(&self) -> Option<String> {
+        let now = unix_now();
+        let active = self.active_clients(now);
+        let mut idle = self
+            .clients
+            .iter()
+            .filter(|(id, _)| !active.contains(*id))
+            .min_by_key(|(_, entry)| (entry.created_at, entry.seq))
+            .map(|(id, _)| id.clone());
+        if idle.is_none() {
+            idle = self
+                .clients
+                .iter()
+                .min_by_key(|(_, entry)| (entry.created_at, entry.seq))
+                .map(|(id, _)| id.clone());
+        }
+        idle
+    }
+
+    pub async fn evict_client(&mut self, id: &str) {
+        self.clients.remove(id);
+        self.revoke_client_grants(id).await;
+        if let Some(pool) = &self.pool {
+            let _ = db_delete_client(pool, id).await;
+        }
+    }
+
+    async fn revoke_client_grants(&mut self, client_id: &str) {
+        self.codes.retain(|_, code| code.client_id != client_id);
+        let token_hashes: Vec<String> = self
+            .tokens
+            .iter()
+            .filter(|(_, grant)| grant.client_id == client_id)
+            .map(|(hash, _)| hash.clone())
+            .collect();
+        for hash in token_hashes {
+            if let Some(grant) = self.tokens.remove(&hash) {
+                self.refresh.remove(&grant.refresh_token);
+                self.by_id.remove(&grant.id);
+                if let Some(pool) = &self.pool {
+                    let _ = db_delete_token(pool, &hash).await;
+                }
+            }
+        }
+    }
+
+    async fn cleanup_clients(&mut self) {
+        let now = unix_now();
+        let unauth_cutoff = now.saturating_sub(UNAUTH_CLIENT_TTL.as_secs());
+        let dynamic_cutoff = now.saturating_sub(DYNAMIC_CLIENT_TTL.as_secs());
+        let active = self.active_clients(now);
+        let expired: Vec<String> = self
+            .clients
+            .iter()
+            .filter(|(id, entry)| {
+                let has_grants = active.contains(*id);
+                (!has_grants && entry.created_at <= unauth_cutoff)
+                    || entry.created_at <= dynamic_cutoff
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in expired {
+            self.evict_client(&id).await;
+        }
     }
 
     /// The dynamically registered client with this id, if one exists.
     pub fn dynamic_client(&self, id: &str) -> Option<McpClientConfig> {
-        self.clients.get(id).cloned()
+        self.clients.get(id).map(|e| e.config.clone())
     }
 
     /// Stores an approved authorization code.
@@ -509,10 +648,18 @@ impl McpAuthorizations {
         true
     }
 
-    /// Drops the expired codes and tokens.
+    /// Drops the expired codes, tokens, and dynamic clients.
     fn cleanup(&mut self) {
         let now = unix_now();
         self.csrf_tokens.retain(|_, csrf| csrf.expires_at > now);
+        let unauth_cutoff = now.saturating_sub(UNAUTH_CLIENT_TTL.as_secs());
+        let dynamic_cutoff = now.saturating_sub(DYNAMIC_CLIENT_TTL.as_secs());
+        let active = self.active_clients(now);
+        self.clients.retain(|id, entry| {
+            let has_grants = active.contains(id);
+            (has_grants && entry.created_at > dynamic_cutoff)
+                || (!has_grants && entry.created_at > unauth_cutoff)
+        });
         if self.codes.len() + self.tokens.len() < MAX_GRANTS {
             return;
         }
@@ -533,6 +680,7 @@ impl McpAuthorizations {
             let pool = pool.clone();
             tokio::spawn(async move {
                 let _ = db_purge_expired(&pool, now as i64).await;
+                let _ = db_purge_expired_clients(&pool, unauth_cutoff as i64).await;
             });
         }
     }
@@ -1643,5 +1791,80 @@ mod tests {
         assert_ne!(db_access, issued.access_token);
         assert_ne!(db_refresh, issued.refresh_token);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn dynamic_client_eviction_when_registry_full() {
+        let mut auth = McpAuthorizations::default();
+        let mut first_id = String::new();
+        for i in 0..MAX_CLIENTS {
+            let client = McpClientConfig {
+                id: String::new(),
+                name: format!("Client {i}"),
+                redirect_uris: vec!["http://localhost/cb".to_string()],
+            };
+            let id = auth
+                .register_client(client)
+                .await
+                .expect("registration succeeds");
+            if i == 0 {
+                first_id = id;
+            }
+        }
+        assert_eq!(auth.clients.len(), MAX_CLIENTS);
+        assert!(auth.dynamic_client(&first_id).is_some());
+
+        let client_new = McpClientConfig {
+            id: String::new(),
+            name: "Client 257".to_string(),
+            redirect_uris: vec!["http://localhost/cb".to_string()],
+        };
+        let new_id = auth
+            .register_client(client_new)
+            .await
+            .expect("257th registration succeeds");
+        assert_eq!(auth.clients.len(), MAX_CLIENTS);
+        assert!(auth.dynamic_client(&new_id).is_some());
+        assert!(auth.dynamic_client(&first_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn dynamic_client_with_active_token_protected_from_eviction() {
+        let mut auth = McpAuthorizations::default();
+        let c0 = McpClientConfig {
+            id: String::new(),
+            name: "Protected Client".to_string(),
+            redirect_uris: vec!["http://localhost/cb".to_string()],
+        };
+        let c0_id = auth.register_client(c0).await.expect("c0 succeeds");
+        let _tokens = auth.issue_tokens(&c0_id, "read", "user").await;
+
+        let mut c1_id = String::new();
+        for i in 1..MAX_CLIENTS {
+            let client = McpClientConfig {
+                id: String::new(),
+                name: format!("Client {i}"),
+                redirect_uris: vec!["http://localhost/cb".to_string()],
+            };
+            let id = auth
+                .register_client(client)
+                .await
+                .expect("registration succeeds");
+            if i == 1 {
+                c1_id = id;
+            }
+        }
+        assert_eq!(auth.clients.len(), MAX_CLIENTS);
+
+        let c_extra = McpClientConfig {
+            id: String::new(),
+            name: "Extra Client".to_string(),
+            redirect_uris: vec!["http://localhost/cb".to_string()],
+        };
+        let extra_id = auth.register_client(c_extra).await.expect("extra succeeds");
+        assert_eq!(auth.clients.len(), MAX_CLIENTS);
+        assert!(auth.dynamic_client(&extra_id).is_some());
+        assert!(auth.dynamic_client(&c0_id).is_some());
+        assert!(auth.dynamic_client(&c1_id).is_none());
     }
 }

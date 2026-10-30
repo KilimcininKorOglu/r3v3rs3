@@ -1114,3 +1114,31 @@ async fn consent_rejects_replayed_csrf_token() -> anyhow::Result<()> {
     })
     .await
 }
+
+#[tokio::test]
+async fn dynamic_registration_rate_limit_throttles_rapid_requests() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-dcr-ratelimit")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let payload = json!({
+            "client_name": "Burst Client",
+            "redirect_uris": ["http://127.0.0.1:49153/callback"],
+        });
+
+        let mut got_429 = false;
+        for _ in 0..15 {
+            let res = client
+                .post(format!("http://{addr}/oauth/register"))
+                .json(&payload)
+                .send()
+                .await?;
+            if res.status() == StatusCode::TOO_MANY_REQUESTS {
+                got_429 = true;
+                break;
+            }
+        }
+        assert!(got_429, "expected at least one 429 Too Many Requests response during burst");
+        Ok(())
+    })
+    .await
+}
