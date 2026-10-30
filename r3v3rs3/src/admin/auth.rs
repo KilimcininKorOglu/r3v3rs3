@@ -22,6 +22,7 @@ use r3v3rs3_api::{
         LoginResponse, PasskeyChallenge, PasskeyCredential, PasskeyRegisterRequest, Role,
         SessionInfo, TokenScope,
     },
+    client_ip::canonical_client_ip,
     error::{Error, ErrorMessage},
 };
 use sha2::{Digest, Sha256};
@@ -124,7 +125,7 @@ pub async fn login(
     let client_ip = resolve_client_ip(&peer, &headers);
     resolve_login_username(&state, &mut request);
     let username = request.username.clone();
-    let attempt_key = (client_ip, username.clone());
+    let attempt_key = (canonical_client_ip(client_ip), username.clone());
     ensure_login_allowed(&state, &attempt_key).await?;
 
     if let Err(err) = verify_pre_login_conditions(&state, &jar, &request, &attempt_key).await {
@@ -814,6 +815,26 @@ mod tests {
         attempts.clear(&key("admin"));
         attempts.record_failure(key("admin"), 2, reset, now);
         assert!(!attempts.is_blocked(&key("admin"), reset, now));
+    }
+
+    #[test]
+    fn failures_from_same_ipv6_prefix_share_attempts() {
+        let reset = Duration::from_secs(60);
+        let now = Instant::now();
+        let mut attempts = LoginAttempts::default();
+
+        let ip1: IpAddr = "2001:db8::1".parse().unwrap();
+        let ip2: IpAddr = "2001:db8::2".parse().unwrap();
+        let key1 = (canonical_client_ip(ip1), "admin".to_string());
+        let key2 = (canonical_client_ip(ip2), "admin".to_string());
+
+        attempts.record_failure(key1.clone(), 2, reset, now);
+        assert!(!attempts.is_blocked(&key1, reset, now));
+        assert!(!attempts.is_blocked(&key2, reset, now));
+
+        attempts.record_failure(key2.clone(), 2, reset, now);
+        assert!(attempts.is_blocked(&key1, reset, now));
+        assert!(attempts.is_blocked(&key2, reset, now));
     }
 
     #[test]

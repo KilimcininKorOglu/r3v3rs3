@@ -1,7 +1,7 @@
 use super::rate_share::{self, RateCountExchange, RateShare, SharedWindow};
 use crate::proxy::registry::WeakRegistry;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter, clock::Clock};
-use r3v3rs3_api::{id::ShortId, policy::RateLimit};
+use r3v3rs3_api::{client_ip::canonical_client_ip, id::ShortId, policy::RateLimit};
 use std::{
     fmt,
     net::IpAddr,
@@ -43,7 +43,7 @@ impl ClientRateLimiter {
 
     /// Records a request of the client. Returns the time to wait when the client is over the limit.
     pub fn check(&self, ip: IpAddr) -> Result<(), Duration> {
-        let ip = ip.to_canonical();
+        let ip = canonical_client_ip(ip);
         self.limiter
             .check_key(&ip)
             .map_err(|not_until| not_until.wait_time_from(self.limiter.clock().now()))?;
@@ -207,6 +207,10 @@ mod tests {
         assert!(limiter.check(ip("203.0.113.2")).is_ok());
         assert!(limiter.check(ip("::ffff:203.0.113.2")).is_ok());
         assert!(limiter.check(ip("203.0.113.2")).is_err());
+
+        assert!(limiter.check(ip("2001:db8::1")).is_ok());
+        assert!(limiter.check(ip("2001:db8::2")).is_ok());
+        assert!(limiter.check(ip("2001:db8::3")).is_err());
     }
 
     #[test]

@@ -18,6 +18,7 @@ use hyper::{
 use r3v3rs3_api::{
     app::AdminConfig,
     auth::{LoginMethod, LoginRequest, LoginResponse},
+    client_ip::canonical_client_ip,
     error::Error,
     id::ShortId,
 };
@@ -330,7 +331,7 @@ impl SessionAuthenticator {
             };
             login_page(template, status)
         };
-        let key = (ctx.client, form.username.clone());
+        let key = (canonical_client_ip(ctx.client), form.username.clone());
         if self.service.is_blocked(&key) {
             warn!(client = %ctx.client, username = %form.username, "sign-in blocked after too many failed attempts");
             return page(TOO_MANY_ATTEMPTS, false, StatusCode::TOO_MANY_REQUESTS);

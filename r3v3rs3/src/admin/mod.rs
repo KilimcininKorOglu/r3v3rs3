@@ -303,10 +303,23 @@ async fn no_store(mut res: Response) -> Response {
     res
 }
 
+#[derive(Clone, Default)]
+struct Prefix64KeyExtractor;
+
+impl tower_governor::key_extractor::KeyExtractor for Prefix64KeyExtractor {
+    type Key = IpAddr;
+
+    fn extract<T>(&self, req: &axum::http::Request<T>) -> Result<Self::Key, GovernorError> {
+        let ip = tower_governor::key_extractor::PeerIpKeyExtractor.extract(req)?;
+        Ok(r3v3rs3_api::client_ip::canonical_client_ip(ip))
+    }
+}
+
 fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
     let governor_conf = GovernorConfigBuilder::default()
         .per_second(4)
         .burst_size(2)
+        .key_extractor(Prefix64KeyExtractor)
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid login rate limit config"))?;
     let login_limit =
@@ -333,6 +346,7 @@ fn public_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
     let governor_conf = GovernorConfigBuilder::default()
         .per_second(1)
         .burst_size(10)
+        .key_extractor(Prefix64KeyExtractor)
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid webhook rate limit config"))?;
     let limit = GovernorLayer::new(Arc::new(governor_conf)).error_handler(|error| match error {
