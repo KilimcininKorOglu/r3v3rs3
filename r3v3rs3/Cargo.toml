@@ -105,7 +105,7 @@ reqwest = { version = "0.13.5", default-features = false, features = [
 ] }
 aws-lc-rs = "1.14.1"
 rpassword = "7.2.0"
-rustls = { version = "0.23", default-features = false, features = [
+rustls = { version = "0.23.46", default-features = false, features = [
     "aws_lc_rs",
     "prefer-post-quantum",
     "std",
@@ -163,7 +163,7 @@ utoipa-axum = "0.2.0"
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "vendored"] }
 x509-parser = "0.18.1"
 yamux = "0.14.1"
-zstd = "0.14.0"
+zstd = "0.14.3"
 
 [build-dependencies]
 built = "0.8.1"
