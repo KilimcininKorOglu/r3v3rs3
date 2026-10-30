@@ -369,7 +369,91 @@ impl UpdateWebhookRequest {
     }
 }
 
-/// Validates that a string is a valid HTTP or HTTPS URL.
+fn is_private_or_restricted_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    if ip.is_loopback() || ip.is_multicast() || ip.is_broadcast() {
+        return true;
+    }
+    let [a, b, ..] = ip.octets();
+    match a {
+        0 | 10 => true,
+        169 if b == 254 => true,
+        172 if (16..=31).contains(&b) => true,
+        192 if b == 168 => true,
+        100 if (64..=127).contains(&b) => true,
+        _ => is_test_net(ip),
+    }
+}
+
+fn is_test_net(ip: std::net::Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    (a == 192 && b == 0 && c == 2)
+        || (a == 198 && b == 51 && c == 100)
+        || (a == 203 && b == 0 && c == 113)
+}
+
+fn is_private_or_restricted_ipv6(ip: std::net::Ipv6Addr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() {
+        return true;
+    }
+    let octets = ip.octets();
+    if (octets[0] & 0xfe) == 0xfc || (octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80) {
+        return true;
+    }
+    check_ipv6_mapped_or_compat(&octets)
+}
+
+fn check_ipv6_mapped_or_compat(octets: &[u8; 16]) -> bool {
+    if octets[0..10] != [0; 10] {
+        return false;
+    }
+    let is_mapped = octets[10] == 0xff && octets[11] == 0xff;
+    let is_compat = octets[10] == 0 && octets[11] == 0;
+    if is_mapped || is_compat {
+        let v4 = std::net::Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15]);
+        return is_private_or_restricted_ipv4(v4);
+    }
+    false
+}
+
+fn is_private_or_restricted_domain(domain: &str) -> bool {
+    let lower = domain.to_ascii_lowercase();
+    let trimmed = lower.trim_end_matches('.');
+    if trimmed == "localhost" {
+        return true;
+    }
+    matches_blocked_suffix(trimmed)
+}
+
+fn matches_blocked_suffix(host: &str) -> bool {
+    const SUFFIXES: &[&str] = &[
+        ".localhost",
+        ".local",
+        ".internal",
+        ".lan",
+        ".home.arpa",
+        ".corp",
+    ];
+    SUFFIXES.iter().any(|suffix| host.ends_with(suffix))
+}
+
+fn is_restricted_host(host: &url::Host<&str>) -> bool {
+    match host {
+        url::Host::Ipv4(ip) => is_private_or_restricted_ipv4(*ip),
+        url::Host::Ipv6(ip) => is_private_or_restricted_ipv6(*ip),
+        url::Host::Domain(domain) => {
+            if let Ok(ip) = domain.parse::<std::net::IpAddr>() {
+                match ip {
+                    std::net::IpAddr::V4(v4) => is_private_or_restricted_ipv4(v4),
+                    std::net::IpAddr::V6(v6) => is_private_or_restricted_ipv6(v6),
+                }
+            } else {
+                is_private_or_restricted_domain(domain)
+            }
+        }
+    }
+}
+
+/// Validates that a string is a valid HTTP or HTTPS URL pointing to a publicly routable host.
 pub fn validate_webhook_url(url: &str) -> Result<(), Error> {
     let parsed = url::Url::parse(url.trim()).map_err(|err| Error::InvalidWebhook {
         reason: format!("invalid webhook URL: {err}"),
@@ -380,9 +464,12 @@ pub fn validate_webhook_url(url: &str) -> Result<(), Error> {
             reason: "webhook URL must use http or https scheme".to_string(),
         });
     }
-    if parsed.host().is_none() {
+    let host = parsed.host().ok_or_else(|| Error::InvalidWebhook {
+        reason: "webhook URL must have a host".to_string(),
+    })?;
+    if is_restricted_host(&host) {
         return Err(Error::InvalidWebhook {
-            reason: "webhook URL must have a host".to_string(),
+            reason: "webhook URL cannot target private, loopback, or restricted addresses".to_string(),
         });
     }
     Ok(())
@@ -475,5 +562,54 @@ mod tests {
             events: vec![],
         };
         assert!(empty_events.validate().is_err());
+    }
+
+    #[test]
+    fn validate_webhook_url_blocks_private_and_loopback_addresses() {
+        let blocked = [
+            "http://127.0.0.1:8080/hook",
+            "http://127.1.2.3/hook",
+            "http://localhost:8080/hook",
+            "http://api.localhost/hook",
+            "http://service.local/hook",
+            "http://internal.internal/hook",
+            "http://router.lan/hook",
+            "http://169.254.169.254/latest/meta-data",
+            "http://10.0.0.1/hook",
+            "http://10.255.0.1/hook",
+            "http://172.16.0.1/hook",
+            "http://172.31.255.255/hook",
+            "http://192.168.1.1/hook",
+            "http://100.64.0.1/hook",
+            "http://0.0.0.0/hook",
+            "http://[::1]/hook",
+            "http://[::]/hook",
+            "http://[fe80::1]/hook",
+            "http://[fc00::1]/hook",
+            "http://[fd12:3456:789a::1]/hook",
+            "http://[::ffff:127.0.0.1]/hook",
+            "http://[::ffff:169.254.169.254]/hook",
+            "http://[::ffff:10.0.0.1]/hook",
+            "http://2130706433/hook",
+        ];
+        for url in blocked {
+            assert!(
+                validate_webhook_url(url).is_err(),
+                "expected {url} to be blocked"
+            );
+        }
+
+        let allowed = [
+            "https://hooks.slack.com/services/xxx",
+            "https://discord.com/api/webhooks/xxx",
+            "http://93.184.216.34/hook",
+            "https://api.example.com/webhook",
+        ];
+        for url in allowed {
+            assert!(
+                validate_webhook_url(url).is_ok(),
+                "expected {url} to be allowed"
+            );
+        }
     }
 }

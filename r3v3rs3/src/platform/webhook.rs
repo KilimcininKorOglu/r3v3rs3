@@ -146,6 +146,14 @@ async fn deliver_to_all(targets: Vec<(String, String, Option<Vec<u8>>)>, payload
     };
 
     for (name, url, secret) in targets {
+        if r3v3rs3_api::webhook::validate_webhook_url(&url).is_err() {
+            warn!(
+                webhook = %name,
+                url = %url,
+                "skipping delivery to restricted webhook URL"
+            );
+            continue;
+        }
         match deliver_webhook(&client, &url, secret.as_deref(), &payload).await {
             Ok((status, elapsed)) => {
                 info!(
@@ -335,6 +343,8 @@ impl Platform {
                 .await
                 .map_err(|_| Error::WebhookNotFound { id })?
                 .ok_or(Error::WebhookNotFound { id })?;
+
+            r3v3rs3_api::webhook::validate_webhook_url(&stored.url)?;
 
             let secret = match self.store.webhook_secret(id).await {
                 Ok(Some(sealed)) => {
