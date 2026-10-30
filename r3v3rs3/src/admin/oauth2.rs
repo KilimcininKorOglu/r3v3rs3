@@ -705,6 +705,13 @@ pub async fn authorize(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("frame-ancestors 'none'"),
+    );
+    response
+        .headers_mut()
+        .insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     Ok(response)
 }
 

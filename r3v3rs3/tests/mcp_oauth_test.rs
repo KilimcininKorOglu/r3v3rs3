@@ -222,6 +222,20 @@ async fn an_authenticated_authorization_request_renders_the_consent_page() -> an
         );
         let response = client.get(&url).header("cookie", &cookie).send().await?;
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-security-policy")
+                .and_then(|v| v.to_str().ok()),
+            Some("frame-ancestors 'none'")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("x-frame-options")
+                .and_then(|v| v.to_str().ok()),
+            Some("DENY")
+        );
         let text = response.text().await?;
         assert!(text.contains("r3v3rs3 MCP client"), "{text}");
         assert!(text.contains("admin"), "{text}");
