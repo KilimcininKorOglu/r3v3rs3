@@ -871,7 +871,7 @@ impl Platform {
 
         if !replayed.is_empty() {
             let _ = self
-                .replay_wal_to_target(target_app.id, &replayed, request.target_time)
+                .replay_wal_to_target(db_id, target_app.id, &replayed, request.target_time)
                 .await;
         }
 
@@ -981,16 +981,17 @@ impl Platform {
 
     async fn replay_wal_to_target(
         &self,
-        db_id: ShortId,
+        source_db_id: ShortId,
+        target_db_id: ShortId,
         segments: &[WalSegment],
         target_time: u64,
     ) -> anyhow::Result<()> {
-        let (app, container, runtime) = self.database_container(db_id).await?;
+        let (app, container, runtime) = self.database_container(target_db_id).await?;
         let engine = app.spec.database.clone().context("no database")?;
         let info = r3v3rs3_api::platform::engine_info(&engine).context("no engine")?;
-        let password = self.database_password(db_id, &info).await?;
+        let password = self.database_password(target_db_id, &info).await?;
         let restore = restore_plan(&engine, &info, &password)?;
-        let dir = self.wal_dir(db_id).await?;
+        let dir = self.wal_dir(source_db_id).await?;
 
         for seg in segments {
             if seg.start_time <= target_time {
@@ -2427,5 +2428,23 @@ mod tests {
         assert!(!drill.integrity_check_passed);
         assert_eq!(drill.table_count, 0);
         assert!(!drill.has_data);
+    }
+
+    #[tokio::test]
+    async fn test_source_and_target_wal_dirs_are_distinct() {
+        let (platform, _dir) = crate::platform::tests::platform().await.unwrap();
+        let source_app = platform
+            .add_app(crate::platform::tests::request("shop-db"), 1)
+            .await
+            .unwrap();
+        let target_app = platform
+            .add_app(crate::platform::tests::request("shop-clone"), 2)
+            .await
+            .unwrap();
+        let source_wal = platform.wal_dir(source_app.id).await.unwrap();
+        let target_wal = platform.wal_dir(target_app.id).await.unwrap();
+        assert_ne!(source_wal, target_wal);
+        assert!(source_wal.ends_with("shop-db/wal"));
+        assert!(target_wal.ends_with("shop-clone/wal"));
     }
 }
