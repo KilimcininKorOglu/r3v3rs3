@@ -15,8 +15,25 @@ use time::OffsetDateTime;
 /// How often the scheduler wakes up to check for due commands.
 const SCHEDULER_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Execution timeout for a scheduled command (5 minutes).
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// Maximum output bytes recorded for a command execution.
 const MAX_OUTPUT_CHARS: usize = 4096;
+
+/// Holds an executing scheduled command so that only one instance runs at a time.
+pub struct ScheduledCommandLock {
+    pub(super) platform: Arc<Platform>,
+    pub(super) cmd_id: ShortId,
+}
+
+impl Drop for ScheduledCommandLock {
+    fn drop(&mut self) {
+        self.platform
+            .running_scheduled_commands()
+            .remove(&self.cmd_id);
+    }
+}
 
 /// Spawns the background scheduler loop.
 pub fn spawn_command_scheduler(platform: &Arc<Platform>) {
@@ -71,10 +88,14 @@ impl Platform {
         let now = unix_ms() as i64;
         for cmd in commands {
             if is_schedule_due(&cmd.schedule, cmd.last_run_at, now) {
+                let Some(lock) = self.lock_scheduled_command(cmd.id) else {
+                    continue;
+                };
                 let this = self.clone();
                 let cmd_id = cmd.id;
                 tokio::spawn(async move {
-                    if let Err(err) = this.execute_scheduled_command(cmd_id).await {
+                    let _lock = lock;
+                    if let Err(err) = this.execute_scheduled_command_impl(cmd_id).await {
                         tracing::warn!(err = format!("{err:#}"), %cmd_id, "scheduled command failed");
                     }
                 });
@@ -84,6 +105,16 @@ impl Platform {
 
     /// Executes a single scheduled command inside the container of its app.
     pub async fn execute_scheduled_command(
+        self: &Arc<Self>,
+        cmd_id: ShortId,
+    ) -> anyhow::Result<ScheduledCommandRunResult> {
+        let Some(_lock) = self.lock_scheduled_command(cmd_id) else {
+            anyhow::bail!("scheduled command {cmd_id} is already running");
+        };
+        self.execute_scheduled_command_impl(cmd_id).await
+    }
+
+    async fn execute_scheduled_command_impl(
         &self,
         cmd_id: ShortId,
     ) -> anyhow::Result<ScheduledCommandRunResult> {
@@ -103,24 +134,11 @@ impl Platform {
         let exec_cmd = vec!["sh".into(), "-c".into(), cmd.command.clone()];
         let run_at = unix_ms() as i64;
 
-        let result = runtime.exec_capture(&container, exec_cmd, Vec::new()).await;
+        let exec_future = runtime.exec_capture(&container, exec_cmd, Vec::new());
+        let result = tokio::time::timeout(COMMAND_TIMEOUT, exec_future).await;
         let duration_ms = start.elapsed().as_millis() as u64;
 
-        let (success, status, output) = match result {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                let truncated = if text.len() > MAX_OUTPUT_CHARS {
-                    format!("{}... [truncated]", &text[..MAX_OUTPUT_CHARS])
-                } else {
-                    text.into_owned()
-                };
-                (true, "ok".to_string(), truncated)
-            }
-            Err(err) => {
-                let err_msg = format!("{err:#}");
-                (false, format!("failed: {err_msg}"), err_msg)
-            }
-        };
+        let (success, status, output) = format_command_result(result);
 
         self.store
             .record_scheduled_command_run(cmd_id, run_at, &status, &output)
@@ -192,6 +210,30 @@ impl Platform {
             return Err(r3v3rs3_api::error::Error::ScheduledCommandNotFound { id: cmd_id }.into());
         };
         self.store.delete_scheduled_command(cmd_id).await
+    }
+}
+
+fn format_command_result(
+    result: Result<Result<Vec<u8>, anyhow::Error>, tokio::time::error::Elapsed>,
+) -> (bool, String, String) {
+    match result {
+        Ok(Ok(bytes)) => {
+            let text = String::from_utf8_lossy(&bytes);
+            let truncated = if text.len() > MAX_OUTPUT_CHARS {
+                format!("{}... [truncated]", &text[..MAX_OUTPUT_CHARS])
+            } else {
+                text.into_owned()
+            };
+            (true, "ok".to_string(), truncated)
+        }
+        Ok(Err(err)) => {
+            let err_msg = format!("{err:#}");
+            (false, format!("failed: {err_msg}"), err_msg)
+        }
+        Err(_) => {
+            let err_msg = format!("command timed out after {}s", COMMAND_TIMEOUT.as_secs());
+            (false, format!("failed: {err_msg}"), err_msg)
+        }
     }
 }
 
@@ -319,5 +361,20 @@ mod tests {
         assert!(match_cron_field("1,2,5", 5));
         assert!(!match_cron_field("1,2,5", 3));
         assert!(match_cron_5("* * * * *", &dt));
+    }
+
+    #[test]
+    fn format_command_result_success_and_errors() {
+        let ok_res = Ok(Ok(b"hello world".to_vec()));
+        let (success, status, output) = format_command_result(ok_res);
+        assert!(success);
+        assert_eq!(status, "ok");
+        assert_eq!(output, "hello world");
+
+        let err_res = Ok(Err(anyhow::anyhow!("exec failed")));
+        let (success, status, output) = format_command_result(err_res);
+        assert!(!success);
+        assert!(status.contains("failed: exec failed"));
+        assert_eq!(output, "exec failed");
     }
 }

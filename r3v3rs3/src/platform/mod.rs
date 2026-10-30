@@ -196,6 +196,8 @@ pub struct Platform {
     sent: Mutex<Option<publish::Published>>,
     /// The apps that a pipeline or a deletion holds.
     busy: std::sync::Mutex<HashSet<ShortId>>,
+    /// Scheduled command IDs that are currently executing.
+    running_commands: std::sync::Mutex<HashSet<ShortId>>,
     /// The apps that a webhook request deploys again after their running pipeline, with optional git ref.
     queued: std::sync::Mutex<HashMap<ShortId, Option<GitRef>>>,
     timing: deploy::Timing,
@@ -278,6 +280,7 @@ impl Platform {
             command,
             sent: Mutex::new(None),
             busy: std::sync::Mutex::new(HashSet::new()),
+            running_commands: std::sync::Mutex::new(HashSet::new()),
             queued: std::sync::Mutex::new(HashMap::new()),
             timing: deploy::Timing::default(),
             fetcher: Arc::new(GitFetcher),
@@ -312,6 +315,26 @@ impl Platform {
             // The set stays valid when a holder panics.
             Err(poisoned) => poisoned.into_inner(),
         }
+    }
+
+    pub fn running_scheduled_commands(&self) -> std::sync::MutexGuard<'_, HashSet<ShortId>> {
+        match self.running_commands.lock() {
+            Ok(running) => running,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    pub fn lock_scheduled_command(
+        self: &Arc<Self>,
+        cmd_id: ShortId,
+    ) -> Option<scheduler::ScheduledCommandLock> {
+        if !self.running_scheduled_commands().insert(cmd_id) {
+            return None;
+        }
+        Some(scheduler::ScheduledCommandLock {
+            platform: self.clone(),
+            cmd_id,
+        })
     }
 
     /// The runtime of the local target.
