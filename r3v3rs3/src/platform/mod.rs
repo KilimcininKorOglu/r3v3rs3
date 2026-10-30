@@ -110,6 +110,13 @@ pub enum PlatformHandle {
 }
 
 impl PlatformHandle {
+    pub fn pool(&self) -> Option<sqlx::SqlitePool> {
+        match self {
+            Self::Ready(platform) => Some(platform.pool().clone()),
+            _ => None,
+        }
+    }
+
     /// Opens the platform when `config.toml` enables it, and starts the task that sends the proxies
     /// of the apps to the server through `command`.
     pub async fn start(
@@ -118,11 +125,12 @@ impl PlatformHandle {
         command: mpsc::Sender<ServerCommand>,
         events: &broadcast::Sender<ServerEvent>,
         audit: Arc<AuditLog>,
+        pool: Option<sqlx::SqlitePool>,
     ) -> Self {
         if !config.platform.enabled {
             return Self::Disabled;
         }
-        match Platform::open(config, config_dir, command, Some(audit)).await {
+        match Platform::open(config, config_dir, command, Some(audit), pool).await {
             Ok(platform) => {
                 let platform = Arc::new(platform);
                 tokio::spawn(publish::refresh(Arc::downgrade(&platform)));
@@ -250,15 +258,30 @@ async fn resolve_public_url(
     }
 }
 
+async fn open_platform_store(
+    config_dir: &Path,
+    pool: Option<sqlx::SqlitePool>,
+) -> anyhow::Result<PlatformStore> {
+    match pool {
+        Some(pool) => PlatformStore::from_pool(pool).await,
+        None => PlatformStore::open(&config_dir.join(DATABASE_FILE)).await,
+    }
+}
+
 impl Platform {
+    pub fn pool(&self) -> &sqlx::SqlitePool {
+        self.store.pool()
+    }
+
     async fn open(
         config: &AppConfig,
         config_dir: &Path,
         command: mpsc::Sender<ServerCommand>,
         audit: Option<Arc<AuditLog>>,
+        pool: Option<sqlx::SqlitePool>,
     ) -> anyhow::Result<Self> {
         let local = docker_runtime(&config.platform.docker)?;
-        let store = PlatformStore::open(&config_dir.join(DATABASE_FILE)).await?;
+        let store = open_platform_store(config_dir, pool).await?;
         let now = crate::clock::unix_ms();
         store.ensure_local_target(now).await?;
         notices::notify_unfinished(&command, store.fail_unfinished(now).await?);
@@ -1452,7 +1475,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let mut platform = Platform::open(&config, &dir.0, command, None).await?;
+        let mut platform = Platform::open(&config, &dir.0, command, None, None).await?;
         let runtime = Arc::new(fake::FakeRuntime::default());
         platform.local = runtime.clone();
         platform.timing = deploy::Timing {
@@ -1629,12 +1652,12 @@ mod tests {
         ));
         let mut config = AppConfig::default();
         let handle =
-            PlatformHandle::start(&config, &dir, command.clone(), &events, audit.clone()).await;
+            PlatformHandle::start(&config, &dir, command.clone(), &events, audit.clone(), None).await;
         assert!(matches!(handle.get(), Err(Error::PlatformDisabled)));
 
         config.platform.enabled = true;
         config.platform.docker = "https://docker.example:2376".into();
-        let handle = PlatformHandle::start(&config, &dir, command, &events, audit).await;
+        let handle = PlatformHandle::start(&config, &dir, command, &events, audit, None).await;
         assert!(matches!(handle.get(), Err(Error::PlatformFailed)));
     }
 

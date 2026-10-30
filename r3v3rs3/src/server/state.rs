@@ -275,6 +275,7 @@ impl ServerState {
                 command_sender.clone(),
                 &br_sender,
                 audit.clone(),
+                storage.sqlite_pool(),
             )
             .await
         };
@@ -572,6 +573,10 @@ impl ServerState {
 
     pub fn platform(&self) -> PlatformHandle {
         self.platform.clone()
+    }
+
+    pub fn sqlite_pool(&self) -> Option<sqlx::SqlitePool> {
+        self.storage.sqlite_pool()
     }
 
     /// Deletes the audit log entries after the retention, once a day.
@@ -1748,6 +1753,7 @@ impl ServerState {
             self.command_sender.clone(),
             &self.br_sender,
             self.audit.clone(),
+            self.storage.sqlite_pool(),
         )
         .await;
     }

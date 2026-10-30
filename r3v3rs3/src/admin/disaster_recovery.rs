@@ -160,12 +160,18 @@ where
             String::new(),
         ))
     });
+    let pool = state
+        .call_system(crate::server::rpc::auth::GetSqlitePool)
+        .await
+        .ok()
+        .and_then(|b| *b);
     let new_handle = PlatformHandle::start(
         &reloaded_config,
         &config_dir,
         state.sender.clone(),
         &state.event,
         audit_for_platform,
+        pool,
     )
     .await;
 

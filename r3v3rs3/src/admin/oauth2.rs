@@ -46,14 +46,14 @@ pub const SCOPES: [&str; 2] = ["read", "edit"];
 const TOKEN_LENGTH: usize = 48;
 const MAX_GRANTS: usize = 1024;
 
-const SCHEMA_CLIENTS: &str = "CREATE TABLE IF NOT EXISTS mcp_clients (
+pub const SCHEMA_CLIENTS: &str = "CREATE TABLE IF NOT EXISTS mcp_clients (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,
     redirect_uris TEXT NOT NULL,
     created_at    INTEGER NOT NULL
 )";
 
-const SCHEMA_TOKENS: &str = "CREATE TABLE IF NOT EXISTS mcp_tokens (
+pub const SCHEMA_TOKENS: &str = "CREATE TABLE IF NOT EXISTS mcp_tokens (
     id                 TEXT PRIMARY KEY,
     access_token       TEXT NOT NULL UNIQUE,
     refresh_token      TEXT NOT NULL UNIQUE,
@@ -325,15 +325,8 @@ impl McpAuthorizations {
         self.pool.is_some()
     }
 
-    /// Opens the SQLite database at `path`, ensures tables exist, loads saved clients and tokens,
-    /// and purges expired records.
-    pub async fn open(path: &std::path::Path) -> anyhow::Result<Self> {
-        let options = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true)
-            .foreign_keys(true)
-            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
-        let pool = SqlitePool::connect_with(options).await?;
+    /// Creates an instance using an existing, shared SQLite connection pool.
+    pub async fn from_pool(pool: SqlitePool) -> anyhow::Result<Self> {
         sqlx::query(SCHEMA_CLIENTS).execute(&pool).await?;
         sqlx::query(SCHEMA_TOKENS).execute(&pool).await?;
         let now = unix_now() as i64;
@@ -353,6 +346,20 @@ impl McpAuthorizations {
             csrf_tokens: HashMap::new(),
             client_seq,
         })
+    }
+
+    /// Opens the SQLite database at `path`, ensures tables exist, loads saved clients and tokens,
+    /// and purges expired records.
+    pub async fn open(path: &std::path::Path) -> anyhow::Result<Self> {
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+            .busy_timeout(std::time::Duration::from_secs(5));
+        let pool = SqlitePool::connect_with(options).await?;
+        Self::from_pool(pool).await
     }
 
     /// Lists active authorized MCP client sessions for the admin WebUI.

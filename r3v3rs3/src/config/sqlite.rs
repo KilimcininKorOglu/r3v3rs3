@@ -250,6 +250,7 @@ async fn connect_db(db_path: &Path) -> anyhow::Result<SqlitePool> {
     let options = SqliteConnectOptions::new()
         .filename(db_path)
         .create_if_missing(true)
+        .foreign_keys(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(std::time::Duration::from_secs(5))
@@ -592,6 +593,10 @@ impl Storage for SqliteStorage {
 
     async fn invalidate_secrets(&self) {
         self.invalidate_secrets().await;
+    }
+
+    fn sqlite_pool(&self) -> Option<SqlitePool> {
+        Some(self.pool.clone())
     }
 
     async fn save_app_config(&self, config: &AppConfig) -> Result<(), Error> {

@@ -10,9 +10,10 @@ use r3v3rs3_api::platform::{
     ImageUpdateStatus, LOCAL_TARGET, TargetEntry, TargetKind,
 };
 use serde_derive::{Deserialize, Serialize};
-use sqlx::sqlite::{SqliteConnectOptions, SqliteRow};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteRow, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
 use std::path::Path;
+use crate::admin::oauth2::{SCHEMA_CLIENTS, SCHEMA_TOKENS};
 
 const SCHEMA: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS targets (
@@ -216,23 +217,8 @@ const SCHEMA: &[&str] = &[
         max_fd_ratio_percent          INTEGER,
         max_time_wait_sockets         INTEGER
     )",
-    "CREATE TABLE IF NOT EXISTS mcp_clients (
-        id            TEXT PRIMARY KEY,
-        name          TEXT NOT NULL,
-        redirect_uris TEXT NOT NULL,
-        created_at    INTEGER NOT NULL
-    )",
-    "CREATE TABLE IF NOT EXISTS mcp_tokens (
-        id                 TEXT PRIMARY KEY,
-        access_token       TEXT NOT NULL UNIQUE,
-        refresh_token      TEXT NOT NULL UNIQUE,
-        client_id          TEXT NOT NULL,
-        username           TEXT NOT NULL,
-        scope              TEXT NOT NULL,
-        expires_at         INTEGER NOT NULL,
-        refresh_expires_at INTEGER NOT NULL,
-        created_at         INTEGER NOT NULL
-    )",
+    SCHEMA_CLIENTS,
+    SCHEMA_TOKENS,
 ];
 
 mod commands;
@@ -377,14 +363,7 @@ pub struct PlatformStore {
 }
 
 impl PlatformStore {
-    pub async fn open(path: &Path) -> anyhow::Result<Self> {
-        let options = SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true)
-            .foreign_keys(true);
-        let pool = SqlitePool::connect_with(options)
-            .await
-            .with_context(|| format!("failed to open {}", path.display()))?;
+    pub async fn from_pool(pool: SqlitePool) -> anyhow::Result<Self> {
         for &statement in SCHEMA {
             sqlx::query(statement).execute(&pool).await?;
         }
@@ -434,6 +413,20 @@ impl PlatformStore {
                 .execute(&pool)
                 .await;
         Ok(Self { pool })
+    }
+
+    pub async fn open(path: &Path) -> anyhow::Result<Self> {
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .busy_timeout(std::time::Duration::from_secs(5));
+        let pool = SqlitePool::connect_with(options)
+            .await
+            .with_context(|| format!("failed to open {}", path.display()))?;
+        Self::from_pool(pool).await
     }
 
     pub fn pool(&self) -> &SqlitePool {

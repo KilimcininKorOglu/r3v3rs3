@@ -49,6 +49,19 @@ impl RpcMethod for GetPlatform {
     }
 }
 
+/// The unified SQLite connection pool, shared across storage, platform, and OAuth.
+pub struct GetSqlitePool;
+
+#[async_trait::async_trait]
+impl RpcMethod for GetSqlitePool {
+    type Output = Option<sqlx::SqlitePool>;
+    const PERMISSION: Permission = Permission::Admin;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        Ok(state.sqlite_pool())
+    }
+}
+
 /// The tag of the newest release, when the update check found a newer one.
 pub struct GetUpdateAvailable;
 

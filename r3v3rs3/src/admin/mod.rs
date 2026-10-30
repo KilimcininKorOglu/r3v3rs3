@@ -2,7 +2,7 @@ use crate::accounts::{AccountDirectory, AccountEntry, Caller};
 use crate::audit::{AuditLog, AuditRecord};
 use crate::command::ServerCommand;
 use crate::platform::PlatformHandle;
-use crate::server::rpc::auth::{GetAuditLog, GetPlatform, GetSessionBackend};
+use crate::server::rpc::auth::{GetAuditLog, GetPlatform, GetSessionBackend, GetSqlitePool};
 use crate::server::rpc::config::GetConfig;
 use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
 use crate::sessions::{LocalSessions, SessionBackend};
@@ -74,7 +74,7 @@ mod logs;
 mod mcp;
 mod metrics;
 mod oauth;
-mod oauth2;
+pub(crate) mod oauth2;
 mod openapi;
 mod platform;
 mod ports;
@@ -196,19 +196,32 @@ fn spawn_config_events(event: broadcast::Sender<ServerEvent>, data: Arc<Mutex<Da
     });
 }
 
-async fn handle_app_config_update(data: &Arc<Mutex<Data>>, config: AppConfig) {
-    let mut data = data.lock().await;
-    data.config = config;
+async fn init_mcp_auth(data: &mut Data, pool: Option<sqlx::SqlitePool>) {
+    if data.mcp.is_persistent() {
+        return;
+    }
+    let shared_pool = pool.or_else(|| data.platform.pool());
+    if let Some(p) = shared_pool
+        && let Ok(mcp) = oauth2::McpAuthorizations::from_pool(p).await
+    {
+        data.mcp = mcp;
+        return;
+    }
     let db_path = data
         .app_info
         .config_path
         .join(crate::platform::DATABASE_FILE);
     if (data.config.mcp.enabled || data.config.platform.enabled || db_path.exists())
-        && !data.mcp.is_persistent()
         && let Ok(mcp) = oauth2::McpAuthorizations::open(&db_path).await
     {
         data.mcp = mcp;
     }
+}
+
+async fn handle_app_config_update(data: &Arc<Mutex<Data>>, config: AppConfig) {
+    let mut data = data.lock().await;
+    data.config = config;
+    init_mcp_auth(&mut data, None).await;
 }
 
 /// Reads the config, the sessions and the audit log of the server. The server broadcasts its
@@ -236,15 +249,12 @@ async fn load_server_state(app_state: &AppState) -> anyhow::Result<()> {
     data.audit = Some(*audit);
     data.platform = *platform;
 
-    let db_path = data
-        .app_info
-        .config_path
-        .join(crate::platform::DATABASE_FILE);
-    if (data.config.mcp.enabled || data.config.platform.enabled || db_path.exists())
-        && let Ok(mcp) = oauth2::McpAuthorizations::open(&db_path).await
-    {
-        data.mcp = mcp;
-    }
+    let pool = app_state
+        .call_system(GetSqlitePool)
+        .await
+        .ok()
+        .and_then(|b| *b);
+    init_mcp_auth(&mut data, pool).await;
     Ok(())
 }
 

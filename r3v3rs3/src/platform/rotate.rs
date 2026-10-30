@@ -594,7 +594,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let fresh = Platform::open(&config, dir, command, None).await?;
+        let fresh = Platform::open(&config, dir, command, None, None).await?;
         let fresh_stored = fresh.store.env(app_id).await?;
         assert_eq!(
             fresh.open_value(app_id, &fresh_stored[0])?,

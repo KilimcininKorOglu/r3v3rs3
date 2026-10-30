@@ -29,6 +29,11 @@ pub trait Storage: Send + Sync + 'static {
     /// Invalidates cached encryption keys so subsequent operations reload them.
     async fn invalidate_secrets(&self) {}
 
+    /// Returns the underlying SQLite pool if this storage backend is backed by SQLite.
+    fn sqlite_pool(&self) -> Option<sqlx::SqlitePool> {
+        None
+    }
+
     async fn save_app_config(&self, config: &AppConfig) -> Result<(), Error>;
     async fn load_app_config(&self) -> AppConfig;
     async fn save_ports(&self, entries: &[PortEntry]) -> Result<(), Error>;
