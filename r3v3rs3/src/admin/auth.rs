@@ -82,7 +82,7 @@ async fn record_successful_login(
     state.record_audit(username, Some(*peer_ip), record).await;
 }
 
-fn header_ip(headers: &axum::http::HeaderMap, name: &'static str) -> Option<IpAddr> {
+pub(crate) fn header_ip(headers: &axum::http::HeaderMap, name: &'static str) -> Option<IpAddr> {
     headers
         .get(name)
         .and_then(|v| v.to_str().ok())

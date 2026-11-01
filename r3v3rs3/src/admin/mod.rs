@@ -299,7 +299,7 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .nest("/api", resource_routes().route_layer(verify.clone()))
         // The webhooks and the OAuth callback carry a signature or a one-time state instead of a
         // session.
-        .merge(public_routes()?)
+        .merge(public_routes(&app_state)?)
         .merge(
             OpenApiRouter::new()
                 .routes(routes!(oauth2::authorization_server_metadata))
@@ -308,10 +308,9 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         )
         .merge(metrics_routes(&app_state))
         .split_for_parts();
-    let docs: Router<AppState> =
-        Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi))
-            .route_layer(verify)
-            .layer(middleware::map_response(docs_frame_protection));
+    let docs: Router<AppState> = Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi))
+        .route_layer(verify)
+        .layer(middleware::map_response(docs_frame_protection));
     let mcp_verify = middleware::from_fn_with_state(app_state.clone(), oauth2::verify_bearer);
     let mcp_service = mcp::StreamableHttpService::new(
         {
@@ -396,12 +395,55 @@ const MAX_APP_FILE_BODY: usize = 100 * 1024 * 1024;
 /// Maximum body limit for volume archives and disaster recovery bundles (512MB).
 const MAX_ARCHIVE_BODY: usize = 512 * 1024 * 1024;
 
+#[derive(Clone)]
+struct ResolvedClientIpKeyExtractor {
+    state: AppState,
+}
+
+impl ResolvedClientIpKeyExtractor {
+    fn is_peer_trusted(&self, peer_ip: &IpAddr) -> bool {
+        if peer_ip.is_loopback() {
+            return true;
+        }
+        self.state
+            .data
+            .try_lock()
+            .map(|d| {
+                d.config
+                    .admin
+                    .trusted_proxies
+                    .iter()
+                    .any(|net| net.contains(peer_ip))
+            })
+            .unwrap_or(false)
+    }
+}
+
+impl tower_governor::key_extractor::KeyExtractor for ResolvedClientIpKeyExtractor {
+    type Key = IpAddr;
+
+    fn extract<T>(&self, req: &axum::http::Request<T>) -> Result<Self::Key, GovernorError> {
+        let peer_ip = tower_governor::key_extractor::PeerIpKeyExtractor.extract(req)?;
+        let trusted = self.is_peer_trusted(&peer_ip);
+        let ip = if trusted {
+            auth::header_ip(req.headers(), "x-forwarded-for")
+                .or_else(|| auth::header_ip(req.headers(), "x-real-ip"))
+                .unwrap_or(peer_ip)
+        } else {
+            peer_ip
+        };
+        Ok(r3v3rs3_api::client_ip::canonical_client_ip(ip))
+    }
+}
+
 /// The routes without a session. They share one rate limit per client address.
-fn public_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
+fn public_routes(app_state: &AppState) -> anyhow::Result<OpenApiRouter<AppState>> {
     let governor_conf = GovernorConfigBuilder::default()
         .per_second(1)
         .burst_size(10)
-        .key_extractor(Prefix64KeyExtractor)
+        .key_extractor(ResolvedClientIpKeyExtractor {
+            state: app_state.clone(),
+        })
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid webhook rate limit config"))?;
     let limit = GovernorLayer::new(Arc::new(governor_conf)).error_handler(|error| match error {
@@ -1151,5 +1193,76 @@ impl Data {
             rpc_callbacks: HashMap::new(),
             mcp: oauth2::McpAuthorizations::default(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::ConnectInfo;
+    use axum::http::Request;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use tower_governor::key_extractor::KeyExtractor;
+
+    #[tokio::test]
+    async fn resolved_client_ip_extractor_uses_forwarded_header_behind_proxy() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "r3-webhook-rate-{}",
+            r3v3rs3_api::id::ShortId::new()
+        ));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let _ = crate::log::open_database(&temp_dir.join("log.db"))
+            .await
+            .unwrap();
+        let app_info = crate::config::new_appinfo(&temp_dir, &temp_dir);
+        let data = Arc::new(Mutex::new(Data::new(app_info).await.unwrap()));
+        let (sender, _) = mpsc::channel(1);
+        let (event, _) = broadcast::channel(1);
+        let (_, accounts) = watch::channel(Arc::new(Default::default()));
+        let (upgrade, _) = mpsc::channel(1);
+        let state = AppState {
+            sender,
+            event,
+            event_listener_counter: Arc::new(AtomicUsize::new(0)),
+            accounts,
+            upgrade,
+            upgrade_stage: Arc::new(std::sync::Mutex::new(None)),
+            data,
+        };
+
+        let extractor = ResolvedClientIpKeyExtractor { state };
+
+        let req = Request::builder()
+            .header("x-forwarded-for", "203.0.113.195, 10.0.0.1")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .body(())
+            .unwrap();
+        let key = extractor.extract(&req).unwrap();
+        assert_eq!(key, IpAddr::V4(Ipv4Addr::new(203, 0, 113, 195)));
+
+        let req = Request::builder()
+            .header("x-real-ip", "198.51.100.5")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .body(())
+            .unwrap();
+        let key = extractor.extract(&req).unwrap();
+        assert_eq!(key, IpAddr::V4(Ipv4Addr::new(198, 51, 100, 5)));
+
+        let req = Request::builder()
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .body(())
+            .unwrap();
+        let key = extractor.extract(&req).unwrap();
+        assert_eq!(key, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+
+        let req = Request::builder()
+            .header("x-forwarded-for", "1.2.3.4")
+            .extension(ConnectInfo(SocketAddr::from(([198, 51, 100, 10], 12345))))
+            .body(())
+            .unwrap();
+        let key = extractor.extract(&req).unwrap();
+        assert_eq!(key, IpAddr::V4(Ipv4Addr::new(198, 51, 100, 10)));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
