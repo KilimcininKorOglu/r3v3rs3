@@ -1449,7 +1449,7 @@ pub async fn create_app_scheduled_command(
     Path(id): Path<ShortId>,
     Json(request): Json<ScheduledCommandRequest>,
 ) -> Result<Json<AppScheduledCommand>, AppError> {
-    let platform = state.platform(&caller, Permission::Edit).await?;
+    let platform = state.platform(&caller, Permission::Admin).await?;
     let cmd = platform
         .add_scheduled_command(id, request)
         .await
@@ -1482,7 +1482,7 @@ pub async fn update_app_scheduled_command(
     Path((id, cmd_id)): Path<(ShortId, ShortId)>,
     Json(request): Json<ScheduledCommandRequest>,
 ) -> Result<Json<AppScheduledCommand>, AppError> {
-    let platform = state.platform(&caller, Permission::Edit).await?;
+    let platform = state.platform(&caller, Permission::Admin).await?;
     let cmd = platform
         .update_scheduled_command(cmd_id, request)
         .await
@@ -1513,7 +1513,7 @@ pub async fn delete_app_scheduled_command(
     Extension(caller): Extension<Caller>,
     Path((id, cmd_id)): Path<(ShortId, ShortId)>,
 ) -> Result<(), AppError> {
-    let platform = state.platform(&caller, Permission::Edit).await?;
+    let platform = state.platform(&caller, Permission::Admin).await?;
     platform
         .delete_scheduled_command(cmd_id)
         .await
@@ -1544,7 +1544,7 @@ pub async fn run_app_scheduled_command(
     Extension(caller): Extension<Caller>,
     Path((id, cmd_id)): Path<(ShortId, ShortId)>,
 ) -> Result<Json<ScheduledCommandRunResult>, AppError> {
-    let platform = state.platform(&caller, Permission::Edit).await?;
+    let platform = state.platform(&caller, Permission::Admin).await?;
     let result = platform
         .execute_scheduled_command(cmd_id)
         .await

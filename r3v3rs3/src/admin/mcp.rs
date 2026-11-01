@@ -2955,7 +2955,7 @@ impl McpServer {
         };
         let platform = self
             .state
-            .platform(&caller, Permission::Edit)
+            .platform(&caller, Permission::Admin)
             .await
             .map_err(any_error)?;
         let cmd = platform
@@ -2992,7 +2992,7 @@ impl McpServer {
         };
         let platform = self
             .state
-            .platform(&caller, Permission::Edit)
+            .platform(&caller, Permission::Admin)
             .await
             .map_err(any_error)?;
         let cmd = platform
@@ -3023,7 +3023,7 @@ impl McpServer {
         let cmd_id: ShortId = parse_id(&params.command_id)?;
         let platform = self
             .state
-            .platform(&caller, Permission::Edit)
+            .platform(&caller, Permission::Admin)
             .await
             .map_err(any_error)?;
         platform
@@ -3054,7 +3054,7 @@ impl McpServer {
         let cmd_id: ShortId = parse_id(&params.command_id)?;
         let platform = self
             .state
-            .platform(&caller, Permission::Edit)
+            .platform(&caller, Permission::Admin)
             .await
             .map_err(any_error)?;
         let result = platform
