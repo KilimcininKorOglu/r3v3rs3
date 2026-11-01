@@ -17,6 +17,8 @@ struct ActiveBan {
     banned_until: Instant,
 }
 
+pub const MAX_VIOLATION_ENTRIES: usize = 10_000;
+
 #[derive(Debug, Clone)]
 struct IpViolationState {
     count: u32,
@@ -93,6 +95,34 @@ impl AutoQuarantineTracker {
         config.enabled && config.block_status_codes.contains(&status)
     }
 
+    fn prune_violations(
+        &self,
+        map: &mut HashMap<IpAddr, IpViolationState>,
+        now: Instant,
+        window_seconds: u64,
+    ) {
+        map.retain(|_, state| now.duration_since(state.window_start).as_secs() < window_seconds);
+        if map.len() >= MAX_VIOLATION_ENTRIES {
+            let excess = map.len() - MAX_VIOLATION_ENTRIES + 1;
+            let mut entries: Vec<(IpAddr, Instant)> =
+                map.iter().map(|(ip, s)| (*ip, s.window_start)).collect();
+            entries.sort_by_key(|(_, t)| *t);
+            for (ip, _) in entries.into_iter().take(excess) {
+                map.remove(&ip);
+            }
+        }
+    }
+
+    /// Prunes expired violation records from memory.
+    pub fn cleanup_violations(&self, now: Instant) {
+        let config = self.config.load();
+        let mut map = match self.violations.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        self.prune_violations(&mut map, now, config.window_seconds);
+    }
+
     /// Records violations for an IP address. If the threshold is exceeded, quarantines the IP.
     pub fn record_violation(
         &self,
@@ -110,6 +140,8 @@ impl AutoQuarantineTracker {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
+
+        self.prune_violations(&mut map, now, config.window_seconds);
 
         let entry = map.entry(ip).or_insert_with(|| IpViolationState {
             count: 0,
@@ -336,5 +368,45 @@ mod tests {
             None
         );
         assert!(!tracker.is_quarantined(&loopback_v4));
+    }
+
+    #[test]
+    fn violations_retention_pruning_and_bounded_capacity() {
+        let config = AutoQuarantineConfig {
+            enabled: true,
+            max_violations: 10,
+            window_seconds: 60,
+            ban_duration_seconds: 120,
+            block_status_codes: vec![404],
+            scanner_patterns: vec![],
+        };
+        let tracker = AutoQuarantineTracker::new(config);
+        let now = Instant::now();
+
+        // 1. Insert a stale entry older than window_seconds
+        {
+            let mut map = tracker.violations.lock().unwrap();
+            let old_ip: IpAddr = "198.51.100.1".parse().unwrap();
+            map.insert(
+                old_ip,
+                IpViolationState {
+                    count: 1,
+                    window_start: now - Duration::from_secs(120),
+                },
+            );
+            assert_eq!(map.len(), 1);
+        }
+
+        // 2. Recording violation prunes the stale entry
+        let new_ip: IpAddr = "198.51.100.2".parse().unwrap();
+        tracker.record_violation(new_ip, "Probe".to_string(), 1);
+
+        {
+            let map = tracker.violations.lock().unwrap();
+            assert_eq!(map.len(), 1);
+            let old_ip: IpAddr = "198.51.100.1".parse().unwrap();
+            assert!(!map.contains_key(&old_ip));
+            assert!(map.contains_key(&new_ip));
+        }
     }
 }
