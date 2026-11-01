@@ -14,11 +14,12 @@ use r3v3rs3_api::{
     proxy::ProxyEntry,
 };
 use std::future::Future;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::{io::BufStream, net::TcpStream};
 use tokio_rustls::rustls::ServerConfig;
-use tracing::{Instrument, Span, error};
+use tracing::{Instrument, Span, debug, error};
 
 pub mod access_log;
 pub mod connection_tracker;
@@ -88,8 +89,47 @@ pub(crate) fn open_connections() -> usize {
     OPEN_CONNECTIONS.load(Ordering::Relaxed)
 }
 
+pub(crate) fn is_client_io_error(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::TimedOut
+            | std::io::ErrorKind::InvalidData
+    )
+}
+
+fn matches_client_keyword(msg: &str) -> bool {
+    const KEYWORDS: &[&str] = &[
+        "PROXY protocol",
+        "tls handshake",
+        "handshake",
+        "alert received",
+        "certificate",
+        "connection closed",
+    ];
+    KEYWORDS.iter().any(|k| msg.contains(k))
+}
+
+pub(crate) fn is_client_error(err: &anyhow::Error) -> bool {
+    if let Some(io_err) = err.root_cause().downcast_ref::<std::io::Error>() {
+        return is_client_io_error(io_err);
+    }
+    matches_client_keyword(&err.to_string())
+}
+
+pub(crate) fn log_connection_error(peer: Option<SocketAddr>, err: &anyhow::Error) {
+    if is_client_error(err) {
+        debug!(?peer, %err, "client connection failed");
+    } else {
+        error!(?peer, %err, "connection failed");
+    }
+}
+
 /// Runs the task of a client connection in the span and logs its error.
-fn spawn_connection<F>(span: Span, task: F)
+pub(crate) fn spawn_connection<F>(span: Span, peer: Option<SocketAddr>, task: F)
 where
     F: Future<Output = anyhow::Result<()>> + Send + 'static,
 {
@@ -98,7 +138,7 @@ where
         async move {
             let _lease = lease;
             if let Err(err) = task.await {
-                error!("{err}");
+                log_connection_error(peer, &err);
             }
         }
         .instrument(span),
@@ -283,4 +323,34 @@ pub enum PortContextKind {
     Http(HttpPortContext),
     Http3(HttpPortContext),
     Reserved,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_client_errors() {
+        let eof = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "early eof",
+        ));
+        assert!(is_client_error(&eof));
+
+        let wrapped = eof.context("read initial byte");
+        assert!(is_client_error(&wrapped));
+
+        let reset = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "reset",
+        ));
+        assert!(is_client_error(&reset));
+
+        let proxy_err =
+            anyhow::anyhow!("the connection does not start with a PROXY protocol header");
+        assert!(is_client_error(&proxy_err));
+
+        let internal = anyhow::anyhow!("internal sqlite error: disk full");
+        assert!(!is_client_error(&internal));
+    }
 }

@@ -7,6 +7,7 @@ use super::{
     tls::{Handshake, PortTls, TlsTermination, port_acceptor, port_tls, upstream_client_config},
 };
 use crate::server::cert_list::CertList;
+use anyhow::Context as _;
 use r3v3rs3_api::{error::Error, id::ShortId, multiaddr::Multiaddr};
 use r3v3rs3_api::{
     port::PortEntry,
@@ -174,11 +175,14 @@ impl TcpStarter {
         };
         let (resolver, stop_notifier) = (self.resolver, self.stop_notifier);
         let proxy_protocol = self.proxy_protocol;
+        let peer = stream.get_ref().peer_addr().ok();
         let task = async move {
-            let client = proxy_protocol::accept(stream, proxy_protocol.as_deref()).await?;
+            let client = proxy_protocol::accept(stream, proxy_protocol.as_deref())
+                .await
+                .context("proxy protocol")?;
             start(client, upstream, resolver, tls, stop_notifier).await
         };
-        spawn_connection(self.span, task);
+        spawn_connection(self.span, peer, task);
     }
 }
 
@@ -253,6 +257,52 @@ impl TcpUpstream {
     }
 }
 
+fn spawn_tcp_pipe(
+    mut stream: BufStream<TcpStream>,
+    mut client_stream: tokio::io::DuplexStream,
+    stop_notifier: Arc<Notify>,
+) {
+    tokio::spawn(async move {
+        tokio::select! {
+            result = tokio::io::copy_bidirectional(&mut stream, &mut client_stream) => {
+                if let Err(err) = result {
+                    if super::is_client_io_error(&err) {
+                        debug!(%err, "client tcp pipe closed");
+                    } else {
+                        error!(%err, "tcp pipe error");
+                    }
+                }
+            },
+            _ = stop_notifier.notified() => {
+                debug!("stop");
+            },
+        }
+    });
+}
+
+async fn tcp_tls_handshake(
+    tls: Option<PortTls>,
+    stream: Box<dyn IoStream>,
+    remote: SocketAddr,
+) -> anyhow::Result<Option<Box<dyn IoStream>>> {
+    let Some(tls) = tls else {
+        return Ok(Some(stream));
+    };
+    debug!(%remote, "server: tls handshake");
+    let start = std::time::Instant::now();
+    match tls.accept(stream).await {
+        Ok(Handshake::Established(accepted)) => {
+            super::stats::record_tls_handshake(start.elapsed());
+            Ok(Some(accepted))
+        }
+        Ok(Handshake::ChallengeServed) => Ok(None),
+        Err(err) => {
+            super::stats::count_tls_handshake_error();
+            Err(anyhow::Error::from(err)).context("tls handshake")
+        }
+    }
+}
+
 async fn start(
     client: Client,
     upstream: TcpUpstream,
@@ -261,44 +311,20 @@ async fn start(
     stop_notifier: Arc<Notify>,
 ) -> anyhow::Result<()> {
     let Client {
-        mut stream,
+        stream,
         remote,
         peer,
     } = client;
     let local = stream.get_ref().local_addr()?;
 
-    let (mut client_stream, server_stream) = tokio::io::duplex(MAX_BUFFER_SIZE);
-    tokio::spawn(async move {
-        tokio::select! {
-            result = tokio::io::copy_bidirectional(&mut stream, &mut client_stream) => {
-                if let Err(err) = result {
-                    error!("{err}");
-                }
-            },
-            _ = stop_notifier.notified() => {
-                debug!("stop");
-            },
-        }
-    });
+    let (client_stream, server_stream) = tokio::io::duplex(MAX_BUFFER_SIZE);
+    spawn_tcp_pipe(stream, client_stream, stop_notifier);
 
     // The handshake runs before the upstream connection, so a TLS-ALPN-01 challenge and a failed
     // handshake do not reach the upstream server.
-    let mut stream: Box<dyn IoStream> = Box::new(server_stream);
-    if let Some(tls) = tls {
-        debug!(%remote, "server: tls handshake");
-        let start = std::time::Instant::now();
-        match tls.accept(stream).await {
-            Ok(Handshake::Established(accepted)) => {
-                super::stats::record_tls_handshake(start.elapsed());
-                stream = accepted;
-            }
-            Ok(Handshake::ChallengeServed) => return Ok(()),
-            Err(err) => {
-                super::stats::count_tls_handshake_error();
-                return Err(err.into());
-            }
-        }
-    }
+    let Some(mut stream) = tcp_tls_handshake(tls, Box::new(server_stream), remote).await? else {
+        return Ok(());
+    };
 
     let (target, mut out, guard) = upstream.connect(&resolver, (remote, local)).await?;
     info!(target: "r3v3rs3::access_log", remote = %remote, %peer, %local, %target);

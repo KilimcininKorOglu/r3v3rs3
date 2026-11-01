@@ -18,6 +18,7 @@ use super::{
     },
 };
 use crate::server::cert_list::CertList;
+use anyhow::Context as _;
 use arc_swap::{ArcSwap, Cache};
 use bytes::{Buf, Bytes};
 use futures::{Stream, StreamExt};
@@ -27,8 +28,8 @@ use hyper::{
     Method, Request, Response, StatusCode, Uri,
     body::{Body, Frame, Incoming},
     header::{
-        AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ETAG, HOST,
-        HeaderName, LOCATION,
+        AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ETAG, HOST, HeaderName,
+        LOCATION,
     },
     http::{
         HeaderValue,
@@ -123,11 +124,14 @@ impl HttpStarter {
         let (shared, stop_notifier) = (Cache::new(self.shared), self.stop_notifier);
         let (proxy_protocol, span) = (self.proxy_protocol, self.span.clone());
         let http2 = self.http2;
+        let peer = stream.get_ref().peer_addr().ok();
         let task = async move {
-            let client = proxy_protocol::accept(stream, proxy_protocol.as_deref()).await?;
+            let client = proxy_protocol::accept(stream, proxy_protocol.as_deref())
+                .await
+                .context("proxy protocol")?;
             start(client, tls, http2, shared, stop_notifier, span).await
         };
-        spawn_connection(self.span, task);
+        spawn_connection(self.span, peer, task);
     }
 }
 
@@ -468,7 +472,7 @@ async fn start(
     let local = stream.get_ref().local_addr()?;
     let (mut client_stream, server_stream) = tokio::io::duplex(MAX_BUFFER_SIZE);
 
-    let first_byte = stream.read_u8().await?;
+    let first_byte = stream.read_u8().await.context("read initial byte")?;
     client_stream.write_u8(first_byte).await?;
 
     spawn_pipe(stream, client_stream, stop_notifier, span.clone());
@@ -479,7 +483,10 @@ async fn start(
     }
 
     let forwarded_proto = if tls.is_some() { "https" } else { "http" };
-    let Some((stream, tls_info)) = handshake(tls, Box::new(server_stream), remote).await? else {
+    let Some((stream, tls_info)) = handshake(tls, Box::new(server_stream), remote)
+        .await
+        .context("tls handshake")?
+    else {
         return Ok(());
     };
     let TlsInfo {
@@ -544,7 +551,7 @@ where
             };
             let http = builder.serve_connection_with_upgrades(stream, service);
             if let Err(err) = http.await {
-                error!("Failed to serve the connection: {:?}", err);
+                debug!(%err, "client HTTP connection closed");
             }
         }
         .instrument(span),
@@ -564,7 +571,11 @@ fn spawn_pipe(
             tokio::select! {
                 result = tokio::io::copy_bidirectional(&mut stream, &mut client_stream) => {
                     if let Err(err) = result {
-                        error!("{err}");
+                        if super::is_client_io_error(&err) {
+                            debug!(%err, "client pipe closed");
+                        } else {
+                            error!(%err, "pipe error");
+                        }
                     }
                 },
                 _ = stop_notifier.notified() => {
@@ -1277,14 +1288,9 @@ where
             return (*proxied, response_rewriter, Some(resource_id), client.ip);
         }
     };
-    if let Some(response) = check_post_auth_early_response(
-        route,
-        &req,
-        request_host.as_deref(),
-        info,
-        &client,
-        &action,
-    ) {
+    if let Some(response) =
+        check_post_auth_early_response(route, &req, request_host.as_deref(), info, &client, &action)
+    {
         return (
             ProxiedRequest::Respond(response),
             response_rewriter,
@@ -1989,10 +1995,7 @@ fn dictionary_response(
 }
 
 fn is_purge_authorized(has_auth: bool, client: &client_ip::ClientAddr) -> bool {
-    client.peer.is_loopback()
-        || client.ip.is_loopback()
-        || client.trusted_peer
-        || has_auth
+    client.peer.is_loopback() || client.ip.is_loopback() || client.trusted_peer || has_auth
 }
 
 fn handle_purge_request<B>(
