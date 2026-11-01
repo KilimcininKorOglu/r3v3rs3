@@ -164,7 +164,7 @@ impl CacheRegistry {
             |existing| existing.config == *config && existing.share.is_some() == store.is_some(),
             || {
                 let share =
-                    store.map(|store| CacheShare::new(id, store.clone(), self.purged_at(id)));
+                    store.map(|store| CacheShare::new(id, store.clone(), self.purged_at(id), config.max_size));
                 Arc::new(HttpCache::new(config.clone(), share))
             },
         ))

@@ -92,6 +92,8 @@ pub struct CacheShare {
     writes: mpsc::Sender<(String, SharedResponse)>,
     /// The Unix time in milliseconds of the last purge. Older responses do not count.
     purged_at: AtomicU64,
+    max_size: u64,
+    current_size: AtomicU64,
 }
 
 impl fmt::Debug for CacheShare {
@@ -99,13 +101,20 @@ impl fmt::Debug for CacheShare {
         f.debug_struct("CacheShare")
             .field("proxy", &self.proxy)
             .field("purged_at", &self.purged_at)
+            .field("max_size", &self.max_size)
+            .field("current_size", &self.current_size)
             .finish_non_exhaustive()
     }
 }
 
 impl CacheShare {
     /// Starts the task that writes the queued responses. The task stops when the share is dropped.
-    pub fn new(proxy: ShortId, store: Arc<dyn SharedCacheStore>, purged_at: u64) -> Self {
+    pub fn new(
+        proxy: ShortId,
+        store: Arc<dyn SharedCacheStore>,
+        purged_at: u64,
+        max_size: u64,
+    ) -> Self {
         let (writes, queue) = mpsc::channel(WRITE_QUEUE);
         tokio::spawn(write_responses(proxy, store.clone(), queue));
         Self {
@@ -113,6 +122,8 @@ impl CacheShare {
             store,
             writes,
             purged_at: AtomicU64::new(purged_at),
+            max_size,
+            current_size: AtomicU64::new(0),
         }
     }
 
@@ -120,17 +131,26 @@ impl CacheShare {
     /// check runs before the node encodes the response.
     pub fn accepts(&self, remaining_freshness: Duration, body_len: usize) -> bool {
         let encoded_len = (body_len as u64).div_ceil(3) * 4;
+        let entry_size = encoded_len + ENTRY_OVERHEAD;
         remaining_freshness >= MIN_SHARED_FRESHNESS
-            && encoded_len + ENTRY_OVERHEAD <= self.store.max_value_size()
+            && entry_size <= self.store.max_value_size()
+            && self.current_size.load(Ordering::Relaxed).saturating_add(entry_size) <= self.max_size
     }
 
     /// Queues a response for the other nodes. A full queue drops the response.
     pub fn offer(&self, key: &str, response: SharedResponse) {
-        if response.size() > self.store.max_value_size() || response.stored_at < self.purged_at() {
+        let size = response.size();
+        if size > self.store.max_value_size() || response.stored_at < self.purged_at() {
+            return;
+        }
+        if self.current_size.load(Ordering::Relaxed).saturating_add(size) > self.max_size {
+            debug!(proxy = %self.proxy, "shared cache byte budget exceeded, so a response stays local");
             return;
         }
         if self.writes.try_send((key.to_string(), response)).is_err() {
             debug!(proxy = %self.proxy, "the shared cache queue is full, so a response stays local");
+        } else {
+            self.current_size.fetch_add(size, Ordering::Relaxed);
         }
     }
 
@@ -153,6 +173,7 @@ impl CacheShare {
 
     pub fn purge(&self, at: u64) {
         self.purged_at.fetch_max(at, Ordering::Relaxed);
+        self.current_size.store(0, Ordering::Relaxed);
     }
 
     fn purged_at(&self) -> u64 {
@@ -231,7 +252,7 @@ mod tests {
     #[tokio::test]
     async fn only_fresh_small_responses_after_the_last_purge_are_shared() {
         let store = Arc::new(MemoryCache::default());
-        let share = CacheShare::new("web".parse().unwrap(), store.clone(), 500);
+        let share = CacheShare::new("web".parse().unwrap(), store.clone(), 500, 10_000);
         assert!(share.accepts(Duration::from_secs(60), 500));
         assert!(!share.accepts(Duration::from_secs(59), 10));
         assert!(!share.accepts(Duration::from_secs(600), 600));
@@ -253,5 +274,30 @@ mod tests {
 
         share.purge(700);
         assert_eq!(share.lookup("new").await, None);
+    }
+
+    #[tokio::test]
+    async fn shared_cache_enforces_byte_budget() {
+        let store = Arc::new(MemoryCache::default());
+        let share = CacheShare::new("web".parse().unwrap(), store.clone(), 0, 600);
+        // An entry of ~300 bytes fits within 600
+        let r1 = response(1000, b"first");
+        share.offer("first", r1);
+        let mut shared = None;
+        for _ in 0..50 {
+            shared = share.lookup("first").await;
+            if shared.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(shared.is_some());
+
+        // A second entry would push total above 600 bytes, so it is rejected
+        let r2 = response(1000, b"second-larger-body-that-exceeds-remaining-budget");
+        assert!(!share.accepts(Duration::from_secs(120), 200));
+        share.offer("second", r2);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(share.lookup("second").await, None);
     }
 }
