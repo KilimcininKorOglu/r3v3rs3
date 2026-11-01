@@ -14,7 +14,10 @@ use hyper::{
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use aws_lc_rs::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
 use hmac::{Hmac, KeyInit, Mac};
+use r3v3rs3_api::app::is_loopback_host;
 use r3v3rs3_api::policy::{OidcAuth, default_oidc_scopes, is_email_allowed};
+use r3v3rs3_api::subject_name::SubjectName;
+use r3v3rs3_api::vhost::VirtualHost;
 use rand::distr::{Alphanumeric, SampleString};
 use sha2::Sha256;
 use std::sync::Arc;
@@ -449,11 +452,42 @@ fn resolve_userinfo_endpoint(config: &OidcAuth) -> String {
     }
 }
 
+fn resolve_callback_host(ctx: &AuthContext<'_>) -> String {
+    let raw_host = ctx.host.unwrap_or("localhost");
+    if is_host_allowed(raw_host, ctx.vhosts) {
+        return raw_host.to_string();
+    }
+    if let Some(vhost) = ctx.vhosts.first() {
+        return match vhost {
+            VirtualHost::SubjectName(SubjectName::WildcardDnsName(name)) => name.to_string(),
+            _ => vhost.to_string(),
+        };
+    }
+    "localhost".to_string()
+}
+
+fn is_host_allowed(host: &str, vhosts: &[VirtualHost]) -> bool {
+    let host_only = host.split(':').next().unwrap_or(host);
+    if vhosts.is_empty() {
+        return is_loopback_host(host_only);
+    }
+    if vhosts.iter().any(|v| v.test(host_only) || v.test(host)) {
+        return true;
+    }
+    let vhost_has_loopback = vhosts.iter().any(|v| match v {
+        VirtualHost::SubjectName(SubjectName::DnsName(n)) => is_loopback_host(n),
+        VirtualHost::SubjectName(SubjectName::IPAddress(ip)) => ip.is_loopback(),
+        _ => false,
+    });
+    vhost_has_loopback && is_loopback_host(host_only)
+}
+
 fn callback_uri(ctx: &AuthContext<'_>) -> String {
+    let host = resolve_callback_host(ctx);
     format!(
         "{}://{}{}/{}/{}/oidc/callback",
         ctx.proto,
-        ctx.host.unwrap_or("localhost"),
+        host,
         ctx.base_path,
         ENDPOINT_PREFIX[0],
         ENDPOINT_PREFIX[1]
@@ -853,5 +887,71 @@ mod tests {
         let text = String::from_utf8_lossy(&bytes);
         assert!(!text.contains("<script>"));
         assert!(text.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    }
+
+    #[test]
+    fn callback_uri_rejects_untrusted_host_header() {
+        use std::str::FromStr;
+        let vhosts = vec![VirtualHost::from_str("app.example.com").unwrap()];
+
+        // 1. Legitimate request matching configured vhost
+        let valid_ctx = AuthContext {
+            client: "127.0.0.1".parse().unwrap(),
+            host: Some("app.example.com"),
+            proto: "https",
+            base_path: "",
+            path_segments: &[],
+            preferences: Default::default(),
+            vhosts: &vhosts,
+        };
+        assert_eq!(
+            callback_uri(&valid_ctx),
+            "https://app.example.com/.r3v3rs3/auth/oidc/callback"
+        );
+
+        // 2. Poisoned request with untrusted Host header falls back to configured vhost
+        let poisoned_ctx = AuthContext {
+            client: "127.0.0.1".parse().unwrap(),
+            host: Some("attacker.com"),
+            proto: "https",
+            base_path: "",
+            path_segments: &[],
+            preferences: Default::default(),
+            vhosts: &vhosts,
+        };
+        assert_eq!(
+            callback_uri(&poisoned_ctx),
+            "https://app.example.com/.r3v3rs3/auth/oidc/callback"
+        );
+
+        // 3. No vhosts configured: accepts loopback host
+        let loopback_ctx = AuthContext {
+            client: "127.0.0.1".parse().unwrap(),
+            host: Some("127.0.0.1:8080"),
+            proto: "http",
+            base_path: "/sub",
+            path_segments: &[],
+            preferences: Default::default(),
+            vhosts: &[],
+        };
+        assert_eq!(
+            callback_uri(&loopback_ctx),
+            "http://127.0.0.1:8080/sub/.r3v3rs3/auth/oidc/callback"
+        );
+
+        // 4. No vhosts configured: rejects untrusted host and falls back to localhost
+        let no_vhosts_poisoned = AuthContext {
+            client: "127.0.0.1".parse().unwrap(),
+            host: Some("evil.com"),
+            proto: "https",
+            base_path: "",
+            path_segments: &[],
+            preferences: Default::default(),
+            vhosts: &[],
+        };
+        assert_eq!(
+            callback_uri(&no_vhosts_poisoned),
+            "https://localhost/.r3v3rs3/auth/oidc/callback"
+        );
     }
 }

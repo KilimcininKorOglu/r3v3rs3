@@ -1267,6 +1267,7 @@ where
         base_path: &route.base_path,
         path_segments: &res.path_segments,
         preferences,
+        vhosts: &route.filter.vhosts,
     };
     let req = match authenticate_request(route, req, &auth_ctx, info, &client, &action).await {
         Ok(req) => req,

@@ -3,7 +3,7 @@ use super::page::PagePreferences;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{HeaderMap, Request, Response, body::Body};
-use r3v3rs3_api::{id::ShortId, policy::AuthPolicy};
+use r3v3rs3_api::{id::ShortId, policy::AuthPolicy, vhost::VirtualHost};
 use std::{error::Error, fmt, net::IpAddr, ops::ControlFlow, sync::Arc};
 use tokio_rustls::rustls::ClientConfig;
 
@@ -47,6 +47,8 @@ pub struct AuthContext<'a> {
     pub path_segments: &'a [String],
     /// Language and theme of the pages that the authenticator renders.
     pub preferences: PagePreferences,
+    /// Configured virtual hosts of the matched route.
+    pub vhosts: &'a [VirtualHost],
 }
 
 /// Why a request did not pass authentication.

@@ -305,6 +305,7 @@ mod tests {
             base_path: "",
             path_segments: &[],
             preferences: Default::default(),
+            vhosts: &[],
         };
         let auth_req = auth.auth_request(&req, &ctx).unwrap();
         let headers = auth_req.headers();
