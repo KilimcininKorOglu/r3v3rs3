@@ -339,6 +339,8 @@ fn worker_command(
         command.pre_exec(move || {
             if libc::dup2(ipc_fd, 3) == -1 {
                 Err(std::io::Error::last_os_error())
+            } else if libc::fcntl(3, libc::F_SETFD, 0) == -1 {
+                Err(std::io::Error::last_os_error())
             } else {
                 Ok(())
             }
