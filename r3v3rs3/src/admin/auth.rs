@@ -724,24 +724,36 @@ pub async fn verify(
     }
 }
 
+fn apply_scope_to_caller(mut caller: Caller, scope: &str) -> Caller {
+    if !scope.split_whitespace().any(|s| s == "edit") {
+        caller.role = Role::Viewer;
+    }
+    caller
+}
+
 async fn bearer_caller(state: &AppState, token: &str) -> Result<Caller, Error> {
-    let (username, created_at) = {
+    let (username, created_at, scope) = {
         let data = state.data.lock().await;
         if !data.config.mcp.enabled {
             return Err(Error::Unauthorized);
         }
         match data.mcp.verify(token) {
-            Some(grant) => (grant.username().to_string(), grant.created_at()),
+            Some(grant) => (
+                grant.username().to_string(),
+                grant.created_at(),
+                grant.scope.clone(),
+            ),
             None => return Err(Error::Unauthorized),
         }
     };
     let mut record = crate::sessions::SessionRecord::new(&username);
     record.started_at = created_at;
-    state
+    let caller = state
         .accounts
         .borrow()
         .caller(&record)
-        .ok_or(Error::Unauthorized)
+        .ok_or(Error::Unauthorized)?;
+    Ok(apply_scope_to_caller(caller, &scope))
 }
 
 /// The account of an active admin session. The account must exist, and its last change must not
@@ -950,5 +962,23 @@ mod tests {
 
         let expired = now + Duration::from_secs(125);
         assert!(!challenges.consume("ch_1028", expired));
+    }
+
+    #[test]
+    fn bearer_scope_downgrades_to_viewer_when_read_only() {
+        let caller = Caller {
+            username: "admin".to_string(),
+            role: Role::Admin,
+            proxies: None,
+            client: None,
+        };
+        let read_caller = apply_scope_to_caller(caller.clone(), "read");
+        assert_eq!(read_caller.role, Role::Viewer);
+
+        let edit_caller = apply_scope_to_caller(caller.clone(), "read edit");
+        assert_eq!(edit_caller.role, Role::Admin);
+
+        let edit_only_caller = apply_scope_to_caller(caller, "edit");
+        assert_eq!(edit_only_caller.role, Role::Admin);
     }
 }
