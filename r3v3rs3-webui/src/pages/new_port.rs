@@ -3,7 +3,7 @@ use crate::{
     pages::Route,
 };
 use gloo_net::http::Request;
-use r3v3rs3_api::port::Port;
+use r3v3rs3_api::{i18n::Locale, port::Port};
 use std::collections::HashMap;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -42,8 +42,13 @@ pub fn new_port() -> Html {
         if let Ok(entry) = (*entry_cloned).clone() {
             is_loading_cloned.set(true);
             wasm_bindgen_futures::spawn_local(async move {
-                if create_port(&entry).await.is_ok() {
-                    navigator.push(&Route::Ports);
+                match create_port(locale, &entry).await {
+                    Ok(()) => {
+                        navigator.push(&Route::Ports);
+                    }
+                    Err(err) => {
+                        crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await;
+                    }
                 }
                 is_loading_cloned.set(false);
             });
@@ -68,11 +73,10 @@ pub fn new_port() -> Html {
     }
 }
 
-async fn create_port(entry: &Port) -> Result<(), gloo_net::Error> {
-    Request::post(&format!("{API_ENDPOINT}/ports"))
-        .json(entry)?
-        .send()
-        .await?
-        .json()
-        .await
+async fn create_port(locale: Locale, entry: &Port) -> Result<(), String> {
+    let req = Request::post(&format!("{API_ENDPOINT}/ports"))
+        .json(entry)
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, req).await?;
+    Ok(())
 }

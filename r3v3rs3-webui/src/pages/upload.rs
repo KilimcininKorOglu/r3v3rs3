@@ -68,11 +68,13 @@ pub fn upload() -> Html {
         if let Some(chain) = chain_cloned {
             is_loading_cloned.set(true);
             wasm_bindgen_futures::spawn_local(async move {
-                if upload_cert(&chain, key_cloned.as_ref(), query.kind)
-                    .await
-                    .is_ok()
-                {
-                    navigator.push(&certs_route(query.kind));
+                match upload_cert(locale, &chain, key_cloned.as_ref(), query.kind).await {
+                    Ok(()) => {
+                        navigator.push(&certs_route(query.kind));
+                    }
+                    Err(err) => {
+                        crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await;
+                    }
                 }
                 is_loading_cloned.set(false);
             });
@@ -104,6 +106,7 @@ pub fn upload() -> Html {
 }
 
 async fn upload_cert(
+    locale: r3v3rs3_api::i18n::Locale,
     chain: &web_sys::File,
     key: Option<&web_sys::File>,
     kind: CertKind,
@@ -119,13 +122,12 @@ async fn upload_cert(
             .map_err(|err| format!("the key could not be attached: {err:?}"))?;
     }
 
-    Request::post(&format!("{API_ENDPOINT}/certs/upload"))
+    let req = Request::post(&format!("{API_ENDPOINT}/certs/upload"))
         .query([("kind", kind.to_string())])
         .body(form_data)
-        .map_err(|err| err.to_string())?
-        .send()
-        .await
         .map_err(|err| err.to_string())?;
+
+    crate::pages::settings::send_request(locale, req).await?;
 
     Ok(())
 }

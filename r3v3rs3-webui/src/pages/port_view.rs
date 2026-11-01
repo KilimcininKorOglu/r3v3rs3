@@ -10,6 +10,7 @@ use crate::{
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::{
+    i18n::Locale,
     id::ShortId,
     port::{Port, PortEntry},
 };
@@ -49,7 +50,7 @@ pub fn port_view(props: &Props) -> Html {
         });
 
     let is_loading = use_state(|| false);
-    let onsubmit = submit_callback(props.id, entry.clone(), is_loading, navigator);
+    let onsubmit = submit_callback(locale, props.id, entry.clone(), is_loading, navigator);
 
     html! {
         <>
@@ -94,6 +95,7 @@ fn use_loaded_port(id: ShortId, ports: &PortStore) -> UseStateHandle<Option<Port
 
 /// Saves the port and returns to the port list. A submit during a save does nothing.
 fn submit_callback(
+    locale: Locale,
     id: ShortId,
     entry: UseStateHandle<Result<Port, HashMap<String, String>>>,
     is_loading: UseStateHandle<bool>,
@@ -111,8 +113,13 @@ fn submit_callback(
         let is_loading = is_loading.clone();
         is_loading.set(true);
         wasm_bindgen_futures::spawn_local(async move {
-            if update_port(id, &entry).await.is_ok() {
-                navigator.push(&Route::Ports);
+            match update_port(locale, id, &entry).await {
+                Ok(()) => {
+                    navigator.push(&Route::Ports);
+                }
+                Err(err) => {
+                    crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await;
+                }
             }
             is_loading.set(false);
         });
@@ -127,11 +134,10 @@ async fn get_port(id: ShortId) -> Result<PortEntry, gloo_net::Error> {
         .await
 }
 
-async fn update_port(id: ShortId, entry: &Port) -> Result<(), gloo_net::Error> {
-    Request::put(&format!("{API_ENDPOINT}/ports/{id}"))
-        .json(entry)?
-        .send()
-        .await?
-        .json()
-        .await
+async fn update_port(locale: Locale, id: ShortId, entry: &Port) -> Result<(), String> {
+    let req = Request::put(&format!("{API_ENDPOINT}/ports/{id}"))
+        .json(entry)
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, req).await?;
+    Ok(())
 }

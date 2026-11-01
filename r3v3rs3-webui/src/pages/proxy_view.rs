@@ -8,6 +8,7 @@ use crate::{
 };
 use gloo_net::http::Request;
 use r3v3rs3_api::{
+    i18n::Locale,
     id::ShortId,
     proxy::{Proxy, ProxyEntry},
 };
@@ -48,7 +49,7 @@ pub fn proxy_view(props: &Props) -> Html {
         });
 
     let is_loading = use_state(|| false);
-    let onsubmit = submit_callback(props.id, entry.clone(), is_loading, navigator);
+    let onsubmit = submit_callback(locale, props.id, entry.clone(), is_loading, navigator);
 
     html! {
         <>
@@ -101,6 +102,7 @@ fn use_loaded_proxy(id: ShortId, proxies: &ProxyStore) -> UseStateHandle<Option<
 
 /// Saves the proxy and returns to the proxy list. A submit during a save does nothing.
 fn submit_callback(
+    locale: Locale,
     id: ShortId,
     entry: UseStateHandle<Result<Proxy, HashMap<String, String>>>,
     is_loading: UseStateHandle<bool>,
@@ -118,8 +120,13 @@ fn submit_callback(
         let is_loading = is_loading.clone();
         is_loading.set(true);
         wasm_bindgen_futures::spawn_local(async move {
-            if update_site(id, &entry).await.is_ok() {
-                navigator.push(&Route::Proxies);
+            match update_site(locale, id, &entry).await {
+                Ok(()) => {
+                    navigator.push(&Route::Proxies);
+                }
+                Err(err) => {
+                    crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await;
+                }
             }
             is_loading.set(false);
         });
@@ -134,11 +141,10 @@ async fn get_site(id: ShortId) -> Result<ProxyEntry, gloo_net::Error> {
         .await
 }
 
-async fn update_site(id: ShortId, entry: &Proxy) -> Result<(), gloo_net::Error> {
-    Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
-        .json(entry)?
-        .send()
-        .await?
-        .json()
-        .await
+async fn update_site(locale: Locale, id: ShortId, entry: &Proxy) -> Result<(), String> {
+    let req = Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
+        .json(entry)
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, req).await?;
+    Ok(())
 }

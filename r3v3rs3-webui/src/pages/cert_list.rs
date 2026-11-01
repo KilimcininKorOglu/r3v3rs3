@@ -310,7 +310,9 @@ fn delete_cert_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
         e.prevent_default();
         let question = locale.tf("common.confirm_delete", &[("id", &id.to_string())]);
         dialog::confirm_then(locale, question, async move {
-            let _ = delete_server_cert(id).await;
+            if let Err(err) = delete_server_cert(locale, id).await {
+                dialog::message(locale, &err, dialog::Icon::Error).await;
+            }
         });
     })
 }
@@ -576,7 +578,9 @@ fn acme_row(
         e.prevent_default();
         let question = locale.tf("common.confirm_delete", &[("id", &id.to_string())]);
         dialog::confirm_then(locale, question, async move {
-            let _ = delete_acme(id).await;
+            if let Err(err) = delete_acme(locale, id).await {
+                dialog::message(locale, &err, dialog::Icon::Error).await;
+            }
         });
     });
 
@@ -732,17 +736,19 @@ async fn get_acme_list() -> Result<Vec<AcmeInfo>, gloo_net::Error> {
         .await
 }
 
-async fn delete_server_cert(id: ShortId) -> Result<(), gloo_net::Error> {
-    Request::delete(&format!("{API_ENDPOINT}/certs/{id}"))
-        .send()
-        .await?;
+async fn delete_server_cert(locale: Locale, id: ShortId) -> Result<(), String> {
+    let req = Request::delete(&format!("{API_ENDPOINT}/certs/{id}"))
+        .build()
+        .map_err(|err| err.to_string())?;
+    send_request(locale, req).await?;
     Ok(())
 }
 
-async fn delete_acme(id: ShortId) -> Result<(), gloo_net::Error> {
-    Request::delete(&format!("{API_ENDPOINT}/acme/{id}"))
-        .send()
-        .await?;
+async fn delete_acme(locale: Locale, id: ShortId) -> Result<(), String> {
+    let req = Request::delete(&format!("{API_ENDPOINT}/acme/{id}"))
+        .build()
+        .map_err(|err| err.to_string())?;
+    send_request(locale, req).await?;
     Ok(())
 }
 

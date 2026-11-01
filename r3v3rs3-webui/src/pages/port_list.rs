@@ -123,10 +123,16 @@ fn bulk_delete_callback(
         );
         let (selected, dispatcher) = (selected.clone(), dispatcher.clone());
         dialog::confirm_then(locale, question, async move {
+            let mut failed = Vec::new();
             for id_str in selected_ids {
                 if let Ok(id) = id_str.parse::<ShortId>() {
-                    let _ = delete_port(id).await;
+                    if let Err(err) = delete_port(locale, id).await {
+                        failed.push(err);
+                    }
                 }
+            }
+            if let Some(err) = failed.first() {
+                dialog::message(locale, err, dialog::Icon::Error).await;
             }
             selected.set(HashSet::new());
             load_ports(dispatcher);
@@ -240,7 +246,9 @@ fn port_row(
         e.prevent_default();
         let question = locale.tf("ports.confirm_reset", &[("id", &id.to_string())]);
         dialog::confirm_then(locale, question, async move {
-            let _ = reset_port(id).await;
+            if let Err(err) = reset_port(locale, id).await {
+                dialog::message(locale, &err, dialog::Icon::Error).await;
+            }
         });
     });
 
@@ -251,15 +259,23 @@ fn port_row(
             let question = locale.tf("common.confirm_delete", &[("id", &id.to_string())]);
             let dispatcher = dispatcher.clone();
             dialog::confirm_then(locale, question, async move {
-                let _ = delete_port(id).await;
-                load_ports(dispatcher);
+                match delete_port(locale, id).await {
+                    Ok(()) => {
+                        load_ports(dispatcher);
+                    }
+                    Err(err) => {
+                        dialog::message(locale, &err, dialog::Icon::Error).await;
+                    }
+                }
             });
         })
     };
 
     let onchange = Callback::from(move |_: Event| {
         wasm_bindgen_futures::spawn_local(async move {
-            let _ = toggle_port(id).await;
+            if let Err(err) = toggle_port(locale, id).await {
+                dialog::message(locale, &err, dialog::Icon::Error).await;
+            }
         });
     });
 
@@ -339,29 +355,34 @@ async fn get_status(id: ShortId) -> Result<PortStatus, gloo_net::Error> {
         .await
 }
 
-async fn delete_port(id: ShortId) -> Result<(), gloo_net::Error> {
-    Request::delete(&format!("{API_ENDPOINT}/ports/{id}"))
-        .send()
-        .await?;
+async fn delete_port(locale: Locale, id: ShortId) -> Result<(), String> {
+    let req = Request::delete(&format!("{API_ENDPOINT}/ports/{id}"))
+        .build()
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, req).await?;
     Ok(())
 }
 
-async fn reset_port(id: ShortId) -> Result<(), gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/ports/{id}/reset"))
-        .send()
-        .await?;
+async fn reset_port(locale: Locale, id: ShortId) -> Result<(), String> {
+    let req = Request::get(&format!("{API_ENDPOINT}/ports/{id}/reset"))
+        .build()
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, req).await?;
     Ok(())
 }
-async fn toggle_port(id: ShortId) -> Result<(), gloo_net::Error> {
+
+async fn toggle_port(locale: Locale, id: ShortId) -> Result<(), String> {
     let mut entry: PortEntry = Request::get(&format!("{API_ENDPOINT}/ports/{id}"))
         .send()
-        .await?
+        .await
+        .map_err(|err| err.to_string())?
         .json()
-        .await?;
+        .await
+        .map_err(|err| err.to_string())?;
     entry.port.active = !entry.port.active;
-    Request::put(&format!("{API_ENDPOINT}/ports/{id}"))
-        .json(&entry)?
-        .send()
-        .await?;
+    let req = Request::put(&format!("{API_ENDPOINT}/ports/{id}"))
+        .json(&entry)
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, req).await?;
     Ok(())
 }

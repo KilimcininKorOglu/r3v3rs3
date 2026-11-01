@@ -214,10 +214,16 @@ fn bulk_delete_callback(
         );
         let (selected, proxies_dispatcher) = (selected.clone(), proxies_dispatcher.clone());
         dialog::confirm_then(locale, question, async move {
+            let mut failed = Vec::new();
             for id_str in selected_ids {
                 if let Ok(id) = id_str.parse::<ShortId>() {
-                    let _ = delete_site(id).await;
+                    if let Err(err) = delete_site(locale, id).await {
+                        failed.push(err);
+                    }
                 }
+            }
+            if let Some(err) = failed.first() {
+                dialog::message(locale, err, Icon::Error).await;
             }
             selected.set(HashSet::new());
             load_proxies(proxies_dispatcher);
@@ -398,7 +404,7 @@ fn proxy_row(entry: &ProxyEntry, ctx: &ProxyRowContext) -> Row {
     let log_onclick = route_onclick(ctx.navigator, Route::ProxyLogView { id });
     let config_onclick = route_onclick(ctx.navigator, Route::ProxyView { id });
     let cache_enabled = matches!(&entry.proxy.kind, ProxyKind::Http(http) if http.cache.enabled);
-    let onchange = toggle_onchange(id);
+    let onchange = toggle_onchange(ctx.locale, id);
 
     let title = match entry.proxy.name.is_empty() {
         true => id.to_string(),
@@ -471,8 +477,14 @@ fn delete_onclick(
         let question = locale.tf("common.confirm_delete", &[("id", &id.to_string())]);
         let proxies_dispatcher = proxies_dispatcher.clone();
         dialog::confirm_then(locale, question, async move {
-            let _ = delete_site(id).await;
-            load_proxies(proxies_dispatcher);
+            match delete_site(locale, id).await {
+                Ok(()) => {
+                    load_proxies(proxies_dispatcher);
+                }
+                Err(err) => {
+                    dialog::message(locale, &err, Icon::Error).await;
+                }
+            }
         });
     })
 }
@@ -494,10 +506,12 @@ fn purge_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
     })
 }
 
-fn toggle_onchange(id: ShortId) -> Callback<Event> {
+fn toggle_onchange(locale: Locale, id: ShortId) -> Callback<Event> {
     Callback::from(move |_: Event| {
         wasm_bindgen_futures::spawn_local(async move {
-            let _ = toggle_proxy(id).await;
+            if let Err(err) = toggle_proxy(locale, id).await {
+                dialog::message(locale, &err, Icon::Error).await;
+            }
         });
     })
 }
@@ -735,24 +749,27 @@ async fn purge_cache(id: ShortId) -> Result<(), gloo_net::Error> {
     }
 }
 
-async fn delete_site(id: ShortId) -> Result<(), gloo_net::Error> {
-    Request::delete(&format!("{API_ENDPOINT}/proxies/{id}"))
-        .send()
-        .await?;
+async fn delete_site(locale: Locale, id: ShortId) -> Result<(), String> {
+    let req = Request::delete(&format!("{API_ENDPOINT}/proxies/{id}"))
+        .build()
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, req).await?;
     Ok(())
 }
 
-async fn toggle_proxy(id: ShortId) -> Result<(), gloo_net::Error> {
+async fn toggle_proxy(locale: Locale, id: ShortId) -> Result<(), String> {
     let mut entry: ProxyEntry = Request::get(&format!("{API_ENDPOINT}/proxies/{id}"))
         .send()
-        .await?
+        .await
+        .map_err(|err| err.to_string())?
         .json()
-        .await?;
+        .await
+        .map_err(|err| err.to_string())?;
     entry.proxy.active = !entry.proxy.active;
-    Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
-        .json(&entry)?
-        .send()
-        .await?;
+    let req = Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
+        .json(&entry)
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, req).await?;
     Ok(())
 }
 
