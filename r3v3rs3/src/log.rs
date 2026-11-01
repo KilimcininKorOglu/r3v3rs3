@@ -135,6 +135,20 @@ impl DatabaseLayer {
         .execute(&pool)
         .await?;
 
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS system_log_resource_timestamp_idx
+            ON system_log (resource_id, timestamp);",
+        )
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS system_log_timestamp_idx
+            ON system_log (timestamp);",
+        )
+        .execute(&pool)
+        .await?;
+
         Ok(Self {
             pool,
             handle: Handle::current(),
@@ -288,6 +302,28 @@ mod tests {
             }
             assert!(layer.span_map.is_empty());
         });
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn system_log_indices_exist() {
+        use r3v3rs3_api::id::ShortId;
+        let temp_dir = std::env::temp_dir().join(format!("r3-log-idx-{}", ShortId::new()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db_path = temp_dir.join("test.db");
+        let layer = super::DatabaseLayer::new(&db_path, super::LevelFilter::INFO)
+            .await
+            .unwrap();
+
+        let indices: Vec<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'system_log';",
+        )
+        .fetch_all(&layer.pool)
+        .await
+        .unwrap();
+        let names: Vec<String> = indices.into_iter().map(|(n,)| n).collect();
+        assert!(names.contains(&"system_log_resource_timestamp_idx".to_string()));
+        assert!(names.contains(&"system_log_timestamp_idx".to_string()));
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
