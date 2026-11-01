@@ -70,7 +70,10 @@ where
     OffsetDateTime::from_unix_timestamp(timestamp).map_err(serde::de::Error::custom)
 }
 
-#[derive(Deserialize, IntoParams)]
+pub const DEFAULT_LOG_QUERY_LIMIT: u32 = 100;
+pub const MAX_LOG_QUERY_LIMIT: u32 = 500;
+
+#[derive(Clone, Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct LogQuery {
     #[serde(default, deserialize_with = "deserialize_time")]
@@ -79,6 +82,7 @@ pub struct LogQuery {
     #[serde(default, deserialize_with = "deserialize_time")]
     #[param(value_type = Option<u64>)]
     pub until: Option<OffsetDateTime>,
+    /// The most entries in the response: 100 by default, at most 500.
     pub limit: Option<u32>,
 }
 

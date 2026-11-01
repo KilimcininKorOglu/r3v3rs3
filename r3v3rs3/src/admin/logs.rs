@@ -18,7 +18,8 @@ use time::OffsetDateTime;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_INTERVAL: Duration = Duration::from_secs(1);
-const REQUEST_DEFAULT_LIMIT: u32 = 100;
+const REQUEST_DEFAULT_LIMIT: u32 = r3v3rs3_api::log::DEFAULT_LOG_QUERY_LIMIT;
+const REQUEST_MAX_LIMIT: u32 = r3v3rs3_api::log::MAX_LOG_QUERY_LIMIT;
 
 /// Returns the log rows of a port, a proxy or a certificate, oldest first. Without `until`, the
 /// request waits up to 10 seconds for a new row.
@@ -89,13 +90,16 @@ impl LogReader {
 
         let since_str = format_since(since);
         let until_str = format_until(until);
+        let effective_limit = limit
+            .unwrap_or(REQUEST_DEFAULT_LIMIT)
+            .min(REQUEST_MAX_LIMIT);
 
         loop {
             let rows = sqlx::query("select * from system_log WHERE resource_id = ? AND (timestamp BETWEEN ? AND ?) ORDER BY timestamp DESC LIMIT ?")
                 .bind(resource_id)
                 .bind(&since_str)
                 .bind(&until_str)
-                .bind(limit.unwrap_or(REQUEST_DEFAULT_LIMIT))
+                .bind(effective_limit)
                 .fetch_all(&self.pool);
             tokio::select! {
                 _ = timeout.tick() => {
@@ -224,5 +228,53 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].message, "msg1");
         assert_eq!(rows[1].message, "msg2");
+    }
+
+    #[tokio::test]
+    async fn fetch_system_log_caps_unbounded_limit() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE system_log (
+                timestamp INTEGER NOT NULL,
+                level TINYINT NOT NULL,
+                resource_id STRING,
+                message STRING,
+                fields STRING
+            );",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for i in 0..600 {
+            let dt = Date::from_calendar_date(2023, Month::November, 14)
+                .unwrap()
+                .with_time(Time::from_hms(10, 0, 0).unwrap())
+                .assume_utc()
+                + time::Duration::seconds(i);
+            sqlx::query("INSERT INTO system_log VALUES (?, 3, 'res1', 'msg', '{}')")
+                .bind(dt)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let reader = LogReader { pool };
+        let until = Date::from_calendar_date(2023, Month::November, 14)
+            .unwrap()
+            .with_time(Time::from_hms(11, 0, 0).unwrap())
+            .assume_utc();
+
+        let rows = reader
+            .fetch_system_log("res1", None, Some(until), Some(10_000))
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), REQUEST_MAX_LIMIT as usize);
+
+        let rows_default = reader
+            .fetch_system_log("res1", None, Some(until), None)
+            .await
+            .unwrap();
+        assert_eq!(rows_default.len(), REQUEST_DEFAULT_LIMIT as usize);
     }
 }
