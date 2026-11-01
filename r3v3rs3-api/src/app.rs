@@ -340,9 +340,36 @@ impl McpClientConfig {
     /// Whether the redirect URI belongs to this client. A loopback redirect may use any port,
     /// per RFC 8252.
     pub fn allows_redirect(&self, redirect_uri: &str) -> bool {
+        if !is_valid_redirect_uri(redirect_uri) {
+            return false;
+        }
         self.redirect_uris.iter().any(|registered| {
+            if !is_valid_redirect_uri(registered) {
+                return false;
+            }
             registered == redirect_uri || is_loopback_redirect(registered, redirect_uri)
         })
+    }
+}
+
+/// Returns true if the host string corresponds to a loopback address.
+pub fn is_loopback_host(host: &str) -> bool {
+    let trimmed = host.trim_start_matches('[').trim_end_matches(']');
+    matches!(trimmed, "127.0.0.1" | "::1" | "localhost")
+}
+
+/// Checks whether a URI string is a valid OAuth 2.1 redirect URI (https or loopback http, no fragment).
+pub fn is_valid_redirect_uri(uri_str: &str) -> bool {
+    let Ok(url) = Url::parse(uri_str) else {
+        return false;
+    };
+    if url.fragment().is_some() {
+        return false;
+    }
+    match url.scheme() {
+        "https" => true,
+        "http" => url.host_str().is_some_and(is_loopback_host),
+        _ => false,
     }
 }
 
@@ -372,13 +399,14 @@ fn is_loopback_redirect(registered: &str, redirect_uri: &str) -> bool {
     let (Ok(registered), Ok(uri)) = (Url::parse(registered), Url::parse(redirect_uri)) else {
         return false;
     };
-    let loopback = |host: &str| matches!(host, "127.0.0.1" | "[::1]" | "localhost");
     registered.scheme() == "http"
         && uri.scheme() == "http"
-        && registered.host_str().is_some_and(loopback)
-        && uri.host_str().is_some_and(loopback)
+        && registered.host_str().is_some_and(is_loopback_host)
+        && uri.host_str().is_some_and(is_loopback_host)
         && registered.path() == uri.path()
         && registered.query() == uri.query()
+        && registered.fragment().is_none()
+        && uri.fragment().is_none()
 }
 
 /// How the proxy ports are served.
@@ -728,5 +756,25 @@ mod tests {
         let value = serde_json::to_value(LogConfig::default()).unwrap();
         assert_eq!(value["database_log_retention"], "3months");
         assert_eq!(value["audit_log_retention"], "1year");
+    }
+
+    #[test]
+    fn oauth_redirect_uri_validation() {
+        let client = McpClientConfig {
+            id: "test".into(),
+            name: "test".into(),
+            redirect_uris: vec![
+                "https://example.com/oauth/callback".into(),
+                "http://127.0.0.1:8080/callback".into(),
+                "http://localhost:3000/callback".into(),
+            ],
+        };
+        assert!(client.allows_redirect("https://example.com/oauth/callback"));
+        assert!(client.allows_redirect("http://127.0.0.1:8080/callback"));
+        assert!(client.allows_redirect("http://127.0.0.1:9090/callback"));
+        assert!(client.allows_redirect("http://localhost:4000/callback"));
+        assert!(!client.allows_redirect("http://attacker.com/callback"));
+        assert!(!client.allows_redirect("https://example.com/oauth/callback#frag"));
+        assert!(!client.allows_redirect("https://attacker.com/callback"));
     }
 }

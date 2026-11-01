@@ -22,7 +22,7 @@ use axum_extra::extract::CookieJar;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use r3v3rs3_api::app::{McpClientConfig, McpConfig, McpSession};
+use r3v3rs3_api::app::{is_loopback_host, McpClientConfig, McpConfig, McpSession};
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use rand::distr::{Alphanumeric, SampleString};
@@ -1432,7 +1432,7 @@ fn validate_registration(
     })
 }
 
-/// Every redirect URI of a registration is an absolute http or https URI.
+/// Every redirect URI of a registration must be https or loopback http without fragment.
 fn validate_redirect_uris(uris: &[String]) -> Result<Vec<String>, (&'static str, String)> {
     if uris.is_empty() {
         return Err((
@@ -1441,17 +1441,36 @@ fn validate_redirect_uris(uris: &[String]) -> Result<Vec<String>, (&'static str,
         ));
     }
     for uri in uris {
-        let parsed = url::Url::parse(uri)
-            .ok()
-            .filter(|url| matches!(url.scheme(), "https" | "http"));
-        if parsed.is_none() {
-            return Err((
-                "invalid_redirect_uri",
-                format!("{uri} is not an absolute http or https URI"),
-            ));
-        }
+        validate_one_redirect_uri(uri)?;
     }
     Ok(uris.to_vec())
+}
+
+fn validate_one_redirect_uri(uri: &str) -> Result<(), (&'static str, String)> {
+    let Ok(parsed) = url::Url::parse(uri) else {
+        return Err((
+            "invalid_redirect_uri",
+            format!("{uri} is not an absolute URI"),
+        ));
+    };
+    if parsed.fragment().is_some() {
+        return Err((
+            "invalid_redirect_uri",
+            format!("{uri} must not contain a URI fragment"),
+        ));
+    }
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" if parsed.host_str().is_some_and(is_loopback_host) => Ok(()),
+        "http" => Err((
+            "invalid_redirect_uri",
+            format!("{uri} uses plaintext http on a non-loopback address"),
+        )),
+        _ => Err((
+            "invalid_redirect_uri",
+            format!("{uri} must use https, or http on loopback"),
+        )),
+    }
 }
 
 /// The grant types, the response types and the auth method of a registration stay inside
@@ -1767,6 +1786,33 @@ mod tests {
         let client = validate_registration(&body).unwrap();
         assert_eq!(client.name, "Claude Code");
         assert_eq!(client.redirect_uris.len(), 1);
+    }
+
+    #[test]
+    fn a_registration_rejects_non_loopback_http_and_fragments() {
+        let remote_http = RegistrationBody {
+            client_name: None,
+            redirect_uris: vec!["http://example.com/callback".to_string()],
+            grant_types: None,
+            response_types: None,
+            token_endpoint_auth_method: None,
+        };
+        assert_eq!(
+            validate_registration(&remote_http).unwrap_err().0,
+            "invalid_redirect_uri"
+        );
+
+        let fragment = RegistrationBody {
+            client_name: None,
+            redirect_uris: vec!["https://example.com/callback#fragment".to_string()],
+            grant_types: None,
+            response_types: None,
+            token_endpoint_auth_method: None,
+        };
+        assert_eq!(
+            validate_registration(&fragment).unwrap_err().0,
+            "invalid_redirect_uri"
+        );
     }
 
     struct TempDir(std::path::PathBuf);
