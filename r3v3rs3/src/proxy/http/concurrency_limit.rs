@@ -2,6 +2,7 @@ use crate::proxy::http::error::ProxyError;
 use crate::proxy::http::rate_limit::LimiterKey;
 use crate::proxy::registry::WeakRegistry;
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use hyper::HeaderMap;
 use hyper::body::{Body, Frame, SizeHint};
 use r3v3rs3_api::policy::ConcurrencyLimit;
@@ -78,12 +79,11 @@ pub struct ConcurrencyGuard {
 
 impl Drop for ConcurrencyGuard {
     fn drop(&mut self) {
-        if let Some(mut entry) = self.active.get_mut(&self.key) {
-            if *entry <= 1 {
-                drop(entry);
-                self.active.remove(&self.key);
+        if let Entry::Occupied(mut occ) = self.active.entry(self.key.clone()) {
+            if *occ.get() <= 1 {
+                occ.remove();
             } else {
-                *entry -= 1;
+                *occ.get_mut() -= 1;
             }
         }
     }
