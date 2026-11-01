@@ -972,7 +972,10 @@ impl Stream for StreamWrapper {
         loop {
             let event = match ready!(this.inner.poll_next_unpin(cx)) {
                 Some(Ok(event)) => event,
-                Some(Err(err)) => return Poll::Ready(Some(Err(axum::Error::new(err)))),
+                Some(Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n))) => {
+                    warn!("event stream lagged, skipped {n} events");
+                    continue;
+                }
                 None => return Poll::Ready(None),
             };
             if let Some(event) = this.caller.visible_event(event) {
