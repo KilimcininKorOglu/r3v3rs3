@@ -204,6 +204,8 @@ fn poll_log(
     wasm_bindgen_futures::spawn_local(async move {
         if let Ok(mut list) = get_log(&id, time).await {
             let time = list.last().map(|row| row.timestamp).or(time);
+            let recent = &history[history.len().saturating_sub(100)..];
+            list.retain(|row| !recent.contains(row));
             history.append(&mut list);
             setter.set(history.clone());
 

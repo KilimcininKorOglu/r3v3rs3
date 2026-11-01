@@ -87,11 +87,14 @@ impl LogReader {
         let mut timeout = tokio::time::interval(REQUEST_TIMEOUT);
         timeout.tick().await;
 
+        let since_str = format_since(since);
+        let until_str = format_until(until);
+
         loop {
             let rows = sqlx::query("select * from system_log WHERE resource_id = ? AND (timestamp BETWEEN ? AND ?) ORDER BY timestamp DESC LIMIT ?")
                 .bind(resource_id)
-                .bind(since.unwrap_or(OffsetDateTime::UNIX_EPOCH))
-                .bind(until.unwrap_or_else(OffsetDateTime::now_utc))
+                .bind(&since_str)
+                .bind(&until_str)
                 .bind(limit.unwrap_or(REQUEST_DEFAULT_LIMIT))
                 .fetch_all(&self.pool);
             tokio::select! {
@@ -125,5 +128,101 @@ impl LogReader {
         }
 
         Ok(vec![])
+    }
+}
+
+fn format_since(since: Option<OffsetDateTime>) -> String {
+    let dt = since.unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    if dt.nanosecond() == 0 {
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+            dt.year(),
+            u8::from(dt.month()),
+            dt.day(),
+            dt.hour(),
+            dt.minute(),
+            dt.second()
+        )
+    } else {
+        dt.format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "1970-01-01T00:00:00".to_string())
+    }
+}
+
+fn format_until(until: Option<OffsetDateTime>) -> String {
+    match until {
+        Some(dt) if dt.nanosecond() == 0 => {
+            format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}~",
+                dt.year(),
+                u8::from(dt.month()),
+                dt.day(),
+                dt.hour(),
+                dt.minute(),
+                dt.second()
+            )
+        }
+        Some(dt) => dt
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "9999-12-31T23:59:59~".to_string()),
+        None => "9999-12-31T23:59:59~".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::{Date, Month, Time};
+
+    #[tokio::test]
+    async fn fetch_system_log_includes_rows_of_same_second() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE system_log (
+                timestamp INTEGER NOT NULL,
+                level TINYINT NOT NULL,
+                resource_id STRING,
+                message STRING,
+                fields STRING
+            );",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let dt1 = Date::from_calendar_date(2023, Month::November, 14)
+            .unwrap()
+            .with_time(Time::from_hms_nano(22, 13, 20, 100_000_000).unwrap())
+            .assume_utc();
+        let dt2 = Date::from_calendar_date(2023, Month::November, 14)
+            .unwrap()
+            .with_time(Time::from_hms_nano(22, 13, 20, 800_000_000).unwrap())
+            .assume_utc();
+
+        sqlx::query("INSERT INTO system_log VALUES (?, 3, 'res1', 'msg1', '{}')")
+            .bind(dt1)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("INSERT INTO system_log VALUES (?, 3, 'res1', 'msg2', '{}')")
+            .bind(dt2)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let reader = LogReader { pool };
+        let since = Date::from_calendar_date(2023, Month::November, 14)
+            .unwrap()
+            .with_time(Time::from_hms(22, 13, 20).unwrap())
+            .assume_utc();
+
+        let rows = reader
+            .fetch_system_log("res1", Some(since), Some(since), None)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].message, "msg1");
+        assert_eq!(rows[1].message, "msg2");
     }
 }
