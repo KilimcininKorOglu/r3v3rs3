@@ -254,7 +254,12 @@ async fn webui_listener(
 ) -> anyhow::Result<Option<tokio::net::TcpListener>> {
     match inherited {
         Some(listener) => Ok(Some(listener)),
-        None if !args.no_webui => Ok(Some(tokio::net::TcpListener::bind(args.webui).await?)),
+        None if !args.no_webui => {
+            let listener = tokio::net::TcpListener::bind(args.webui)
+                .await
+                .with_context(|| format!("failed to bind the admin address on {}", args.webui))?;
+            Ok(Some(listener))
+        }
         None => Ok(None),
     }
 }
@@ -366,10 +371,16 @@ async fn serve_admin(
     tokio::pin!(signals);
     match webui_listener {
         Some(listener) => {
+            let addr = listener.local_addr().ok();
             tokio::select! {
                 r = r3v3rs3::admin::start_admin_on(app_info, listener, channels.command, channels.callback, channels.event, channels.accounts, upgrade_sender) => {
                     if let Err(err) = r {
-                        error!("admin error: {}", err);
+                        error!(?addr, %err, "admin API stopped with an error");
+                        let msg = match addr {
+                            Some(a) => format!("admin API failed on {a}"),
+                            None => "admin API failed".to_string(),
+                        };
+                        return Err(err).context(msg);
                     }
                 }
                 _ = &mut signals => {}
