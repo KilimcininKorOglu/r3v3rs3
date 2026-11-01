@@ -91,21 +91,58 @@ async fn load_cert_pair(kind: CertKind, chain: &Path) -> Result<Cert, Error> {
     Cert::new(kind, chain_data, key_data)
 }
 
-/// Writes a file that holds secrets, such as ACME account keys, so only the owner can read it.
-pub(crate) async fn write_private(path: &Path, contents: impl AsRef<[u8]>) -> anyhow::Result<()> {
+/// Writes to a temporary file, sets mode if specified, flushes and fsyncs to disk.
+async fn write_tmp_file(
+    options: &fs::OpenOptions,
+    tmp_path: &Path,
+    contents: &[u8],
+    mode: Option<u32>,
+) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     use tokio::io::AsyncWriteExt;
 
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    options.mode(0o600);
-    let mut file = options.open(path).await?;
-    // The creation mode does not apply to a file that an earlier version created.
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-        .await?;
-    file.write_all(contents.as_ref()).await?;
-    file.flush().await?;
+    let mut file = options.open(tmp_path).await?;
+    if let Some(m) = mode {
+        file.set_permissions(std::fs::Permissions::from_mode(m)).await?;
+    }
+    file.write_all(contents).await?;
+    file.sync_all().await?;
     Ok(())
+}
+
+/// Atomically writes contents to `path` via a temporary file in the same directory, fsync, and rename.
+async fn write_atomic_impl(path: &Path, contents: &[u8], mode: Option<u32>) -> anyhow::Result<()> {
+    create_parent(path).await?;
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let random_suffix: u64 = rand::random();
+    let tmp_path = parent.join(format!(".{file_name}.{random_suffix}.tmp"));
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    if let Some(m) = mode {
+        options.mode(m);
+    }
+    let res = write_tmp_file(&options, &tmp_path, contents, mode).await;
+    if let Err(err) = res {
+        let _ = fs::remove_file(&tmp_path).await;
+        return Err(err);
+    }
+    if let Err(err) = fs::rename(&tmp_path, path).await {
+        let _ = fs::remove_file(&tmp_path).await;
+        return Err(err.into());
+    }
+    Ok(())
+}
+
+/// Writes a file that holds secrets, such as ACME account keys, so only the owner can read it.
+pub(crate) async fn write_private(path: &Path, contents: impl AsRef<[u8]>) -> anyhow::Result<()> {
+    write_atomic_impl(path, contents.as_ref(), Some(0o600)).await
+}
+
+/// Writes a configuration file atomically through a temporary file, fsync and rename.
+pub(crate) async fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> anyhow::Result<()> {
+    write_atomic_impl(path, contents.as_ref(), None).await
 }
 
 #[cfg(test)]
@@ -140,6 +177,15 @@ mod private_file_test {
         let mode = std::fs::metadata(&path)?.permissions().mode() & 0o777;
         std::fs::remove_file(&path)?;
         assert_eq!(mode, 0o600);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_atomic_persists_contents_via_rename() -> anyhow::Result<()> {
+        let path = std::env::temp_dir().join(format!("r3v3rs3-atomic-{}.toml", std::process::id()));
+        super::write_atomic(&path, "atomic test content").await?;
+        assert_eq!(std::fs::read_to_string(&path)?, "atomic test content");
+        std::fs::remove_file(&path)?;
         Ok(())
     }
 }
@@ -333,7 +379,7 @@ impl FileStorage {
         if fs::try_exists(path).await.unwrap_or(true) {
             return;
         }
-        match fs::write(path, DEFAULT_CONFIG).await {
+        match write_atomic(path, DEFAULT_CONFIG).await {
             Ok(()) => info!(?path, "wrote the default config"),
             Err(err) => error!(?path, "failed to write the default config: {err}"),
         }
@@ -355,14 +401,14 @@ impl FileStorage {
     async fn save_cdn_ranges_impl(&self, path: &Path, ranges: &CdnRanges) -> anyhow::Result<()> {
         fs::create_dir_all(&self.dir).await?;
         info!(?path, "save CDN IP ranges");
-        fs::write(path, serde_json::to_vec(ranges)?).await?;
+        write_atomic(path, serde_json::to_vec(ranges)?).await?;
         Ok(())
     }
 
     async fn save_app_store_impl(&self, path: &Path, catalog: &StoreCatalog) -> anyhow::Result<()> {
         fs::create_dir_all(&self.dir).await?;
         info!(?path, "save app store catalog");
-        fs::write(path, serde_json::to_vec(catalog)?).await?;
+        write_atomic(path, serde_json::to_vec(catalog)?).await?;
         Ok(())
     }
 
@@ -376,7 +422,7 @@ impl FileStorage {
         info!(?path, "save config");
         let mut doc = toml_edit::ser::to_document(&config)?;
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        fs::write(path, doc.to_string()).await?;
+        write_atomic(path, doc.to_string()).await?;
         Ok(())
     }
 
@@ -432,7 +478,7 @@ impl FileStorage {
         }
 
         doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        fs::write(path, doc.to_string()).await?;
+        write_atomic(path, doc.to_string()).await?;
         Ok(())
     }
 
@@ -497,7 +543,7 @@ impl FileStorage {
     async fn save_cert_impl(&self, path: &Path, cert: &Cert) -> anyhow::Result<()> {
         fs::create_dir_all(path).await?;
         info!(?path, "save cert");
-        fs::write(path.join("cert.pem"), &cert.pem_chain).await?;
+        write_atomic(&path.join("cert.pem"), &cert.pem_chain).await?;
         if let Some(key) = &cert.pem_key {
             write_private(&path.join("key.pem"), key).await?;
         }
@@ -911,7 +957,7 @@ impl Storage for FileStorage {
         let result = async {
             fs::create_dir_all(&self.dir).await?;
             info!(?path, "save engine catalog");
-            fs::write(&path, serde_json::to_vec(catalog)?).await?;
+            write_atomic(&path, serde_json::to_vec(catalog)?).await?;
             Ok(())
         }
         .await;
@@ -954,7 +1000,7 @@ impl Storage for FileStorage {
         let path = self.dir.join("notifications.json");
         let result = async {
             create_parent(&path).await?;
-            fs::write(&path, serde_json::to_vec(keys)?).await?;
+            write_atomic(&path, serde_json::to_vec(keys)?).await?;
             Ok(())
         }
         .await;
