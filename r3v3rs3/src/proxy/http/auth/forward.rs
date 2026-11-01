@@ -176,6 +176,7 @@ impl ForwardAuthenticator {
         for name in CONNECTION_HEADERS.iter().chain([&HOST]) {
             headers.remove(name);
         }
+        super::remove_auth_cookies(&mut headers);
         let client = ctx.client.to_string();
         let forwarded = [
             ("x-forwarded-method", req.method().as_str()),
@@ -292,7 +293,7 @@ mod tests {
     async fn auth_request_describes_the_client_request() {
         let auth = authenticator("http://127.0.0.1:4180/auth?rd=1");
         let req = Request::post("http://example.com/private?page=2")
-            .header("cookie", "session=good")
+            .header("cookie", "r3v3rs3_session=leaked; session=good")
             .header("x-forwarded-for", "203.0.113.66")
             .header(CONTENT_LENGTH, "5")
             .header(HOST, "example.com")

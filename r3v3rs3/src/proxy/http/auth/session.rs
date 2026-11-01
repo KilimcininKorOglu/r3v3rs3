@@ -404,8 +404,9 @@ impl SessionAuthenticator {
                 return text_response(StatusCode::SERVICE_UNAVAILABLE, "Service Unavailable");
             }
         };
+        let path = cookie_path(ctx);
         let cookie = format!(
-            "{COOKIE_NAME}={token}; Path=/; Max-Age={}; HttpOnly; SameSite=Lax{}",
+            "{COOKIE_NAME}={token}; Path={path}; Max-Age={}; HttpOnly; SameSite=Lax{}",
             expiry.as_secs(),
             secure_attribute(ctx)
         );
@@ -419,6 +420,7 @@ impl SessionAuthenticator {
         ctx: &AuthContext<'_>,
     ) -> Response<Full<Bytes>> {
         let expiry = Duration::from_secs(300);
+        let path = cookie_path(ctx);
         let cookie = match self
             .service
             .backend
@@ -426,7 +428,7 @@ impl SessionAuthenticator {
             .await
         {
             Ok(token) => Some(format!(
-                "{COOKIE_NAME}={token}; Path=/; Max-Age={}; HttpOnly; SameSite=Lax{}",
+                "{COOKIE_NAME}={token}; Path={path}; Max-Age={}; HttpOnly; SameSite=Lax{}",
                 expiry.as_secs(),
                 secure_attribute(ctx)
             )),
@@ -499,8 +501,9 @@ impl SessionAuthenticator {
         if let Some(token) = session_token(headers) {
             self.service.remove_session(token).await;
         }
+        let path = cookie_path(ctx);
         let cookie = format!(
-            "{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax{}",
+            "{COOKIE_NAME}=; Path={path}; Max-Age=0; HttpOnly; SameSite=Lax{}",
             secure_attribute(ctx)
         );
         redirect_response(StatusCode::SEE_OTHER, &login_path(ctx), Some(&cookie))
@@ -554,6 +557,14 @@ fn login_path(ctx: &AuthContext<'_>) -> String {
 
 fn secure_attribute(ctx: &AuthContext<'_>) -> &'static str {
     if ctx.proto == "http" { "" } else { "; Secure" }
+}
+
+fn cookie_path<'a>(ctx: &'a AuthContext<'_>) -> &'a str {
+    if ctx.base_path.is_empty() {
+        "/"
+    } else {
+        ctx.base_path
+    }
 }
 
 fn query_redirect<B>(req: &Request<B>) -> String {

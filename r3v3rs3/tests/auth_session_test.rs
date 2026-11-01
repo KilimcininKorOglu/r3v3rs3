@@ -270,3 +270,69 @@ async fn only_the_accounts_that_see_the_proxy_keep_a_session() -> anyhow::Result
     })
     .await
 }
+
+#[tokio::test]
+async fn session_cookie_scoped_to_base_path_and_stripped_on_unprotected_route() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let mut upstream = mockito::Server::new_async().await;
+
+    let mock_public = upstream
+        .mock("GET", "/hello")
+        .match_header("cookie", "custom=val")
+        .with_body("public hello ok")
+        .expect(1)
+        .create_async()
+        .await;
+
+    let mut admin_route = http_route("/admin", &upstream.url(), None);
+    admin_route.auth = Some(AuthPolicy::Session);
+
+    let public_route = http_route("/public", &upstream.url(), None);
+
+    let storage = TestStorage::builder()
+        .accounts(HashMap::from([("admin".to_string(), "secret".to_string())]))
+        .ports(vec![http_port_entry("sesscp", &port)])
+        .proxies(vec![http_proxy_entry(
+            "pxsess",
+            "sesscp",
+            HttpProxy {
+                routes: vec![admin_route, public_route],
+                ..Default::default()
+            },
+        )])
+        .build();
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .build()?;
+
+        let login_url = port.http_url("/admin/.r3v3rs3/auth/login");
+        let resp = client
+            .post(login_url)
+            .form(&[
+                ("username", "admin"),
+                ("password", "secret"),
+                ("redirect", "/admin/dashboard"),
+            ])
+            .send()
+            .await?;
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let set_cookie = resp.headers()[SET_COOKIE].to_str()?;
+        assert!(set_cookie.contains("Path=/admin"), "expected Path=/admin, got: {set_cookie}");
+
+        let session = set_cookie.split(';').next().unwrap_or_default();
+
+        let resp = client
+            .get(port.http_url("/public/hello"))
+            .header(COOKIE, format!("{session}; custom=val"))
+            .send()
+            .await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.text().await?, "public hello ok");
+        mock_public.assert_async().await;
+
+        Ok(())
+    })
+    .await
+}
