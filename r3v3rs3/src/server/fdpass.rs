@@ -12,6 +12,9 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::ptr;
 
+/// The Linux flag for `recvmsg` to set `FD_CLOEXEC` on received file descriptors atomically.
+const MSG_CMSG_CLOEXEC: libc::c_int = 0x4000_0000;
+
 /// The byte length of the data that one control message with `fds` carries.
 fn cmsg_data_len(fds: &[RawFd]) -> usize {
     std::mem::size_of_val(fds)
@@ -65,7 +68,7 @@ pub fn recv_fds(stream: &UnixStream, max_fds: usize) -> Result<Vec<OwnedFd>> {
     message.msg_control = control.as_mut_ptr() as *mut libc::c_void;
     message.msg_controllen = control.len() as _;
     unsafe {
-        if recvmsg(stream.as_raw_fd(), &mut message, 0) < 0 {
+        if recvmsg(stream.as_raw_fd(), &mut message, MSG_CMSG_CLOEXEC) < 0 {
             return Err(std::io::Error::last_os_error());
         }
         let mut header = CMSG_FIRSTHDR(&message);
@@ -80,6 +83,7 @@ pub fn recv_fds(stream: &UnixStream, max_fds: usize) -> Result<Vec<OwnedFd>> {
                         if fd < 0 {
                             return Err(std::io::Error::last_os_error());
                         }
+                        libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
                         Ok(OwnedFd::from_raw_fd(fd))
                     })
                     .collect();
@@ -134,5 +138,17 @@ mod tests {
         let (sender, receiver) = UnixStream::pair().unwrap();
         std::mem::drop(sender);
         assert!(recv_fds(&receiver, 1).is_err());
+    }
+
+    #[test]
+    fn received_descriptors_have_cloexec_set() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        send_fds(&sender, &[listener.as_raw_fd()]).unwrap();
+        let passed = recv_fds(&receiver, 1).unwrap();
+        assert_eq!(passed.len(), 1);
+        let flags = unsafe { libc::fcntl(passed[0].as_raw_fd(), libc::F_GETFD) };
+        assert!(flags >= 0);
+        assert_ne!(flags & libc::FD_CLOEXEC, 0);
     }
 }
