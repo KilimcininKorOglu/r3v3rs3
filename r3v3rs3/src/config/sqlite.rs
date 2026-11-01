@@ -958,8 +958,12 @@ impl Storage for SqliteStorage {
     }
 
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error> {
-        let accounts = self.load_accounts().await?;
-        account::verify(accounts.get(&request.username), request)
+        let mut accounts = self.load_accounts().await?;
+        let (response, updated) = account::verify_and_update(&mut accounts, request)?;
+        if updated {
+            self.save_accounts(&accounts).await?;
+        }
+        Ok(response)
     }
 
     async fn load_accounts(&self) -> Result<HashMap<String, Account>, Error> {

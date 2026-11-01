@@ -37,6 +37,10 @@ pub struct Account {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub totp: Option<String>,
 
+    /// The last accepted TOTP time step. Prevents token reuse within the validity window (RFC 6238).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub totp_step: u64,
+
     /// An account without a role is an admin.
     #[serde(default, skip_serializing_if = "Role::is_admin")]
     pub role: Role,

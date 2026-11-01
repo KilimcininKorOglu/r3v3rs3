@@ -55,7 +55,10 @@ pub fn verify(account: Option<&Account>, request: LoginRequest) -> Result<LoginR
     };
     match request.method {
         LoginMethod::Password { password } => verify_password(account, &password),
-        LoginMethod::Totp { token } => verify_totp(name, account, &token),
+        LoginMethod::Totp { token } => {
+            let mut clone = account.clone();
+            verify_totp(name, &mut clone, &token)
+        }
         LoginMethod::Passkey {
             credential_id,
             authenticator_data,
@@ -91,10 +94,10 @@ pub fn verify_and_update(
         }
         LoginMethod::Totp { token } => {
             let account = accounts
-                .get(&request.username)
+                .get_mut(&request.username)
                 .ok_or(Error::InvalidLoginCredentials)?;
             let response = verify_totp(&request.username, account, &token)?;
-            Ok((response, false))
+            Ok((response, true))
         }
         LoginMethod::Passkey {
             credential_id,
@@ -143,17 +146,22 @@ fn verify_password(account: &Account, password: &str) -> Result<LoginResponse, E
     Ok(LoginResponse::Success)
 }
 
-fn verify_totp(name: &str, account: &Account, token: &str) -> Result<LoginResponse, Error> {
+fn verify_totp(name: &str, account: &mut Account, token: &str) -> Result<LoginResponse, Error> {
     let Some(encoded) = &account.totp else {
         error!(%name, "totp not found: {name}");
         return Err(Error::InvalidLoginCredentials);
     };
     let secret = Secret::try_from_base32(encoded).map_err(|_| Error::InvalidLoginCredentials)?;
     let totp = Builder::new().with_secret(secret).build_noncompliant();
-    if totp.check_current(token).is_some() {
-        return Ok(LoginResponse::Success);
+    let Some(step) = totp.check_current(token) else {
+        return Err(Error::InvalidLoginCredentials);
+    };
+    if step <= account.totp_step {
+        error!(%name, step, last_step = account.totp_step, "totp code replay rejected");
+        return Err(Error::InvalidLoginCredentials);
     }
-    Err(Error::InvalidLoginCredentials)
+    account.totp_step = step;
+    Ok(LoginResponse::Success)
 }
 
 pub fn decode_base64_or_hex(input: &str) -> Option<Vec<u8>> {
@@ -431,5 +439,40 @@ mod tests {
             verify_and_update(&mut accounts, req2),
             Err(Error::InvalidLoginCredentials)
         ));
+    }
+
+    #[test]
+    fn totp_replay_is_rejected() -> anyhow::Result<()> {
+        let account = new_account("test-password", true)?;
+        let totp_encoded = account.totp.as_ref().unwrap();
+        let secret = Secret::try_from_base32(totp_encoded).unwrap();
+        let totp = Builder::new().with_secret(secret).build_noncompliant();
+        let code = totp.generate_current().to_string();
+
+        let mut accounts = HashMap::new();
+        accounts.insert("totpuser".into(), account);
+
+        let req1 = LoginRequest {
+            username: "totpuser".into(),
+            method: LoginMethod::Totp {
+                token: code.clone(),
+            },
+            insecure: false,
+        };
+
+        let (resp, updated) = verify_and_update(&mut accounts, req1)?;
+        assert!(matches!(resp, LoginResponse::Success));
+        assert!(updated);
+        assert!(accounts["totpuser"].totp_step > 0);
+
+        let req2 = LoginRequest {
+            username: "totpuser".into(),
+            method: LoginMethod::Totp { token: code },
+            insecure: false,
+        };
+        let res = verify_and_update(&mut accounts, req2);
+        assert!(matches!(res, Err(Error::InvalidLoginCredentials)));
+
+        Ok(())
     }
 }
