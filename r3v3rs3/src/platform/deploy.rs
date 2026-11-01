@@ -2189,6 +2189,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_primary_database_with_replicas_cannot_be_deleted() -> anyhow::Result<()> {
+        let (platform, _runtime, linked, _dir, _host_port) = setup_with_database().await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        let (rep_id, _replica_port) = add_and_deploy_replica(&platform, db_id).await?;
+        platform.delete_app(linked.id).await?;
+
+        let err = platform.delete_app(db_id).await.unwrap_err();
+        let err = err.downcast::<Error>().context("an api error")?;
+        assert!(matches!(err, Error::DatabaseInUse { .. }), "{err}");
+
+        platform.delete_app(rep_id).await?;
+        platform.delete_app(db_id).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn a_deployment_of_a_connected_app_fails_while_the_database_is_down() -> anyhow::Result<()>
     {
         let (platform, runtime, linked, _dir, _host_port) = setup_with_database().await?;

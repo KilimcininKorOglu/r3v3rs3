@@ -509,18 +509,16 @@ impl Platform {
         Ok(status)
     }
 
-    /// Refuses the deletion of a database that another app uses.
+    /// Refuses the deletion of a database that another app uses or that has read replicas.
     async fn ensure_database_free(&self, app: &AppEntry) -> anyhow::Result<()> {
         if app.spec.database.is_none() {
             return Ok(());
         }
-        let uses = self
-            .store
-            .apps()
-            .await?
-            .into_iter()
-            .any(|other| other.spec.uses_database == Some(app.id));
-        if uses {
+        let apps = self.store.apps().await?;
+        let in_use = apps.iter().any(|other| {
+            other.spec.uses_database == Some(app.id) || other.spec.replica_of == Some(app.id)
+        });
+        if in_use {
             Err(Error::DatabaseInUse {
                 name: app.name.to_string(),
             }
