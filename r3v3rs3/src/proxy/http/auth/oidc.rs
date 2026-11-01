@@ -720,6 +720,7 @@ fn sign_in_required<B>(req: &Request<B>, ctx: &AuthContext<'_>) -> Response<Full
 }
 
 fn forbidden_page(user: &str) -> Response<Full<Bytes>> {
+    let escaped_user = r3v3rs3_api::error_page_theme::escape_html(user);
     let body = format!(
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Access Denied</title>\
          <style>body{{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#09090b;color:#f4f4f5;}}\
@@ -729,7 +730,7 @@ fn forbidden_page(user: &str) -> Response<Full<Bytes>> {
          </style></head><body><div class=\"card\"><h1>Access Denied</h1>\
          <p>Account <strong>{}</strong> is not authorized to access this service.</p>\
          <a href=\"/{}/{}/oidc/logout\">Sign out</a></div></body></html>",
-        user, ENDPOINT_PREFIX[0], ENDPOINT_PREFIX[1]
+        escaped_user, ENDPOINT_PREFIX[0], ENDPOINT_PREFIX[1]
     );
     let mut res = Response::new(Full::new(Bytes::from(body)));
     *res.status_mut() = StatusCode::FORBIDDEN;
@@ -840,5 +841,17 @@ mod tests {
         let sig = b64_decode(s).unwrap();
         assert!(verify_hs256(message.as_bytes(), &sig, b"secret-key"));
         assert!(!verify_hs256(message.as_bytes(), &sig, b"wrong-secret"));
+    }
+
+    #[tokio::test]
+    async fn forbidden_page_escapes_user_input() {
+        use http_body_util::BodyExt;
+        let xss_user = "<script>alert(1)</script>";
+        let res = forbidden_page(xss_user);
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains("<script>"));
+        assert!(text.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
     }
 }
