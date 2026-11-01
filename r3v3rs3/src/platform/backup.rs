@@ -153,6 +153,36 @@ fn format_rsync_rsh(ssh_options: &str) -> anyhow::Result<String> {
     }
 }
 
+pub(crate) fn sanitize_sftp_path_component(component: &str) -> anyhow::Result<&str> {
+    let trimmed = component.trim();
+    if trimmed.is_empty() {
+        bail!("sftp path component cannot be empty");
+    }
+    const FORBIDDEN: &[char] = &['\n', '\r', '\0', '"', '\\', '!', ';', '`', '$'];
+    if trimmed.contains(FORBIDDEN) {
+        bail!("sftp path component contains forbidden characters");
+    }
+    Ok(trimmed)
+}
+
+pub(crate) fn validate_sftp_config(
+    sftp: &r3v3rs3_api::platform::SftpConfig,
+) -> anyhow::Result<()> {
+    if !sftp.path.is_empty() {
+        sanitize_sftp_path_component(&sftp.path)?;
+    }
+    const FORBIDDEN_HOST_USER: &[char] = &[
+        '\n', '\r', '\0', ' ', '\t', ';', '&', '|', '`', '$', '\'', '"', '\\',
+    ];
+    if sftp.host.contains(FORBIDDEN_HOST_USER) || sftp.host.starts_with('-') {
+        bail!("sftp host contains invalid characters");
+    }
+    if sftp.user.contains(FORBIDDEN_HOST_USER) || sftp.user.starts_with('-') {
+        bail!("sftp user contains invalid characters");
+    }
+    Ok(())
+}
+
 impl Platform {
     /// The backup settings stored in the platform database, or the defaults.
     pub async fn backup_config(&self) -> anyhow::Result<BackupConfig> {
@@ -168,6 +198,9 @@ impl Platform {
     pub async fn set_backup_config(&self, mut config: BackupConfig) -> anyhow::Result<()> {
         if let Some(ref rsync) = config.rsync {
             validate_rsync_ssh_options(&rsync.ssh_options)?;
+        }
+        if let Some(ref sftp) = config.sftp {
+            validate_sftp_config(sftp)?;
         }
         self.save_s3_secret(&mut config.s3).await?;
         self.save_sftp_secret(&mut config.sftp).await?;
@@ -1168,28 +1201,27 @@ impl Platform {
         cmd
     }
 
-    /// Uploads one backup to the configured SFTP server. Does nothing without a target.
-    async fn upload_to_sftp(
-        &self,
-        entry: &BackupEntry,
+    fn build_sftp_batch(
+        path: &str,
+        name: &str,
         dump_path: &std::path::Path,
         manifest_path: &std::path::Path,
-    ) -> anyhow::Result<()> {
-        let config = self.backup_config().await?;
-        let Some(sftp) = config.sftp else {
-            return Ok(());
-        };
-        let secret = self.sftp_secret().await?.unwrap_or_default();
-        let target_dir = format!("{}/{}", sftp.path.trim_end_matches('/'), entry.name);
-        let batch = format!(
+    ) -> anyhow::Result<String> {
+        let clean_path = sanitize_sftp_path_component(path)?;
+        let clean_name = sanitize_sftp_path_component(name)?;
+        let target_dir = format!("{}/{}", clean_path.trim_end_matches('/'), clean_name);
+        Ok(format!(
             "-mkdir \"{target_dir}\"\nput \"{}\" \"{target_dir}/\"\nput \"{}\" \"{target_dir}/\"\nquit\n",
             dump_path.display(),
             manifest_path.display()
-        );
+        ))
+    }
 
-        let temp_key = Self::prepare_sftp_key(&secret).await?;
-        let mut cmd = Self::build_sftp_cmd(&sftp, temp_key.as_deref());
-
+    async fn execute_sftp_batch(
+        mut cmd: tokio::process::Command,
+        batch: &str,
+        temp_key: Option<std::path::PathBuf>,
+    ) -> anyhow::Result<()> {
         let mut child = cmd.spawn()?;
         if let Some(mut stdin) = child.stdin.take() {
             use tokio::io::AsyncWriteExt;
@@ -1210,6 +1242,24 @@ impl Platform {
             bail!("sftp upload failed: {msg}");
         }
         Ok(())
+    }
+
+    /// Uploads one backup to the configured SFTP server. Does nothing without a target.
+    async fn upload_to_sftp(
+        &self,
+        entry: &BackupEntry,
+        dump_path: &std::path::Path,
+        manifest_path: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        let config = self.backup_config().await?;
+        let Some(sftp) = config.sftp else {
+            return Ok(());
+        };
+        let secret = self.sftp_secret().await?.unwrap_or_default();
+        let batch = Self::build_sftp_batch(&sftp.path, &entry.name, dump_path, manifest_path)?;
+        let temp_key = Self::prepare_sftp_key(&secret).await?;
+        let cmd = Self::build_sftp_cmd(&sftp, temp_key.as_deref());
+        Self::execute_sftp_batch(cmd, &batch, temp_key).await
     }
 
     /// Syncs one backup to the configured rsync destination. Does nothing without a target.
@@ -3062,6 +3112,46 @@ mod tests {
         ];
         for opt in invalid {
             assert!(validate_rsync_ssh_options(opt).is_err(), "should be rejected: {opt}");
+        }
+    }
+
+    #[test]
+    fn test_sanitize_sftp_path_valid() {
+        let valid = [
+            "/var/backups",
+            "backups/db",
+            "my_backup-1",
+            "backups.prod",
+        ];
+        for path in valid {
+            assert!(sanitize_sftp_path_component(path).is_ok(), "should be valid: {path}");
+        }
+        let batch = Platform::build_sftp_batch(
+            "/backups",
+            "mydb",
+            std::path::Path::new("/tmp/dump.sql"),
+            std::path::Path::new("/tmp/manifest.json"),
+        )
+        .unwrap();
+        assert!(batch.contains("-mkdir \"/backups/mydb\""));
+    }
+
+    #[test]
+    fn test_sanitize_sftp_path_rejects_injections() {
+        let invalid = [
+            "",
+            "   ",
+            "backup\n!id\n",
+            "backup\r!whoami",
+            "!sh",
+            "\"/backups\"",
+            "backup\\path",
+            "backup;rm",
+            "backup`id`",
+            "backup$var",
+        ];
+        for path in invalid {
+            assert!(sanitize_sftp_path_component(path).is_err(), "should be rejected: {path}");
         }
     }
 }
