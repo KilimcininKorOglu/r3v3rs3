@@ -2285,10 +2285,10 @@ pub async fn create_environment(
 pub async fn get_environment(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path((_id, env_id)): Path<(ShortId, ShortId)>,
+    Path((id, env_id)): Path<(ShortId, ShortId)>,
 ) -> Result<Json<ProjectEnvironment>, AppError> {
     let platform = state.platform(&caller, Permission::Read).await?;
-    let env = platform.environment(env_id).await.map_err(platform_error)?;
+    let env = platform.environment(id, env_id).await.map_err(platform_error)?;
     Ok(Json(env))
 }
 
@@ -2308,12 +2308,12 @@ pub async fn get_environment(
 pub async fn update_environment(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path((_id, env_id)): Path<(ShortId, ShortId)>,
+    Path((id, env_id)): Path<(ShortId, ShortId)>,
     Json(request): Json<EnvironmentSpec>,
 ) -> Result<Json<ProjectEnvironment>, AppError> {
     let platform = state.platform(&caller, Permission::Edit).await?;
     let env = platform
-        .update_environment(env_id, request, unix_ms())
+        .update_environment(id, env_id, request, unix_ms())
         .await
         .map_err(platform_error)?;
     let record = AuditRecord::new(AuditAction::UpdateEnvironment)
@@ -2340,11 +2340,11 @@ pub async fn update_environment(
 pub async fn delete_environment(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path((_id, env_id)): Path<(ShortId, ShortId)>,
+    Path((id, env_id)): Path<(ShortId, ShortId)>,
 ) -> Result<Json<ProjectEnvironment>, AppError> {
     let platform = state.platform(&caller, Permission::Edit).await?;
     let env = platform
-        .delete_environment(env_id)
+        .delete_environment(id, env_id)
         .await
         .map_err(platform_error)?;
     let record = AuditRecord::new(AuditAction::DeleteEnvironment)
@@ -2371,10 +2371,10 @@ pub async fn delete_environment(
 pub async fn get_environment_env(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path((_id, env_id)): Path<(ShortId, ShortId)>,
+    Path((id, env_id)): Path<(ShortId, ShortId)>,
 ) -> Result<Json<Vec<EnvEntry>>, AppError> {
     let platform = state.platform(&caller, Permission::Read).await?;
-    let env = platform.environment(env_id).await.map_err(platform_error)?;
+    let env = platform.environment(id, env_id).await.map_err(platform_error)?;
     Ok(Json(env.variables))
 }
 
@@ -2394,12 +2394,12 @@ pub async fn get_environment_env(
 pub async fn put_environment_env(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path((_id, env_id)): Path<(ShortId, ShortId)>,
+    Path((id, env_id)): Path<(ShortId, ShortId)>,
     Json(request): Json<EnvironmentEnvSpec>,
 ) -> Result<Json<Vec<EnvEntry>>, AppError> {
     let platform = state.platform(&caller, Permission::Edit).await?;
     let env = platform
-        .set_environment_env(env_id, request)
+        .set_environment_env(id, env_id, request)
         .await
         .map_err(platform_error)?;
     let record = AuditRecord::new(AuditAction::UpdateEnvironmentEnv)

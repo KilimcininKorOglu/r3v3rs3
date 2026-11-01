@@ -2588,6 +2588,7 @@ mod tests {
         let env_id = project.environments[0].id;
         platform
             .set_environment_env(
+                project.id,
                 env_id,
                 r3v3rs3_api::platform::EnvironmentEnvSpec {
                     variables: vec![

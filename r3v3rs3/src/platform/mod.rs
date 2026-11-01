@@ -194,7 +194,7 @@ pub(super) struct Backend {
 }
 
 pub struct Platform {
-    store: PlatformStore,
+    pub(crate) store: PlatformStore,
     keys: std::sync::RwLock<ClusterKeys>,
     local: Arc<dyn ContainerRuntime>,
     config: PlatformConfig,
@@ -1343,7 +1343,7 @@ fn is_local(target: ShortId) -> bool {
     target.to_string() == LOCAL_TARGET
 }
 
-fn not_found(id: ShortId) -> anyhow::Error {
+pub(crate) fn not_found(id: ShortId) -> anyhow::Error {
     Error::IdNotFound { id: id.to_string() }.into()
 }
 
@@ -1830,6 +1830,7 @@ mod tests {
         let prod_env_id = project.environments[0].id;
         platform
             .set_environment_env(
+                project.id,
                 prod_env_id,
                 r3v3rs3_api::platform::EnvironmentEnvSpec {
                     variables: vec![
@@ -1852,7 +1853,7 @@ mod tests {
         assert_eq!(list[0].name, "Shop Project");
         assert_eq!(list[0].environments_count, 2);
 
-        let fetched_env = platform.environment(prod_env_id).await?;
+        let fetched_env = platform.environment(project_id, prod_env_id).await?;
         assert_eq!(fetched_env.variables.len(), 2);
         let secret = fetched_env
             .variables
@@ -2000,6 +2001,50 @@ mod tests {
             err.to_string()
                 .contains("referenced database belongs to a different project")
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn environment_scoped_to_wrong_project_is_rejected() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let (proj_a, env_a) = setup_test_project_and_env(&platform).await?;
+
+        let spec_b = r3v3rs3_api::platform::ProjectSpec {
+            name: "Project B".to_string(),
+            description: None,
+            default_environments: vec!["production".to_string()],
+        };
+        let project_b = platform.create_project(spec_b, 1000).await?;
+        let env_b = project_b.environments[0].id;
+
+        // Accessing env_b under proj_a must return error
+        assert!(platform.environment(proj_a, env_b).await.is_err());
+        assert!(platform.environment(project_b.id, env_a).await.is_err());
+
+        // Updating env_b under proj_a must return error
+        let update_spec = r3v3rs3_api::platform::EnvironmentSpec {
+            name: "renamed".to_string(),
+            description: None,
+        };
+        assert!(
+            platform
+                .update_environment(proj_a, env_b, update_spec, 2000)
+                .await
+                .is_err()
+        );
+
+        // Deleting env_b under proj_a must return error
+        assert!(platform.delete_environment(proj_a, env_b).await.is_err());
+
+        // Updating env vars of env_b under proj_a must return error
+        let env_spec = r3v3rs3_api::platform::EnvironmentEnvSpec { variables: vec![] };
+        assert!(
+            platform
+                .set_environment_env(proj_a, env_b, env_spec)
+                .await
+                .is_err()
+        );
+
         Ok(())
     }
 }

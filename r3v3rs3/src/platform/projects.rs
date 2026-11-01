@@ -167,16 +167,23 @@ impl Platform {
                 updated_at: now,
             })
             .await?;
-        self.environment(env_id).await
+        self.environment(project_id, env_id).await
     }
 
-    /// Gets an environment by ID including its shared variables.
-    pub async fn environment(&self, id: ShortId) -> anyhow::Result<ProjectEnvironment> {
+    /// Gets an environment by ID including its shared variables, scoped to its parent project.
+    pub async fn environment(
+        &self,
+        project_id: ShortId,
+        id: ShortId,
+    ) -> anyhow::Result<ProjectEnvironment> {
         let stored = self
             .store
             .environment(id)
             .await?
             .ok_or_else(|| not_found(id))?;
+        if stored.project_id != project_id {
+            return Err(not_found(id));
+        }
         let stored_vars = self.store.environment_vars(id).await?;
         let variables = self.unseal_env_vars(id, stored_vars)?;
         let apps = self.store.apps().await?;
@@ -221,6 +228,7 @@ impl Platform {
     /// Updates an environment's name and description.
     pub async fn update_environment(
         &self,
+        project_id: ShortId,
         id: ShortId,
         spec: EnvironmentSpec,
         now: u64,
@@ -231,6 +239,9 @@ impl Platform {
             .environment(id)
             .await?
             .ok_or_else(|| not_found(id))?;
+        if current.project_id != project_id {
+            return Err(not_found(id));
+        }
         if spec.name != current.name
             && self
                 .store
@@ -256,12 +267,16 @@ impl Platform {
                 updated_at: now,
             })
             .await?;
-        self.environment(id).await
+        self.environment(project_id, id).await
     }
 
     /// Deletes an environment if no apps are linked.
-    pub async fn delete_environment(&self, id: ShortId) -> anyhow::Result<ProjectEnvironment> {
-        let env = self.environment(id).await?;
+    pub async fn delete_environment(
+        &self,
+        project_id: ShortId,
+        id: ShortId,
+    ) -> anyhow::Result<ProjectEnvironment> {
+        let env = self.environment(project_id, id).await?;
         let apps = self.store.apps().await?;
         let in_use = apps.iter().any(|a| a.spec.environment_id == Some(id));
         if in_use {
@@ -277,11 +292,12 @@ impl Platform {
     /// Updates environment variables of a project environment.
     pub async fn set_environment_env(
         &self,
+        project_id: ShortId,
         env_id: ShortId,
         spec: EnvironmentEnvSpec,
     ) -> anyhow::Result<ProjectEnvironment> {
         spec.validate()?;
-        let _ = self.environment(env_id).await?;
+        let _ = self.environment(project_id, env_id).await?;
         let current_vars = self
             .store
             .environment_vars(env_id)
@@ -294,7 +310,7 @@ impl Platform {
             vars.push(self.stored_env(env_id, entry, &current_vars)?);
         }
         self.store.replace_environment_vars(env_id, &vars).await?;
-        self.environment(env_id).await
+        self.environment(project_id, env_id).await
     }
 
     async fn validate_project_environments(
@@ -303,14 +319,8 @@ impl Platform {
         source_id: ShortId,
         target_id: ShortId,
     ) -> anyhow::Result<(ProjectEnvironment, ProjectEnvironment)> {
-        let source_env = self.environment(source_id).await?;
-        let target_env = self.environment(target_id).await?;
-        if source_env.project_id != project_id || target_env.project_id != project_id {
-            return Err(Error::InvalidEnvironment {
-                reason: "environments must belong to the specified project".to_string(),
-            }
-            .into());
-        }
+        let source_env = self.environment(project_id, source_id).await?;
+        let target_env = self.environment(project_id, target_id).await?;
         Ok((source_env, target_env))
     }
 

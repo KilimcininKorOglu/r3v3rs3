@@ -3858,19 +3858,20 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let env_id: ShortId = parse_id(&params.environment_id)?;
-        let variables: Vec<r3v3rs3_api::platform::EnvEntry> =
-            serde_json::from_value(serde_json::Value::Array(params.variables))
-                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
-        let spec = r3v3rs3_api::platform::EnvironmentEnvSpec { variables };
-        spec.validate().map_err(any_error)?;
+        let (env_id, spec) = parse_project_env_params(params)?;
         let platform = self
             .state
             .platform(&caller, Permission::Edit)
             .await
             .map_err(any_error)?;
+        let stored = platform
+            .store
+            .environment(env_id)
+            .await
+            .map_err(any_error)?
+            .ok_or_else(|| any_error(crate::platform::not_found(env_id)))?;
         let env = platform
-            .set_environment_env(env_id, spec)
+            .set_environment_env(stored.project_id, env_id, spec)
             .await
             .map_err(any_error)?;
         let record = AuditRecord::new(AuditAction::UpdateEnvironmentEnv)
@@ -5157,4 +5158,16 @@ fn apply_ct_config_overrides(
     if params.ct_api_url.is_some() {
         config.ct_api_url = params.ct_api_url;
     }
+}
+
+fn parse_project_env_params(
+    params: UpdateProjectEnvParams,
+) -> Result<(ShortId, r3v3rs3_api::platform::EnvironmentEnvSpec), ErrorData> {
+    let env_id: ShortId = parse_id(&params.environment_id)?;
+    let variables: Vec<r3v3rs3_api::platform::EnvEntry> =
+        serde_json::from_value(serde_json::Value::Array(params.variables))
+            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+    let spec = r3v3rs3_api::platform::EnvironmentEnvSpec { variables };
+    spec.validate().map_err(any_error)?;
+    Ok((env_id, spec))
 }
