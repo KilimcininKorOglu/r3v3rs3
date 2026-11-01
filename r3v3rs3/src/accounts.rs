@@ -170,10 +170,13 @@ impl AccountDirectory {
     }
 
     /// Resolves an API token to its caller. A read token gets viewer permissions; an edit token
-    /// gets the account's permissions.
+    /// gets the account's permissions. Tokens created before the last credentials change have none.
     pub fn token_caller(&self, token_hash: &str) -> Option<Caller> {
         self.accounts.iter().find_map(|(name, entry)| {
             let token = entry.tokens.iter().find(|t| t.token_hash == token_hash)?;
+            if token.created_at < entry.credentials_changed_at {
+                return None;
+            }
             let role = match token.scope {
                 TokenScope::Read => Role::Viewer,
                 TokenScope::Edit => entry.role,
@@ -427,5 +430,24 @@ mod tests {
 
         // Unknown token yields None
         assert!(dir.token_caller("unknown_hash").is_none());
+
+        // Token created before credentials change is invalidated
+        let stale_accounts = HashMap::from([(
+            "admin_user".to_string(),
+            Account {
+                role: Role::Admin,
+                credentials_changed_at: 200,
+                tokens: vec![ApiToken {
+                    id: "t1".into(),
+                    name: "Read".into(),
+                    token_hash: "hash_stale".into(),
+                    scope: TokenScope::Read,
+                    created_at: 100,
+                }],
+                ..Default::default()
+            },
+        )]);
+        let stale_dir = AccountDirectory::new(&stale_accounts);
+        assert!(stale_dir.token_caller("hash_stale").is_none());
     }
 }
