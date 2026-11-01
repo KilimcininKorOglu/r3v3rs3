@@ -15,9 +15,7 @@ use std::time::Duration;
 const REFLECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn build_reflection_client(is_plaintext: bool) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(REFLECTION_TIMEOUT)
-        .danger_accept_invalid_certs(true);
+    let mut builder = reqwest::Client::builder().timeout(REFLECTION_TIMEOUT);
 
     if is_plaintext {
         builder = builder.http2_prior_knowledge();

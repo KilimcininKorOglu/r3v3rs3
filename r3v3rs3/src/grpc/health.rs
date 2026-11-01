@@ -83,9 +83,7 @@ pub fn build_grpc_health_client(
     is_plaintext: bool,
     timeout: Duration,
 ) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(timeout)
-        .danger_accept_invalid_certs(true);
+    let mut builder = reqwest::Client::builder().timeout(timeout);
 
     if is_plaintext {
         builder = builder.http2_prior_knowledge();
@@ -297,5 +295,15 @@ mod tests {
 
         // Empty payload defaults to UNKNOWN
         assert_eq!(parse_health_check_response(&[]), GrpcServingStatus::Unknown);
+    }
+
+    #[test]
+    fn test_grpc_health_client_builder() {
+        let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let h2c_client = build_grpc_health_client(true, Duration::from_secs(5));
+        assert!(h2c_client.is_ok());
+
+        let tls_client = build_grpc_health_client(false, Duration::from_secs(5));
+        assert!(tls_client.is_ok());
     }
 }

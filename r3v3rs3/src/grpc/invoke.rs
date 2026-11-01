@@ -11,9 +11,7 @@ use std::time::{Duration, Instant};
 const GRPC_INVOKE_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn build_http_client(plaintext_h2: bool) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(GRPC_INVOKE_TIMEOUT)
-        .danger_accept_invalid_certs(true);
+    let mut builder = reqwest::Client::builder().timeout(GRPC_INVOKE_TIMEOUT);
 
     if plaintext_h2 {
         builder = builder.http2_prior_knowledge();
@@ -207,5 +205,12 @@ mod tests {
         assert_eq!(payload, b"sample");
         assert_eq!(trailers.get("grpc-status").unwrap(), "0");
         assert_eq!(trailers.get("grpc-message").unwrap(), "Success");
+    }
+
+    #[test]
+    fn test_build_http_client() {
+        let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider().install_default();
+        assert!(build_http_client(true).is_ok());
+        assert!(build_http_client(false).is_ok());
     }
 }
