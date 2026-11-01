@@ -39,6 +39,8 @@ use std::{
 };
 use tracing::{error, info};
 
+/// Longest wait for an individual ACME request.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longest wait for the ACME server to validate the challenges.
 const VALIDATION_TIMEOUT: Duration = Duration::from_secs(180);
 /// First wait between two order refreshes.
@@ -81,9 +83,14 @@ impl HttpClient for HyperAcmeClient {
             let (parts, body) = req.into_parts();
             let Ok(body) = body.collect().await;
             let req = Request::from_parts(parts, Full::new(body.to_bytes()));
-            let rsp = client
-                .request(req)
+            let rsp = tokio::time::timeout(REQUEST_TIMEOUT, client.request(req))
                 .await
+                .map_err(|_| {
+                    instant_acme::Error::Other(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "ACME request timed out",
+                    )))
+                })?
                 .map_err(|err| instant_acme::Error::Other(Box::new(err)))?;
             Ok(BytesResponse::from(rsp))
         })
@@ -461,9 +468,13 @@ impl AcmeOrder {
 
     /// Reads the certificate chain of the order. The ACME server needs a moment to issue it.
     async fn download_chain(&mut self) -> anyhow::Result<String> {
+        let deadline = Instant::now() + VALIDATION_TIMEOUT;
         loop {
             if let Some(cert_chain_pem) = self.order.certificate().await? {
                 return Ok(cert_chain_pem);
+            }
+            if Instant::now() >= deadline {
+                bail!("timed out waiting for certificate issuance");
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
