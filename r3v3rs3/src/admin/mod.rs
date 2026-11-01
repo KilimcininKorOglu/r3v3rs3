@@ -791,7 +791,7 @@ fn cert_file_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(certs::list))
         .routes(routes!(certs::self_sign))
-        .routes(routes!(certs::upload))
+        .routes(routes!(certs::upload).layer(DefaultBodyLimit::max(MAX_APP_FILE_BODY)))
         .routes(routes!(certs::delete_many))
         .routes(routes!(certs::check_coverage))
         .routes(routes!(certs::verify_cname))
@@ -824,7 +824,8 @@ fn config_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(config::get, config::put))
         .routes(routes!(config::test_notification))
-        .routes(routes!(config::backup, config::restore))
+        .routes(routes!(config::backup))
+        .routes(routes!(config::restore).layer(DefaultBodyLimit::max(MAX_APP_FILE_BODY)))
 }
 
 /// The views of the running server: build info, CDN ranges, discovery and cluster state.

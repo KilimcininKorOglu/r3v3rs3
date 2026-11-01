@@ -127,3 +127,62 @@ async fn export_and_import_config_backup_round_trip() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn config_restore_accepts_payload_larger_than_default_limit() -> anyhow::Result<()> {
+    use common::{alloc_tcp_port, login_when_allowed, wait_for_listener};
+    use r3v3rs3::admin::start_admin;
+    use r3v3rs3::config::new_appinfo;
+    use r3v3rs3::server::Server;
+    use r3v3rs3_api::auth::Role;
+
+    let dir = std::env::temp_dir().join(format!("r3-cfg-restore-{}", rand::random::<u32>()));
+    std::fs::create_dir_all(&dir)?;
+
+    let storage = TestStorage::builder()
+        .account("admin", "password", Role::Admin, None)
+        .build();
+    let addr = alloc_tcp_port().await?.socket_addr();
+    let (server, channels) = Server::new(new_appinfo(&dir, &dir), storage).await;
+    let event = channels.event.clone();
+    let task = tokio::spawn(server.start());
+    tokio::spawn(start_admin(
+        new_appinfo(&dir, &dir),
+        addr,
+        channels.command,
+        channels.callback,
+        channels.event.clone(),
+        channels.accounts.clone(),
+    ));
+    wait_for_listener(addr).await?;
+
+    let cookie = login_when_allowed(addr, "admin", "password").await?;
+    let mut files = std::collections::BTreeMap::new();
+    let large_comment = "# ".to_string() + &"x".repeat(2_500_000) + "\n";
+    files.insert("proxies.toml".to_string(), large_comment);
+
+    let backup = ConfigBackup {
+        version: "3.0.1".to_string(),
+        created_at: 0,
+        config: AppConfig::default(),
+        ports: Vec::new(),
+        proxies: Vec::new(),
+        access_lists: Vec::new(),
+        acme: Vec::new(),
+        files,
+    };
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("http://{addr}/api/config/restore"))
+        .header("cookie", &cookie)
+        .json(&backup)
+        .send()
+        .await?;
+
+    assert_ne!(res.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+    event.send(r3v3rs3_api::event::ServerEvent::Shutdown)?;
+    task.await??;
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
