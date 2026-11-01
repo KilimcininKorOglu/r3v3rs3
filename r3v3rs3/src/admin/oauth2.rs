@@ -776,12 +776,28 @@ fn base_origin(headers: &HeaderMap) -> String {
     let scheme = headers
         .get("x-forwarded-proto")
         .and_then(|value| value.to_str().ok())
+        .filter(|s| matches!(*s, "http" | "https"))
         .unwrap_or("http");
     let host = headers
         .get(header::HOST)
         .and_then(|value| value.to_str().ok())
+        .filter(|h| is_valid_host_header(h))
         .unwrap_or("localhost");
     format!("{scheme}://{host}")
+}
+
+fn is_valid_host_header(host: &str) -> bool {
+    if host.is_empty() || host.len() > 255 {
+        return false;
+    }
+    if host.contains(|c: char| {
+        c.is_ascii_whitespace()
+            || c.is_ascii_control()
+            || matches!(c, '"' | '\\' | '\'' | '<' | '>' | '/' | '?' | '#')
+    }) {
+        return false;
+    }
+    url::Url::parse(&format!("http://{host}")).is_ok()
 }
 
 /// Validates the authorization request and returns the registered client. A client lives in
@@ -1671,14 +1687,19 @@ fn unauthorized(origin: &str) -> Response {
         Json(json!({ "error": "unauthorized" })),
     )
         .into_response();
+    let escaped_origin = escape_header_param(origin);
     response.headers_mut().insert(
         header::WWW_AUTHENTICATE,
         HeaderValue::from_str(&format!(
-            "Bearer resource_metadata=\"{origin}/.well-known/oauth-protected-resource\""
+            "Bearer resource_metadata=\"{escaped_origin}/.well-known/oauth-protected-resource\""
         ))
         .unwrap_or(HeaderValue::from_static("Bearer")),
     );
     response
+}
+
+fn escape_header_param(param: &str) -> String {
+    param.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// The middleware of the MCP endpoint: the request needs an access token with a live grant of a
@@ -1742,6 +1763,25 @@ mod tests {
     #[test]
     fn the_origin_falls_back_to_the_forwarded_headers() {
         assert_eq!(base_origin(&headers()), "https://127.0.0.1:46492");
+
+        let mut bad_host = HeaderMap::new();
+        bad_host.insert(
+            header::HOST,
+            HeaderValue::from_static("evil.com\", test=\"1"),
+        );
+        assert_eq!(base_origin(&bad_host), "http://localhost");
+
+        let mut space_host = HeaderMap::new();
+        space_host.insert(header::HOST, HeaderValue::from_static("evil.com foo"));
+        assert_eq!(base_origin(&space_host), "http://localhost");
+    }
+
+    #[test]
+    fn unauthorized_escapes_origin_quotes() {
+        let resp = unauthorized("http://evil.com\"inj");
+        let header = resp.headers().get(header::WWW_AUTHENTICATE).unwrap();
+        let val = header.to_str().unwrap();
+        assert!(val.contains(r#"resource_metadata="http://evil.com\"inj/.well-known/oauth-protected-resource""#));
     }
 
     #[test]
