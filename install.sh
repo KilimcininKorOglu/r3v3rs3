@@ -353,7 +353,11 @@ open_iptables() {
 	if command -v netfilter-persistent >/dev/null 2>&1; then
 		netfilter-persistent save >/dev/null 2>&1
 	elif [ -d "$conf" ]; then
-		"$cmd"-save >"$conf/rules.v4"
+		local rules_file="rules.v4"
+		if [ "$cmd" = "ip6tables" ]; then
+			rules_file="rules.v6"
+		fi
+		"$cmd"-save >"$conf/$rules_file"
 	else
 		warn "the $cmd rule does not survive a reboot; no persistence tool found"
 	fi
