@@ -1277,6 +1277,8 @@ fn create_body(spec: &ContainerSpec) -> Value {
         "RestartPolicy": { "Name": spec.restart.docker_name() },
         "Mounts": mounts,
         "LogConfig": log_config,
+        "SecurityOpt": ["no-new-privileges:true"],
+        "CapDrop": ["NET_RAW", "MKNOD", "AUDIT_WRITE"],
     });
     if let Some(memory) = spec.limits.memory_bytes {
         host_config["Memory"] = json!(memory);
@@ -1896,6 +1898,8 @@ mod tests {
                         "max-file": "3"
                     }
                 },
+                "SecurityOpt": ["no-new-privileges:true"],
+                "CapDrop": ["NET_RAW", "MKNOD", "AUDIT_WRITE"],
                 "Memory": 268435456,
                 "NetworkMode": "r3v3rs3-shop",
                 "ExtraHosts": ["host.docker.internal:host-gateway"],
