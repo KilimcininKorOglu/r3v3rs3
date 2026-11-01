@@ -337,6 +337,14 @@ async fn openapi_document_and_swagger_ui_require_a_session() -> anyhow::Result<(
             .await?;
         assert_eq!(docs.status(), StatusCode::OK);
         assert!(content_type(&docs).starts_with("text/html"));
+        assert_eq!(
+            docs.headers().get("x-frame-options").and_then(|v| v.to_str().ok()),
+            Some("DENY")
+        );
+        assert_eq!(
+            docs.headers().get("content-security-policy").and_then(|v| v.to_str().ok()),
+            Some("frame-ancestors 'none'")
+        );
 
         // The routes still answer after the router records them in the document.
         assert_eq!(
