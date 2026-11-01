@@ -186,8 +186,10 @@ fn parse_callback(request: &str) -> anyhow::Result<CallbackQuery> {
 }
 
 /// A small HTTP server that receives exactly one redirect of the authorization flow.
-async fn wait_for_code(port: u16, expected_state: &str) -> anyhow::Result<String> {
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+async fn wait_for_code(
+    listener: tokio::net::TcpListener,
+    expected_state: &str,
+) -> anyhow::Result<String> {
     let (mut socket, _) = tokio::time::timeout(TOKEN_POLL_TIMEOUT, listener.accept()).await??;
     let mut buffer = vec![0u8; 8192];
     let read = tokio::time::timeout(TOKEN_POLL_TIMEOUT, socket.read(&mut buffer)).await??;
@@ -240,7 +242,7 @@ pub async fn login(
     }
 
     // The server answers the browser while this task waits for the code.
-    let code = wait_for_code(port, &state).await?;
+    let code = wait_for_code(listener, &state).await?;
 
     let value = token_request(
         client,
@@ -309,4 +311,23 @@ fn urlencoding_escape(value: &str) -> String {
         }
     }
     escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn wait_for_code_accepts_from_provided_listener() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = tokio::spawn(async move {
+            wait_for_code(listener, "test-state").await
+        });
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let req = "GET /callback?code=abc123xyz&state=test-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let code = handle.await.unwrap().unwrap();
+        assert_eq!(code, "abc123xyz");
+    }
 }
