@@ -24,7 +24,9 @@ use r3v3rs3_api::{
 };
 use sailfish::TemplateOnce;
 use std::{
+    collections::HashMap,
     fmt,
+    net::IpAddr,
     ops::ControlFlow,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant},
@@ -61,6 +63,8 @@ pub struct SessionService {
 struct SessionState {
     config: AdminConfig,
     attempts: LoginAttempts,
+    ban_tracker: crate::admin::ban::IpBanTracker,
+    rate_limits: HashMap<IpAddr, (u32, Instant)>,
 }
 
 enum Verification {
@@ -79,6 +83,31 @@ impl SessionState {
     fn expiry(&self) -> Duration {
         sessions::expiry(&self.config)
     }
+
+    fn check_rate_limit(&mut self, ip: &IpAddr, now: Instant) -> bool {
+        self.rate_limits
+            .retain(|_, (_, time)| now.duration_since(*time) < Duration::from_secs(2));
+        if self.rate_limits.len() >= 1024 {
+            if let Some(oldest) = self
+                .rate_limits
+                .iter()
+                .min_by_key(|(_, (_, time))| *time)
+                .map(|(k, _)| *k)
+            {
+                self.rate_limits.remove(&oldest);
+            }
+        }
+        let entry = self.rate_limits.entry(*ip).or_insert((0, now));
+        if now.duration_since(entry.1) >= Duration::from_secs(1) {
+            *entry = (1, now);
+            true
+        } else if entry.0 < 10 {
+            entry.0 += 1;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl SessionService {
@@ -95,6 +124,8 @@ impl SessionService {
             state: Mutex::new(SessionState {
                 config,
                 attempts: LoginAttempts::default(),
+                ban_tracker: Default::default(),
+                rate_limits: HashMap::new(),
             }),
         }
     }
@@ -175,29 +206,57 @@ impl SessionService {
         }
     }
 
-    fn is_blocked(&self, key: &LoginAttemptKey) -> bool {
+    fn check_blocked(&self, client_ip: &IpAddr, key: &LoginAttemptKey) -> Result<(), Error> {
         let mut state = self.state();
+        let now = Instant::now();
+        if !state.check_rate_limit(client_ip, now) {
+            return Err(Error::TooManyLoginAttempts);
+        }
+        state.ban_tracker.check_banned(client_ip, now)?;
         let reset = state.config.login_attempts_reset;
-        state.attempts.is_blocked(key, reset, Instant::now())
+        if state.attempts.is_blocked(key, reset, now) {
+            return Err(Error::TooManyLoginAttempts);
+        }
+        Ok(())
     }
 
-    fn record_failure(&self, key: LoginAttemptKey) {
+    fn record_failure(&self, client_ip: IpAddr, key: LoginAttemptKey) {
         let mut state = self.state();
         let config = state.config.clone();
+        let now = Instant::now();
         state.attempts.record_failure(
             key,
             config.max_login_attempts,
             config.login_attempts_reset,
-            Instant::now(),
+            now,
+        );
+        let ban_threshold = config.max_login_attempts.saturating_mul(2).max(5);
+        state.ban_tracker.record_failure(
+            client_ip,
+            ban_threshold,
+            config.login_attempts_reset,
+            config.login_attempts_reset.max(Duration::from_secs(300)),
+            now,
         );
     }
 
-    fn clear_failures(&self, key: &LoginAttemptKey) {
-        self.state().attempts.clear(key);
+    fn clear_failures(&self, client_ip: &IpAddr, key: &LoginAttemptKey) {
+        let mut state = self.state();
+        state.attempts.clear(key);
+        state.ban_tracker.clear(client_ip);
     }
 
     /// Checks the password, and the TOTP code when the account requires one.
-    async fn verify(&self, form: &LoginForm) -> Verification {
+    async fn verify(&self, form: &LoginForm, has_login_session: bool) -> Verification {
+        if has_login_session && !form.totp.is_empty() {
+            let totp = LoginMethod::Totp {
+                token: form.totp.clone(),
+            };
+            return match self.verify_account(&form.username, totp).await {
+                Ok(LoginResponse::Success) => Verification::Success,
+                _ => Verification::Failed,
+            };
+        }
         let password = LoginMethod::Password {
             password: form.password.clone(),
         };
@@ -313,31 +372,94 @@ impl SessionAuthenticator {
         Ok(())
     }
 
+    async fn has_valid_login_session(&self, headers: &HeaderMap) -> bool {
+        let Some(token) = session_token(headers) else {
+            return false;
+        };
+        self.service
+            .backend
+            .get(SessionScope::Login, token)
+            .await
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
+    async fn complete_login(
+        &self,
+        record: SessionRecord,
+        form: &LoginForm,
+        ctx: &AuthContext<'_>,
+    ) -> Response<Full<Bytes>> {
+        let (token, expiry) = match self.service.create_session(record).await {
+            Ok(session) => session,
+            Err(err) => {
+                error!(%err, "failed to start the session");
+                return text_response(StatusCode::SERVICE_UNAVAILABLE, "Service Unavailable");
+            }
+        };
+        let cookie = format!(
+            "{COOKIE_NAME}={token}; Path=/; Max-Age={}; HttpOnly; SameSite=Lax{}",
+            expiry.as_secs(),
+            secure_attribute(ctx)
+        );
+        redirect_response(StatusCode::SEE_OTHER, &form.redirect, Some(&cookie))
+    }
+
+    async fn issue_totp_challenge(
+        &self,
+        record: SessionRecord,
+        form: &LoginForm,
+        ctx: &AuthContext<'_>,
+    ) -> Response<Full<Bytes>> {
+        let expiry = Duration::from_secs(300);
+        let cookie = match self
+            .service
+            .backend
+            .create(SessionScope::Login, record, expiry)
+            .await
+        {
+            Ok(token) => Some(format!(
+                "{COOKIE_NAME}={token}; Path=/; Max-Age={}; HttpOnly; SameSite=Lax{}",
+                expiry.as_secs(),
+                secure_attribute(ctx)
+            )),
+            Err(_) => None,
+        };
+        render_login_page(
+            form,
+            ctx,
+            TOTP_REQUIRED,
+            true,
+            StatusCode::UNAUTHORIZED,
+            cookie.as_deref(),
+        )
+    }
+
     async fn login<B>(&self, req: Request<B>, ctx: &AuthContext<'_>) -> Response<Full<Bytes>>
     where
         B: Body<Data = Bytes>,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
+        let has_login_session = self.has_valid_login_session(req.headers()).await;
         let Some(form) = read_form(req.into_body()).await else {
             return text_response(StatusCode::BAD_REQUEST, "Bad Request");
         };
-        let page = |error_key, totp, status| {
-            let template = LoginTemplate {
-                username: &form.username,
-                redirect: &form.redirect,
-                error: Some(ctx.preferences.locale.t(error_key)),
-                totp,
-                preferences: ctx.preferences,
-            };
-            login_page(template, status)
-        };
-        let key = (canonical_client_ip(ctx.client), form.username.clone());
-        if self.service.is_blocked(&key) {
-            warn!(client = %ctx.client, username = %form.username, "sign-in blocked after too many failed attempts");
-            return page(TOO_MANY_ATTEMPTS, false, StatusCode::TOO_MANY_REQUESTS);
+        let client_ip = canonical_client_ip(ctx.client);
+        let key = (client_ip, form.username.clone());
+        if let Err(err) = self.service.check_blocked(&client_ip, &key) {
+            warn!(client = %ctx.client, username = %form.username, %err, "sign-in blocked");
+            return render_login_page(
+                &form,
+                ctx,
+                TOO_MANY_ATTEMPTS,
+                false,
+                StatusCode::TOO_MANY_REQUESTS,
+                None,
+            );
         }
         let record = SessionRecord::proxy(ctx.host.unwrap_or_default(), &form.username);
-        let verification = match self.service.verify(&form).await {
+        let verification = match self.service.verify(&form, has_login_session).await {
             Verification::Failed => Verification::Failed,
             // An account that does not see the proxy gets the answer of a wrong password.
             _ if !self.service.can_open(&record, self.proxy) => Verification::Failed,
@@ -345,29 +467,21 @@ impl SessionAuthenticator {
         };
         match verification {
             Verification::Success => {
-                self.service.clear_failures(&key);
-                let (token, expiry) = match self.service.create_session(record).await {
-                    Ok(session) => session,
-                    Err(err) => {
-                        error!(%err, "failed to start the session");
-                        return text_response(
-                            StatusCode::SERVICE_UNAVAILABLE,
-                            "Service Unavailable",
-                        );
-                    }
-                };
-                let cookie = format!(
-                    "{COOKIE_NAME}={token}; Path=/; Max-Age={}; HttpOnly; SameSite=Lax{}",
-                    expiry.as_secs(),
-                    secure_attribute(ctx)
-                );
-                redirect_response(StatusCode::SEE_OTHER, &form.redirect, Some(&cookie))
+                self.service.clear_failures(&client_ip, &key);
+                self.complete_login(record, &form, ctx).await
             }
-            Verification::TotpRequired => page(TOTP_REQUIRED, true, StatusCode::UNAUTHORIZED),
+            Verification::TotpRequired => self.issue_totp_challenge(record, &form, ctx).await,
             Verification::Failed => {
                 warn!(client = %ctx.client, username = %form.username, "sign-in failed");
-                self.service.record_failure(key);
-                page(INVALID_CREDENTIALS, false, StatusCode::UNAUTHORIZED)
+                self.service.record_failure(client_ip, key);
+                render_login_page(
+                    &form,
+                    ctx,
+                    INVALID_CREDENTIALS,
+                    false,
+                    StatusCode::UNAUTHORIZED,
+                    None,
+                )
             }
         }
     }
@@ -505,6 +619,30 @@ fn session_token(headers: &HeaderMap) -> Option<&str> {
 /// Removes the session cookie, so the upstream server never receives the session token.
 pub(crate) fn remove_session_cookie(headers: &mut HeaderMap) {
     remove_cookie(headers, COOKIE_NAME);
+}
+
+fn render_login_page(
+    form: &LoginForm,
+    ctx: &AuthContext<'_>,
+    error_key: &str,
+    totp: bool,
+    status: StatusCode,
+    cookie: Option<&str>,
+) -> Response<Full<Bytes>> {
+    let template = LoginTemplate {
+        username: &form.username,
+        redirect: &form.redirect,
+        error: Some(ctx.preferences.locale.t(error_key)),
+        totp,
+        preferences: ctx.preferences,
+    };
+    let mut res = login_page(template, status);
+    if let Some(cookie) = cookie {
+        if let Ok(val) = HeaderValue::try_from(cookie) {
+            res.headers_mut().insert(SET_COOKIE, val);
+        }
+    }
+    res
 }
 
 #[derive(TemplateOnce)]

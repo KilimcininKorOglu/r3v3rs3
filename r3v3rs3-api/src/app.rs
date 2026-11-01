@@ -1,5 +1,6 @@
 use crate::acme::webhook_url_allowed;
 use crate::error::Error;
+use ipnet::IpNet;
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
 use std::{fmt, net::SocketAddr, path::PathBuf, time::Duration};
@@ -555,6 +556,11 @@ pub struct AdminConfig {
     /// UTC; this only changes how the panel shows them.
     #[serde(default = "default_display_timezone")]
     pub display_timezone: String,
+
+    /// Trusted reverse proxy IP ranges that are allowed to pass X-Forwarded-For or X-Real-IP headers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = [String], example = json!(["127.0.0.1/32"]))]
+    pub trusted_proxies: Vec<IpNet>,
 }
 
 impl AdminConfig {

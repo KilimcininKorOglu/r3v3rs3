@@ -56,7 +56,7 @@ mod app_info;
 mod audit;
 pub(crate) mod auth;
 mod backups;
-mod ban;
+pub(crate) mod ban;
 mod cdn;
 mod certs;
 mod config;

@@ -1092,6 +1092,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 max_login_attempts,
                 login_attempts_reset: admin[1].login_attempts_reset,
                 display_timezone,
+                trusted_proxies: Vec::new(),
             },
             log: LogConfig {
                 database_log_retention: log[0].database_log_retention,

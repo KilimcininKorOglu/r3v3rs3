@@ -90,8 +90,16 @@ fn header_ip(headers: &axum::http::HeaderMap, name: &'static str) -> Option<IpAd
         .and_then(|s| s.trim().parse::<IpAddr>().ok())
 }
 
-fn resolve_client_ip(peer: &SocketAddr, headers: &axum::http::HeaderMap) -> IpAddr {
-    if !peer.ip().is_loopback() {
+async fn resolve_client_ip(
+    state: &AppState,
+    peer: &SocketAddr,
+    headers: &axum::http::HeaderMap,
+) -> IpAddr {
+    let trusted = {
+        let data = state.data.lock().await;
+        data.config.admin.trusted_proxies.clone()
+    };
+    if !trusted.iter().any(|net| net.contains(&peer.ip())) {
         return peer.ip();
     }
     header_ip(headers, "x-forwarded-for")
@@ -122,7 +130,7 @@ pub async fn login(
     jar: CookieJar,
     Json(mut request): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let client_ip = resolve_client_ip(&peer, &headers);
+    let client_ip = resolve_client_ip(&state, &peer, &headers).await;
     resolve_login_username(&state, &mut request);
     let username = request.username.clone();
     let attempt_key = (canonical_client_ip(client_ip), username.clone());
