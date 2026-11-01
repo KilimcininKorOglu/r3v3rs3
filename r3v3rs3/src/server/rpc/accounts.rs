@@ -17,8 +17,7 @@ use rand::distr::{Alphanumeric, SampleString};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 
-/// The longest username. The username is a part of the admin API path of the account.
-const MAX_USERNAME_LENGTH: usize = 64;
+pub use r3v3rs3_api::auth::{MAX_USERNAME_LENGTH, validate_username};
 
 pub struct GetAccountList;
 
@@ -413,19 +412,6 @@ fn unix_secs() -> u64 {
     unix_ms() / 1000
 }
 
-fn validate_username(username: &str) -> Result<(), Error> {
-    let invalid_char = |c: char| c == ':' || c == '/' || c.is_control() || c.is_whitespace();
-    if username.is_empty()
-        || username.chars().count() > MAX_USERNAME_LENGTH
-        || username.chars().any(invalid_char)
-    {
-        return Err(Error::InvalidUsername {
-            username: username.to_string(),
-        });
-    }
-    Ok(())
-}
-
 /// An admin sees every proxy, so only the other roles take a proxy list.
 fn validate_scope(role: Role, proxies: Option<&BTreeSet<ShortId>>) -> Result<(), Error> {
     if role.is_admin() && proxies.is_some() {
@@ -491,7 +477,7 @@ mod tests {
     fn usernames_without_separators_are_valid() {
         assert!(validate_username("editor.1@example").is_ok());
         let long = "a".repeat(MAX_USERNAME_LENGTH + 1);
-        for username in ["", "a:b", "a/b", "a b", "a\tb", long.as_str()] {
+        for username in ["", "a:b", "a/b", "a b", "a\tb", long.as_str(), "version", "Version", "VERSION"] {
             assert!(
                 matches!(
                     validate_username(username),

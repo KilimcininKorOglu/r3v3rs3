@@ -943,6 +943,7 @@ impl Storage for SqliteStorage {
         totp: bool,
         role: Role,
     ) -> Result<Account, Error> {
+        r3v3rs3_api::auth::validate_username(name)?;
         let mut accounts = self.load_accounts().await?;
         let existing = accounts.get(name);
         let mut account =

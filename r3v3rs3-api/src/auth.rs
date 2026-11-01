@@ -1,3 +1,4 @@
+use crate::error::Error;
 use crate::id::ShortId;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -29,6 +30,24 @@ impl Role {
 
 /// The shortest password that a new account or a password change accepts.
 pub const MIN_PASSWORD_LENGTH: usize = 8;
+
+/// The longest username that an account accepts.
+pub const MAX_USERNAME_LENGTH: usize = 64;
+
+/// Validates an account username and rejects invalid characters and reserved names.
+pub fn validate_username(username: &str) -> Result<(), Error> {
+    let invalid_char = |c: char| c == ':' || c == '/' || c.is_control() || c.is_whitespace();
+    if username.is_empty()
+        || username.chars().count() > MAX_USERNAME_LENGTH
+        || username.chars().any(invalid_char)
+        || username.eq_ignore_ascii_case("version")
+    {
+        return Err(Error::InvalidUsername {
+            username: username.to_string(),
+        });
+    }
+    Ok(())
+}
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Account {

@@ -427,6 +427,7 @@ async fn create_account(
 }
 
 async fn add_user(mut args: r3v3rs3::args::AddUserArgs) -> anyhow::Result<()> {
+    r3v3rs3_api::auth::validate_username(&args.name)?;
     let config_dir = get_config_dir(args.config_dir.take())?;
     let local = read_local_config(&config_dir).await?;
     let password = match args.password.take() {

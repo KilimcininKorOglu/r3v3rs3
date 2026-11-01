@@ -617,21 +617,12 @@ impl FileStorage {
         totp: bool,
         role: Role,
     ) -> anyhow::Result<Account> {
+        r3v3rs3_api::auth::validate_username(name)?;
         fs::create_dir_all(&self.dir).await?;
         let path = self.dir.join("accounts.toml");
         info!(?path, "save account");
 
-        let mut doc = match fs::read_to_string(&path).await {
-            Ok(content) => content
-                .parse::<DocumentMut>()
-                .with_context(|| format!("failed to parse {}", path.display()))?,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => DocumentMut::default(),
-            Err(err) => {
-                return Err(anyhow::Error::new(err)
-                    .context(format!("failed to read {}", path.display())));
-            }
-        };
-
+        let mut doc = load_account_document(&path).await?;
         let prev = Self::previous_credentials_changed_at(&doc, name);
         let mut account = account::new_account(password, totp)?;
         account.role = role;
@@ -642,6 +633,19 @@ impl FileStorage {
         write_private(&path, doc.to_string()).await?;
         Ok(account)
     }
+}
+
+async fn load_account_document(path: &Path) -> anyhow::Result<DocumentMut> {
+    match fs::read_to_string(path).await {
+        Ok(content) => content
+            .parse::<DocumentMut>()
+            .with_context(|| format!("failed to parse {}", path.display())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(DocumentMut::default()),
+        Err(err) => Err(anyhow::Error::new(err).context(format!("failed to read {}", path.display()))),
+    }
+}
+
+impl FileStorage {
 
     async fn read_accounts(&self) -> anyhow::Result<HashMap<String, Account>> {
         let path = self.dir.join("accounts.toml");
@@ -1127,6 +1131,16 @@ mod test {
         let res = storage.add_account("alice", "password123", false, Role::Admin).await;
         assert!(res.is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "this is = [invalid toml");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn add_account_rejects_version_username() {
+        let dir = std::env::temp_dir().join(format!("r33-add-user-version-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = FileStorage::new(&dir);
+        let res = storage.add_account("version", "password123", false, Role::Admin).await;
+        assert!(res.is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
