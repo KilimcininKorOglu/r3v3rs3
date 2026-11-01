@@ -61,7 +61,7 @@ mod cdn;
 mod certs;
 mod config;
 mod dashboard;
-mod databases;
+pub(crate) mod databases;
 mod disaster_recovery;
 mod discovery;
 mod dns_credentials;

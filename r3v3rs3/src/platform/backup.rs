@@ -914,12 +914,8 @@ impl Platform {
             return Ok(String::new());
         }
         let password = format!("{:032x}", rand::random::<u128>());
-        let entry = r3v3rs3_api::platform::EnvEntry {
-            key: info.password_env.parse()?,
-            value: Some(password.clone()),
-            secret: true,
-        };
-        self.set_env(db_id, vec![entry]).await?;
+        let entries = crate::admin::databases::initial_db_env_entries(info, &password)?;
+        self.set_env(db_id, entries).await?;
         Ok(password)
     }
 }
