@@ -252,13 +252,7 @@ pub async fn create_replica(
 ) -> Result<Json<DatabaseCreated>, AppError> {
     let platform = state.platform(&caller, Permission::Edit).await?;
     let primary = platform.app(id).await.map_err(platform_error)?;
-    if primary.spec.replica_of.is_some() {
-        return Err(Error::InvalidContainerSpec {
-            reason: "replicas can only be created from primary databases".to_string(),
-        }
-        .into());
-    }
-    let info = source_engine_info(&primary)?;
+    let info = validate_primary_for_replica(&primary)?;
     let host_port = resolve_host_port(request.host_port)?;
     let app_req =
         replica_app_request(&primary, &request, &info, host_port).map_err(into_app_error)?;
@@ -556,9 +550,39 @@ fn into_app_error(err: Error) -> AppError {
     AppError::R3v3rs3(err)
 }
 
+/// Validates that the primary database is eligible for replica creation and its engine supports replication.
+fn validate_primary_for_replica(primary: &AppEntry) -> Result<EngineInfo, AppError> {
+    if primary.spec.replica_of.is_some() {
+        return Err(Error::InvalidContainerSpec {
+            reason: "replicas can only be created from primary databases".to_string(),
+        }
+        .into());
+    }
+    let info = source_engine_info(primary)?;
+    validate_replica_support(&info.engine).map_err(into_app_error)?;
+    Ok(info)
+}
+
+/// Validates whether autonomous read replication is supported for the database engine.
+fn validate_replica_support(engine: &str) -> Result<(), Error> {
+    Err(Error::InvalidContainerSpec {
+        reason: format!(
+            "autonomous read replication is currently unsupported for database engine '{engine}'"
+        ),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_replica_support_disallows_unsupported_engines() {
+        assert!(validate_replica_support("postgres").is_err());
+        assert!(validate_replica_support("mysql").is_err());
+        assert!(validate_replica_support("mongodb").is_err());
+        assert!(validate_replica_support("redis").is_err());
+    }
 
     #[test]
     fn test_mongodb_initial_env_entries() {
