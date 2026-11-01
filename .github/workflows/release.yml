@@ -284,11 +284,13 @@ jobs:
         run: rustup toolchain install
       - name: Add the target
         run: rustup target add "${{ matrix.target }}"
+      - name: Install cargo-binstall
+        if: matrix.zigbuild
+        uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
       - name: Install zig and cargo-zigbuild
         if: matrix.zigbuild
         run: |
           python3 -m pip install ziglang==0.17.0
-          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
           cargo binstall cargo-zigbuild@0.23.4 --force -y
       - name: Cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
