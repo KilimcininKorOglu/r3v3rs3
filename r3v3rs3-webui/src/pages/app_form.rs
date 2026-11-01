@@ -216,12 +216,14 @@ impl AppForm {
                 ..Self::default()
             };
         }
+        let volumes = store_volumes_str(&app.id, &app.volumes);
         Self {
             name: app.id.clone(),
             kind: SourceKind::Image,
             image: app.image.clone().unwrap_or_default(),
             port: app.port.to_string(),
             health_check_path: app.health_check_path.clone().unwrap_or_default(),
+            volumes,
             store_app_id: Some(app.id.clone()),
             ..Self::default()
         }
@@ -843,6 +845,22 @@ fn lines<T: ToString>(items: impl Iterator<Item = T>) -> String {
 fn mount_line(mount: &VolumeMount) -> String {
     let suffix = if mount.read_only { ":ro" } else { "" };
     format!("{}:{}{suffix}", mount.volume, mount.target.as_str())
+}
+
+fn store_volumes_str(app_id: &str, targets: &[String]) -> String {
+    targets
+        .iter()
+        .enumerate()
+        .map(|(i, target)| {
+            let suffix = if i == 0 {
+                "data".to_string()
+            } else {
+                format!("data{}", i + 1)
+            };
+            format!("{app_id}-{suffix}:{target}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The options and lists available for selection in the app form.
@@ -1820,8 +1838,10 @@ mod tests {
             file: None,
             service: None,
             env: Vec::new(),
+            volumes: vec!["/app/data".into()],
         };
         let form = AppForm::from_store(&entry);
+        assert_eq!(form.volumes, "uptime-kuma-data:/app/data");
         let request = form.parse(Locale::En).unwrap();
         assert_eq!(request.name.as_str(), "uptime-kuma");
         assert_eq!(request.target.to_string(), "local");
@@ -1832,6 +1852,9 @@ mod tests {
         assert_eq!(request.spec.port, 3001);
         assert_eq!(request.spec.health_check_path.as_deref(), Some("/"));
         assert!(request.spec.domains.is_empty());
+        assert_eq!(request.spec.volumes.len(), 1);
+        assert_eq!(request.spec.volumes[0].volume.as_str(), "uptime-kuma-data");
+        assert_eq!(request.spec.volumes[0].target.as_str(), "/app/data");
     }
 
     #[test]
@@ -1854,6 +1877,7 @@ mod tests {
             file: Some("app-store-compose/umami/compose.yaml".into()),
             service: Some("umami".into()),
             env: Vec::new(),
+            volumes: Vec::new(),
         };
         let form = AppForm::from_store(&entry);
         let request = form.parse(Locale::En).unwrap();

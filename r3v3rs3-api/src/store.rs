@@ -66,6 +66,9 @@ pub struct StoreApp {
     /// The environment variables that the user fills before the first deployment.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env: Vec<StoreEnv>,
+    /// Default persistent volume targets inside the container (e.g. `["/data"]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<String>,
 }
 
 /// An environment variable of a Compose entry that the user fills in the panel.

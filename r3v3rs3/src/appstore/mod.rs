@@ -103,6 +103,7 @@ mod tests {
             file: None,
             service: None,
             env: Vec::new(),
+            volumes: Vec::new(),
         }
     }
 
