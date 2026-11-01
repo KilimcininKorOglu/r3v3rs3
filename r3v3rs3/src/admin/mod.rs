@@ -351,11 +351,11 @@ fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
             _ => AppError::Anyhow(anyhow::anyhow!(error)).into_response(),
         });
     Ok(OpenApiRouter::new()
-        .routes(routes!(auth::login).layer(login_limit))
+        .routes(routes!(auth::login).layer(login_limit.clone()))
         .routes(routes!(auth::logout))
         .nest(
             "/auth",
-            OpenApiRouter::new().routes(routes!(auth::get_passkey_challenge)),
+            OpenApiRouter::new().routes(routes!(auth::get_passkey_challenge).layer(login_limit)),
         ))
 }
 

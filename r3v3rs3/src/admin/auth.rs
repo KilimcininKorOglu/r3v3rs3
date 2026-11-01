@@ -807,6 +807,9 @@ impl LoginAttempt {
     }
 }
 
+/// Maximum number of active WebAuthn challenges held in memory.
+const MAX_PASSKEY_CHALLENGES: usize = 1024;
+
 /// Active WebAuthn challenges with 2-minute expiration.
 #[derive(Default)]
 pub struct PasskeyChallenges {
@@ -817,7 +820,20 @@ impl PasskeyChallenges {
     pub fn insert(&mut self, challenge: String, now: Instant) {
         self.entries
             .retain(|_, time| now.duration_since(*time) < Duration::from_secs(120));
+        if self.entries.len() >= MAX_PASSKEY_CHALLENGES {
+            Self::prune_oldest(&mut self.entries);
+        }
         self.entries.insert(challenge, now);
+    }
+
+    fn prune_oldest(entries: &mut HashMap<String, Instant>) {
+        if let Some(oldest) = entries
+            .iter()
+            .min_by_key(|(_, time)| *time)
+            .map(|(k, _)| k.clone())
+        {
+            entries.remove(&oldest);
+        }
     }
 
     pub fn consume(&mut self, challenge: &str, now: Instant) -> bool {
@@ -911,5 +927,20 @@ mod tests {
             "example.com"
         ));
         assert!(!is_valid_origin("not-a-url", "example.com"));
+    }
+
+    #[test]
+    fn passkey_challenges_cap_and_expiry() {
+        let mut challenges = PasskeyChallenges::default();
+        let now = Instant::now();
+        for i in 0..1030 {
+            challenges.insert(format!("ch_{i}"), now + Duration::from_millis(i as u64));
+        }
+        assert!(challenges.entries.len() <= MAX_PASSKEY_CHALLENGES);
+        assert!(!challenges.consume("ch_0", now));
+        assert!(challenges.consume("ch_1029", now + Duration::from_millis(1029)));
+
+        let expired = now + Duration::from_secs(125);
+        assert!(!challenges.consume("ch_1028", expired));
     }
 }
