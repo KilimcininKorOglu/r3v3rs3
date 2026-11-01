@@ -60,6 +60,10 @@ pub enum ServerCommand {
     Notify {
         notification: Notification,
     },
+    /// A certificate notification delivery succeeded, so its event key is marked as sent.
+    CertificateNotificationDelivered {
+        key: String,
+    },
     /// The worker wrote the new configuration into its storage, so the ports, the proxies, the
     /// access lists and the certificates must reload from it.
     WorkerApply,
@@ -132,10 +136,12 @@ impl std::fmt::Debug for ServerCommand {
                 .debug_struct("Notify")
                 .field("event", &notification.event)
                 .finish(),
+            Self::CertificateNotificationDelivered { key } => f
+                .debug_struct("CertificateNotificationDelivered")
+                .field("key", key)
+                .finish(),
             Self::WorkerApply => f.debug_struct("WorkerApply").finish(),
-            Self::InvalidateStorageSecrets => {
-                f.debug_struct("InvalidateStorageSecrets").finish()
-            }
+            Self::InvalidateStorageSecrets => f.debug_struct("InvalidateStorageSecrets").finish(),
             Self::SuspendListeners => f.debug_struct("SuspendListeners").finish(),
             Self::WorkerConfigSnapshot { .. } => f.debug_struct("WorkerConfigSnapshot").finish(),
             Self::SetWorkerStatus { pid, status } => f

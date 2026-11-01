@@ -536,8 +536,21 @@ impl ServerState {
                 self.reload_proxies().await;
             }
             ServerCommand::Notify { notification } => self.notify(notification),
+            ServerCommand::CertificateNotificationDelivered { key } => {
+                self.record_certificate_notification_sent(key).await;
+            }
             // `handle_command` handles the other commands before it calls this method.
             _ => {}
+        }
+    }
+
+    async fn record_certificate_notification_sent(&mut self, key: String) {
+        if self.sent_notifications.insert(key) {
+            log_save_error(
+                self.storage
+                    .save_sent_notifications(&self.sent_notifications)
+                    .await,
+            );
         }
     }
 
@@ -599,7 +612,7 @@ impl ServerState {
     }
 
     /// Sends a webhook notification for each certificate that expires within the warning time or
-    /// has expired. Each event of a certificate is sent once.
+    /// has expired. Each event of a certificate is sent once after successful delivery.
     async fn notify_certificates(&mut self) {
         let Some(webhook) = self.config.notifications.webhook.clone() else {
             return;
@@ -610,19 +623,30 @@ impl ServerState {
             .map(|cert| cert.info())
             .collect::<Vec<_>>();
         let now = i64::try_from(unix_ms() / 1000).unwrap_or(i64::MAX);
-        let (notifications, sent) = certificate_notifications(
+        let (notifications, current_keys) = certificate_notifications(
             &certs,
             &self.sent_notifications,
             now,
             self.config.notifications.cert_expiry_warning,
             "",
         );
-        for notification in notifications {
-            self.notifier.send(&webhook, notification);
+        let pruned: HashSet<String> = self
+            .sent_notifications
+            .iter()
+            .filter(|k| current_keys.contains(*k))
+            .cloned()
+            .collect();
+        if pruned != self.sent_notifications {
+            log_save_error(self.storage.save_sent_notifications(&pruned).await);
+            self.sent_notifications = pruned;
         }
-        if sent != self.sent_notifications {
-            log_save_error(self.storage.save_sent_notifications(&sent).await);
-            self.sent_notifications = sent;
+        for (notification, key) in notifications {
+            let command = self.command_sender.clone();
+            self.notifier
+                .send_with_success(&webhook, notification, move || {
+                    let _ =
+                        command.try_send(ServerCommand::CertificateNotificationDelivered { key });
+                });
         }
     }
 

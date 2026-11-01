@@ -202,14 +202,14 @@ impl Notification {
 /// The certificate notifications to send at the Unix time `now`, and the keys of the events that
 /// the certificates have now. `sent` holds the keys of the events that were sent before, so each
 /// event of a certificate is sent once. A renewed certificate has a new fingerprint, so its events
-/// are new.
+/// are new. Each notification is paired with its event key.
 pub fn certificate_notifications(
     certs: &[CertInfo],
     sent: &HashSet<String>,
     now: i64,
     warning: Duration,
     node: &str,
-) -> (Vec<Notification>, HashSet<String>) {
+) -> (Vec<(Notification, String)>, HashSet<String>) {
     let mut notifications = Vec::new();
     let mut keys = HashSet::new();
     for info in certs {
@@ -220,7 +220,10 @@ pub fn certificate_notifications(
         };
         let key = format!("{}:{}", event.as_str(), info.fingerprint);
         if !sent.contains(&key) {
-            notifications.push(Notification::new(event, node).certificate(info));
+            notifications.push((
+                Notification::new(event, node).certificate(info),
+                key.clone(),
+            ));
         }
         keys.insert(key);
     }
@@ -245,18 +248,26 @@ pub async fn deliver(webhook: &WebhookConfig, notification: &Notification) -> an
     Ok(())
 }
 
+type SuccessCallback = Box<dyn FnOnce() + Send + 'static>;
+
+struct NotificationTask {
+    webhook: WebhookConfig,
+    notification: Notification,
+    on_success: Option<SuccessCallback>,
+}
+
 /// Sends the notifications in the background, so a slow webhook does not delay the server.
 #[derive(Clone)]
 pub struct Notifier {
-    sender: mpsc::Sender<(WebhookConfig, Notification)>,
+    sender: mpsc::Sender<NotificationTask>,
 }
 
 impl Notifier {
     pub fn spawn() -> Self {
-        let (sender, mut receiver) = mpsc::channel::<(WebhookConfig, Notification)>(QUEUE_SIZE);
+        let (sender, mut receiver) = mpsc::channel::<NotificationTask>(QUEUE_SIZE);
         tokio::spawn(async move {
-            while let Some((webhook, notification)) = receiver.recv().await {
-                deliver_with_retry(&webhook, &notification).await;
+            while let Some(task) = receiver.recv().await {
+                deliver_with_retry(&task.webhook, &task.notification, task.on_success).await;
             }
         });
         Self { sender }
@@ -264,23 +275,58 @@ impl Notifier {
 
     /// Queues the notification. A full queue drops it and logs an error.
     pub fn send(&self, webhook: &WebhookConfig, notification: Notification) {
-        if let Err(err) = self.sender.try_send((webhook.clone(), notification)) {
+        let task = NotificationTask {
+            webhook: webhook.clone(),
+            notification,
+            on_success: None,
+        };
+        if let Err(err) = self.sender.try_send(task) {
+            error!(%err, "failed to queue the notification");
+        }
+    }
+
+    /// Queues the notification and calls `on_success` only after delivery succeeds.
+    pub fn send_with_success<F>(
+        &self,
+        webhook: &WebhookConfig,
+        notification: Notification,
+        on_success: F,
+    ) where
+        F: FnOnce() + Send + 'static,
+    {
+        let task = NotificationTask {
+            webhook: webhook.clone(),
+            notification,
+            on_success: Some(Box::new(on_success)),
+        };
+        if let Err(err) = self.sender.try_send(task) {
             error!(%err, "failed to queue the notification");
         }
     }
 }
 
-async fn deliver_with_retry(webhook: &WebhookConfig, notification: &Notification) {
+async fn deliver_with_retry(
+    webhook: &WebhookConfig,
+    notification: &Notification,
+    on_success: Option<SuccessCallback>,
+) {
     for attempt in 1..=ATTEMPTS {
-        let Err(err) = deliver(webhook, notification).await else {
-            return;
-        };
-        if attempt == ATTEMPTS {
-            error!(event = ?notification.event, "failed to send the notification: {err:#}");
-            return;
+        match deliver(webhook, notification).await {
+            Ok(()) => {
+                if let Some(callback) = on_success {
+                    callback();
+                }
+                return;
+            }
+            Err(err) => {
+                if attempt == ATTEMPTS {
+                    error!(event = ?notification.event, "failed to send the notification: {err:#}");
+                    return;
+                }
+                warn!(event = ?notification.event, attempt, "failed to send the notification: {err:#}");
+                tokio::time::sleep(RETRY_DELAY * attempt).await;
+            }
         }
-        warn!(event = ?notification.event, attempt, "failed to send the notification: {err:#}");
-        tokio::time::sleep(RETRY_DELAY * attempt).await;
     }
 }
 
@@ -325,7 +371,7 @@ mod tests {
         let (sent, current) = certificate_notifications(&certs, &HashSet::new(), now, warning, "a");
         let events = sent
             .iter()
-            .map(|notification| (notification.event, notification.certificate.clone()))
+            .map(|(notification, _)| (notification.event, notification.certificate.clone()))
             .map(|(event, certificate)| (event, certificate.map(|c| c.not_after)))
             .collect::<Vec<_>>();
         assert_eq!(
