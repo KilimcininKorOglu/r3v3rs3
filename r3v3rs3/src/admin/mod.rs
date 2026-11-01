@@ -36,12 +36,12 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    task::{Context, Poll, ready},
+    task::{Context, Poll},
 };
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot, watch};
-use tokio_stream::wrappers::{BroadcastStream, WatchStream};
+use tokio_stream::wrappers::{ReceiverStream, WatchStream};
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::{GovernorError, GovernorLayer};
 use tracing::{trace, warn};
@@ -945,61 +945,122 @@ fn state_routes() -> OpenApiRouter<AppState> {
 async fn events(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    session_token: Option<Extension<auth::AuthSessionToken>>,
 ) -> Sse<impl Stream<Item = Result<Event, axum::Error>>> {
-    let stream = StreamWrapper::new(
-        BroadcastStream::new(state.event.subscribe()),
-        state.event_listener_counter.clone(),
-        state.sender.clone(),
-        caller,
-        state.accounts.clone(),
-    );
+    let session_token = session_token.map(|Extension(t)| t.0);
+    let stream = StreamWrapper::new(&state, caller, session_token);
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 /// The server events that the account of the stream sees. The stream ends when the account
-/// changes or is removed.
+/// changes or is removed, or when its admin session ends or expires.
 struct StreamWrapper {
-    inner: BroadcastStream<ServerEvent>,
-    accounts: WatchStream<Arc<AccountDirectory>>,
-    caller: Caller,
-    /// The account at the start of the stream.
-    account: Option<AccountEntry>,
+    inner: ReceiverStream<Result<Event, axum::Error>>,
     counter: Arc<AtomicUsize>,
     sender: Sender<ServerCommand>,
 }
 
 impl StreamWrapper {
-    fn new(
-        stream: BroadcastStream<ServerEvent>,
-        counter: Arc<AtomicUsize>,
-        sender: Sender<ServerCommand>,
-        caller: Caller,
-        accounts: watch::Receiver<Arc<AccountDirectory>>,
-    ) -> Self {
+    fn new(state: &AppState, caller: Caller, session_token: Option<String>) -> Self {
+        let counter = state.event_listener_counter.clone();
+        let sender = state.sender.clone();
         if counter.fetch_add(1, Ordering::Relaxed) == 0 {
             let _ = sender.try_send(ServerCommand::SetBroadcastEvents { enabled: true });
         }
-        let account = accounts.borrow().get(&caller.username).cloned();
+        let initial_account = state.accounts.borrow().get(&caller.username).cloned();
+        let (tx, rx) = mpsc::channel(32);
+        let state_clone = state.clone();
+
+        tokio::spawn(async move {
+            run_event_stream(state_clone, caller, initial_account, session_token, tx).await;
+        });
+
         Self {
-            inner: stream,
-            accounts: WatchStream::new(accounts),
-            caller,
-            account,
+            inner: ReceiverStream::new(rx),
             counter,
             sender,
         }
     }
+}
 
-    fn account_changed(&mut self, cx: &mut Context<'_>) -> bool {
-        while let Poll::Ready(directory) = self.accounts.poll_next_unpin(cx) {
-            let Some(directory) = directory else {
-                return true;
-            };
-            if directory.get(&self.caller.username) != self.account.as_ref() {
-                return true;
+async fn is_session_invalid(state: &AppState, token: &str) -> bool {
+    let (backend, expiry) = auth::session_backend(state).await;
+    match backend
+        .get(crate::sessions::SessionScope::Admin, token)
+        .await
+    {
+        Ok(Some(record)) => !record.is_active(expiry),
+        _ => true,
+    }
+}
+
+async fn handle_broadcast_event(
+    state: &AppState,
+    caller: &Caller,
+    session_token: Option<&str>,
+    event: ServerEvent,
+    tx: &mpsc::Sender<Result<Event, axum::Error>>,
+) -> bool {
+    if let Some(token) = session_token
+        && is_session_invalid(state, token).await
+    {
+        return false;
+    }
+    if let Some(event) = caller.visible_event(event) {
+        return tx.send(Event::default().json_data(event)).await.is_ok();
+    }
+    true
+}
+
+async fn run_event_stream(
+    state: AppState,
+    caller: Caller,
+    initial_account: Option<AccountEntry>,
+    session_token: Option<String>,
+    tx: mpsc::Sender<Result<Event, axum::Error>>,
+) {
+    let mut broadcast = state.event.subscribe();
+    let mut accounts_stream = WatchStream::new(state.accounts.clone());
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                if let Some(token) = session_token.as_deref()
+                    && is_session_invalid(&state, token).await
+                {
+                    break;
+                }
+            }
+            account = accounts_stream.next() => {
+                let Some(directory) = account else { break; };
+                if directory.get(&caller.username) != initial_account.as_ref() {
+                    break;
+                }
+            }
+            event = broadcast.recv() => {
+                match event {
+                    Ok(event) => {
+                        if !handle_broadcast_event(
+                            &state,
+                            &caller,
+                            session_token.as_deref(),
+                            event,
+                            &tx,
+                        )
+                        .await
+                        {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("event stream lagged, skipped {n} events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
             }
         }
-        false
     }
 }
 
@@ -1008,22 +1069,7 @@ impl Stream for StreamWrapper {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        if this.account_changed(cx) {
-            return Poll::Ready(None);
-        }
-        loop {
-            let event = match ready!(this.inner.poll_next_unpin(cx)) {
-                Some(Ok(event)) => event,
-                Some(Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n))) => {
-                    warn!("event stream lagged, skipped {n} events");
-                    continue;
-                }
-                None => return Poll::Ready(None),
-            };
-            if let Some(event) = this.caller.visible_event(event) {
-                return Poll::Ready(Some(Event::default().json_data(event)));
-            }
-        }
+        this.inner.poll_next_unpin(cx)
     }
 }
 

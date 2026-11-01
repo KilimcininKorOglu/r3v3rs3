@@ -182,7 +182,7 @@ pub async fn login(
 
 /// The sessions and their lifetime. The lock is released before the sessions are used, because
 /// the sessions of a cluster wait for the store.
-async fn session_backend(state: &AppState) -> (Arc<dyn SessionBackend>, Duration) {
+pub(crate) async fn session_backend(state: &AppState) -> (Arc<dyn SessionBackend>, Duration) {
     let data = state.data.lock().await;
     (data.sessions.clone(), sessions::expiry(&data.config.admin))
 }
@@ -683,26 +683,29 @@ pub(crate) fn api_token_caller(state: &AppState, token: &str) -> Option<Caller> 
     state.accounts.borrow().token_caller(&token_hash)
 }
 
+#[derive(Clone, Debug)]
+pub struct AuthSessionToken(pub String);
+
 async fn resolve_caller(
     state: &AppState,
     bearer: Option<&str>,
     cookie: Option<&str>,
-) -> Result<Caller, Error> {
+) -> Result<(Caller, Option<String>), Error> {
     if let Some(token) = bearer {
         if let Some(caller) = api_token_caller(state, token) {
-            return Ok(caller);
+            return Ok((caller, None));
         }
         if let Ok(caller) = bearer_caller(state, token).await {
-            return Ok(caller);
+            return Ok((caller, None));
         }
         if let Ok(caller) = session_caller(state, token).await {
-            return Ok(caller);
+            return Ok((caller, Some(token.to_string())));
         }
     }
     if let Some(token) = cookie
         && let Ok(caller) = session_caller(state, token).await
     {
-        return Ok(caller);
+        return Ok((caller, Some(token.to_string())));
     }
     Err(Error::Unauthorized)
 }
@@ -721,12 +724,15 @@ pub async fn verify(
         .and_then(|val| val.strip_prefix("Bearer "));
     let cookie = jar.get("token").map(|c| c.value());
     match resolve_caller(&state, bearer, cookie).await {
-        Ok(mut caller) => {
+        Ok((mut caller, session_token)) => {
             caller.client = request
                 .extensions()
                 .get::<ConnectInfo<SocketAddr>>()
                 .map(|info| info.0.ip());
             request.extensions_mut().insert(caller);
+            if let Some(token) = session_token {
+                request.extensions_mut().insert(AuthSessionToken(token));
+            }
             next.run(request).await
         }
         Err(err) => AppError::R3v3rs3(err).into_response(),
