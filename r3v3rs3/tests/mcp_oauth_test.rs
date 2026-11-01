@@ -1157,6 +1157,35 @@ async fn dynamic_registration_rate_limit_throttles_rapid_requests() -> anyhow::R
 }
 
 #[tokio::test]
+async fn token_rate_limit_throttles_rapid_requests() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-token-ratelimit")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let mut got_429 = false;
+        for i in 0..25 {
+            let res = client
+                .post(format!("http://{addr}/oauth/token"))
+                .form(&[
+                    ("grant_type", "authorization_code"),
+                    ("code", &format!("bogus_{i}")),
+                    ("redirect_uri", REDIRECT_URI),
+                    ("client_id", CLIENT_ID),
+                    ("code_verifier", "verifier"),
+                ])
+                .send()
+                .await?;
+            if res.status() == StatusCode::TOO_MANY_REQUESTS {
+                got_429 = true;
+                break;
+            }
+        }
+        assert!(got_429, "expected at least one 429 Too Many Requests response during burst");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
 async fn run_server_upgrade_rejects_non_admin() -> anyhow::Result<()> {
     use rmcp::model::CallToolRequestParams;
     use rmcp::service::serve_client;

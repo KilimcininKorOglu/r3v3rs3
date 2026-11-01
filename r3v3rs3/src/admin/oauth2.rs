@@ -14,7 +14,7 @@ use crate::audit::AuditRecord;
 use crate::server::rpc::auth::GetPlatform;
 use axum::{
     Json,
-    extract::{Form, Query, RawQuery, State},
+    extract::{ConnectInfo, Form, Query, RawQuery, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Redirect, Response},
 };
@@ -31,7 +31,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{Row as _, SqlitePool};
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::net::{IpAddr, SocketAddr};
+use std::time::{Duration, Instant};
 use tracing::info;
 
 /// The lifetime of an authorization code. RFC 6749 recommends 10 minutes.
@@ -1585,7 +1586,23 @@ pub async fn register(
     request_body = TokenForm,
     responses((status = 200, description = "The access and refresh tokens."), ErrorResponses)
 )]
-pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -> Response {
+pub async fn token(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Form(form): Form<TokenForm>,
+) -> Response {
+    let ip = r3v3rs3_api::client_ip::canonical_client_ip(peer.ip());
+    let now = Instant::now();
+    {
+        let mut data = state.data.lock().await;
+        if let Err(err) = data.ban_tracker.check_banned(&ip, now) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({ "error": "slow_down", "error_description": err.to_string() })),
+            )
+                .into_response();
+        }
+    }
     let config = state.data.lock().await.config.mcp.clone();
     if !config.enabled {
         return (
@@ -1616,7 +1633,11 @@ pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -
                 .await
             {
                 Ok((_username, issued)) => Json(issued).into_response(),
-                Err(_) => oauth_error("invalid_grant", "the code is unknown, expired or used"),
+                Err(_) => {
+                    drop(data);
+                    record_token_failure(&state, ip).await;
+                    oauth_error("invalid_grant", "the code is unknown, expired or used")
+                }
             }
         }
         "refresh_token" => {
@@ -1626,7 +1647,11 @@ pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -
             let mut data = state.data.lock().await;
             match data.mcp.refresh_tokens(refresh_token).await {
                 Some(issued) => Json(issued).into_response(),
-                None => oauth_error("invalid_grant", "the refresh token is unknown or expired"),
+                None => {
+                    drop(data);
+                    record_token_failure(&state, ip).await;
+                    oauth_error("invalid_grant", "the refresh token is unknown or expired")
+                }
             }
         }
         _ => oauth_error(
@@ -1634,6 +1659,20 @@ pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -
             "only authorization_code and refresh_token",
         ),
     }
+}
+
+async fn record_token_failure(state: &AppState, ip: IpAddr) {
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut data = state.data.lock().await;
+    let admin = data.config.admin.clone();
+    let ban_threshold = admin.max_login_attempts.saturating_mul(2).max(5);
+    data.ban_tracker.record_failure(
+        ip,
+        ban_threshold,
+        admin.login_attempts_reset,
+        admin.login_attempts_reset.max(Duration::from_secs(300)),
+        Instant::now(),
+    );
 }
 
 /// Lists active authorized MCP client sessions.
