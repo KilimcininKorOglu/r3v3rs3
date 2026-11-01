@@ -243,17 +243,17 @@ async fn load_server_state(app_state: &AppState) -> anyhow::Result<()> {
         .call_system(GetPlatform)
         .await
         .map_err(|err| anyhow::anyhow!("failed to load the deployment platform: {err}"))?;
+    let pool = app_state
+        .call_system(GetSqlitePool)
+        .await
+        .ok()
+        .and_then(|b| *b);
     let mut data = app_state.data.lock().await;
     data.config = *config;
     data.sessions = *sessions;
     data.audit = Some(*audit);
     data.platform = *platform;
 
-    let pool = app_state
-        .call_system(GetSqlitePool)
-        .await
-        .ok()
-        .and_then(|b| *b);
     init_mcp_auth(&mut data, pool).await;
     Ok(())
 }
