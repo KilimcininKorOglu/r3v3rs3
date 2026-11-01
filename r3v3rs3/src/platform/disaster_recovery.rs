@@ -284,6 +284,39 @@ fn extract_entry(
     Ok(true)
 }
 
+pub const MAX_DR_UNPACKED_BYTES: u64 = 512 * 1024 * 1024;
+pub const MAX_DR_ENTRY_BYTES: u64 = 256 * 1024 * 1024;
+pub const MAX_DR_ENTRY_COUNT: usize = 5000;
+
+fn check_entry_limits(
+    entry: &tar::Entry<impl std::io::Read>,
+    entries_scanned: usize,
+    total_unpacked_bytes: &mut u64,
+) -> anyhow::Result<()> {
+    if entries_scanned > MAX_DR_ENTRY_COUNT {
+        anyhow::bail!("archive contains too many entries (exceeds limit of {MAX_DR_ENTRY_COUNT})");
+    }
+    let entry_size = entry.header().size()?;
+    if entry_size > MAX_DR_ENTRY_BYTES {
+        anyhow::bail!("archive entry exceeds maximum allowed file size of {MAX_DR_ENTRY_BYTES} bytes");
+    }
+    *total_unpacked_bytes = total_unpacked_bytes.saturating_add(entry_size);
+    if *total_unpacked_bytes > MAX_DR_UNPACKED_BYTES {
+        anyhow::bail!("total uncompressed archive size exceeds limit of {MAX_DR_UNPACKED_BYTES} bytes");
+    }
+    Ok(())
+}
+
+fn unpack_single_entry(
+    entry: tar::Entry<impl std::io::Read>,
+    canonical_dest: &Path,
+) -> anyhow::Result<bool> {
+    let is_dir = validate_entry_type(&entry)?;
+    let rel_path = entry.path()?.to_path_buf();
+    let target = resolve_target_path(canonical_dest, &rel_path)?;
+    extract_entry(entry, &target, is_dir)
+}
+
 /// Unpacks a gzipped tar archive into `dest_dir` with path traversal protections.
 pub fn unpack_tar_gz(archive_bytes: &[u8], dest_dir: &Path) -> anyhow::Result<usize> {
     let canonical_dest = dest_dir
@@ -291,17 +324,18 @@ pub fn unpack_tar_gz(archive_bytes: &[u8], dest_dir: &Path) -> anyhow::Result<us
         .unwrap_or_else(|_| dest_dir.to_path_buf());
     let dec = GzDecoder::new(archive_bytes);
     let mut tar = tar::Archive::new(dec);
-    let mut count = 0;
+    let mut file_count = 0;
+    let mut total_bytes = 0u64;
+    let mut scanned = 0;
     for entry in tar.entries()? {
         let entry = entry?;
-        let is_dir = validate_entry_type(&entry)?;
-        let rel_path = entry.path()?.to_path_buf();
-        let target = resolve_target_path(&canonical_dest, &rel_path)?;
-        if extract_entry(entry, &target, is_dir)? {
-            count += 1;
+        scanned += 1;
+        check_entry_limits(&entry, scanned, &mut total_bytes)?;
+        if unpack_single_entry(entry, &canonical_dest)? {
+            file_count += 1;
         }
     }
-    Ok(count)
+    Ok(file_count)
 }
 
 fn sanitize_relative_path(path: &Path) -> anyhow::Result<PathBuf> {
@@ -599,6 +633,21 @@ mod tests {
             tar.into_inner().unwrap().finish().unwrap();
         }
         assert!(unpack_tar_gz(&tar_bytes, &temp_dir).is_err());
+
+        // 3. Decompression bomb / oversized file entry
+        let mut bomb_bytes = Vec::new();
+        {
+            let enc = flate2::write::GzEncoder::new(&mut bomb_bytes, flate2::Compression::default());
+            let mut tar = tar::Builder::new(enc);
+            let mut header = tar::Header::new_old();
+            header.set_size(MAX_DR_ENTRY_BYTES + 1024);
+            header.set_cksum();
+            tar.append_data(&mut header, "config.toml", std::io::empty()).unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        let err = unpack_tar_gz(&bomb_bytes, &temp_dir).unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum allowed file size"), "{err}");
+
         let _ = fs::remove_dir_all(&temp_dir);
     }
 

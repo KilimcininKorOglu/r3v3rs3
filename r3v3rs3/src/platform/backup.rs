@@ -2228,11 +2228,24 @@ async fn gzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
     Ok(compressed)
 }
 
-/// The content behind the gzip.
+pub const MAX_DB_BACKUP_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// The content behind the gzip, bounded to prevent gzip decompression bombs.
 async fn ungzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
-    let mut decoder = async_compression::tokio::bufread::GzipDecoder::new(content);
+    ungzip_limited(content, MAX_DB_BACKUP_UNCOMPRESSED_BYTES).await
+}
+
+async fn ungzip_limited(content: &[u8], max_bytes: u64) -> anyhow::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let decoder = async_compression::tokio::bufread::GzipDecoder::new(content);
+    let mut reader = decoder.take(max_bytes + 1);
     let mut plain = Vec::new();
-    decoder.read_to_end(&mut plain).await?;
+    reader.read_to_end(&mut plain).await?;
+    if plain.len() as u64 > max_bytes {
+        anyhow::bail!(
+            "decompressed database backup exceeds maximum allowed size of {max_bytes} bytes"
+        );
+    }
     Ok(plain)
 }
 
@@ -2574,6 +2587,14 @@ mod tests {
         let content = b"the dump content".to_vec();
         let restored = ungzip(&gzip(&content).await.unwrap()).await.unwrap();
         assert_eq!(restored, content);
+
+        let err = ungzip_limited(&gzip(&content).await.unwrap(), 5)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("exceeds maximum allowed size"),
+            "{err}"
+        );
     }
 
     #[test]

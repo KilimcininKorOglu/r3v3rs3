@@ -219,6 +219,8 @@ impl Platform {
     }
 }
 
+pub const MAX_VOLUME_ARCHIVE_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
+
 pub(crate) async fn gzip_bytes(content: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut encoder = GzipEncoder::new(content);
     let mut compressed = Vec::new();
@@ -227,9 +229,23 @@ pub(crate) async fn gzip_bytes(content: &[u8]) -> anyhow::Result<Vec<u8>> {
 }
 
 pub(crate) async fn ungzip_bytes(content: &[u8]) -> anyhow::Result<Vec<u8>> {
-    let mut decoder = GzipDecoder::new(content);
+    ungzip_bytes_limited(content, MAX_VOLUME_ARCHIVE_UNCOMPRESSED_BYTES).await
+}
+
+pub(crate) async fn ungzip_bytes_limited(
+    content: &[u8],
+    max_bytes: u64,
+) -> anyhow::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let decoder = GzipDecoder::new(content);
+    let mut reader = decoder.take(max_bytes + 1);
     let mut plain = Vec::new();
-    decoder.read_to_end(&mut plain).await?;
+    reader.read_to_end(&mut plain).await?;
+    if plain.len() as u64 > max_bytes {
+        anyhow::bail!(
+            "decompressed volume archive exceeds maximum allowed size of {max_bytes} bytes"
+        );
+    }
     Ok(plain)
 }
 
@@ -248,5 +264,8 @@ mod tests {
         assert!(!compressed.is_empty());
         let decompressed = ungzip_bytes(&compressed).await.unwrap();
         assert_eq!(&decompressed, input);
+
+        let err = ungzip_bytes_limited(&compressed, 10).await.unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum allowed size"), "{err}");
     }
 }
