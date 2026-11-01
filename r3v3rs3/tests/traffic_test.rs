@@ -199,6 +199,8 @@ async fn verify_get_entry_and_replay(
         headers: vec![r3v3rs3_api::traffic::HeaderEntry::new("Cookie", cookie)],
         body: None,
         timeout_ms: Some(5000),
+        allow_internal: true,
+        insecure_skip_verify: false,
     };
     let replay_resp: r3v3rs3_api::traffic::RequestReplayResponse = client
         .post(format!("http://{addr}/api/traffic/replay"))

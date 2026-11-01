@@ -133,6 +133,8 @@ fn create_replay_callback(
                 headers: entry.request_headers.clone(),
                 body: entry.request_body.clone(),
                 timeout_ms: Some(10_000),
+                allow_internal: false,
+                insecure_skip_verify: false,
             };
             let res = Request::post(&format!("{API_ENDPOINT}/traffic/replay")).json(&req_payload);
             if let Ok(req) = res

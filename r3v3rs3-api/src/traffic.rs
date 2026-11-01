@@ -67,6 +67,10 @@ pub struct RequestReplayRequest {
     pub body: Option<String>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub allow_internal: bool,
+    #[serde(default)]
+    pub insecure_skip_verify: bool,
 }
 
 /// Execution result of a replayed request.
@@ -395,6 +399,8 @@ mod tests {
             headers: vec![HeaderEntry::new("Authorization", "Bearer token123")],
             body: Some(r#"{"hello":"world"}"#.to_string()),
             timeout_ms: Some(5000),
+            allow_internal: false,
+            insecure_skip_verify: false,
         };
         let req_json = serde_json::to_string(&req).unwrap();
         let req_decoded: RequestReplayRequest = serde_json::from_str(&req_json).unwrap();
