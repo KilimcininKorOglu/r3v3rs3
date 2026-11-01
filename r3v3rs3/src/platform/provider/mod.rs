@@ -180,8 +180,17 @@ impl From<GrantError> for anyhow::Error {
     }
 }
 
+fn is_transient_error(status: StatusCode) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS || status == StatusCode::REQUEST_TIMEOUT
+}
+
 /// GitHub answers a refused grant with 200 and an `error` field, the others with a 4xx status.
 fn grant_of(status: StatusCode, body: &[u8]) -> Result<TokenGrant, GrantError> {
+    if is_transient_error(status) {
+        return Err(GrantError::Failed(anyhow!(
+            "the token endpoint answered {status}"
+        )));
+    }
     let value = serde_json::from_slice::<Value>(body).ok();
     if let Some(error) = value.as_ref().and_then(|value| value["error"].as_str()) {
         let description = value
@@ -191,7 +200,7 @@ fn grant_of(status: StatusCode, body: &[u8]) -> Result<TokenGrant, GrantError> {
             description.unwrap_or(error).to_string(),
         ));
     }
-    if status.is_client_error() {
+    if status == StatusCode::BAD_REQUEST || status == StatusCode::UNAUTHORIZED {
         return Err(GrantError::Refused(format!(
             "the provider answered {status}"
         )));
@@ -274,6 +283,14 @@ mod tests {
         ));
         assert!(matches!(
             grant_of(StatusCode::BAD_GATEWAY, b"down"),
+            Err(GrantError::Failed(_))
+        ));
+        assert!(matches!(
+            grant_of(StatusCode::TOO_MANY_REQUESTS, b"rate limited"),
+            Err(GrantError::Failed(_))
+        ));
+        assert!(matches!(
+            grant_of(StatusCode::REQUEST_TIMEOUT, b"timeout"),
             Err(GrantError::Failed(_))
         ));
         let granted = br#"{"access_token":"a","refresh_token":"r","expires_in":7200}"#;

@@ -585,6 +585,26 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn a_rate_limited_renewal_keeps_the_connection() -> anyhow::Result<()> {
+        let mut setup = setup().await?;
+        connect(&mut setup, 30).await?;
+        setup
+            .server
+            .mock("POST", "/login/oauth/access_token")
+            .with_status(429)
+            .with_body("rate limited")
+            .create_async()
+            .await;
+        let err = setup.platform.git_access_token(setup.id).await.unwrap_err();
+        assert!(err.to_string().contains("429"));
+        let entry = setup.platform.git_connection(setup.id).await?;
+        assert_eq!(entry.status, ConnectionStatus::Connected);
+        let stored = setup.platform.connection_secrets(setup.id).await?;
+        assert!(stored.access_token.is_some() && stored.refresh_token.is_some());
+        Ok(())
+    }
+
     #[test]
     fn the_challenge_is_the_sha256_of_the_verifier() {
         // The example of RFC 7636, appendix B.
