@@ -193,9 +193,13 @@ pub async fn clone(
         .deploy(app.id, &caller.username, DeploymentTrigger::Manual)
         .await
         .map_err(platform_error)?;
-    let _ = platform
+    if let Err(err) = platform
         .restore_clone_data(id, app.id, password.as_deref().unwrap_or_default())
-        .await;
+        .await
+    {
+        let _ = platform.delete_app(app.id).await;
+        return Err(platform_error(err));
+    }
     record_clone_audit(&state, &caller, &app, &source).await;
     Ok(Json(DatabaseCreated {
         app,
