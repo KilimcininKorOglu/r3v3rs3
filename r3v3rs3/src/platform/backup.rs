@@ -183,6 +183,111 @@ pub(crate) fn validate_sftp_config(
     Ok(())
 }
 
+const SQL_PREFIXES: &[&str] = &[
+    "--", "/*", "SET ", "CREATE ", "INSERT ", "DROP ", "ALTER ", "USE ", "\\",
+];
+
+pub fn validate_backup_engine_format(engine: &str, bytes: &[u8]) -> anyhow::Result<()> {
+    if bytes.is_empty() {
+        bail!("backup dump is empty");
+    }
+    match engine {
+        "redis" => validate_redis_dump(bytes),
+        "postgres" => validate_postgres_dump(bytes),
+        "mysql" | "mariadb" => validate_mysql_dump(engine, bytes),
+        "mongodb" => validate_mongodb_dump(bytes),
+        _ => Ok(()),
+    }
+}
+
+fn validate_redis_dump(bytes: &[u8]) -> anyhow::Result<()> {
+    if !bytes.starts_with(b"REDIS") {
+        bail!("invalid backup format for redis: missing REDIS magic header");
+    }
+    Ok(())
+}
+
+fn validate_postgres_dump(bytes: &[u8]) -> anyhow::Result<()> {
+    if bytes.starts_with(b"REDIS") {
+        bail!("cannot restore redis dump into postgres database");
+    }
+    if bytes.starts_with(b"PGDMP") {
+        return Ok(());
+    }
+    validate_sql_dump("postgres", bytes)
+}
+
+fn validate_mysql_dump(engine: &str, bytes: &[u8]) -> anyhow::Result<()> {
+    if bytes.starts_with(b"REDIS") {
+        bail!("cannot restore redis dump into {engine} database");
+    }
+    if bytes.starts_with(b"PGDMP") {
+        bail!("cannot restore postgres custom dump into {engine} database");
+    }
+    validate_sql_dump(engine, bytes)
+}
+
+fn validate_mongodb_dump(bytes: &[u8]) -> anyhow::Result<()> {
+    if bytes.starts_with(b"REDIS") {
+        bail!("cannot restore redis dump into mongodb database");
+    }
+    if bytes.starts_with(b"PGDMP") {
+        bail!("cannot restore postgres custom dump into mongodb database");
+    }
+    if is_plain_sql(bytes) {
+        bail!("cannot restore sql dump into mongodb database");
+    }
+    Ok(())
+}
+
+fn is_plain_sql(bytes: &[u8]) -> bool {
+    let sample = &bytes[..bytes.len().min(1024)];
+    if sample.contains(&0) {
+        return false;
+    }
+    match std::str::from_utf8(sample) {
+        Ok(text) => {
+            let trimmed = text.trim_start();
+            SQL_PREFIXES.iter().any(|prefix| trimmed.starts_with(prefix))
+        }
+        Err(_) => false,
+    }
+}
+
+fn validate_sql_dump(engine: &str, bytes: &[u8]) -> anyhow::Result<()> {
+    let sample = &bytes[..bytes.len().min(1024)];
+    if sample.contains(&0) {
+        bail!("invalid {engine} backup format: binary content detected in SQL dump");
+    }
+    let text = std::str::from_utf8(sample)
+        .map_err(|_| anyhow::anyhow!("invalid {engine} backup format: non-UTF-8 content"))?;
+    if !is_plain_sql(bytes) {
+        bail!("invalid {engine} backup format: unrecognized SQL dump header");
+    }
+    check_cross_sql_mismatch(engine, text)
+}
+
+fn check_cross_sql_mismatch(engine: &str, text: &str) -> anyhow::Result<()> {
+    if engine == "postgres" && is_mysql_signature(text) {
+        bail!("cannot restore MySQL/MariaDB dump into postgres database");
+    }
+    if (engine == "mysql" || engine == "mariadb") && is_postgres_signature(text) {
+        bail!("cannot restore PostgreSQL dump into {engine} database");
+    }
+    Ok(())
+}
+
+fn is_mysql_signature(text: &str) -> bool {
+    text.contains("MySQL dump")
+        || text.contains("MariaDB dump")
+        || text.contains("/*M!")
+        || text.contains("/*!40101")
+}
+
+fn is_postgres_signature(text: &str) -> bool {
+    text.contains("PostgreSQL database dump") || text.contains("pg_dump")
+}
+
 impl Platform {
     /// The backup settings stored in the platform database, or the defaults.
     pub async fn backup_config(&self) -> anyhow::Result<BackupConfig> {
@@ -532,6 +637,9 @@ impl Platform {
         let password = self.database_password(db_id, &info).await?;
         let plan = restore_plan(&engine, &info, &password)?;
         let bytes = ungzip(&self.download_backup(db_id, backup_id).await?).await?;
+        validate_backup_engine_format(&engine, &bytes).map_err(|err| Error::RestoreFailed {
+            reason: format!("{err:#}"),
+        })?;
         run_restore(&runtime, &container, &plan, bytes, &info.data_path)
             .await
             .map_err(|err| Error::RestoreFailed {
@@ -713,7 +821,8 @@ impl Platform {
             raw_bytes
         };
         if let Some(target_id) = req.target_db_id {
-            self.restore_s3_into_existing(target_id, dump_bytes).await
+            self.restore_s3_into_existing(target_id, dump_bytes, req.engine.as_deref())
+                .await
         } else {
             self.restore_s3_as_new(req, caller, dump_bytes).await
         }
@@ -723,6 +832,7 @@ impl Platform {
         &self,
         target_id: ShortId,
         dump_bytes: Vec<u8>,
+        requested_engine: Option<&str>,
     ) -> anyhow::Result<RestoreFromS3Response> {
         let (app, container, runtime) = self.database_container(target_id).await?;
         let engine = app
@@ -730,6 +840,18 @@ impl Platform {
             .database
             .clone()
             .context("the target app is not a managed database")?;
+        if let Some(req_engine) = requested_engine {
+            if !req_engine.eq_ignore_ascii_case(&engine) {
+                bail!(Error::RestoreFailed {
+                    reason: format!(
+                        "requested engine '{req_engine}' does not match target database engine '{engine}'"
+                    ),
+                });
+            }
+        }
+        validate_backup_engine_format(&engine, &dump_bytes).map_err(|err| Error::RestoreFailed {
+            reason: format!("{err:#}"),
+        })?;
         let info = r3v3rs3_api::platform::engine_info(&engine)
             .context("the engine is not in the database catalog")?;
         let password = self.database_password(target_id, &info).await?;
@@ -754,6 +876,9 @@ impl Platform {
         dump_bytes: Vec<u8>,
     ) -> anyhow::Result<RestoreFromS3Response> {
         let (app_req, engine_key, info) = resolve_s3_restore_app(&req)?;
+        validate_backup_engine_format(&engine_key, &dump_bytes).map_err(|err| Error::RestoreFailed {
+            reason: format!("{err:#}"),
+        })?;
         let app = self.add_app(app_req, unix_ms()).await?;
         let password = self.init_db_password(app.id, &info).await?;
         let restore = restore_plan(&engine_key, &info, &password)?;
@@ -3153,5 +3278,32 @@ mod tests {
         for path in invalid {
             assert!(sanitize_sftp_path_component(path).is_err(), "should be rejected: {path}");
         }
+    }
+
+    #[test]
+    fn test_validate_backup_engine_format_redis() {
+        assert!(validate_backup_engine_format("redis", b"REDIS0009\xfa\tredis-ver\x057.0.0").is_ok());
+        assert!(validate_backup_engine_format("redis", b"-- PostgreSQL dump\nCREATE TABLE foo;").is_err());
+        assert!(validate_backup_engine_format("redis", b"").is_err());
+        assert!(validate_backup_engine_format("redis", b"\x00\x01\x02\x03").is_err());
+    }
+
+    #[test]
+    fn test_validate_backup_engine_format_postgres() {
+        assert!(validate_backup_engine_format("postgres", b"-- PostgreSQL database dump\nSET statement_timeout = 0;").is_ok());
+        assert!(validate_backup_engine_format("postgres", b"PGDMP\x01\x02").is_ok());
+        assert!(validate_backup_engine_format("postgres", b"REDIS0009\xfa").is_err());
+        assert!(validate_backup_engine_format("postgres", b"-- MySQL dump 10.13\n/*!40101 SET").is_err());
+    }
+
+    #[test]
+    fn test_validate_backup_engine_format_mysql_mongodb() {
+        assert!(validate_backup_engine_format("mysql", b"-- MySQL dump 10.13\nCREATE DATABASE foo;").is_ok());
+        assert!(validate_backup_engine_format("mysql", b"REDIS0009\xfa").is_err());
+        assert!(validate_backup_engine_format("mysql", b"PGDMP\x01").is_err());
+        assert!(validate_backup_engine_format("mysql", b"-- PostgreSQL database dump\n").is_err());
+        assert!(validate_backup_engine_format("mongodb", b"\x16\x00\x00\x00\x02name\x00").is_ok());
+        assert!(validate_backup_engine_format("mongodb", b"REDIS0009").is_err());
+        assert!(validate_backup_engine_format("mongodb", b"-- PostgreSQL dump").is_err());
     }
 }
