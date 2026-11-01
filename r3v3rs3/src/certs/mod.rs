@@ -153,42 +153,14 @@ impl Cert {
         pem_chain: Vec<u8>,
         pem_key: Option<Vec<u8>>,
     ) -> Result<Self, Error> {
-        let key = pem_key
-            .as_deref()
-            .map(|pem_key| {
-                let key = parse_private_key(pem_key)?;
-                SecretDocument::try_from(key.secret_der())
-                    .map_err(|_| Error::FailedToReadPrivateKey)
-            })
-            .transpose()?;
-        let chain_meta = pem_chain.as_slice();
-        let mut meta_read = BufReader::new(chain_meta);
-        let mut comment = String::new();
-        meta_read
-            .read_line(&mut comment)
-            .map_err(|_| Error::FailedToReadCertificate)?;
-
-        let metadata: Option<CertMetadata> = serde_qs::from_str(
-            comment
-                .trim_start_matches(|c: char| c == '#' || c.is_whitespace())
-                .trim_end(),
-        )
-        .ok();
+        let key = parse_key_document(pem_key.as_deref())?;
+        let metadata = parse_cert_metadata(&pem_chain);
 
         let certs = CertificateDer::pem_slice_iter(&pem_chain)
             .map(|cert| cert.map_err(|_| Error::FailedToReadCertificate))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let der = certs
-            .first()
-            .ok_or(Error::FailedToReadCertificate)?
-            .as_ref();
-        let mut hasher = Sha256::new();
-        hasher.update(der);
-        let id = hasher.finalize();
-        let mut short_id = [0; 7];
-        short_id.copy_from_slice(&id[..7]);
-        let fingerprint = hex::encode(id);
+        let (id, fingerprint) = calculate_fingerprint(&certs)?;
 
         let parsed_chain = parse_chain(&certs)?;
         let x509 = parsed_chain.first().ok_or(Error::FailedToReadCertificate)?;
@@ -205,8 +177,8 @@ impl Cert {
             .filter(|_| parsed_chain.len() > 1)
             .map(|cert| cert.subject().to_string());
 
-        Ok(Self {
-            id: short_id.into(),
+        let cert = Self {
+            id,
             kind,
             fingerprint,
             key,
@@ -220,7 +192,10 @@ impl Cert {
             is_ca,
             metadata,
             source: None,
-        })
+        };
+
+        validate_key_match(kind, &cert)?;
+        Ok(cert)
     }
 
     pub fn new_ca() -> Result<Self, Error> {
@@ -310,7 +285,9 @@ impl Cert {
         let key = self.private_key_der()?;
         let signing_key = sign::any_supported_type(&key).map_err(|err| anyhow::anyhow!("{err}"))?;
         let chain = self.certificates()?;
-        Ok(CertifiedKey::new(chain, signing_key))
+        let certified = CertifiedKey::new(chain, signing_key);
+        certified.keys_match().map_err(|err| anyhow::anyhow!("{err}"))?;
+        Ok(certified)
     }
 }
 
@@ -342,6 +319,47 @@ fn leaf_params(san: &[SubjectName]) -> Result<CertificateParams, Error> {
 fn generation_error(err: rcgen::Error) -> Error {
     error!(%err);
     Error::FailedToGenerateSelfSignedCertificate
+}
+
+fn validate_key_match(kind: CertKind, cert: &Cert) -> Result<(), Error> {
+    if kind == CertKind::Server && cert.key.is_none() {
+        return Err(Error::FailedToReadPrivateKey);
+    }
+    if cert.key.is_some() {
+        cert.certified_key()?;
+    }
+    Ok(())
+}
+
+fn parse_cert_metadata(pem_chain: &[u8]) -> Option<CertMetadata> {
+    let mut meta_read = BufReader::new(pem_chain);
+    let mut comment = String::new();
+    meta_read.read_line(&mut comment).ok()?;
+    serde_qs::from_str(
+        comment
+            .trim_start_matches(|c: char| c == '#' || c.is_whitespace())
+            .trim_end(),
+    )
+    .ok()
+}
+
+fn parse_key_document(pem_key: Option<&[u8]>) -> Result<Option<SecretDocument>, Error> {
+    pem_key
+        .map(|bytes| {
+            let key = parse_private_key(bytes)?;
+            SecretDocument::try_from(key.secret_der()).map_err(|_| Error::FailedToReadPrivateKey)
+        })
+        .transpose()
+}
+
+fn calculate_fingerprint(certs: &[CertificateDer<'_>]) -> Result<(ShortId, String), Error> {
+    let der = certs.first().ok_or(Error::FailedToReadCertificate)?.as_ref();
+    let mut hasher = Sha256::new();
+    hasher.update(der);
+    let id = hasher.finalize();
+    let mut short_id = [0; 7];
+    short_id.copy_from_slice(&id[..7]);
+    Ok((short_id.into(), hex::encode(id)))
 }
 
 /// Reads the first private key of a PEM text. rustls signs with PKCS#8, PKCS#1 (RSA) and SEC1 (EC)
@@ -459,7 +477,12 @@ mod test {
 
         let san = [SubjectName::from_str("chain.example.com").unwrap()];
         let leaf = Cert::new_self_signed(&san, &ca).unwrap();
-        let chained = Cert::new(CertKind::Server, leaf.pem_chain.clone(), None).unwrap();
+        let chained = Cert::new(
+            CertKind::Server,
+            leaf.pem_chain.clone(),
+            leaf.pem_key.clone(),
+        )
+        .unwrap();
         assert_eq!(chained.certificates().unwrap().len(), 2);
         assert_eq!(chained.root_cert, Some(chained.issuer.clone()));
     }
@@ -472,6 +495,21 @@ mod test {
             cert.pem_chain.clone(),
             Some(cert.pem_chain.clone()),
         );
+        assert!(matches!(result, Err(Error::FailedToReadPrivateKey)));
+    }
+
+    #[test]
+    fn server_certificate_without_private_key_is_rejected() {
+        let (cert, _) = signed(Cert::new_self_signed, "nokey2.example.com");
+        let result = Cert::new(CertKind::Server, cert.pem_chain, None);
+        assert!(matches!(result, Err(Error::FailedToReadPrivateKey)));
+    }
+
+    #[test]
+    fn server_certificate_with_mismatched_private_key_is_rejected() {
+        let (cert1, _) = signed(Cert::new_self_signed, "cert1.example.com");
+        let (cert2, _) = signed(Cert::new_self_signed, "cert2.example.com");
+        let result = Cert::new(CertKind::Server, cert1.pem_chain, cert2.pem_key);
         assert!(matches!(result, Err(Error::FailedToReadPrivateKey)));
     }
 }

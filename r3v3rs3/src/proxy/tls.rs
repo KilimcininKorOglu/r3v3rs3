@@ -291,6 +291,23 @@ impl CertResolver {
             cache: DashMap::new(),
         }
     }
+
+    fn get_or_load_certified_key(&self, cert: &Cert) -> Option<Arc<CertifiedKey>> {
+        if let Some(certified) = self.cache.get(&cert.id()) {
+            return Some(certified.clone());
+        }
+        match cert.certified_key() {
+            Ok(certified) => {
+                let certified = Arc::new(certified);
+                self.cache.insert(cert.id(), certified.clone());
+                Some(certified)
+            }
+            Err(err) => {
+                error!(id = %cert.id(), "failed to load certified key: {}", err);
+                None
+            }
+        }
+    }
 }
 
 impl ResolvesServerCert for CertResolver {
@@ -308,24 +325,16 @@ impl ResolvesServerCert for CertResolver {
             &sni
         };
 
-        let cert = self
+        for cert in self
             .certs
             .iter()
-            .find(|cert| cert.is_valid() && names.iter().all(|name| cert.has_subject_name(name)))?;
-
-        if let Some(cert) = self.cache.get(&cert.id()) {
-            Some(cert.clone())
-        } else {
-            let certified = match cert.certified_key() {
-                Ok(certified) => Arc::new(certified),
-                Err(err) => {
-                    error!("failed to load certified key: {}", err);
-                    return None;
-                }
-            };
-            self.cache.insert(cert.id(), certified.clone());
-            Some(certified)
+            .filter(|cert| cert.is_valid() && names.iter().all(|name| cert.has_subject_name(name)))
+        {
+            if let Some(certified) = self.get_or_load_certified_key(cert) {
+                return Some(certified);
+            }
         }
+        None
     }
 }
 
@@ -376,6 +385,27 @@ mod tests {
             cert,
             conn.alpn_protocol().map(<[u8]>::to_vec),
         )
+    }
+
+    #[tokio::test]
+    async fn cert_resolver_skips_certificate_without_working_key() {
+        let root = Cert::new_ca().unwrap();
+        let server =
+            Arc::new(Cert::new_self_signed(&["localhost".parse().unwrap()], &root).unwrap());
+        let mut broken = (*server).clone();
+        broken.pem_key = None;
+        broken.key = None;
+        let broken = Arc::new(broken);
+
+        let resolver = CertResolver::new(vec![broken, server.clone()], vec![], true);
+        let config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(Arc::new(resolver));
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let tls = PortTls::new(acceptor, None);
+
+        let (_, cert, _) = handshake(&tls, &[]).await;
+        assert_eq!(cert, server.certificates().unwrap().remove(0));
     }
 
     fn config(client_auth: ClientAuthMode, client_ca_certs: Vec<ShortId>) -> TlsConfig {
