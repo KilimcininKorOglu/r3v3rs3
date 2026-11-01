@@ -281,11 +281,11 @@ impl Platform {
         pool: Option<sqlx::SqlitePool>,
     ) -> anyhow::Result<Self> {
         let local = docker_runtime(&config.platform.docker)?;
+        let keys = open_keys(config_dir).await?;
         let store = open_platform_store(config_dir, pool).await?;
         let now = crate::clock::unix_ms();
         store.ensure_local_target(now).await?;
         notices::notify_unfinished(&command, store.fail_unfinished(now).await?);
-        let keys = open_keys(config_dir).await?;
         // A stopped server can leave the checkouts of its unfinished builds.
         let build_dir = config_dir.join(build::BUILD_DIR);
         build::remove_dir(&build_dir).await?;
@@ -1435,12 +1435,23 @@ async fn open_keys(config_dir: &Path) -> anyhow::Result<ClusterKeys> {
     load_keys(&paths).await
 }
 
+async fn database_exists(config_dir: &Path) -> bool {
+    let db_path = config_dir.join(DATABASE_FILE);
+    let legacy_db = config_dir.join("platform.db");
+    tokio::fs::try_exists(&db_path).await.unwrap_or(false)
+        || tokio::fs::try_exists(&legacy_db).await.unwrap_or(false)
+}
+
 async fn ensure_key_files(config_dir: &Path) -> anyhow::Result<()> {
     let key_path = config_dir.join(KEY_FILE);
     let legacy = config_dir.join("platform.key");
     if !tokio::fs::try_exists(&key_path).await? {
         if tokio::fs::try_exists(&legacy).await? {
             tokio::fs::rename(&legacy, &key_path).await?;
+        } else if database_exists(config_dir).await {
+            anyhow::bail!(
+                "refuse to create a new platform key when the platform database already exists; restore {KEY_FILE} or platform.key"
+            );
         } else {
             write_new_key_file(&key_path).await?;
         }
@@ -1776,6 +1787,20 @@ mod tests {
         config.platform.docker = "https://docker.example:2376".into();
         let handle = PlatformHandle::start(&config, &dir, command, &events, audit, None).await;
         assert!(matches!(handle.get(), Err(Error::PlatformFailed)));
+    }
+
+    #[tokio::test]
+    async fn missing_key_file_is_refused_when_database_already_exists() {
+        let dir = std::env::temp_dir().join(format!("r3-missing-key-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Create the database file without creating the key file
+        std::fs::write(dir.join(DATABASE_FILE), b"sqlite-data").unwrap();
+
+        let res = open_keys(&dir).await;
+        assert!(res.is_err());
+        assert!(!dir.join(KEY_FILE).exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

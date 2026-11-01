@@ -213,9 +213,19 @@ async fn ensure_primary_key(dir: &Path) -> anyhow::Result<()> {
     if fs::try_exists(&legacy_key).await? {
         fs::rename(&legacy_key, &key_path).await?;
         info!("migrated legacy platform.key to r3v3rs3.key");
-    } else {
-        write_new_key_file(&key_path).await?;
+        return Ok(());
     }
+    let db_path = dir.join(DATABASE_FILE);
+    let legacy_db = dir.join("platform.db");
+    if fs::try_exists(&db_path).await.unwrap_or(false)
+        || fs::try_exists(&legacy_db).await.unwrap_or(false)
+    {
+        anyhow::bail!(
+            "refuse to create a new key file when the database already exists ({}); restore {KEY_FILE} or platform.key",
+            db_path.display()
+        );
+    }
+    write_new_key_file(&key_path).await?;
     Ok(())
 }
 
