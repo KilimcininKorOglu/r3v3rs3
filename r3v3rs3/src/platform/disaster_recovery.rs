@@ -268,6 +268,15 @@ fn resolve_target_path(canonical_dest: &Path, rel_path: &Path) -> anyhow::Result
     Ok(target)
 }
 
+fn is_secret_key_file(target: &Path) -> bool {
+    let file_name = target.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    file_name == "r3v3rs3.key"
+        || file_name == "platform.key"
+        || file_name == "key.pem"
+        || file_name.ends_with(".key")
+        || target.components().any(|c| c.as_os_str() == "keys")
+}
+
 fn extract_entry(
     mut entry: tar::Entry<impl std::io::Read>,
     target: &Path,
@@ -281,6 +290,10 @@ fn extract_entry(
         fs::create_dir_all(parent)?;
     }
     entry.unpack(target)?;
+    if is_secret_key_file(target) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(target, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(true)
 }
 
@@ -632,6 +645,49 @@ mod tests {
             fs::read_to_string(temp_dir.join("certs/site.pem")).unwrap(),
             "CERT DATA"
         );
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_dr_bundle_enforces_0600_permissions_on_secret_keys() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = std::env::temp_dir().join(format!("r3dr_test_perm_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let mut tar_bytes = Vec::new();
+        {
+            let enc = flate2::write::GzEncoder::new(&mut tar_bytes, flate2::Compression::default());
+            let mut tar = tar::Builder::new(enc);
+
+            // Append r3v3rs3.key with mode 0o644 (loose permissions)
+            let mut h1 = tar::Header::new_old();
+            let key_data = b"supersecretkey123456";
+            h1.set_size(key_data.len() as u64);
+            h1.set_mode(0o644);
+            h1.set_cksum();
+            tar.append_data(&mut h1, "r3v3rs3.key", &key_data[..]).unwrap();
+
+            // Append certs/mycert/key.pem with mode 0o777 (loose permissions)
+            let mut h2 = tar::Header::new_old();
+            h2.set_size(key_data.len() as u64);
+            h2.set_mode(0o777);
+            h2.set_cksum();
+            tar.append_data(&mut h2, "certs/key.pem", &key_data[..]).unwrap();
+
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+
+        let count = unpack_tar_gz(&tar_bytes, &temp_dir).unwrap();
+        assert_eq!(count, 2);
+
+        let m1 = fs::metadata(temp_dir.join("r3v3rs3.key")).unwrap();
+        assert_eq!(m1.permissions().mode() & 0o777, 0o600);
+
+        let m2 = fs::metadata(temp_dir.join("certs/key.pem")).unwrap();
+        assert_eq!(m2.permissions().mode() & 0o777, 0o600);
+
         let _ = fs::remove_dir_all(&temp_dir);
     }
 

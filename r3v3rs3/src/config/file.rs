@@ -92,7 +92,7 @@ async fn load_cert_pair(kind: CertKind, chain: &Path) -> Result<Cert, Error> {
 }
 
 /// Writes a file that holds secrets, such as ACME account keys, so only the owner can read it.
-pub(crate) async fn write_private(path: &Path, contents: String) -> anyhow::Result<()> {
+pub(crate) async fn write_private(path: &Path, contents: impl AsRef<[u8]>) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     use tokio::io::AsyncWriteExt;
 
@@ -103,7 +103,7 @@ pub(crate) async fn write_private(path: &Path, contents: String) -> anyhow::Resu
     // The creation mode does not apply to a file that an earlier version created.
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .await?;
-    file.write_all(contents.as_bytes()).await?;
+    file.write_all(contents.as_ref()).await?;
     file.flush().await?;
     Ok(())
 }
@@ -499,7 +499,7 @@ impl FileStorage {
         info!(?path, "save cert");
         fs::write(path.join("cert.pem"), &cert.pem_chain).await?;
         if let Some(key) = &cert.pem_key {
-            fs::write(path.join("key.pem"), key).await?;
+            write_private(&path.join("key.pem"), key).await?;
         }
         Ok(())
     }
@@ -990,6 +990,27 @@ mod test {
             assert_eq!(found.kind, cert.kind);
             assert!(found.key.is_some());
         }
+    }
+
+    #[tokio::test]
+    async fn save_cert_enforces_0600_permissions_on_key_pem() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("r3-cert-perm-{}", std::process::id()));
+        let storage = FileStorage::new(&dir);
+        let ca = Cert::new_ca().unwrap();
+        storage.save_cert(&ca).await.unwrap();
+
+        let key_path = dir
+            .join("certs")
+            .join(ca.kind.to_string())
+            .join(ca.id().to_string())
+            .join("key.pem");
+        let meta = std::fs::metadata(&key_path).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
