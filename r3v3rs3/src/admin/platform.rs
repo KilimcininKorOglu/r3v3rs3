@@ -340,6 +340,7 @@ pub async fn add_app(
     Json(mut request): Json<AppRequest>,
 ) -> Result<Json<AppEntry>, AppError> {
     request.spec.preview_of = None;
+    request.spec.replica_of = None;
     let platform = state.platform(&caller, Permission::Edit).await?;
     let app = platform
         .add_app(request, unix_ms())
@@ -395,6 +396,7 @@ pub async fn update_app(
     let platform = state.platform(&caller, Permission::Edit).await?;
     let current = platform.app(id).await.map_err(platform_error)?;
     request.spec.preview_of = current.spec.preview_of;
+    request.spec.replica_of = current.spec.replica_of;
     let app = platform
         .update_app(id, request, unix_ms())
         .await

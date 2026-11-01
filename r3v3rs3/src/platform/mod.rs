@@ -446,6 +446,7 @@ impl Platform {
     ) -> anyhow::Result<AppEntry> {
         let current = self.app(id).await?;
         request.spec.preview_of = current.spec.preview_of;
+        request.spec.replica_of = current.spec.replica_of;
         let hook = self.check_request(&request).await?;
         // The containers of the deployments run on the old target.
         if request.target != current.target && !self.store.deployments(id, 1).await?.is_empty() {
@@ -1940,6 +1941,21 @@ mod tests {
 
         let updated = platform.update_app(shop.id, malicious_request, 2).await?;
         assert!(updated.spec.preview_of.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_app_ignores_replica_of_mass_assignment() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let shop = platform.add_app(request("shop"), 1).await?;
+        assert!(shop.spec.replica_of.is_none());
+
+        let fake_primary = new_id()?;
+        let mut malicious_request = request("shop");
+        malicious_request.spec.replica_of = Some(fake_primary);
+
+        let updated = platform.update_app(shop.id, malicious_request, 2).await?;
+        assert!(updated.spec.replica_of.is_none());
         Ok(())
     }
 
