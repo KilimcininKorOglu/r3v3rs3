@@ -2,10 +2,10 @@ use axum::{
     body::Bytes,
     extract::{RawQuery, State},
     http::{
-        HeaderMap, HeaderValue, StatusCode, Uri,
+        HeaderMap, HeaderName, HeaderValue, StatusCode, Uri,
         header::{
-            ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, ETAG, IF_NONE_MATCH,
-            VARY,
+            ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_SECURITY_POLICY,
+            CONTENT_TYPE, ETAG, IF_NONE_MATCH, VARY,
         },
     },
     response::{IntoResponse, Redirect, Response},
@@ -144,6 +144,18 @@ fn find_precompressed<'a>(file_name: &str, req_headers: &HeaderMap) -> Option<Se
     find_client_encoding(file_name, req_headers).or_else(|| find_identity_fallback(file_name))
 }
 
+/// Enforces anti-clickjacking frame protection headers on all administrative WebUI assets and SPA shells.
+fn apply_frame_protection_headers(headers: &mut HeaderMap) {
+    headers.insert(
+        HeaderName::from_static("x-frame-options"),
+        HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("frame-ancestors 'none'"),
+    );
+}
+
 /// Answers a file of the embedded WebUI bundle.
 async fn serve_file(file_name: &str, req_headers: &HeaderMap) -> Result<Response, AppError> {
     let selected = find_precompressed(file_name, req_headers).ok_or(AppError::NotFound)?;
@@ -153,6 +165,7 @@ async fn serve_file(file_name: &str, req_headers: &HeaderMap) -> Result<Response
         .ok_or(AppError::NotFound)?;
 
     let mut headers = HeaderMap::new();
+    apply_frame_protection_headers(&mut headers);
     headers.insert(
         CACHE_CONTROL,
         HeaderValue::from_static(cache_control(file_name)),
@@ -365,6 +378,17 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(name, HeaderValue::from_str(value).unwrap());
         headers
+    }
+
+    #[test]
+    fn frame_protection_headers_enforce_anti_clickjacking() {
+        let mut map = HeaderMap::new();
+        apply_frame_protection_headers(&mut map);
+        assert_eq!(map.get("x-frame-options").unwrap(), "DENY");
+        assert_eq!(
+            map.get(CONTENT_SECURITY_POLICY).unwrap(),
+            "frame-ancestors 'none'"
+        );
     }
 
     #[test]
