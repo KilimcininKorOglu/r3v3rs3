@@ -8,11 +8,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   # The draft release exists before any job uploads to it. Keeping this out of the WebUI job
@@ -21,6 +20,8 @@ jobs:
     name: Create release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -37,6 +38,8 @@ jobs:
   webui:
     name: Build WebUI
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -80,6 +83,8 @@ jobs:
           - target: x86_64-unknown-linux-gnu
           - target: aarch64-unknown-linux-gnu
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -122,6 +127,9 @@ jobs:
   test-gate:
     name: Test gate
     runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
     outputs:
       tested: ${{ steps.check.outputs.tested }}
     steps:
@@ -209,6 +217,8 @@ jobs:
     needs: [binary, binary-cli]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -276,6 +286,8 @@ jobs:
             archive: zip
             zigbuild: false
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -327,6 +339,8 @@ jobs:
     if: always() && startsWith(github.ref, 'refs/tags/v') && needs.binary.result == 'success' && needs.binary-cli.result == 'success' && needs.sign.result == 'success' && needs.test-gate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
     needs: [binary, binary-cli, sign, test-gate, test]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - name: Publish the draft release
         env:
