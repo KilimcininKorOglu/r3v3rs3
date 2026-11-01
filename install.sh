@@ -258,6 +258,21 @@ create_admin() {
 	account_created=true
 }
 
+create_service_user() {
+	if ! getent group docker >/dev/null 2>&1; then
+		groupadd -r docker 2>/dev/null || addgroup -S docker 2>/dev/null || true
+	fi
+	if ! id -u r3v3rs3 >/dev/null 2>&1; then
+		useradd --system --no-create-home --user-group --shell /usr/sbin/nologin r3v3rs3 2>/dev/null || \
+		useradd --system --no-create-home --user-group --shell /bin/false r3v3rs3 2>/dev/null || \
+		adduser -S -D -H -s /sbin/nologin r3v3rs3 2>/dev/null || true
+	fi
+	if getent group docker >/dev/null 2>&1; then
+		usermod -aG docker r3v3rs3 2>/dev/null || addgroup r3v3rs3 docker 2>/dev/null || true
+	fi
+	chown -R r3v3rs3:r3v3rs3 "$CONFIG_DIR" "$LOG_DIR" 2>/dev/null || true
+}
+
 write_unit() {
 	cat >"$UNIT" <<EOF
 [Unit]
@@ -269,6 +284,18 @@ After=network-online.target
 [Service]
 Type=notify
 NotifyAccess=main
+User=r3v3rs3
+Group=r3v3rs3
+SupplementaryGroups=docker
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=$CONFIG_DIR $LOG_DIR
 Environment=R3V3RS3_CONFIG_DIR=$CONFIG_DIR
 Environment=R3V3RS3_LOG_DIR=$LOG_DIR
 Environment=R3V3RS3_WEBUI=$webui
@@ -476,6 +503,13 @@ After=network-online.target docker.service
 
 [Service]
 Type=simple
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=$AGENT_DATA_DIR
 Environment=R3V3RS3_AGENT_MASTER=$master
 Environment=R3V3RS3_AGENT_DATA_DIR=$AGENT_DATA_DIR
 # Holds the enrollment token until the agent is enrolled.
@@ -588,6 +622,7 @@ main() {
 	install -d -m 0700 "$CONFIG_DIR"
 	install -d -m 0750 "$LOG_DIR"
 	create_admin
+	create_service_user
 
 	if systemctl is-active --quiet r3v3rs3 2>/dev/null; then
 		info "Stopping legacy r3v3rs3.service"
