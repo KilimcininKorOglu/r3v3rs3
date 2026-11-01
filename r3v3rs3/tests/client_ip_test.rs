@@ -89,3 +89,71 @@ async fn client_ip_from_trusted_proxy() -> anyhow::Result<()> {
     mock_direct.assert_async().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn quarantine_enforces_against_resolved_client_ip() -> anyhow::Result<()> {
+    let trusted_port = alloc_tcp_port().await?;
+    let mut server = mockito::Server::new_async().await;
+
+    let _mock_env = server
+        .mock("GET", "/.env")
+        .with_status(404)
+        .with_body("not found")
+        .create_async()
+        .await;
+
+    let _mock_allowed = server
+        .mock("GET", "/allowed")
+        .with_body("allowed")
+        .create_async()
+        .await;
+
+    let trusted = ClientIpConfig {
+        trust_cdn: true,
+        trusted_proxies: vec!["127.0.0.0/8".parse()?, "::1/128".parse()?],
+    };
+
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("trusted", &trusted_port)])
+        .proxies(vec![http_proxy_entry(
+            "proxy1",
+            "trusted",
+            proxy(&server.url(), trusted),
+        )])
+        .build();
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::new();
+        let bad_ip = "203.0.113.150";
+        let good_ip = "203.0.113.151";
+
+        // 1. Probing /.env from bad_ip triggers scanner pattern quarantine
+        let _ = client
+            .get(trusted_port.http_url("/.env"))
+            .header("x-forwarded-for", bad_ip)
+            .send()
+            .await;
+
+        // 2. Next request from bad_ip should be dropped by quarantine
+        let resp_bad = client
+            .get(trusted_port.http_url("/allowed"))
+            .header("x-forwarded-for", bad_ip)
+            .send()
+            .await;
+        // Quarantined connection is dropped (connection error)
+        assert!(resp_bad.is_err(), "bad_ip should be dropped by quarantine");
+
+        // 3. Request from good_ip via the same trusted proxy connection should succeed
+        let resp_good = client
+            .get(trusted_port.http_url("/allowed"))
+            .header("x-forwarded-for", good_ip)
+            .send()
+            .await?;
+        assert_eq!(resp_good.text().await?, "allowed");
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}

@@ -599,9 +599,6 @@ async fn proxied_response(
     info: &RequestInfo<'_>,
     fronting: bool,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
-    if shared.quarantine.is_quarantined(&info.remote.ip()) {
-        return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
-    }
     let start = std::time::Instant::now();
     crate::proxy::stats::count_http_request();
     if let Some(cl) = req
@@ -643,6 +640,9 @@ async fn proxied_response(
     } else {
         route_request(shared, req, info).await
     };
+    if shared.quarantine.is_quarantined(&client_ip) {
+        return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
+    }
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
     let duration = start.elapsed();
@@ -1716,9 +1716,6 @@ where
 
     crate::proxy::stats::count_h3_request();
     let shared = shared_cache.load();
-    if shared.quarantine.is_quarantined(&ctx.remote.ip()) {
-        return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
-    }
     let info = RequestInfo {
         remote: ctx.remote,
         peer: ctx.remote,
@@ -1756,6 +1753,9 @@ where
     let body = BoxBody::new(StreamBody::new(StreamWrapper::<T> { stream: recv }));
     let (req, response_rewriter, resource_id, client_ip) =
         route_request(shared, req.map(|()| body), &info).await;
+    if shared.quarantine.is_quarantined(&client_ip) {
+        return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
+    }
 
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
