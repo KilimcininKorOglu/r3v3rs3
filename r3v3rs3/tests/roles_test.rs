@@ -395,6 +395,8 @@ async fn the_admin_api_answers_403_to_an_action_that_the_role_does_not_allow() -
             (Method::GET, "/api/certs/abc/download", 403),
             (Method::POST, "/api/grpc/reflect", 403),
             (Method::POST, "/api/grpc/health", 403),
+            (Method::GET, "/api/databases/abc/backups/b1/download", 403),
+            (Method::GET, "/api/databases/s3/download?key=test.dump.gz", 403),
         ];
         for (method, path, expected) in checks {
             let actual = status(&client, addr, method.clone(), path, &viewer).await?;
@@ -408,6 +410,8 @@ async fn the_admin_api_answers_403_to_an_action_that_the_role_does_not_allow() -
             (Method::GET, "/api/config", 403),
             (Method::POST, "/api/grpc/reflect", 403),
             (Method::POST, "/api/grpc/health", 403),
+            (Method::GET, "/api/databases/abc/backups/b1/download", 403),
+            (Method::GET, "/api/databases/s3/download?key=test.dump.gz", 403),
         ];
         for (method, path, expected) in checks {
             let actual = status(&client, addr, method.clone(), path, &editor).await?;

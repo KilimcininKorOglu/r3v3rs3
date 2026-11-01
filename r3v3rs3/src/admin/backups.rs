@@ -82,7 +82,7 @@ pub async fn download(
     Extension(caller): Extension<Caller>,
     Path((id, backup_id)): Path<(ShortId, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let platform = state.platform(&caller, Permission::Read).await?;
+    let platform = state.platform(&caller, Permission::Admin).await?;
     let content = platform
         .download_backup(id, &backup_id)
         .await
@@ -366,7 +366,7 @@ pub async fn download_s3(
     Extension(caller): Extension<Caller>,
     Query(query): Query<S3DownloadQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let platform = state.platform(&caller, Permission::Read).await?;
+    let platform = state.platform(&caller, Permission::Admin).await?;
     let content = platform
         .download_s3_backup(&query.key)
         .await
