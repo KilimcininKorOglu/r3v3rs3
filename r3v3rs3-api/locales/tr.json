@@ -494,6 +494,7 @@
   "error.acme_exec_program_not_allowed": "Exec programı, config.toml dosyasındaki acme_exec programlarından biri olmalıdır: {program}",
   "error.acme_identifiers_missing": "En az bir alan adı girin.",
   "error.acme_invalid_identifier": "ACME için geçersiz alan adı: {identifier}",
+  "error.acme_renewal_days_invalid": "Yenileme aralığı {min} ile {max} gün arasında olmalıdır: {days}.",
   "error.acme_unsupported_challenge": "Desteklenmeyen ACME challenge'ı: {challenge}",
   "error.acme_webhook_url_invalid": "Webhook URL'i HTTPS kullanmalıdır. HTTP yalnız loopback adresinde kullanılabilir: {url}",
   "error.acme_wildcard_needs_dns_challenge": "Wildcard alan adı DNS-01 challenge'ı gerektirir: {identifier}",

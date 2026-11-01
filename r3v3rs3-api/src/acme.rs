@@ -9,6 +9,11 @@ pub const HTTP_01: &str = "http-01";
 pub const DNS_01: &str = "dns-01";
 pub const TLS_ALPN_01: &str = "tls-alpn-01";
 
+/// The minimum renewal interval in days.
+pub const MIN_RENEWAL_DAYS: u64 = 1;
+/// The maximum renewal interval in days (under the standard 90-day validity window).
+pub const MAX_RENEWAL_DAYS: u64 = 89;
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 pub struct Acme {
     #[schema(inline)]
@@ -34,34 +39,51 @@ pub struct Acme {
 impl Acme {
     /// Checks that the challenge can validate every identifier.
     pub fn validate(&self) -> Result<(), Error> {
+        self.config.validate()?;
+        self.validate_challenge()?;
+        self.validate_dns_alias()?;
+        self.validate_identifiers()
+    }
+
+    fn validate_challenge(&self) -> Result<(), Error> {
         match self.challenge_type.as_str() {
-            HTTP_01 | TLS_ALPN_01 => {}
-            DNS_01 => match (&self.dns_provider, &self.dns_credential) {
-                (Some(provider), None) if provider.has_credentials() => provider.validate()?,
-                (None, Some(_)) => {}
-                (Some(_), Some(_)) => return Err(Error::AcmeCredentialConflict),
-                _ => return Err(Error::AcmeDnsProviderRequired),
-            },
-            _ => {
-                return Err(Error::AcmeUnsupportedChallenge {
-                    challenge: self.challenge_type.clone(),
-                });
-            }
+            HTTP_01 | TLS_ALPN_01 => Ok(()),
+            DNS_01 => self.validate_dns_challenge(),
+            _ => Err(Error::AcmeUnsupportedChallenge {
+                challenge: self.challenge_type.clone(),
+            }),
         }
-        if let Some(alias) = &self.dns_alias {
-            if self.challenge_type != DNS_01 {
-                return Err(Error::AcmeDnsAliasInvalid {
-                    reason: "DNS alias is only supported with the dns-01 challenge type"
-                        .to_string(),
-                });
-            }
-            let alias = alias.trim();
-            if alias.is_empty() || alias.len() > 253 {
-                return Err(Error::AcmeDnsAliasInvalid {
-                    reason: "DNS alias cannot be empty or exceed 253 characters".to_string(),
-                });
-            }
+    }
+
+    fn validate_dns_challenge(&self) -> Result<(), Error> {
+        match (&self.dns_provider, &self.dns_credential) {
+            (Some(provider), None) if provider.has_credentials() => provider.validate(),
+            (None, Some(_)) => Ok(()),
+            (Some(_), Some(_)) => Err(Error::AcmeCredentialConflict),
+            _ => Err(Error::AcmeDnsProviderRequired),
         }
+    }
+
+    fn validate_dns_alias(&self) -> Result<(), Error> {
+        let Some(alias) = &self.dns_alias else {
+            return Ok(());
+        };
+        if self.challenge_type != DNS_01 {
+            return Err(Error::AcmeDnsAliasInvalid {
+                reason: "DNS alias is only supported with the dns-01 challenge type"
+                    .to_string(),
+            });
+        }
+        let alias = alias.trim();
+        if alias.is_empty() || alias.len() > 253 {
+            return Err(Error::AcmeDnsAliasInvalid {
+                reason: "DNS alias cannot be empty or exceed 253 characters".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_identifiers(&self) -> Result<(), Error> {
         if self.identifiers.is_empty() {
             return Err(Error::AcmeIdentifiersMissing);
         }
@@ -548,6 +570,20 @@ pub struct AcmeConfig {
     pub renewal_days: u64,
 }
 
+impl AcmeConfig {
+    /// Validates that the renewal interval is within standard bounds.
+    pub fn validate(&self) -> Result<(), Error> {
+        if !(MIN_RENEWAL_DAYS..=MAX_RENEWAL_DAYS).contains(&self.renewal_days) {
+            return Err(Error::AcmeRenewalDaysInvalid {
+                min: MIN_RENEWAL_DAYS,
+                max: MAX_RENEWAL_DAYS,
+                days: self.renewal_days,
+            });
+        }
+        Ok(())
+    }
+}
+
 fn default_active() -> bool {
     true
 }
@@ -926,5 +962,38 @@ mod test {
         let mut http_entry = acme(&["shop.client.com"], HTTP_01);
         http_entry.dns_alias = Some("auth.r3v3rs3.com".to_string());
         assert!(http_entry.validate().is_err());
+    }
+
+    #[test]
+    fn renewal_days_validation() {
+        let mut entry = acme(&["example.com"], HTTP_01);
+        entry.config.renewal_days = 60;
+        assert!(entry.validate().is_ok());
+
+        entry.config.renewal_days = 1;
+        assert!(entry.validate().is_ok());
+
+        entry.config.renewal_days = 89;
+        assert!(entry.validate().is_ok());
+
+        entry.config.renewal_days = 0;
+        assert!(matches!(
+            entry.validate(),
+            Err(Error::AcmeRenewalDaysInvalid {
+                min: 1,
+                max: 89,
+                days: 0,
+            })
+        ));
+
+        entry.config.renewal_days = 90;
+        assert!(matches!(
+            entry.validate(),
+            Err(Error::AcmeRenewalDaysInvalid {
+                min: 1,
+                max: 89,
+                days: 90,
+            })
+        ));
     }
 }

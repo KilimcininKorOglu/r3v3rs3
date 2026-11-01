@@ -245,6 +245,9 @@ pub enum Error {
     #[error("an ACME entry names a dns provider and a dns credential, not both")]
     AcmeCredentialConflict,
 
+    #[error("the renewal interval must be between {min} and {max} days: {days}")]
+    AcmeRenewalDaysInvalid { min: u64, max: u64, days: u64 },
+
     #[error("the dns credential {name} does not exist")]
     DnsCredentialNotFound { name: String },
 

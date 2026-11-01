@@ -290,6 +290,11 @@ mod tests {
             Error::AcmeWildcardNeedsDnsChallenge { identifier: text() },
             Error::AcmeDnsProviderRequired,
             Error::AcmeCredentialConflict,
+            Error::AcmeRenewalDaysInvalid {
+                min: 1,
+                max: 89,
+                days: 0,
+            },
             Error::DnsCredentialNotFound { name: text() },
             Error::DnsCredentialInUse { name: text() },
             Error::DnsCredentialNameTaken { name: text() },

@@ -115,6 +115,7 @@ impl RpcMethod for UpdateAcme {
     const MUTATES: bool = true;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        self.config.validate()?;
         let mut entry = get_entry(state, self.id)?.clone();
         entry.acme.config = self.config;
         state.storage.save_acme(&entry).await?;

@@ -239,7 +239,7 @@ impl AcmeEntry {
                     .unwrap_or(SystemTime::UNIX_EPOCH)
             })
             .max()?;
-        let renewal_days = self.acme.config.renewal_days;
+        let renewal_days = self.acme.config.renewal_days.max(1);
         Some(last_issued + Duration::from_secs(60 * 60 * 24 * renewal_days))
     }
 }

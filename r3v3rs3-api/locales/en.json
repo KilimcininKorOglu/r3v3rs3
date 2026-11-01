@@ -494,6 +494,7 @@
   "error.acme_exec_program_not_allowed": "The exec program must be one of the acme_exec programs in config.toml: {program}",
   "error.acme_identifiers_missing": "Enter at least one domain name.",
   "error.acme_invalid_identifier": "Invalid domain name for ACME: {identifier}",
+  "error.acme_renewal_days_invalid": "The renewal interval must be between {min} and {max} days: {days}.",
   "error.acme_unsupported_challenge": "Unsupported ACME challenge: {challenge}",
   "error.acme_webhook_url_invalid": "The webhook URL must use HTTPS. HTTP is allowed only for a loopback address: {url}",
   "error.acme_wildcard_needs_dns_challenge": "A wildcard domain name needs the DNS-01 challenge: {identifier}",
