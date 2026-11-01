@@ -895,11 +895,18 @@ pub struct AppLogLiveQuery {
 )]
 pub async fn logs_live(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Extension(caller): Extension<Caller>,
     Path(id): Path<ShortId>,
     Query(query): Query<AppLogLiveQuery>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, AppError> {
+    let public_url = {
+        let data = state.data.lock().await;
+        data.config.public_url.as_ref().map(|u| u.to_string())
+    };
+    verify_websocket_origin(&headers, public_url.as_deref())?;
+
     let platform = state.platform(&caller, Permission::Read).await?;
     let tail = query
         .tail
