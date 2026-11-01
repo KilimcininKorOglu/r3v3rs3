@@ -487,7 +487,7 @@ fn preview_iframe_view(locale: Locale, body: &str, viewport: PreviewViewport) ->
                 <iframe
                     class="w-full h-[360px] rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white shadow-inner"
                     srcdoc={body.to_string()}
-                    sandbox="allow-same-origin allow-scripts"
+                    sandbox="allow-scripts"
                     title="Live Error Page Preview"
                 />
             </div>
