@@ -102,6 +102,7 @@ impl Platform {
         volume: &str,
         backup_id: &str,
     ) -> anyhow::Result<Vec<u8>> {
+        validate_backup_id(backup_id)?;
         let app = self.app(id).await?;
         Self::find_volume_mount(&app, volume)?;
         let path = self
@@ -122,6 +123,7 @@ impl Platform {
         volume: &str,
         backup_id: &str,
     ) -> anyhow::Result<()> {
+        validate_backup_id(backup_id)?;
         let (app, name, runtime) = self.file_runtime(id).await?;
         let mount = Self::find_volume_mount(&app, volume)?;
         if mount.read_only {
@@ -143,6 +145,7 @@ impl Platform {
         volume: &str,
         backup_id: &str,
     ) -> anyhow::Result<()> {
+        validate_backup_id(backup_id)?;
         let app = self.app(id).await?;
         Self::find_volume_mount(&app, volume)?;
         let dir = self.volume_backup_dir(app.name.as_str(), volume);
@@ -249,6 +252,20 @@ pub(crate) async fn ungzip_bytes_limited(
     Ok(plain)
 }
 
+pub fn validate_backup_id(backup_id: &str) -> anyhow::Result<()> {
+    if !backup_id.is_empty()
+        && backup_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        Ok(())
+    } else {
+        bail!(Error::InvalidFilePath {
+            path: backup_id.to_string(),
+        })
+    }
+}
+
 fn generate_backup_id() -> String {
     format!("{:x}-{:08x}", unix_ms(), rand::random::<u32>())
 }
@@ -256,6 +273,17 @@ fn generate_backup_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_volume_backup_id_validation() {
+        assert!(validate_backup_id("backup-123_abc").is_ok());
+        assert!(validate_backup_id("12345678-abcdef01").is_ok());
+        assert!(validate_backup_id("../traverse").is_err());
+        assert!(validate_backup_id("foo/bar").is_err());
+        assert!(validate_backup_id("foo\\bar").is_err());
+        assert!(validate_backup_id("").is_err());
+        assert!(validate_backup_id("backup.tar.gz").is_err());
+    }
 
     #[tokio::test]
     async fn gzip_round_trip() {

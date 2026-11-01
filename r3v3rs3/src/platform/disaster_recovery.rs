@@ -472,14 +472,29 @@ pub async fn list_dr_backups(
     Ok(list)
 }
 
+/// Validates that a disaster recovery backup ID strictly conforms to expected alphanumeric format.
+pub fn validate_dr_backup_id(id: &str) -> anyhow::Result<()> {
+    if !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        Ok(())
+    } else {
+        anyhow::bail!("invalid disaster recovery backup id: {id}")
+    }
+}
+
 /// Reads the raw encrypted `.r3bundle` of a backup.
 pub async fn download_dr_backup(config_dir: &Path, id: &str) -> anyhow::Result<Vec<u8>> {
+    validate_dr_backup_id(id)?;
     let path = dr_dir(config_dir).join(format!("{id}.r3bundle"));
     fs::read(&path).with_context(|| format!("disaster recovery backup not found: {id}"))
 }
 
 /// Deletes a backup and its manifest.
 pub async fn delete_dr_backup(config_dir: &Path, id: &str) -> anyhow::Result<()> {
+    validate_dr_backup_id(id)?;
     let dir = dr_dir(config_dir);
     let bundle = dir.join(format!("{id}.r3bundle"));
     let manifest = dir.join(format!("{id}.json"));
@@ -494,6 +509,7 @@ pub async fn restore_dr_backup(
     id: &str,
     passphrase: Option<&str>,
 ) -> anyhow::Result<usize> {
+    validate_dr_backup_id(id)?;
     let bundle = download_dr_backup(config_dir, id).await?;
     restore_dr_bytes(config_dir, &bundle, passphrase).await
 }
@@ -566,6 +582,17 @@ pub async fn run_cli_restore(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_dr_backup_id_validation() {
+        assert!(validate_dr_backup_id("dr-1698765432-abcdef").is_ok());
+        assert!(validate_dr_backup_id("dr-test_1").is_ok());
+        assert!(validate_dr_backup_id("../traverse").is_err());
+        assert!(validate_dr_backup_id("foo/bar").is_err());
+        assert!(validate_dr_backup_id("foo\\bar").is_err());
+        assert!(validate_dr_backup_id("").is_err());
+        assert!(validate_dr_backup_id("dr.r3bundle").is_err());
+    }
 
     #[test]
     fn test_dr_bundle_encrypt_decrypt_round_trip() {
