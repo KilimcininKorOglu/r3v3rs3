@@ -59,6 +59,7 @@ where
     let storage = TestStorage::builder()
         .config(config)
         .account("admin", "password", Role::Admin, None)
+        .account("editor", "password", Role::Editor, None)
         .build();
     DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
     let addr = alloc_tcp_port().await?.socket_addr();
@@ -94,11 +95,15 @@ fn no_redirect() -> Client {
 
 /// Signs in and returns the session cookie.
 async fn session(client: &Client, addr: &SocketAddr) -> anyhow::Result<String> {
-    match session_cookie(*addr, "admin", "password").await {
+    let _ = client;
+    session_as(addr, "admin", "password").await
+}
+
+async fn session_as(addr: &SocketAddr, username: &str, password: &str) -> anyhow::Result<String> {
+    match session_cookie(*addr, username, password).await {
         Ok(cookie) => Ok(cookie),
         Err(err) if err.to_string().contains("429") => {
-            let _ = client;
-            login_when_allowed(*addr, "admin", "password").await
+            login_when_allowed(*addr, username, password).await
         }
         Err(err) => Err(err),
     }
@@ -590,8 +595,16 @@ async fn a_registration_without_a_redirect_uri_is_refused() -> anyhow::Result<()
 
 /// Completes the authorization flow and returns an access token with the edit scope.
 async fn access_token(addr: &SocketAddr) -> anyhow::Result<String> {
+    access_token_for(addr, "admin", "password").await
+}
+
+async fn access_token_for(
+    addr: &SocketAddr,
+    username: &str,
+    password: &str,
+) -> anyhow::Result<String> {
     let client = Client::new();
-    let cookie = session(&client, addr).await?;
+    let cookie = session_as(addr, username, password).await?;
     let (verifier, challenge) = pkce();
     let url = format!(
         "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
@@ -1138,6 +1151,38 @@ async fn dynamic_registration_rate_limit_throttles_rapid_requests() -> anyhow::R
             }
         }
         assert!(got_429, "expected at least one 429 Too Many Requests response during burst");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn run_server_upgrade_rejects_non_admin() -> anyhow::Result<()> {
+    use rmcp::model::CallToolRequestParams;
+    use rmcp::service::serve_client;
+    use rmcp::transport::streamable_http_client::{
+        StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+    };
+
+    let dir = TempDir::new("mcp-upgrade-auth")?;
+    with_admin(&dir.0, |addr| async move {
+        let token = access_token_for(&addr, "editor", "password").await?;
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(format!("http://{addr}/api/mcp"))
+                .auth_header(&token),
+        );
+        let client = serve_client(TestClient, transport).await?;
+        let err = client
+            .call_tool(CallToolRequestParams::new("run_server_upgrade"))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("the role of the account does not allow this action")
+                || err.to_string().contains("-32603"),
+            "{err}"
+        );
+        client.cancel().await?;
         Ok(())
     })
     .await

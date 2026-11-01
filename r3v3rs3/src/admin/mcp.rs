@@ -1067,15 +1067,15 @@ impl McpServer {
 
     /// Run server self-upgrade to the latest release.
     #[tool(
-        description = "Fetch, download, install and hand over to the newest release of the server binary. Needs the edit scope."
+        description = "Fetch, download, install and hand over to the newest release of the server binary. Needs the edit scope and Admin role."
     )]
     async fn run_server_upgrade(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut caller = caller_of(&parts)?;
+        let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        caller.role = r3v3rs3_api::auth::Role::Admin;
+        caller.authorize(Permission::Admin).map_err(tool_error)?;
         let started = super::upgrade::upgrade(
             axum::extract::State(self.state.clone()),
             axum::Extension(caller),
