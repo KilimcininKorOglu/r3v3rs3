@@ -155,7 +155,10 @@ pub async fn login(
             record_successful_login(&state, &username, &client_ip, &attempt_key).await;
             SessionScope::Admin
         }
-        _ => SessionScope::Login,
+        _ => {
+            release_login_attempt(&state, &attempt_key).await;
+            SessionScope::Login
+        }
     };
 
     let (backend, expiry) = session_backend(&state).await;
@@ -189,10 +192,16 @@ async fn ensure_login_allowed(state: &AppState, key: &LoginAttemptKey) -> Result
     let now = Instant::now();
     data.ban_tracker.check_banned(&key.0, now)?;
     let reset = data.config.admin.login_attempts_reset;
-    if data.login_attempts.is_blocked(key, reset, now) {
+    let max = data.config.admin.max_login_attempts;
+    if !data.login_attempts.acquire(key, max, reset, now) {
         return Err(Error::TooManyLoginAttempts);
     }
     Ok(())
+}
+
+async fn release_login_attempt(state: &AppState, key: &LoginAttemptKey) {
+    let mut data = state.data.lock().await;
+    data.login_attempts.release(key);
 }
 
 /// Counts a failed sign-in and records it in the audit log.
@@ -774,6 +783,7 @@ pub type LoginAttemptKey = (IpAddr, String);
 #[derive(Debug, Clone, Copy)]
 struct LoginAttempt {
     failures: u32,
+    in_flight: u32,
     window_start: Instant,
     blocked_until: Option<Instant>,
 }
@@ -785,6 +795,40 @@ pub struct LoginAttempts {
 }
 
 impl LoginAttempts {
+    /// Attempts to acquire an in-flight login attempt slot. Returns false if blocked or max attempts reached.
+    pub fn acquire(
+        &mut self,
+        key: &LoginAttemptKey,
+        max_attempts: u32,
+        reset: Duration,
+        now: Instant,
+    ) -> bool {
+        self.entries
+            .retain(|_, attempt| attempt.is_active(reset, now));
+        let max = max_attempts.max(1);
+        let attempt = self.entries.entry(key.clone()).or_insert(LoginAttempt {
+            failures: 0,
+            in_flight: 0,
+            window_start: now,
+            blocked_until: None,
+        });
+        if attempt.blocked_until.is_some_and(|until| until > now) {
+            return false;
+        }
+        if attempt.failures.saturating_add(attempt.in_flight) >= max {
+            return false;
+        }
+        attempt.in_flight += 1;
+        true
+    }
+
+    /// Releases an in-flight attempt slot without recording a failure.
+    pub fn release(&mut self, key: &LoginAttemptKey) {
+        if let Some(attempt) = self.entries.get_mut(key) {
+            attempt.in_flight = attempt.in_flight.saturating_sub(1);
+        }
+    }
+
     /// Returns true while the key is blocked. Expired entries are dropped.
     pub fn is_blocked(&mut self, key: &LoginAttemptKey, reset: Duration, now: Instant) -> bool {
         self.entries
@@ -804,9 +848,11 @@ impl LoginAttempts {
     ) {
         let attempt = self.entries.entry(key).or_insert(LoginAttempt {
             failures: 0,
+            in_flight: 0,
             window_start: now,
             blocked_until: None,
         });
+        attempt.in_flight = attempt.in_flight.saturating_sub(1);
         attempt.failures += 1;
         if attempt.failures >= max_attempts.max(1) {
             attempt.blocked_until = Some(now + reset);
@@ -820,6 +866,9 @@ impl LoginAttempts {
 
 impl LoginAttempt {
     fn is_active(&self, reset: Duration, now: Instant) -> bool {
+        if self.in_flight > 0 {
+            return true;
+        }
         match self.blocked_until {
             Some(until) => until > now,
             None => now.duration_since(self.window_start) < reset,
@@ -913,6 +962,20 @@ mod tests {
         attempts.clear(&key("admin"));
         attempts.record_failure(key("admin"), 2, reset, now);
         assert!(!attempts.is_blocked(&key("admin"), reset, now));
+    }
+
+    #[test]
+    fn in_flight_attempts_block_concurrent_burst_exceeding_threshold() {
+        let reset = Duration::from_secs(60);
+        let now = Instant::now();
+        let mut attempts = LoginAttempts::default();
+
+        assert!(attempts.acquire(&key("admin"), 2, reset, now));
+        assert!(attempts.acquire(&key("admin"), 2, reset, now));
+        assert!(!attempts.acquire(&key("admin"), 2, reset, now));
+
+        attempts.release(&key("admin"));
+        assert!(attempts.acquire(&key("admin"), 2, reset, now));
     }
 
     #[test]

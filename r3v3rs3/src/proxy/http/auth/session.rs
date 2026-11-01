@@ -214,10 +214,16 @@ impl SessionService {
         }
         state.ban_tracker.check_banned(client_ip, now)?;
         let reset = state.config.login_attempts_reset;
-        if state.attempts.is_blocked(key, reset, now) {
+        let max = state.config.max_login_attempts;
+        if !state.attempts.acquire(key, max, reset, now) {
             return Err(Error::TooManyLoginAttempts);
         }
         Ok(())
+    }
+
+    fn release_attempt(&self, key: &LoginAttemptKey) {
+        let mut state = self.state();
+        state.attempts.release(key);
     }
 
     fn record_failure(&self, client_ip: IpAddr, key: LoginAttemptKey) {
@@ -470,7 +476,10 @@ impl SessionAuthenticator {
                 self.service.clear_failures(&client_ip, &key);
                 self.complete_login(record, &form, ctx).await
             }
-            Verification::TotpRequired => self.issue_totp_challenge(record, &form, ctx).await,
+            Verification::TotpRequired => {
+                self.service.release_attempt(&key);
+                self.issue_totp_challenge(record, &form, ctx).await
+            }
             Verification::Failed => {
                 warn!(client = %ctx.client, username = %form.username, "sign-in failed");
                 self.service.record_failure(client_ip, key);
