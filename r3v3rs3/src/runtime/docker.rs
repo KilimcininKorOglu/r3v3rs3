@@ -917,6 +917,9 @@ impl ContainerRuntime for DockerRuntime {
         if let Some(swap) = limits.memory_swap_bytes {
             body["MemorySwap"] = json!(swap);
         }
+        if let Some(pids) = limits.pids_limit {
+            body["PidsLimit"] = json!(pids);
+        }
         let path = format!("/containers/{}/update", found.id);
         self.call(Method::POST, &path, Some(&body), &[]).await
     }
@@ -1288,6 +1291,9 @@ fn create_body(spec: &ContainerSpec) -> Value {
     }
     if let Some(swap) = spec.limits.memory_swap_bytes {
         host_config["MemorySwap"] = json!(swap);
+    }
+    if let Some(pids) = spec.limits.pids_limit {
+        host_config["PidsLimit"] = json!(pids);
     }
     let mut body = json!({
         "Image": spec.image.as_str(),
@@ -1868,6 +1874,7 @@ mod tests {
                 memory_bytes: Some(256 << 20),
                 nano_cpus: None,
                 memory_swap_bytes: None,
+                pids_limit: Some(1024),
             },
             publish: Some(8080),
             host_port: Some(18080),
@@ -1901,6 +1908,7 @@ mod tests {
                 "SecurityOpt": ["no-new-privileges:true"],
                 "CapDrop": ["NET_RAW", "MKNOD", "AUDIT_WRITE"],
                 "Memory": 268435456,
+                "PidsLimit": 1024,
                 "NetworkMode": "r3v3rs3-shop",
                 "ExtraHosts": ["host.docker.internal:host-gateway"],
                 "PortBindings": { "8080/tcp": [{ "HostIp": "127.0.0.1", "HostPort": "18080" }] },

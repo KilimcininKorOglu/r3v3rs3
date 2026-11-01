@@ -720,6 +720,7 @@ fn parse_db_limits(memory_mb: &str, cpus: &str, swap_mb: &str) -> ResourceLimits
         memory_bytes: mem,
         nano_cpus: nano,
         memory_swap_bytes: swap,
+        pids_limit: None,
     }
 }
 

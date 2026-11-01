@@ -338,6 +338,9 @@ pub struct ResourceLimits {
     /// Total memory + swap limit in bytes (`-1` for unlimited swap).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_swap_bytes: Option<i64>,
+    /// Maximum number of PIDs (processes/threads) allowed in the container (`<= 0` or `None` for default/unlimited).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pids_limit: Option<i64>,
 }
 
 /// A container to create. The image runs its own entrypoint and command.

@@ -731,6 +731,7 @@ impl AppForm {
             memory_bytes,
             nano_cpus,
             memory_swap_bytes,
+            pids_limit: None,
         })
     }
 }
