@@ -15,6 +15,7 @@ use r3v3rs3_api::{
     auth::Role,
     error::Error,
     id::ShortId,
+    policy::{AuthPolicy, ForwardAuth},
     proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind},
 };
 use reqwest::{Client, Method, Response, StatusCode, header::COOKIE};
@@ -336,6 +337,54 @@ async fn a_restricted_editor_cannot_use_stored_client_certificates() -> anyhow::
         let admin = caller(Role::Admin, None);
         let add_admin = AddProxy {
             entry: with_cert,
+            owner: None,
+        };
+        let res = call_as(&mut channels, admin, add_admin).await.expect("rpc call");
+        assert!(res.is_ok(), "{res:?}");
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn forward_auth_ssrf_destinations_are_restricted() -> anyhow::Result<()> {
+    let web_id: ShortId = "web".parse().unwrap();
+    let storage = TestStorage::builder()
+        .proxies(vec![proxy_entry("web", "http://127.0.0.1:1/")])
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    with_server(storage, |mut channels| async move {
+        let editor = caller(Role::Editor, web_only());
+        let admin = caller(Role::Admin, None);
+
+        let make_forward = |url: &str| {
+            let mut p = http_proxy("http://127.0.0.1:2/");
+            if let ProxyKind::Http(http) = &mut p.kind {
+                http.auth = AuthPolicy::Forward(Box::new(ForwardAuth {
+                    url: url.parse().unwrap(),
+                    response_headers: vec!["X-Auth-User".into()],
+                    timeout: std::time::Duration::from_secs(5),
+                }));
+            }
+            p
+        };
+
+        // 1. Cloud metadata is rejected for both editor and admin
+        let meta_proxy = make_forward("http://169.254.169.254/latest/meta-data");
+        assert_add_rejected(&mut channels, editor.clone(), meta_proxy.clone()).await;
+        assert_add_rejected(&mut channels, admin.clone(), meta_proxy).await;
+
+        // 2. Loopback destination is rejected for restricted editor
+        let loopback_proxy = make_forward("http://127.0.0.1:4180/auth");
+        assert_add_rejected(&mut channels, editor.clone(), loopback_proxy.clone()).await;
+        assert_update_rejected(&mut channels, editor.clone(), web_id, loopback_proxy.clone()).await;
+
+        // 3. Admin can configure forward auth on loopback
+        let add_admin = AddProxy {
+            entry: loopback_proxy,
             owner: None,
         };
         let res = call_as(&mut channels, admin, add_admin).await.expect("rpc call");

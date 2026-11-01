@@ -3,7 +3,7 @@ use crate::proxy::http::{error::ProxyError, hyper_tls::client::HttpsConnector};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty, Full, Limited};
 use hyper::{
-    Request, Response, Uri,
+    Request, Response, StatusCode, Uri,
     body::Incoming,
     header::{
         CONNECTION, CONTENT_LENGTH, HOST, HeaderMap, HeaderName, HeaderValue, TE, TRAILER,
@@ -15,7 +15,7 @@ use hyper_util::{
     rt::TokioExecutor,
 };
 use r3v3rs3_api::policy::ForwardAuth;
-use std::{fmt, str::FromStr, sync::Arc, time::Duration};
+use std::{fmt, net::IpAddr, str::FromStr, sync::Arc, time::Duration};
 use tokio_rustls::rustls::ClientConfig;
 use tracing::error;
 
@@ -61,13 +61,68 @@ enum Verdict {
     Deny(Response<Full<Bytes>>),
 }
 
+fn parse_host_ip(host: &str) -> Option<IpAddr> {
+    let clean = host.trim_matches(|c| c == '[' || c == ']');
+    clean.parse().ok()
+}
+
+pub(crate) fn is_cloud_metadata_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            a == 169 && b == 254
+        }
+        IpAddr::V6(v6) => {
+            let octets = v6.octets();
+            octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80
+        }
+    }
+}
+
+pub(crate) fn is_cloud_metadata_host(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    let trimmed = lower.trim_end_matches('.');
+    if trimmed == "metadata.google.internal" || trimmed == "instance-data" {
+        return true;
+    }
+    if let Some(ip) = parse_host_ip(host) {
+        return is_cloud_metadata_ip(ip);
+    }
+    false
+}
+
+pub(crate) fn is_loopback_host(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    let trimmed = lower.trim_end_matches('.');
+    if trimmed == "localhost" || trimmed.ends_with(".localhost") || trimmed.ends_with(".local") {
+        return true;
+    }
+    if let Some(ip) = parse_host_ip(host) {
+        return ip.is_loopback() || ip.is_unspecified();
+    }
+    false
+}
+
 impl ForwardAuthenticator {
     pub fn new(config: ForwardAuth, tls_client_config: Arc<ClientConfig>) -> Self {
-        let url = Uri::from_str(config.url.0.as_str())
-            .map_err(|err| {
+        let url = match Uri::from_str(config.url.0.as_str()) {
+            Ok(uri) => {
+                let prohibited = uri
+                    .host()
+                    .map(is_cloud_metadata_host)
+                    .unwrap_or(true);
+                if prohibited {
+                    error!(url = %config.url, "forbidden forward auth url (cloud metadata)");
+                    None
+                } else {
+                    Some(uri)
+                }
+            }
+            Err(err) => {
                 error!(url = %config.url, %err, "invalid forward auth url, every request is rejected");
-            })
-            .ok();
+                None
+            }
+        };
         let response_headers = config
             .response_headers
             .iter()
@@ -169,8 +224,29 @@ impl ForwardAuthenticator {
     }
 }
 
+fn is_safe_denied_header(name: &HeaderName) -> bool {
+    matches!(
+        name.as_str(),
+        "location"
+            | "set-cookie"
+            | "www-authenticate"
+            | "content-type"
+            | "content-length"
+            | "cache-control"
+    )
+}
+
 async fn denied_response(res: Response<Incoming>) -> Result<Response<Full<Bytes>>, ProxyError> {
-    let (mut parts, body) = res.into_parts();
+    let status = res.status();
+    if !status.is_redirection()
+        && status != StatusCode::UNAUTHORIZED
+        && status != StatusCode::FORBIDDEN
+    {
+        error!(%status, "forward auth service rejected with unexpected status, rejecting request");
+        return Err(ProxyError::AuthServiceUnavailable);
+    }
+
+    let (parts, body) = res.into_parts();
     let body = Limited::new(body, MAX_RESPONSE_BODY_SIZE)
         .collect()
         .await
@@ -179,10 +255,18 @@ async fn denied_response(res: Response<Incoming>) -> Result<Response<Full<Bytes>
             ProxyError::AuthServiceUnavailable
         })?
         .to_bytes();
-    for name in &CONNECTION_HEADERS {
-        parts.headers.remove(name);
+
+    let mut sanitized_headers = HeaderMap::new();
+    for (name, value) in parts.headers.iter() {
+        if is_safe_denied_header(name) {
+            sanitized_headers.append(name.clone(), value.clone());
+        }
     }
-    Ok(Response::from_parts(parts, Full::new(body)))
+
+    let mut new_res = Response::new(Full::new(body));
+    *new_res.status_mut() = status;
+    *new_res.headers_mut() = sanitized_headers;
+    Ok(new_res)
 }
 
 #[cfg(test)]
@@ -258,5 +342,30 @@ mod tests {
             ["admin", "dev"]
         );
         assert!(to.get("x-internal").is_none());
+    }
+
+    #[test]
+    fn metadata_and_loopback_detection() {
+        assert!(is_cloud_metadata_host("169.254.169.254"));
+        assert!(is_cloud_metadata_host("169.254.1.1"));
+        assert!(is_cloud_metadata_host("metadata.google.internal"));
+        assert!(is_cloud_metadata_host("instance-data"));
+        assert!(!is_cloud_metadata_host("auth.example.com"));
+
+        assert!(is_loopback_host("127.0.0.1"));
+        assert!(is_loopback_host("localhost"));
+        assert!(is_loopback_host("app.localhost"));
+        assert!(is_loopback_host("::1"));
+        assert!(is_loopback_host("[::1]"));
+        assert!(!is_loopback_host("auth.example.com"));
+    }
+
+    #[test]
+    fn safe_denied_headers_filter() {
+        assert!(is_safe_denied_header(&hyper::header::LOCATION));
+        assert!(is_safe_denied_header(&hyper::header::SET_COOKIE));
+        assert!(is_safe_denied_header(&hyper::header::WWW_AUTHENTICATE));
+        assert!(!is_safe_denied_header(&hyper::header::SERVER));
+        assert!(!is_safe_denied_header(&HeaderName::from_static("x-powered-by")));
     }
 }

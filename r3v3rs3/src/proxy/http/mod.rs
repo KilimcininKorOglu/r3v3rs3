@@ -60,7 +60,7 @@ use tokio_rustls::{TlsAcceptor, rustls::pki_types::ServerName};
 use tracing::{Instrument, Level, Span, debug, error, info, span};
 
 mod affinity;
-mod auth;
+pub(crate) mod auth;
 mod body_limit;
 pub(crate) mod bot;
 pub(crate) mod cache;

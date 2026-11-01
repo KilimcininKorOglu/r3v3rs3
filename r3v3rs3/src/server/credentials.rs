@@ -228,6 +228,12 @@ fn validate_forward_auth(forward: &ForwardAuth) -> Result<(), Error> {
     if forward.timeout.is_zero() {
         return Err(Error::InvalidTimeout);
     }
+    let host = forward.url.0.host_str().unwrap_or_default();
+    if crate::proxy::http::auth::forward::is_cloud_metadata_host(host) {
+        return Err(Error::InvalidServerUrl {
+            url: forward.url.to_string(),
+        });
+    }
     match forward
         .response_headers
         .iter()

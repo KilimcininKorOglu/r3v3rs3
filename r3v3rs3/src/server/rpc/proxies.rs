@@ -7,6 +7,7 @@ use crate::server::state::ServerState;
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::policy::AuthPolicy;
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, ProxyStatus};
 use r3v3rs3_api::subject_name::SubjectName;
 use r3v3rs3_api::vhost::VirtualHost;
@@ -270,8 +271,26 @@ fn validate_proxy_rules(
     validate_proxy(proxy, state)?;
     ensure_access_lists(proxy, state)?;
     ensure_client_cert_allowed(proxy, caller)?;
+    ensure_forward_auth_allowed(proxy, caller)?;
     ensure_no_unseen_host_overlap(proxy, proxy_id, caller, state)?;
     ensure_no_unseen_port_conflict(proxy, proxy_id, caller, state)
+}
+
+fn ensure_forward_auth_allowed(proxy: &Proxy, caller: &Caller) -> Result<(), Error> {
+    let ProxyKind::Http(http) = &proxy.kind else {
+        return Ok(());
+    };
+    let AuthPolicy::Forward(forward) = &http.auth else {
+        return Ok(());
+    };
+    let host = forward.url.0.host_str().unwrap_or_default();
+    if crate::proxy::http::auth::forward::is_cloud_metadata_host(host) {
+        return Err(Error::Forbidden);
+    }
+    if caller.proxies.is_some() && crate::proxy::http::auth::forward::is_loopback_host(host) {
+        return Err(Error::Forbidden);
+    }
+    Ok(())
 }
 
 /// Checks the upstream timeouts and the health check, and that the upstream client certificate of

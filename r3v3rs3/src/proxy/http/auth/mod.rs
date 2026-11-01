@@ -9,7 +9,7 @@ use tokio_rustls::rustls::ClientConfig;
 
 mod basic;
 mod bearer;
-mod forward;
+pub(crate) mod forward;
 mod oidc;
 mod session;
 
