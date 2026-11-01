@@ -775,16 +775,34 @@ impl PlatformStore {
         Ok(())
     }
 
-    /// Moves a pending deployment to queued and clears its message.
-    pub async fn approve_deployment(&self, id: ShortId, now: u64) -> anyhow::Result<()> {
-        sqlx::query(
-            "UPDATE deployments SET status = 'queued', message = NULL, started_at = ? WHERE id = ?",
+    /// Moves a pending deployment to queued and clears its message if still pending approval.
+    pub async fn approve_deployment(&self, id: ShortId, now: u64) -> anyhow::Result<bool> {
+        let res = sqlx::query(
+            "UPDATE deployments SET status = 'queued', message = NULL, started_at = ? WHERE id = ? AND status = 'pending_approval'",
         )
         .bind(sql_int(now))
         .bind(id.to_string())
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(res.rows_affected() > 0)
+    }
+
+    /// Rejects a pending deployment with cancelled status if still pending approval.
+    pub async fn reject_deployment(
+        &self,
+        id: ShortId,
+        message: &str,
+        now: u64,
+    ) -> anyhow::Result<bool> {
+        let res = sqlx::query(
+            "UPDATE deployments SET status = 'cancelled', message = ?, finished_at = ? WHERE id = ? AND status = 'pending_approval'",
+        )
+        .bind(message)
+        .bind(sql_int(now))
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
     }
 
     /// The deployments waiting for manual approval or for their deploy window.

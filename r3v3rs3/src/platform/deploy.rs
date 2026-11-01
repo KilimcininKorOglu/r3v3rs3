@@ -214,6 +214,14 @@ fn job_image_for_entry(entry: &DeploymentEntry, spec: &AppSpec) -> Result<JobIma
     }
 }
 
+fn ensure_pending_approval(id: ShortId, status: DeploymentStatus) -> anyhow::Result<()> {
+    if status != DeploymentStatus::PendingApproval {
+        Err(Error::DeploymentNotPendingApproval { id }.into())
+    } else {
+        Ok(())
+    }
+}
+
 /// Holds the app of a running pipeline, so that the app gets one pipeline at a time.
 pub struct AppLock {
     platform: Arc<Platform>,
@@ -343,29 +351,14 @@ impl Platform {
         _username: &str,
     ) -> anyhow::Result<DeploymentEntry> {
         let entry = self.deployment(id).await?;
-        if entry.status != DeploymentStatus::PendingApproval {
-            return Err(Error::DeploymentNotPendingApproval { id }.into());
-        }
+        ensure_pending_approval(id, entry.status)?;
         let app = self.app(entry.app).await?;
         let lock = self.lock_app(&app)?;
-        let (spec, env) = self
-            .store
-            .deployment_snapshot(id)
-            .await?
-            .ok_or_else(|| not_found(id))?;
-        let image = job_image_for_entry(&entry, &spec)?;
-        self.store.approve_deployment(id, unix_ms()).await?;
-        let job = Job {
-            app: entry.app,
-            app_name: app.name.clone(),
-            app_target: app.target,
-            trigger: entry.trigger,
-            deployment: entry.id,
-            backend: self.backend(app.target),
-            spec,
-            env,
-            image,
-        };
+        let (spec, env) = self.load_deployment_snapshot(id).await?;
+        let job = self.build_approval_job(&entry, &app, spec, env)?;
+        if !self.store.approve_deployment(id, unix_ms()).await? {
+            return Err(Error::DeploymentNotPendingApproval { id }.into());
+        }
         self.spawn_job(lock, job);
         self.deployment(id).await
     }
@@ -377,14 +370,45 @@ impl Platform {
         username: &str,
     ) -> anyhow::Result<DeploymentEntry> {
         let entry = self.deployment(id).await?;
-        if entry.status != DeploymentStatus::PendingApproval {
+        ensure_pending_approval(id, entry.status)?;
+        let app = self.app(entry.app).await?;
+        let _lock = self.lock_app(&app)?;
+        let message = format!("Rejected by {username}");
+        if !self.store.reject_deployment(id, &message, unix_ms()).await? {
             return Err(Error::DeploymentNotPendingApproval { id }.into());
         }
-        let message = format!("Rejected by {username}");
-        self.store
-            .fail_deployment(id, DeploymentStatus::Cancelled, &message, unix_ms())
-            .await?;
         self.deployment(id).await
+    }
+
+    async fn load_deployment_snapshot(
+        &self,
+        id: ShortId,
+    ) -> anyhow::Result<(AppSpec, Vec<StoredEnv>)> {
+        self.store
+            .deployment_snapshot(id)
+            .await?
+            .ok_or_else(|| not_found(id))
+    }
+
+    fn build_approval_job(
+        &self,
+        entry: &DeploymentEntry,
+        app: &AppEntry,
+        spec: AppSpec,
+        env: Vec<StoredEnv>,
+    ) -> anyhow::Result<Job> {
+        let image = job_image_for_entry(entry, &spec)?;
+        Ok(Job {
+            app: entry.app,
+            app_name: app.name.clone(),
+            app_target: app.target,
+            trigger: entry.trigger,
+            deployment: entry.id,
+            backend: self.backend(app.target),
+            spec,
+            env,
+            image,
+        })
     }
 
     async fn start_job(
