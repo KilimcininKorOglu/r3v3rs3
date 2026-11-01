@@ -472,7 +472,7 @@ async fn cli_backup_action(
     let config_dir = get_config_dir(cli_args.config_dir)?;
     let passphrase = match cli_args.passphrase {
         Some(p) => p,
-        None => rpassword::prompt_password("Enter encryption passphrase (or blank for none): ")?,
+        None => rpassword::prompt_password("Enter encryption passphrase: ")?,
     };
     let (entry, path) = r3v3rs3::platform::disaster_recovery::run_cli_backup(
         &config_dir,

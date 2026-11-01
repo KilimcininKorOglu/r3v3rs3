@@ -65,12 +65,16 @@ pub fn derive_dr_key(passphrase: &str, salt: &[u8; SALT_LEN]) -> [u8; 32] {
 
 /// Encrypts raw bundle bytes with AES-256-GCM and prepends the magic header, version, salt, and nonce.
 pub fn encrypt_dr_bundle(payload: &[u8], passphrase: &str) -> anyhow::Result<Vec<u8>> {
+    let pass = passphrase.trim();
+    if pass.is_empty() {
+        anyhow::bail!("passphrase must not be empty");
+    }
     let random = SystemRandom::new();
     let mut salt = [0u8; SALT_LEN];
     random
         .fill(&mut salt)
         .map_err(|_| anyhow!("failed to generate random salt"))?;
-    let key_bytes = derive_dr_key(passphrase, &salt);
+    let key_bytes = derive_dr_key(pass, &salt);
     let key =
         UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|_| anyhow!("invalid encryption key"))?;
     let safe_key = LessSafeKey::new(key);
@@ -91,6 +95,10 @@ pub fn encrypt_dr_bundle(payload: &[u8], passphrase: &str) -> anyhow::Result<Vec
 
 /// Decrypts an encrypted `.r3bundle` into its raw `.tar.gz` payload.
 pub fn decrypt_dr_bundle(bundle: &[u8], passphrase: &str) -> anyhow::Result<Vec<u8>> {
+    let pass = passphrase.trim();
+    if pass.is_empty() {
+        anyhow::bail!("passphrase must not be empty");
+    }
     let min_len = 4 + 1 + SALT_LEN + NONCE_LEN + 16;
     if bundle.len() < min_len {
         anyhow::bail!("disaster recovery bundle is too short");
@@ -110,7 +118,7 @@ pub fn decrypt_dr_bundle(bundle: &[u8], passphrase: &str) -> anyhow::Result<Vec<
     nonce.copy_from_slice(&bundle[5 + SALT_LEN..5 + SALT_LEN + NONCE_LEN]);
     let body_start = 5 + SALT_LEN + NONCE_LEN;
     let mut body = bundle[body_start..].to_vec();
-    let key_bytes = derive_dr_key(passphrase, &salt);
+    let key_bytes = derive_dr_key(pass, &salt);
     let key =
         UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|_| anyhow!("invalid decryption key"))?;
     let safe_key = LessSafeKey::new(key);
@@ -393,10 +401,13 @@ pub async fn create_dr_backup(
     upload_s3: bool,
     platform: Option<&crate::platform::Platform>,
 ) -> anyhow::Result<DisasterRecoveryBackupEntry> {
+    let pass = passphrase
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| anyhow!("passphrase must not be empty"))?;
     let files = collect_bundle_files(config_dir).await?;
     let files_count = files.len();
     let tar_gz = pack_tar_gz(&files)?;
-    let pass = passphrase.unwrap_or("");
     let encrypted_bundle = encrypt_dr_bundle(&tar_gz, pass)?;
     let id = dr_backup_id();
     let sha256 = hex::encode(Sha256::digest(&encrypted_bundle));
@@ -533,7 +544,10 @@ pub async fn restore_dr_bytes(
     bytes: &[u8],
     passphrase: Option<&str>,
 ) -> anyhow::Result<usize> {
-    let pass = passphrase.unwrap_or("");
+    let pass = passphrase
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| anyhow!("passphrase must not be empty"))?;
     let tar_gz = decrypt_dr_bundle(bytes, pass)?;
     unpack_tar_gz(&tar_gz, config_dir)
 }
@@ -545,10 +559,14 @@ pub async fn run_cli_backup(
     passphrase: &str,
     _upload_s3: bool,
 ) -> anyhow::Result<(DisasterRecoveryBackupEntry, PathBuf)> {
+    let pass = passphrase.trim();
+    if pass.is_empty() {
+        anyhow::bail!("passphrase must not be empty");
+    }
     let files = collect_bundle_files(config_dir).await?;
     let files_count = files.len();
     let tar_gz = pack_tar_gz(&files)?;
-    let encrypted = encrypt_dr_bundle(&tar_gz, passphrase)?;
+    let encrypted = encrypt_dr_bundle(&tar_gz, pass)?;
     let id = dr_backup_id();
     let sha256 = hex::encode(Sha256::digest(&encrypted));
     let size = encrypted.len() as u64;
@@ -587,9 +605,13 @@ pub async fn run_cli_restore(
     config_dir: &Path,
     passphrase: &str,
 ) -> anyhow::Result<usize> {
+    let pass = passphrase.trim();
+    if pass.is_empty() {
+        anyhow::bail!("passphrase must not be empty");
+    }
     let bytes = fs::read(file_path)
         .with_context(|| format!("failed to read bundle file: {}", file_path.display()))?;
-    restore_dr_bytes(config_dir, &bytes, Some(passphrase)).await
+    restore_dr_bytes(config_dir, &bytes, Some(pass)).await
 }
 
 #[cfg(test)]
@@ -621,6 +643,12 @@ mod tests {
 
         // Wrong passphrase
         assert!(decrypt_dr_bundle(&encrypted, "wrong-passphrase").is_err());
+
+        // Empty passphrase rejected
+        assert!(encrypt_dr_bundle(plaintext, "").is_err());
+        assert!(encrypt_dr_bundle(plaintext, "   ").is_err());
+        assert!(decrypt_dr_bundle(&encrypted, "").is_err());
+        assert!(decrypt_dr_bundle(&encrypted, "   ").is_err());
     }
 
     #[test]
