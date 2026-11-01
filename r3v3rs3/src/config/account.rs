@@ -9,8 +9,26 @@ use base64::{
 use r3v3rs3_api::auth::{Account, LoginMethod, LoginRequest, LoginResponse};
 use r3v3rs3_api::error::Error;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use totp_rs::{Builder, Secret, Totp};
 use tracing::error;
+
+/// Hash that the password of an unknown user is verified against, so the response time does not
+/// reveal which usernames exist.
+static UNKNOWN_USER_HASH: LazyLock<Option<String>> =
+    LazyLock::new(|| match Argon2::default().hash_password(b"") {
+        Ok(hash) => Some(hash.to_string()),
+        Err(err) => {
+            error!(%err, "failed to hash the unknown user password");
+            None
+        }
+    });
+
+fn dummy_verify_password(password: &str) {
+    if let Some(hash) = UNKNOWN_USER_HASH.as_ref() {
+        let _ = Argon2::default().verify_password(password.as_bytes(), hash.as_str());
+    }
+}
 
 pub fn new_account(password: &str, totp: bool) -> anyhow::Result<Account> {
     let password = Argon2::default()
@@ -30,6 +48,9 @@ pub fn verify(account: Option<&Account>, request: LoginRequest) -> Result<LoginR
     let name = &request.username;
     let Some(account) = account else {
         error!(%name, "account not found: {name}");
+        if let LoginMethod::Password { password } = &request.method {
+            dummy_verify_password(password);
+        }
         return Err(Error::InvalidLoginCredentials);
     };
     match request.method {
@@ -61,9 +82,10 @@ pub fn verify_and_update(
 ) -> Result<(LoginResponse, bool), Error> {
     match request.method {
         LoginMethod::Password { password } => {
-            let account = accounts
-                .get(&request.username)
-                .ok_or(Error::InvalidLoginCredentials)?;
+            let Some(account) = accounts.get(&request.username) else {
+                dummy_verify_password(&password);
+                return Err(Error::InvalidLoginCredentials);
+            };
             let response = verify_password(account, &password)?;
             Ok((response, false))
         }
@@ -381,5 +403,33 @@ mod tests {
     fn new_account_sets_credentials_changed_at_to_current_time() {
         let account = new_account("test-password-123", false).unwrap();
         assert!(account.credentials_changed_at > 0);
+    }
+
+    #[test]
+    fn unknown_account_dummy_password_verification() {
+        let req1 = LoginRequest {
+            username: "nonexistent".into(),
+            method: LoginMethod::Password {
+                password: "bad-password".into(),
+            },
+            insecure: false,
+        };
+        assert!(matches!(
+            verify(None, req1),
+            Err(Error::InvalidLoginCredentials)
+        ));
+
+        let req2 = LoginRequest {
+            username: "nonexistent".into(),
+            method: LoginMethod::Password {
+                password: "bad-password".into(),
+            },
+            insecure: false,
+        };
+        let mut accounts = HashMap::new();
+        assert!(matches!(
+            verify_and_update(&mut accounts, req2),
+            Err(Error::InvalidLoginCredentials)
+        ));
     }
 }
