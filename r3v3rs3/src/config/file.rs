@@ -622,8 +622,14 @@ impl FileStorage {
         info!(?path, "save account");
 
         let mut doc = match fs::read_to_string(&path).await {
-            Ok(content) => content.parse::<DocumentMut>().unwrap_or_default(),
-            Err(_) => DocumentMut::default(),
+            Ok(content) => content
+                .parse::<DocumentMut>()
+                .with_context(|| format!("failed to parse {}", path.display()))?,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => DocumentMut::default(),
+            Err(err) => {
+                return Err(anyhow::Error::new(err)
+                    .context(format!("failed to read {}", path.display())));
+            }
         };
 
         let prev = Self::previous_credentials_changed_at(&doc, name);
@@ -1108,6 +1114,19 @@ mod test {
         assert!(acc1.credentials_changed_at > 0);
         let acc2 = storage.add_account("bob", "newpassword123", false, Role::Viewer).await.unwrap();
         assert!(acc2.credentials_changed_at >= acc1.credentials_changed_at);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn add_account_refuses_to_overwrite_corrupted_accounts_toml() {
+        let dir = std::env::temp_dir().join(format!("r33-add-user-corrupted-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("accounts.toml");
+        std::fs::write(&path, "this is = [invalid toml").unwrap();
+        let storage = FileStorage::new(&dir);
+        let res = storage.add_account("alice", "password123", false, Role::Admin).await;
+        assert!(res.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "this is = [invalid toml");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
