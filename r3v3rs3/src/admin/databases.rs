@@ -8,7 +8,7 @@ use super::{AppError, AppState};
 use crate::accounts::{Caller, Permission};
 use crate::audit::AuditRecord;
 use crate::clock::unix_ms;
-use crate::platform::allocate_host_port;
+use crate::platform::Platform;
 use axum::{
     Extension, Json,
     extract::{Path, State},
@@ -130,10 +130,7 @@ pub async fn create(
         }
         .into());
     }
-    let host_port = match request.host_port {
-        Some(port) => port,
-        None => allocate_host_port().map_err(platform_error)?,
-    };
+    let host_port = resolve_host_port(&platform, request.host_port).await?;
     let app_request = app_request(&request, &info, host_port).map_err(into_app_error)?;
     let app = platform
         .add_app(app_request, unix_ms())
@@ -182,7 +179,7 @@ pub async fn clone(
     let platform = state.platform(&caller, Permission::Edit).await?;
     let source = platform.app(id).await.map_err(platform_error)?;
     let info = source_engine_info(&source)?;
-    let host_port = resolve_host_port(request.host_port)?;
+    let host_port = resolve_host_port(&platform, request.host_port).await?;
     let app_req = clone_app_request(&source, &request, &info, host_port).map_err(into_app_error)?;
     let app = platform
         .add_app(app_req, unix_ms())
@@ -253,7 +250,7 @@ pub async fn create_replica(
     let platform = state.platform(&caller, Permission::Edit).await?;
     let primary = platform.app(id).await.map_err(platform_error)?;
     let info = validate_primary_for_replica(&primary)?;
-    let host_port = resolve_host_port(request.host_port)?;
+    let host_port = resolve_host_port(&platform, request.host_port).await?;
     let app_req =
         replica_app_request(&primary, &request, &info, host_port).map_err(into_app_error)?;
     let app = platform
@@ -383,10 +380,10 @@ fn source_engine_info(source: &AppEntry) -> Result<EngineInfo, AppError> {
     })
 }
 
-fn resolve_host_port(port: Option<u16>) -> Result<u16, AppError> {
+async fn resolve_host_port(platform: &Platform, port: Option<u16>) -> Result<u16, AppError> {
     match port {
         Some(p) => Ok(p),
-        None => allocate_host_port().map_err(platform_error),
+        None => platform.allocate_host_port().await.map_err(platform_error),
     }
 }
 

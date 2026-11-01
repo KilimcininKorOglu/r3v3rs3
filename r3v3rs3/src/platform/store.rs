@@ -35,6 +35,7 @@ const SCHEMA: &[&str] = &[
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
     )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS apps_host_port_idx ON apps (json_extract(spec, '$.host_port')) WHERE json_extract(spec, '$.host_port') IS NOT NULL",
     "CREATE TABLE IF NOT EXISTS app_env (
         app_id TEXT    NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
         key    TEXT    NOT NULL,
@@ -350,12 +351,13 @@ pub struct RunningDeployment {
     pub spec: AppSpec,
 }
 
-/// The outcome of a write that a unique app name can refuse.
+/// The outcome of a write that a unique app name or host port can refuse.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Write {
     Done,
     NotFound,
     NameTaken,
+    HostPortTaken,
 }
 
 pub struct PlatformStore {
@@ -605,6 +607,25 @@ impl PlatformStore {
             .fetch_optional(&self.pool)
             .await?;
         row.as_ref().map(app_of).transpose()
+    }
+
+    /// True if any registered app (excluding `excluding_app`) has configured `port` as its host port.
+    pub async fn is_host_port_used(
+        &self,
+        port: u16,
+        excluding_app: Option<ShortId>,
+    ) -> anyhow::Result<bool> {
+        let excluding_id = excluding_app.map(|id| id.to_string()).unwrap_or_default();
+        let row = sqlx::query(
+            "SELECT 1 FROM apps
+             WHERE json_extract(spec, '$.host_port') = ?
+               AND id != ?",
+        )
+        .bind(port as i64)
+        .bind(excluding_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.is_some())
     }
 
     /// The sealed value of a secret of an app.
@@ -1012,9 +1033,21 @@ impl PlatformStore {
     }
 }
 
-/// Maps a unique constraint failure on the app name to `NameTaken`.
+/// Maps a unique constraint failure on the app name to `NameTaken` or host port to `HostPortTaken`.
 fn written(result: Result<Write, sqlx::Error>) -> anyhow::Result<Write> {
-    written_name(result, "apps.name")
+    match result {
+        Err(sqlx::Error::Database(err)) if err.is_unique_violation() => {
+            let msg = err.message();
+            if msg.contains("apps_host_port_idx") {
+                Ok(Write::HostPortTaken)
+            } else if msg.contains("apps.name") {
+                Ok(Write::NameTaken)
+            } else {
+                Err(sqlx::Error::Database(err).into())
+            }
+        }
+        other => Ok(other?),
+    }
 }
 
 /// Maps a unique constraint failure on the `column` of a name to `NameTaken`.
@@ -1416,6 +1449,22 @@ mod tests {
             .map(|app| app.name.to_string())
             .collect::<Vec<_>>();
         assert_eq!(names, ["blog", "shop"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn host_port_is_unique_across_apps() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let mut app1 = app("abc-def", "app1");
+        app1.spec.host_port = Some(15432);
+        assert_eq!(store.insert_app(&app1).await?, Write::Done);
+        assert!(store.is_host_port_used(15432, None).await?);
+        assert!(!store.is_host_port_used(15432, Some(app1.id)).await?);
+        assert!(!store.is_host_port_used(15433, None).await?);
+
+        let mut app2 = app("ghj-klm", "app2");
+        app2.spec.host_port = Some(15432);
+        assert_eq!(store.insert_app(&app2).await?, Write::HostPortTaken);
         Ok(())
     }
 

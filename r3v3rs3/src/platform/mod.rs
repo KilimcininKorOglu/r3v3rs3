@@ -447,7 +447,7 @@ impl Platform {
         let current = self.app(id).await?;
         request.spec.preview_of = current.spec.preview_of;
         request.spec.replica_of = current.spec.replica_of;
-        let hook = self.check_request(&request).await?;
+        let hook = self.check_request_for(Some(id), &request).await?;
         // The containers of the deployments run on the old target.
         if request.target != current.target && !self.store.deployments(id, 1).await?.is_empty() {
             return Err(Error::AppTargetFixed {
@@ -1155,12 +1155,29 @@ impl Platform {
         &self,
         request: &AppRequest,
     ) -> anyhow::Result<Option<app_hooks::HookTarget>> {
-        request.spec.validate()?;
-        if let Some(port) = request.spec.host_port
-            && !host_port_free(port)
-        {
-            return Err(Error::HostPortUnavailable { port }.into());
+        self.check_request_for(None, request).await
+    }
+
+    async fn check_host_port(
+        &self,
+        port: Option<u16>,
+        app_id: Option<ShortId>,
+    ) -> anyhow::Result<()> {
+        if let Some(port) = port {
+            if !self.is_host_port_available(port, app_id).await? {
+                return Err(Error::HostPortUnavailable { port }.into());
+            }
         }
+        Ok(())
+    }
+
+    async fn check_request_for(
+        &self,
+        app_id: Option<ShortId>,
+        request: &AppRequest,
+    ) -> anyhow::Result<Option<app_hooks::HookTarget>> {
+        request.spec.validate()?;
+        self.check_host_port(request.spec.host_port, app_id).await?;
         if !self.store.has_target(request.target).await? {
             return Err(not_found(request.target));
         }
@@ -1277,6 +1294,28 @@ impl Platform {
     ) -> anyhow::Result<r3v3rs3_api::platform::KeyRotationReport> {
         rotate::run_key_rotation(self.store.pool(), &self.config_dir, &self.keys).await
     }
+
+    pub async fn is_host_port_available(
+        &self,
+        port: u16,
+        excluding_app: Option<ShortId>,
+    ) -> anyhow::Result<bool> {
+        if self.store.is_host_port_used(port, excluding_app).await? {
+            return Ok(false);
+        }
+        Ok(host_port_free(port))
+    }
+
+    /// A free port of `127.0.0.1` for a fixed host port, not used by any registered app or active socket.
+    pub async fn allocate_host_port(&self) -> anyhow::Result<u16> {
+        for _ in 0..100 {
+            let candidate = allocate_ephemeral_port()?;
+            if self.is_host_port_available(candidate, None).await? {
+                return Ok(candidate);
+            }
+        }
+        anyhow::bail!("failed to allocate a free host port after 100 attempts")
+    }
 }
 
 /// The associated data of a sealed value binds it to its app and its key, so a value copied to
@@ -1293,9 +1332,13 @@ fn host_port_free(port: u16) -> bool {
 }
 
 /// A free port of `127.0.0.1` for a fixed host port, chosen by the kernel.
-pub fn allocate_host_port() -> anyhow::Result<u16> {
+fn allocate_ephemeral_port() -> anyhow::Result<u16> {
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
     Ok(listener.local_addr()?.port())
+}
+
+pub fn allocate_host_port() -> anyhow::Result<u16> {
+    allocate_ephemeral_port()
 }
 
 pub(super) fn git_token_aad(app: ShortId) -> String {
@@ -1351,6 +1394,10 @@ fn written(write: Write, app: &AppEntry) -> anyhow::Result<()> {
     match write {
         Write::Done => Ok(()),
         Write::NameTaken => Err(name_taken(app).into()),
+        Write::HostPortTaken => {
+            let port = app.spec.host_port.unwrap_or_default();
+            Err(Error::HostPortUnavailable { port }.into())
+        }
         Write::NotFound => Err(not_found(app.id)),
     }
 }

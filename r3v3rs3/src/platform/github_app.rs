@@ -215,7 +215,7 @@ impl Platform {
                 name: entry.name.to_string(),
             }
             .into()),
-            Write::NotFound => Err(anyhow!("the connection was not stored")),
+            _ => Err(anyhow!("the connection was not stored")),
         }
     }
 

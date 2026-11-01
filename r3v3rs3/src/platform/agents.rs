@@ -99,7 +99,7 @@ impl Platform {
                 name: name.to_string(),
             }
             .into()),
-            Write::NotFound => Err(anyhow!("the target was not stored")),
+            _ => Err(anyhow!("the target was not stored")),
         }
     }
 

@@ -2,7 +2,7 @@
 //! `backups` directory of the config directory, with one JSON manifest per file. A restore
 //! uploads the dump back into the running container and runs the restore command of the engine.
 
-use super::{Platform, allocate_host_port, is_local, proxy};
+use super::{Platform, is_local, proxy};
 use crate::clock::unix_ms;
 use crate::runtime::ContainerRuntime;
 use anyhow::{Context, bail};
@@ -875,7 +875,7 @@ impl Platform {
         caller: &str,
         dump_bytes: Vec<u8>,
     ) -> anyhow::Result<RestoreFromS3Response> {
-        let (app_req, engine_key, info) = resolve_s3_restore_app(&req)?;
+        let (app_req, engine_key, info) = resolve_s3_restore_app(self, &req).await?;
         validate_backup_engine_format(&engine_key, &dump_bytes).map_err(|err| Error::RestoreFailed {
             reason: format!("{err:#}"),
         })?;
@@ -970,7 +970,8 @@ fn create_database_spec(
     })
 }
 
-fn resolve_s3_restore_app(
+async fn resolve_s3_restore_app(
+    platform: &Platform,
     req: &RestoreFromS3Request,
 ) -> anyhow::Result<(r3v3rs3_api::platform::AppRequest, String, EngineInfo)> {
     let new_name = req
@@ -989,7 +990,7 @@ fn resolve_s3_restore_app(
         .unwrap_or_else(|| info.versions.first().cloned().unwrap_or_default());
     let host_port = match req.host_port {
         Some(p) => p,
-        None => allocate_host_port()?,
+        None => platform.allocate_host_port().await?,
     };
     let spec = create_database_spec(&new_name, &engine_key, &version, &info, host_port)?;
     let app_req = r3v3rs3_api::platform::AppRequest {
@@ -1207,7 +1208,7 @@ impl Platform {
     ) -> anyhow::Result<AppEntry> {
         let resolved_port = match host_port {
             Some(p) => p,
-            None => allocate_host_port()?,
+            None => self.allocate_host_port().await?,
         };
         let mut app_spec = source.spec.clone();
         app_spec.host_port = Some(resolved_port);

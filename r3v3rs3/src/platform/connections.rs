@@ -57,7 +57,7 @@ impl Platform {
         match self.store.insert_git_connection(&entry, &sealed).await? {
             Write::Done => Ok(entry),
             Write::NameTaken => Err(connection_name_taken(&entry).into()),
-            Write::NotFound => Err(anyhow!("the connection was not stored")),
+            _ => Err(anyhow!("the connection was not stored")),
         }
     }
 
@@ -97,7 +97,7 @@ impl Platform {
         {
             Write::Done => self.git_connection(id).await,
             Write::NameTaken => Err(connection_name_taken(&entry).into()),
-            Write::NotFound => Err(not_found(id)),
+            _ => Err(not_found(id)),
         }
     }
 
