@@ -18,15 +18,42 @@ use r3v3rs3_api::{
     proxy::{Proxy, ProxyKind},
 };
 
-fn resolve_proxy_target(proxy: &Proxy) -> Option<String> {
+fn proxy_upstream_servers(proxy: &Proxy) -> Vec<String> {
     match &proxy.kind {
         ProxyKind::Http(http) => http
             .routes
             .iter()
             .flat_map(|r| &r.servers)
             .map(|s| s.url.to_string())
-            .next(),
-        _ => None,
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn resolve_proxy_grpc_target(
+    proxy: &Proxy,
+    requested: Option<String>,
+    empty_reason: &str,
+) -> Result<String, Error> {
+    let servers = proxy_upstream_servers(proxy);
+    if servers.is_empty() {
+        return Err(Error::GrpcError {
+            reason: empty_reason.to_string(),
+        });
+    }
+    if let Some(target) = requested {
+        let matches = servers
+            .iter()
+            .any(|s| s == &target || s.trim_end_matches('/') == target.trim_end_matches('/'));
+        if matches {
+            Ok(target)
+        } else {
+            Err(Error::GrpcError {
+                reason: "target_url must match an upstream server configured for this proxy".to_string(),
+            })
+        }
+    } else {
+        Ok(servers.into_iter().next().unwrap())
     }
 }
 
@@ -51,13 +78,11 @@ pub async fn reflect_proxy(
     Json(body): Json<Option<GrpcReflectRequest>>,
 ) -> Result<Json<GrpcReflectResponse>, AppError> {
     let entry = state.call(&caller, GetProxy { id }).await?;
-    let target = body
-        .as_ref()
-        .and_then(|b| b.target_url.clone())
-        .or_else(|| resolve_proxy_target(&entry.proxy))
-        .ok_or_else(|| Error::GrpcError {
-            reason: "no upstream servers configured for gRPC reflection".to_string(),
-        })?;
+    let target = resolve_proxy_grpc_target(
+        &entry.proxy,
+        body.and_then(|b| b.target_url),
+        "no upstream servers configured for gRPC reflection",
+    )?;
 
     let res = crate::grpc::discover_grpc_services(&target)
         .await
@@ -87,14 +112,13 @@ pub async fn invoke_proxy(
     Path(id): Path<ShortId>,
     Json(mut req): Json<GrpcInvokeRequest>,
 ) -> Result<Json<GrpcInvokeResponse>, AppError> {
+    caller.authorize(Permission::EditProxies)?;
     let entry = state.call(&caller, GetProxy { id }).await?;
-    let target = req
-        .target_url
-        .clone()
-        .or_else(|| resolve_proxy_target(&entry.proxy))
-        .ok_or_else(|| Error::GrpcError {
-            reason: "no upstream servers configured for gRPC invoke".to_string(),
-        })?;
+    let target = resolve_proxy_grpc_target(
+        &entry.proxy,
+        req.target_url.take(),
+        "no upstream servers configured for gRPC invoke",
+    )?;
 
     req.target_url = Some(target.clone());
     let res = crate::grpc::execute_grpc_call(&target, &req)
@@ -103,14 +127,6 @@ pub async fn invoke_proxy(
             reason: err.to_string(),
         })?;
     Ok(Json(res))
-}
-
-fn get_proxy_grpc_target(proxy: &Proxy, body_target: Option<String>) -> Result<String, Error> {
-    body_target
-        .or_else(|| resolve_proxy_target(proxy))
-        .ok_or_else(|| Error::GrpcError {
-            reason: "no upstream servers configured for gRPC health check".to_string(),
-        })
 }
 
 fn get_proxy_grpc_service(proxy: &Proxy, body_service: Option<String>) -> String {
@@ -142,9 +158,10 @@ pub async fn health_proxy(
     Json(body): Json<Option<GrpcHealthCheckRequest>>,
 ) -> Result<Json<GrpcHealthCheckResponse>, AppError> {
     let entry = state.call(&caller, GetProxy { id }).await?;
-    let target = get_proxy_grpc_target(
+    let target = resolve_proxy_grpc_target(
         &entry.proxy,
         body.as_ref().and_then(|b| b.target_url.clone()),
+        "no upstream servers configured for gRPC health check",
     )?;
     let service =
         get_proxy_grpc_service(&entry.proxy, body.as_ref().and_then(|b| b.service.clone()));

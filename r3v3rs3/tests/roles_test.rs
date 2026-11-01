@@ -568,3 +568,96 @@ async fn standalone_grpc_endpoints_require_edit_permission() -> anyhow::Result<(
     std::fs::remove_dir_all(&dir)?;
     Ok(())
 }
+
+async fn assert_viewer_grpc_invoke_forbidden(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    let payload = serde_json::json!({
+        "service": "test.Service",
+        "method": "TestMethod",
+        "payload": {}
+    });
+    let res = client
+        .post(format!("http://{addr}/api/proxies/px1/grpc/invoke"))
+        .header(COOKIE, cookie)
+        .json(&payload)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+async fn assert_editor_grpc_target_restricted(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    let malicious_payload = serde_json::json!({
+        "target_url": "http://169.254.169.254",
+        "service": "test.Service",
+        "method": "TestMethod",
+        "payload": {}
+    });
+    let res = client
+        .post(format!("http://{addr}/api/proxies/px1/grpc/invoke"))
+        .header(COOKIE, cookie)
+        .json(&malicious_payload)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
+    let err_json: serde_json::Value = res.json().await?;
+    assert!(
+        err_json["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("target_url must match an upstream server configured for this proxy")
+    );
+    Ok(())
+}
+
+fn setup_grpc_roles_storage(port_num: &common::TestPort) -> TestStorage {
+    TestStorage::builder()
+        .ports(vec![port_entry("p1", port_num.multiaddr_tcp())])
+        .proxies(vec![proxy_entry("px1", "http://127.0.0.1:50051")])
+        .account("viewer", "viewer-secret", Role::Viewer, None)
+        .account("editor", "editor-secret", Role::Editor, None)
+        .build()
+}
+
+async fn run_proxy_grpc_invoke_roles_test(addr: SocketAddr) -> anyhow::Result<()> {
+    let client = Client::new();
+    let viewer = session_cookie(addr, "viewer", "viewer-secret").await?;
+    let editor = session_cookie(addr, "editor", "editor-secret").await?;
+
+    assert_viewer_grpc_invoke_forbidden(&client, addr, &viewer).await?;
+    assert_editor_grpc_target_restricted(&client, addr, &editor).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn proxy_grpc_invoke_requires_edit_and_restricts_target_url() -> anyhow::Result<()> {
+    let dir = log_dir("proxy-grpc-roles").await?;
+    let addr = alloc_tcp_port().await?.socket_addr();
+    let port_num = alloc_tcp_port().await?;
+    let storage = setup_grpc_roles_storage(&port_num);
+
+    let app_info = new_appinfo(&dir, &dir);
+    with_server(storage, |channels| async move {
+        tokio::spawn(start_admin(
+            app_info,
+            addr,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+            channels.accounts.clone(),
+        ));
+        wait_for_listener(addr).await?;
+        run_proxy_grpc_invoke_roles_test(addr).await
+    })
+    .await?;
+
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
