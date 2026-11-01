@@ -1253,10 +1253,12 @@ where
     };
 
     // Authentication removes the credentials, so the cache reads them before. The cache key uses
-    // the client host and path, so the selected upstream server does not split the cache.
+    // the request scheme, host and path, so the selected upstream server does not split the cache
+    // and HTTP/HTTPS requests do not share cached responses.
     let authorized = is_request_authorized(&req, route);
     let cache_key = format!(
-        "{} {}",
+        "{} {} {}",
+        info.proto,
         request_host.as_deref().unwrap_or_default(),
         req.uri().path_and_query().map_or("/", |path| path.as_str())
     );

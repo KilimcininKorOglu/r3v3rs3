@@ -56,6 +56,16 @@ impl fmt::Debug for HttpCache {
     }
 }
 
+/// Extracts the URI path and query from a cache key (`"{proto} {host} {path}"` or `"{host} {path}"`).
+fn extract_key_path(key: &str) -> &str {
+    let mut parts = key.splitn(3, ' ');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(_proto), Some(_host), Some(path)) => path,
+        (Some(_host), Some(path), None) => path,
+        _ => key,
+    }
+}
+
 impl HttpCache {
     fn new(config: CacheConfig, share: Option<CacheShare>) -> Self {
         let default_swr = config.stale_while_revalidate;
@@ -79,7 +89,7 @@ impl HttpCache {
         let trimmed = path.trim();
         let mut count = 0;
         for (key, _) in self.entries.iter() {
-            let key_path = key.split_once(' ').map(|(_, p)| p).unwrap_or(&key);
+            let key_path = extract_key_path(&key);
             if key_path == trimmed || key_path.starts_with(trimmed) {
                 self.entries.invalidate(&*key);
                 count += 1;
@@ -1130,5 +1140,23 @@ mod tests {
             ..shared
         };
         assert!(CachedResponse::from_shared(&invalid, 3_000).is_err());
+    }
+
+    #[test]
+    fn purge_path_removes_matching_keys_across_schemes() {
+        let cache = HttpCache::new(CacheConfig::default(), None);
+        cache.entries.insert("https example.com /fresh/a".into(), Arc::new(stored_entry()));
+        cache.entries.insert("http example.com /fresh/b".into(), Arc::new(stored_entry()));
+        cache.entries.insert("example.com /legacy".into(), Arc::new(stored_entry()));
+        assert_eq!(cache.purge_path("/fresh"), 2);
+        assert_eq!(cache.purge_path("/legacy"), 1);
+    }
+
+    #[test]
+    fn extract_key_path_extracts_path_from_both_formats() {
+        assert_eq!(extract_key_path("https example.com /test?a=1"), "/test?a=1");
+        assert_eq!(extract_key_path("http example.com /test"), "/test");
+        assert_eq!(extract_key_path("example.com /legacy/path"), "/legacy/path");
+        assert_eq!(extract_key_path("opaque-key"), "opaque-key");
     }
 }
