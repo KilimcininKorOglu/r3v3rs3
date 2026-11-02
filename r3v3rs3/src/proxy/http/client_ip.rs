@@ -10,6 +10,7 @@ use std::net::{IpAddr, SocketAddr};
 pub const CLIENT_IP_HEADERS: &[&str] = &[
     "forwarded",
     "x-forwarded-for",
+    "x-forwarded-host",
     "x-real-ip",
     "cf-connecting-ip",
     "true-client-ip",

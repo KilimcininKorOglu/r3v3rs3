@@ -1328,7 +1328,6 @@ where
         info,
         client: &client,
         action,
-        header_host,
         request_host,
         cache_key,
         authorized,
@@ -1390,15 +1389,15 @@ fn acquire_concurrency(
     }
 }
 
-/// The host of the request: the `Host` header, then the SNI name, then the host of the URI.
+/// The host of the request: the `Host` header, then the host of the URI, then the SNI name.
 fn request_host<B>(
     req: &Request<B>,
     header_host: Option<String>,
     sni: Option<&str>,
 ) -> Option<String> {
     header_host
-        .or_else(|| sni.map(str::to_string))
         .or_else(|| req.uri().host().map(str::to_string))
+        .or_else(|| sni.map(str::to_string))
 }
 
 /// The redirect response of the request: the HTTPS upgrade first, then the redirect rules.
@@ -1446,7 +1445,6 @@ struct PreparedRequest<'a> {
     info: &'a RequestInfo<'a>,
     client: &'a client_ip::ClientAddr,
     action: String,
-    header_host: Option<String>,
     request_host: Option<String>,
     cache_key: String,
     authorized: bool,
@@ -1477,7 +1475,6 @@ where
         info,
         client,
         action,
-        header_host,
         request_host,
         cache_key,
         authorized,
@@ -1524,7 +1521,7 @@ where
     auth::remove_auth_cookies(req.headers_mut());
     shared
         .header_rewriter
-        .pre_process(req.headers_mut(), client, header_host, info.proto);
+        .pre_process(req.headers_mut(), client, request_host.clone(), info.proto);
     shared.header_rewriter.post_process(req.headers_mut());
     let response_rewriter = apply_header_rules(
         route,

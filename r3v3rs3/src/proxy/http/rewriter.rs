@@ -76,7 +76,7 @@ impl RequestRewriter {
         &self,
         headers: &mut HeaderMap,
         client: &ClientAddr,
-        header_host: Option<String>,
+        request_host: Option<String>,
         forwarded_proto: &'static str,
     ) {
         let mut x_forwarded_for = Vec::new();
@@ -104,7 +104,7 @@ impl RequestRewriter {
                 .into_iter()
                 .chain(iter::once(forwarded_for_directive(remote_addr)))
                 .chain(
-                    header_host
+                    request_host
                         .as_ref()
                         .map(|host| forwarded_host_directive(host)),
                 )
@@ -131,7 +131,7 @@ impl RequestRewriter {
             HeaderValue::from_static(forwarded_proto),
         );
 
-        if let Some(host) = &header_host
+        if let Some(host) = &request_host
             && let Ok(host) = HeaderValue::from_str(host)
         {
             headers.insert("x-forwarded-host", host);
@@ -517,6 +517,7 @@ mod test {
 
         let mut headers = HeaderMap::new();
         headers.append("x-forwarded-for", "192.168.0.1".parse().unwrap());
+        headers.append("x-forwarded-host", "evil.example".parse().unwrap());
         headers.append("x-real-ip", "192.168.0.1".parse().unwrap());
         headers.append("cf-connecting-ip", "192.168.0.1".parse().unwrap());
 
@@ -532,6 +533,16 @@ mod test {
         assert_eq!(headers.get("cf-connecting-ip"), None);
         assert_eq!(headers.get("x-forwarded-proto").unwrap(), "http");
         assert_eq!(headers.get("x-forwarded-host").unwrap(), "example.com");
+
+        let mut headers = HeaderMap::new();
+        headers.append("x-forwarded-host", "evil.example".parse().unwrap());
+        rewriter.pre_process(
+            &mut headers,
+            &ClientAddr::direct(localhost),
+            None,
+            forwarded_proto,
+        );
+        assert_eq!(headers.get("x-forwarded-host"), None);
 
         let mut headers = HeaderMap::new();
         headers.append(FORWARDED, "for=192.168.0.1".parse().unwrap());
