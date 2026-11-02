@@ -9,7 +9,7 @@ use http_body_util::{BodyExt, Full, Limited, combinators::BoxBody};
 use hyper::{
     Method, Request, Response, StatusCode, Uri,
     body::Body,
-    header::{CONTENT_LENGTH, HOST, HeaderValue, UPGRADE},
+    header::{CONNECTION, CONTENT_LENGTH, HOST, HeaderValue, UPGRADE},
     http::uri::Scheme,
 };
 use hyper_util::{
@@ -94,6 +94,22 @@ impl fmt::Debug for ConnectionPool {
     }
 }
 
+fn is_websocket_upgrade_request<B>(req: &Request<B>) -> bool {
+    req.method() == hyper::Method::GET
+        && req
+            .headers()
+            .get(UPGRADE)
+            .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"))
+        && req
+            .headers()
+            .get(CONNECTION)
+            .is_some_and(|v| {
+                v.to_str().map_or(false, |s| {
+                    s.split(',').any(|p| p.trim().eq_ignore_ascii_case("upgrade"))
+                })
+            })
+}
+
 impl ConnectionPool {
     pub fn new(
         tls_client_config: Arc<ClientConfig>,
@@ -147,7 +163,8 @@ impl ConnectionPool {
         mut req: Request<ProxyBody>,
         request_timeout: Duration,
     ) -> Result<Response<ProxyBody>, SendError> {
-        let upgrading_req = if req.headers().contains_key(UPGRADE) {
+        let is_ws = is_websocket_upgrade_request(&req);
+        let upgrading_req = if is_ws {
             let mut cloned_req = Request::builder()
                 .uri(req.uri())
                 .body(empty_body())
@@ -155,6 +172,8 @@ impl ConnectionPool {
             cloned_req.headers_mut().clone_from(req.headers());
             Some(std::mem::replace(&mut req, cloned_req))
         } else {
+            req.headers_mut().remove(UPGRADE);
+            req.headers_mut().remove("http2-settings");
             None
         };
 
@@ -1031,5 +1050,29 @@ mod tests {
         assert!(is_idempotent(&Method::PUT));
         assert!(!is_idempotent(&Method::POST));
         assert!(!is_idempotent(&Method::PATCH));
+    }
+
+    #[test]
+    fn test_is_websocket_upgrade_request() {
+        let ws = Request::get("http://127.0.0.1/")
+            .header(UPGRADE, "websocket")
+            .header(CONNECTION, "Upgrade")
+            .body(())
+            .unwrap();
+        assert!(is_websocket_upgrade_request(&ws));
+
+        let h2c = Request::get("http://127.0.0.1/")
+            .header(UPGRADE, "h2c")
+            .header(CONNECTION, "Upgrade")
+            .body(())
+            .unwrap();
+        assert!(!is_websocket_upgrade_request(&h2c));
+
+        let post_ws = Request::post("http://127.0.0.1/")
+            .header(UPGRADE, "websocket")
+            .header(CONNECTION, "Upgrade")
+            .body(())
+            .unwrap();
+        assert!(!is_websocket_upgrade_request(&post_ws));
     }
 }

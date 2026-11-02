@@ -13,7 +13,7 @@ use r3v3rs3_api::{
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 mod common;
-use common::{TestStorage, alloc_tcp_port, with_server};
+use common::{TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, with_server};
 
 #[tokio::test]
 async fn ws_proxy() -> anyhow::Result<()> {
@@ -111,4 +111,50 @@ async fn handle_socket(mut socket: WebSocket) {
             return;
         }
     }
+}
+
+#[tokio::test]
+async fn non_websocket_upgrade_is_not_tunneled() -> anyhow::Result<()> {
+    let listen_port = alloc_tcp_port().await?;
+    let proxy_port = alloc_tcp_port().await?;
+
+    let app = Router::new().route("/h2c", any(|| async { "plain response" }));
+    let addr = listen_port.socket_addr();
+    tokio::spawn(axum_server::bind(addr).serve(app.into_make_service()));
+
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("tph2c", &proxy_port)])
+        .proxies(vec![http_proxy_entry(
+            "tpxh2c",
+            "tph2c",
+            HttpProxy {
+                vhosts: vec!["localhost".parse().unwrap()],
+                routes: vec![Route {
+                    servers: vec![r3v3rs3_api::proxy::Server::new(
+                        listen_port.http_url("/").try_into().unwrap(),
+                    )],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )])
+        .build();
+
+    with_server(config, |_| async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let mut stream = tokio::net::TcpStream::connect(proxy_port.socket_addr()).await?;
+        let raw = format!(
+            "GET /h2c HTTP/1.1\r\nHost: localhost\r\nUpgrade: h2c\r\nConnection: Upgrade, HTTP2-Settings\r\nHTTP2-Settings: AAMAAABkAARAAAAAAAIAAAAA\r\n\r\n"
+        );
+        stream.write_all(raw.as_bytes()).await?;
+
+        let mut buf = vec![0u8; 1024];
+        let n = stream.read(&mut buf).await?;
+        let resp = String::from_utf8_lossy(&buf[..n]);
+        assert!(resp.starts_with("HTTP/1.1 200 OK"), "unexpected response: {resp}");
+        assert!(resp.contains("plain response"));
+        Ok(())
+    })
+    .await
 }
