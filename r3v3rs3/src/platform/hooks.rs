@@ -795,6 +795,53 @@ fn preview_app_spec(parent: &AppEntry, pr: &PrPayload, domain: SubjectName) -> A
     spec
 }
 
+fn extract_delivery_id(headers: &HeaderMap) -> Option<String> {
+    const DELIVERY_HEADERS: [&str; 7] = [
+        "x-github-delivery",
+        "x-gitlab-event-uuid",
+        "x-gitea-delivery",
+        "x-forgejo-delivery",
+        "x-delivery-id",
+        "x-request-id",
+        "idempotency-key",
+    ];
+    for name in DELIVERY_HEADERS {
+        if let Some(val) = headers.get(name).and_then(|v| v.to_str().ok()) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn validate_webhook_timestamp(headers: &HeaderMap) -> Result<(), Error> {
+    let ts_header = headers
+        .get("x-webhook-timestamp")
+        .or_else(|| headers.get("x-timestamp"))
+        .and_then(|v| v.to_str().ok());
+    let Some(ts_str) = ts_header else {
+        return Ok(());
+    };
+    let ts = ts_str
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| Error::InvalidWebhookPayload {
+            reason: "invalid webhook timestamp format".to_string(),
+        })?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    if (now - ts).abs() > 300 {
+        return Err(Error::InvalidWebhookPayload {
+            reason: "webhook timestamp is outside the acceptable 5-minute time window".to_string(),
+        });
+    }
+    Ok(())
+}
+
 impl Platform {
     fn queued_hooks(&self) -> std::sync::MutexGuard<'_, HashMap<ShortId, Option<GitRef>>> {
         match self.queued.lock() {
@@ -858,6 +905,45 @@ impl Platform {
         Ok(Some(secret))
     }
 
+    async fn verify_hook_signature<'a>(
+        &self,
+        id: ShortId,
+        headers: &'a HeaderMap,
+        body: &'a [u8],
+    ) -> anyhow::Result<Signature<'a>> {
+        let secret = self
+            .webhook_secret(id)
+            .await?
+            .ok_or_else(|| not_found(id))?;
+        Signature::of(headers, body)
+            .filter(|sig| sig.verify(&secret, body))
+            .ok_or_else(|| Error::Unauthorized.into())
+    }
+
+    fn check_delivery_deduplication(&self, id: ShortId, headers: &HeaderMap) -> Result<(), Error> {
+        if let Some(delivery_id) = extract_delivery_id(headers) {
+            let key = format!("{id}:delivery:{delivery_id}");
+            self.check_and_record_delivery(&key)?;
+        }
+        Ok(())
+    }
+
+    async fn execute_hook_action(
+        self: &Arc<Self>,
+        id: ShortId,
+        app: &AppEntry,
+        action: HookAction,
+    ) -> anyhow::Result<HookResponse> {
+        match action {
+            HookAction::Deploy(target_ref) => self.hook_deploy(id, target_ref).await,
+            HookAction::PullRequest(pr) => self.handle_pull_request(app, pr).await,
+            HookAction::Ignore => Ok(HookResponse {
+                outcome: HookOutcome::Ignored,
+                deployment: None,
+            }),
+        }
+    }
+
     /// Checks the signature of a webhook request of an app, and deploys the app for a push to
     /// its branch. An app without a webhook secret answers like a missing app.
     pub async fn hook(
@@ -866,23 +952,12 @@ impl Platform {
         headers: &HeaderMap,
         body: &[u8],
     ) -> anyhow::Result<(AppEntry, Provider, HookResponse)> {
+        validate_webhook_timestamp(headers)?;
+        let signature = self.verify_hook_signature(id, headers, body).await?;
+        self.check_delivery_deduplication(id, headers)?;
         let app = self.app(id).await?;
-        let secret = self
-            .webhook_secret(id)
-            .await?
-            .ok_or_else(|| not_found(id))?;
-        let signature = Signature::of(headers, body)
-            .filter(|signature| signature.verify(&secret, body))
-            .ok_or(Error::Unauthorized)?;
         let action = hook_action(&signature, &app, body)?;
-        let response = match action {
-            HookAction::Deploy(target_ref) => self.hook_deploy(id, target_ref).await?,
-            HookAction::PullRequest(pr) => self.handle_pull_request(&app, pr).await?,
-            HookAction::Ignore => HookResponse {
-                outcome: HookOutcome::Ignored,
-                deployment: None,
-            },
-        };
+        let response = self.execute_hook_action(id, &app, action).await?;
         Ok((app, signature.provider, response))
     }
 
@@ -1661,6 +1736,46 @@ mod tests {
         let quay_headers = headers(&[("x-webhook-secret", secret.secret.clone())]);
         let res = platform.hook(app.id, &quay_headers, quay_body).await?;
         assert_eq!(outcome(&res), (Provider::Quay, HookOutcome::Deployed));
+        Ok(())
+    }
+
+    #[test]
+    fn test_delivery_id_and_timestamp_validation() {
+        let mut hdrs = HeaderMap::new();
+        assert_eq!(extract_delivery_id(&hdrs), None);
+        assert!(validate_webhook_timestamp(&hdrs).is_ok());
+
+        hdrs.insert("x-github-delivery", HeaderValue::from_static("uuid-1234"));
+        assert_eq!(extract_delivery_id(&hdrs), Some("uuid-1234".to_string()));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        hdrs.insert("x-webhook-timestamp", HeaderValue::from_str(&now.to_string()).unwrap());
+        assert!(validate_webhook_timestamp(&hdrs).is_ok());
+
+        let old = now - 600;
+        hdrs.insert("x-webhook-timestamp", HeaderValue::from_str(&old.to_string()).unwrap());
+        assert!(validate_webhook_timestamp(&hdrs).is_err());
+    }
+
+    #[tokio::test]
+    async fn duplicate_webhook_delivery_is_rejected() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let app = platform.add_app(git_request("dedup-app"), 1).await?;
+        let (_, secret) = platform.new_webhook_secret(app.id).await?;
+
+        let body = push("refs/heads/main");
+        let mut hdrs = github(&secret.secret, "push", &body);
+        hdrs.insert("x-github-delivery", HeaderValue::from_static("delivery-uuid-999"));
+
+        let res1 = platform.hook(app.id, &hdrs, &body).await;
+        assert!(res1.is_ok());
+
+        let res2 = platform.hook(app.id, &hdrs, &body).await;
+        assert!(res2.is_err());
+        assert!(matches!(api_error(res2.unwrap_err()), Error::InvalidWebhookPayload { .. }));
         Ok(())
     }
 }

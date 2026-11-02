@@ -212,6 +212,8 @@ pub struct Platform {
     pub(super) backup_attempts: std::sync::Mutex<HashMap<ShortId, (i64, u32, i64)>>,
     /// The apps that a webhook request deploys again after their running pipeline, with optional git ref.
     queued: std::sync::Mutex<HashMap<ShortId, Option<GitRef>>>,
+    /// Processed webhook delivery IDs with expiration epoch seconds.
+    pub(super) webhook_deliveries: std::sync::Mutex<HashMap<String, u64>>,
     timing: deploy::Timing,
     fetcher: Arc<dyn SourceFetcher>,
     /// Limits the builds that run at the same time.
@@ -311,6 +313,7 @@ impl Platform {
             running_commands: std::sync::Mutex::new(HashSet::new()),
             backup_attempts: std::sync::Mutex::new(HashMap::new()),
             queued: std::sync::Mutex::new(HashMap::new()),
+            webhook_deliveries: std::sync::Mutex::new(HashMap::new()),
             timing: deploy::Timing::default(),
             fetcher: Arc::new(GitFetcher),
             builds: Semaphore::new(build::MAX_BUILDS),
@@ -375,6 +378,30 @@ impl Platform {
         } else {
             false
         }
+    }
+
+    pub fn check_and_record_delivery(&self, key: &str) -> Result<(), Error> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let expires_at = now + 3600;
+        let mut deliveries = match self.webhook_deliveries.lock() {
+            Ok(map) => map,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if deliveries.len() > 1000 {
+            deliveries.retain(|_, exp| *exp > now);
+        }
+        if let Some(&exp) = deliveries.get(key)
+            && exp > now
+        {
+            return Err(Error::InvalidWebhookPayload {
+                reason: "duplicate webhook delivery".to_string(),
+            });
+        }
+        deliveries.insert(key.to_string(), expires_at);
+        Ok(())
     }
 
     pub fn running_scheduled_commands(&self) -> std::sync::MutexGuard<'_, HashSet<ShortId>> {
