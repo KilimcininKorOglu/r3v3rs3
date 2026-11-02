@@ -25,6 +25,7 @@ use std::{
     task::{Context, Poll, ready},
     time::{Duration, Instant, SystemTime},
 };
+use tokio::sync::Notify;
 use tracing::{debug, warn};
 
 type ProxyBody = BoxBody<Bytes, anyhow::Error>;
@@ -44,6 +45,7 @@ pub struct HttpCache {
     /// The responses that the nodes of a cluster share.
     share: Option<CacheShare>,
     revalidating: Mutex<HashSet<String>>,
+    in_flight: Mutex<HashMap<String, Arc<Notify>>>,
 }
 
 impl fmt::Debug for HttpCache {
@@ -81,6 +83,23 @@ impl HttpCache {
             entries,
             share,
             revalidating: Mutex::new(HashSet::new()),
+            in_flight: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn start_flight(self: &Arc<Self>, key: &str) -> Flight {
+        let mut flights = lock(&self.in_flight);
+        if let Some(notify) = flights.get(key) {
+            Flight::Follower(notify.clone())
+        } else {
+            let notify = Arc::new(Notify::new());
+            flights.insert(key.to_string(), notify.clone());
+            Flight::Leader(FlightGuard {
+                cache: self.clone(),
+                key: key.to_string(),
+                notify,
+                completed: false,
+            })
         }
     }
 
@@ -533,12 +552,19 @@ impl CacheRequest {
     }
 
     /// Marks the upstream response as a miss and stores it while the client receives the body.
-    fn store(&self, mut res: Response<ProxyBody>) -> Response<ProxyBody> {
+    fn store(
+        &self,
+        mut res: Response<ProxyBody>,
+        mut guard: Option<FlightGuard>,
+    ) -> Response<ProxyBody> {
         let head = self.storable_head(&res);
         res.headers_mut()
             .insert(X_CACHE, HeaderValue::from_static("MISS"));
         super::super::stats::count_cache_miss();
         let Some(head) = head else {
+            if let Some(guard) = guard.take() {
+                guard.finish();
+            }
             return res;
         };
         let recorder = Recorder {
@@ -548,6 +574,7 @@ impl CacheRequest {
             max_size: self.cache.config.max_entry_size,
             cache: self.cache.clone(),
             key: self.key.clone(),
+            guard,
         };
         res.map(|inner| BoxBody::new(RecordingBody { inner, recorder }))
     }
@@ -570,6 +597,39 @@ impl CacheRequest {
             initial_age: age(headers),
             freshness,
         })
+    }
+}
+
+enum Flight {
+    Leader(FlightGuard),
+    Follower(Arc<Notify>),
+}
+
+struct FlightGuard {
+    cache: Arc<HttpCache>,
+    key: String,
+    notify: Arc<Notify>,
+    completed: bool,
+}
+
+impl FlightGuard {
+    fn finish(mut self) {
+        self.completed = true;
+        self.cleanup();
+    }
+
+    fn cleanup(&mut self) {
+        let mut flights = lock(&self.cache.in_flight);
+        flights.remove(&self.key);
+        self.notify.notify_waiters();
+    }
+}
+
+impl Drop for FlightGuard {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.cleanup();
+        }
     }
 }
 
@@ -679,21 +739,75 @@ async fn run_background_revalidation(task: RevalidationTask) {
     }
 }
 
+fn cached_response(
+    cache: &CacheRequest,
+    stored: Option<&Arc<CachedResponse>>,
+) -> Option<Response<ProxyBody>> {
+    let entry = stored?;
+    if entry.is_fresh() {
+        Some(cache.respond(entry))
+    } else {
+        None
+    }
+}
+
+async fn find_stored(cache: &CacheRequest) -> Option<Arc<CachedResponse>> {
+    match cache.stored() {
+        Some(entry) => Some(entry),
+        None => cache.shared().await,
+    }
+}
+
+async fn wait_for_flight(
+    cache: &CacheRequest,
+    notify: Arc<Notify>,
+) -> Option<Response<ProxyBody>> {
+    if let Some(stored) = cache.stored().filter(|entry| entry.is_fresh()) {
+        return Some(cache.respond(&stored));
+    }
+    let _ = tokio::time::timeout(Duration::from_secs(10), notify.notified()).await;
+    let stored = cache.stored()?;
+    if stored.is_fresh() {
+        Some(cache.respond(&stored))
+    } else {
+        None
+    }
+}
+
+async fn fetch_upstream(
+    upstream: &Upstream,
+    mut req: Request<ProxyBody>,
+    cache: &CacheRequest,
+    stored: Option<Arc<CachedResponse>>,
+    mut guard: Option<FlightGuard>,
+) -> Result<Response<ProxyBody>, anyhow::Error> {
+    if let Some(entry) = &stored {
+        set_validators(req.headers_mut(), &entry.head.headers);
+    }
+    let res = upstream.request(req).await?;
+    match stored {
+        Some(entry) if res.status() == StatusCode::NOT_MODIFIED => {
+            if let Some(guard) = guard.take() {
+                guard.finish();
+            }
+            Ok(handle_304(cache, &entry, res.headers()))
+        }
+        _ => Ok(cache.store(res, guard)),
+    }
+}
+
 /// Sends the request to the upstream server, or answers it from the cache.
 pub async fn fetch(
     upstream: &Upstream,
-    mut req: Request<ProxyBody>,
+    req: Request<ProxyBody>,
     cache: Option<CacheRequest>,
 ) -> Result<Response<ProxyBody>, anyhow::Error> {
     let Some(cache) = cache else {
         return upstream.request(req).await;
     };
-    let stored = match cache.stored() {
-        Some(entry) => Some(entry),
-        None => cache.shared().await,
-    };
-    if let Some(entry) = stored.as_ref().filter(|entry| entry.is_fresh()) {
-        return Ok(cache.respond(entry));
+    let stored = find_stored(&cache).await;
+    if let Some(res) = cached_response(&cache, stored.as_ref()) {
+        return Ok(res);
     }
     if let Some(entry) = stored
         .as_ref()
@@ -702,15 +816,14 @@ pub async fn fetch(
         cache.revalidate_background(upstream, entry, &req);
         return Ok(cache.respond_stale(entry));
     }
-    if let Some(entry) = &stored {
-        set_validators(req.headers_mut(), &entry.head.headers);
-    }
-    let res = upstream.request(req).await?;
-    match stored {
-        Some(entry) if res.status() == StatusCode::NOT_MODIFIED => {
-            Ok(handle_304(&cache, &entry, res.headers()))
+    match cache.cache.start_flight(&cache.key) {
+        Flight::Follower(notify) => {
+            if let Some(res) = wait_for_flight(&cache, notify).await {
+                return Ok(res);
+            }
+            fetch_upstream(upstream, req, &cache, stored, None).await
         }
-        _ => Ok(cache.store(res)),
+        Flight::Leader(guard) => fetch_upstream(upstream, req, &cache, stored, Some(guard)).await,
     }
 }
 
@@ -873,6 +986,7 @@ struct Recorder {
     max_size: u64,
     cache: Arc<HttpCache>,
     key: String,
+    guard: Option<FlightGuard>,
 }
 
 impl Recorder {
@@ -896,6 +1010,7 @@ impl Recorder {
     }
 
     fn finish(&mut self) {
+        let guard = self.guard.take();
         let Some(head) = self.head.take() else {
             return;
         };
@@ -915,6 +1030,9 @@ impl Recorder {
             share_response(share, &key, &entry);
         }
         self.cache.entries.insert(key, entry);
+        if let Some(guard) = guard {
+            guard.finish();
+        }
     }
 }
 
@@ -1158,5 +1276,56 @@ mod tests {
         assert_eq!(extract_key_path("http example.com /test"), "/test");
         assert_eq!(extract_key_path("example.com /legacy/path"), "/legacy/path");
         assert_eq!(extract_key_path("opaque-key"), "opaque-key");
+    }
+
+    #[tokio::test]
+    async fn concurrent_flights_coalesce_to_leader_and_followers() {
+        let cache = Arc::new(HttpCache::new(CacheConfig::default(), None));
+        let flight1 = cache.start_flight("stampede-key");
+        assert!(matches!(flight1, Flight::Leader(_)));
+
+        let flight2 = cache.start_flight("stampede-key");
+        assert!(matches!(flight2, Flight::Follower(_)));
+
+        let cache_clone = cache.clone();
+        let handle = tokio::spawn(async move {
+            if let Flight::Follower(notify) = flight2 {
+                let req = CacheRequest {
+                    cache: cache_clone,
+                    key: "stampede-key".into(),
+                    head: false,
+                    headers: HeaderMap::new(),
+                    lookup: true,
+                    authorized: false,
+                };
+                wait_for_flight(&req, notify).await
+            } else {
+                None
+            }
+        });
+
+        tokio::task::yield_now().await;
+
+        if let Flight::Leader(guard) = flight1 {
+            let entry = CachedResponse {
+                head: StoredHead {
+                    status: StatusCode::OK,
+                    headers: headers(&[("etag", "\"v1\""), ("cache-control", "max-age=90")]),
+                    vary: vec![],
+                    initial_age: Duration::from_secs(10),
+                    freshness: Duration::from_secs(90),
+                },
+                body: Bytes::from_static(b"body"),
+                stored_at: Instant::now(),
+            };
+            cache.entries.insert("stampede-key".into(), Arc::new(entry));
+            guard.finish();
+        }
+
+        let res = handle.await.unwrap();
+        assert!(res.is_some());
+
+        let flight3 = cache.start_flight("stampede-key");
+        assert!(matches!(flight3, Flight::Leader(_)));
     }
 }
