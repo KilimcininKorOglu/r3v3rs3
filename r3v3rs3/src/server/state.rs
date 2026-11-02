@@ -35,7 +35,7 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
-use r3v3rs3_api::proxy::{ProxyEntry, ProxyKind};
+use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyKind};
 use rand::seq::IndexedRandom;
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -976,7 +976,7 @@ impl ServerState {
             &proxies,
             &ports,
             self.ids_not_owned_by(provider),
-            |proxy| validate_proxy(proxy, self),
+            |proxy| self.validate_discovered_proxy(proxy),
         );
         let mut issues = built.issues;
         let (entries, seal_issues) = self.discovery.seal(provider, built.entries).await;
@@ -1020,6 +1020,13 @@ impl ServerState {
             .chain(self.ports.entries().map(|port| port.id))
             .chain(other_proxies.map(|entry| entry.id))
             .collect()
+    }
+
+    fn validate_discovered_proxy(&self, proxy: &Proxy) -> Result<(), Error> {
+        if proxy.kind.client_cert().is_some() {
+            return Err(Error::Forbidden);
+        }
+        validate_proxy(proxy, self)
     }
 
     fn publish_discovery(&self) {

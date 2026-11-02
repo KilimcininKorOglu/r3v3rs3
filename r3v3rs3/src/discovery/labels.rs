@@ -192,11 +192,19 @@ fn proxy_kind(
     match protocol {
         Protocol::Http => {
             expand_http_ports(&mut node, upstream)?;
-            Ok(ProxyKind::Http(Box::new(read::<HttpProxy>(node)?)))
+            let proxy = read::<HttpProxy>(node)?;
+            if proxy.client_cert.is_some() {
+                return Err("a discovery source may not choose a client certificate".into());
+            }
+            Ok(ProxyKind::Http(Box::new(proxy)))
         }
         Protocol::Tcp => {
             expand_stream_port(&mut node, upstream, "tcp")?;
-            Ok(ProxyKind::Tcp(read::<TcpProxy>(node)?))
+            let proxy = read::<TcpProxy>(node)?;
+            if proxy.client_cert.is_some() {
+                return Err("a discovery source may not choose a client certificate".into());
+            }
+            Ok(ProxyKind::Tcp(proxy))
         }
         Protocol::Udp => {
             expand_stream_port(&mut node, upstream, "udp")?;
@@ -551,6 +559,22 @@ mod tests {
                 "http://cdn/",
                 "/ip4/10.0.0.7/tcp/8080",
             ]
+        );
+    }
+
+    #[test]
+    fn discovery_source_cannot_choose_client_cert() {
+        let parsed = parse(
+            labels(&[
+                ("r3v3rs3.http.app.ports", "http"),
+                ("r3v3rs3.http.app.port", "80"),
+                ("r3v3rs3.http.app.client_cert", "abc-def"),
+            ]),
+            Some("10.0.0.1"),
+        );
+        assert_eq!(
+            parsed.issues,
+            ["http.app: a discovery source may not choose a client certificate"]
         );
     }
 }
