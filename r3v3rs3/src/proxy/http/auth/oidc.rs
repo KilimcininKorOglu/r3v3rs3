@@ -897,6 +897,7 @@ mod tests {
         // 1. Legitimate request matching configured vhost
         let valid_ctx = AuthContext {
             client: "127.0.0.1".parse().unwrap(),
+            peer: "127.0.0.1".parse().unwrap(),
             host: Some("app.example.com"),
             proto: "https",
             base_path: "",
@@ -912,6 +913,7 @@ mod tests {
         // 2. Poisoned request with untrusted Host header falls back to configured vhost
         let poisoned_ctx = AuthContext {
             client: "127.0.0.1".parse().unwrap(),
+            peer: "127.0.0.1".parse().unwrap(),
             host: Some("attacker.com"),
             proto: "https",
             base_path: "",
@@ -927,6 +929,7 @@ mod tests {
         // 3. No vhosts configured: accepts loopback host
         let loopback_ctx = AuthContext {
             client: "127.0.0.1".parse().unwrap(),
+            peer: "127.0.0.1".parse().unwrap(),
             host: Some("127.0.0.1:8080"),
             proto: "http",
             base_path: "/sub",
@@ -942,6 +945,7 @@ mod tests {
         // 4. No vhosts configured: rejects untrusted host and falls back to localhost
         let no_vhosts_poisoned = AuthContext {
             client: "127.0.0.1".parse().unwrap(),
+            peer: "127.0.0.1".parse().unwrap(),
             host: Some("evil.com"),
             proto: "https",
             base_path: "",

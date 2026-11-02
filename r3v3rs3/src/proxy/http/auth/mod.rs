@@ -51,6 +51,7 @@ pub enum Authenticator {
 /// Details of the client request that are not in the request itself.
 pub struct AuthContext<'a> {
     pub client: IpAddr,
+    pub peer: IpAddr,
     pub host: Option<&'a str>,
     pub proto: &'static str,
     /// Path of the matched route without a trailing slash, e.g. `/admin`. Empty for `/`.

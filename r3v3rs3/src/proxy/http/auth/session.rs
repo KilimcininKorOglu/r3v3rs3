@@ -461,10 +461,10 @@ impl SessionAuthenticator {
         let Some(form) = read_form(req.into_body()).await else {
             return text_response(StatusCode::BAD_REQUEST, "Bad Request");
         };
-        let client_ip = canonical_client_ip(ctx.client);
+        let client_ip = canonical_client_ip(ctx.peer);
         let key = (client_ip, form.username.clone());
         if let Err(err) = self.service.check_blocked(&client_ip, &key) {
-            warn!(client = %ctx.client, %err, "sign-in blocked");
+            warn!(peer = %ctx.peer, %err, "sign-in blocked");
             return render_login_page(
                 &form,
                 ctx,
@@ -491,7 +491,7 @@ impl SessionAuthenticator {
                 self.issue_totp_challenge(record, &form, ctx).await
             }
             Verification::Failed => {
-                warn!(client = %ctx.client, "sign-in failed");
+                warn!(peer = %ctx.peer, "sign-in failed");
                 self.service.record_failure(client_ip, key);
                 render_login_page(
                     &form,

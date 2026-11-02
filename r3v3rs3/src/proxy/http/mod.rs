@@ -1280,6 +1280,7 @@ where
     );
     let auth_ctx = AuthContext {
         client: client.ip,
+        peer: client.peer,
         host: request_host.as_deref(),
         proto: info.proto,
         base_path: &route.base_path,

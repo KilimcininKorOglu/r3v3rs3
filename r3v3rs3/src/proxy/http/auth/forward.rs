@@ -301,6 +301,7 @@ mod tests {
             .unwrap();
         let ctx = AuthContext {
             client: "198.51.100.7".parse().unwrap(),
+            peer: "198.51.100.7".parse().unwrap(),
             host: Some("example.com"),
             proto: "h3",
             base_path: "",
