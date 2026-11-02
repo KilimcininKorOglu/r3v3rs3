@@ -1179,6 +1179,11 @@ fn verify_websocket_origin(
     headers: &axum::http::HeaderMap,
     public_url: Option<&str>,
 ) -> Result<(), AppError> {
+    if headers.get(axum::http::header::ORIGIN).is_none()
+        && headers.contains_key(axum::http::header::COOKIE)
+    {
+        return Err(Error::Unauthorized.into());
+    }
     super::auth::verify_origin(headers, public_url).map_err(Into::into)
 }
 
