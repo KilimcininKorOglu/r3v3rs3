@@ -68,6 +68,35 @@ async fn an_admin_manages_the_accounts_through_the_admin_api() -> anyhow::Result
             assert!(body.contains(message), "{body}");
         }
 
+        // Malformed JSON syntax rejected with 400 and structured JSON ErrorMessage
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("http://{addr}/api/accounts"))
+            .header("cookie", &admin)
+            .header("content-type", "application/json")
+            .body("{ invalid json syntax")
+            .send()
+            .await?;
+        assert_eq!(res.status(), 400);
+        let ct = res.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.starts_with("application/json"));
+        let err: r3v3rs3_api::error::ErrorMessage = res.json().await?;
+        assert_eq!(err.message, "Malformed or invalid JSON payload");
+
+        // Invalid field type rejected with 422 and structured JSON ErrorMessage without internal type leakage
+        let res = client
+            .post(format!("http://{addr}/api/accounts"))
+            .header("cookie", &admin)
+            .header("content-type", "application/json")
+            .body(r#"{"username": 12345, "password": "valid-secret"}"#)
+            .send()
+            .await?;
+        assert_eq!(res.status(), 422);
+        let ct = res.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.starts_with("application/json"));
+        let err: r3v3rs3_api::error::ErrorMessage = res.json().await?;
+        assert_eq!(err.message, "Invalid field format or value in request payload");
+
         let editor = json!({
             "username": "editor",
             "password": "editor-secret",

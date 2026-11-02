@@ -328,9 +328,92 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .merge(docs)
         // Every admin response carries the config of the server, so no cache may keep it. The
         // layer sits above the fallback, which sets its own Cache-Control for the WebUI files.
+        .layer(middleware::from_fn(map_extractor_rejections))
         .layer(middleware::map_response(no_store))
         .fallback(static_file::fallback)
         .with_state(app_state))
+}
+
+async fn map_extractor_rejections(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let res = next.run(req).await;
+    let status = res.status();
+    if status != StatusCode::BAD_REQUEST
+        && status != StatusCode::UNPROCESSABLE_ENTITY
+        && status != StatusCode::UNSUPPORTED_MEDIA_TYPE
+    {
+        return res;
+    }
+
+    let is_text_plain = res
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|val| val.to_str().ok())
+        .is_some_and(|ct| ct.starts_with("text/plain"));
+
+    if !is_text_plain {
+        return res;
+    }
+
+    let (parts, body) = res.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, 64 * 1024).await else {
+        return Response::from_parts(parts, axum::body::Body::empty());
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let message = sanitize_rejection_message(&text, status);
+    (
+        status,
+        Json(ErrorMessage {
+            message,
+            error: None,
+        }),
+    )
+        .into_response()
+}
+
+fn sanitize_rejection_message(text: &str, status: StatusCode) -> String {
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("content-type: application/json") {
+        "Expected request with Content-Type: application/json".to_string()
+    } else if lower.contains("missing request body") {
+        "Request body is required".to_string()
+    } else if lower.contains("path parameter") {
+        "Invalid path parameter in request URL".to_string()
+    } else if lower.contains("query") {
+        "Invalid query parameters in request URL".to_string()
+    } else {
+        sanitize_payload_rejection(text, &lower, status)
+    }
+}
+
+fn sanitize_payload_rejection(text: &str, lower: &str, status: StatusCode) -> String {
+    if lower.contains("failed to parse the request body as json")
+        || lower.contains("expected value at")
+        || lower.contains("syntax error")
+    {
+        "Malformed or invalid JSON payload".to_string()
+    } else if let Some(field) = extract_missing_field(text) {
+        format!("Missing required field: {field}")
+    } else if lower.contains("failed to deserialize the request body")
+        || lower.contains("invalid type")
+        || status == StatusCode::UNPROCESSABLE_ENTITY
+    {
+        "Invalid field format or value in request payload".to_string()
+    } else {
+        "Invalid request payload".to_string()
+    }
+}
+
+fn extract_missing_field(text: &str) -> Option<&str> {
+    let pos = text.find("missing field `")?;
+    let field = text[pos + 15..].split('`').next()?;
+    if field.is_empty() {
+        None
+    } else {
+        Some(field)
+    }
 }
 
 async fn no_store(mut res: Response) -> Response {
