@@ -4,7 +4,7 @@ use super::{PortContextEvent, PortStatus, SocketState};
 use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing};
 use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
-use std::collections::HashMap;
+use dashmap::DashMap;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -19,12 +19,13 @@ use tracing::{Level, Span, debug, error, info, span, warn};
 type Resolver = DnsResolver;
 
 const MAX_SESSIONS: usize = 10_000;
+const UDP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UdpPortContext {
     pub listen: SocketAddr,
-    upstream: UdpUpstream,
-    sessions: HashMap<SocketAddr, UdpSession>,
+    upstream: Arc<UdpUpstream>,
+    sessions: Arc<DashMap<SocketAddr, UdpSession>>,
     status: PortStatus,
     span: Span,
     resolver: Resolver,
@@ -47,7 +48,7 @@ impl UdpPortContext {
         Ok(Self {
             listen,
             upstream: Default::default(),
-            sessions: Default::default(),
+            sessions: Arc::new(DashMap::new()),
             status: Default::default(),
             span,
             resolver,
@@ -63,7 +64,7 @@ impl UdpPortContext {
         // Keep the open sessions, the resolved addresses and the server health when the settings
         // do not change.
         if !upstream.same_settings(&self.upstream) {
-            self.upstream = upstream;
+            self.upstream = Arc::new(upstream);
             self.sessions.clear();
         }
         Ok(())
@@ -101,25 +102,32 @@ impl UdpPortContext {
 
     /// Sends a packet of a client to the upstream server of its session. The replies of the
     /// server go back to the client through `listener`.
-    pub async fn forward(&mut self, client: SocketAddr, data: &[u8], listener: &Arc<UdpSocket>) {
-        let open = self.sessions.get(&client).is_some_and(UdpSession::is_open);
-        if !open {
+    pub async fn forward(&self, client: SocketAddr, data: &[u8], listener: &Arc<UdpSocket>) {
+        let is_open = self
+            .sessions
+            .get(&client)
+            .map(|s| s.is_open())
+            .unwrap_or(false);
+        if !is_open {
             let Some(session) = self.open_session(client, listener).await else {
                 return;
             };
             self.sessions.insert(client, session);
         }
-        let Some(session) = self.sessions.get(&client) else {
-            return;
+        let (socket, context) = match self.sessions.get(&client) {
+            Some(session) => {
+                session.touch();
+                (session.socket.clone(), session.context.clone())
+            }
+            None => return,
         };
-        session.touch();
         let payload = if data.len() > self.upstream.max_datagram_size {
             &data[..self.upstream.max_datagram_size]
         } else {
             data
         };
-        if let Err(err) = session.socket.send(payload).await {
-            session.context.report_failure(&err.to_string());
+        if let Err(err) = socket.send(payload).await {
+            context.report_failure(&err.to_string());
             self.span.in_scope(|| {
                 debug!(%client, %err, "failed to send the packet to the upstream server");
             });
@@ -129,7 +137,7 @@ impl UdpPortContext {
     /// Opens a session to the selected server. When the server cannot be resolved or its socket
     /// fails, it opens the session once to the next server.
     async fn open_session(
-        &mut self,
+        &self,
         client: SocketAddr,
         listener: &Arc<UdpSocket>,
     ) -> Option<UdpSession> {
@@ -158,9 +166,10 @@ impl UdpPortContext {
         None
     }
 
-    async fn open_server_session(&mut self, context: SessionContext) -> Option<UdpSession> {
-        let server = self.upstream.servers.get_mut(context.index)?;
-        let Some(upstream) = resolve(&self.resolver, &self.span, server).await else {
+    async fn open_server_session(&self, context: SessionContext) -> Option<UdpSession> {
+        let server = self.upstream.servers.get(context.index)?;
+        let deadline = Instant::now() + UDP_CONNECT_TIMEOUT;
+        let Some(upstream) = resolve(&self.resolver, &self.span, server, deadline).await else {
             context.report_failure("failed to resolve the upstream server");
             return None;
         };
@@ -179,7 +188,7 @@ impl UdpPortContext {
 }
 
 /// The upstream servers and the session settings of the UDP proxy of a port.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct UdpUpstream {
     servers: Vec<Connection>,
     idle_timeout: Duration,
@@ -265,16 +274,24 @@ fn same_servers(a: &[Connection], b: &[Connection]) -> bool {
 }
 
 /// Returns the address of the server using DNS round-robin and TTL caching.
-async fn resolve(resolver: &Resolver, span: &Span, server: &mut Connection) -> Option<SocketAddr> {
+async fn resolve(
+    resolver: &Resolver,
+    span: &Span,
+    server: &Connection,
+    deadline: Instant,
+) -> Option<SocketAddr> {
     let host = server.name.to_str();
-    match resolver.resolve_addr(&host, server.port).await {
-        Ok(addr) => {
-            server.addr = Some(addr);
-            Some(addr)
-        }
-        Err(e) => {
+    match tokio::time::timeout_at(deadline.into(), resolver.resolve_addr(&host, server.port)).await {
+        Ok(Ok(addr)) => Some(addr),
+        Ok(Err(e)) => {
             span.in_scope(|| {
                 error!("failed to resolve {}: {}", host, e);
+            });
+            None
+        }
+        Err(_) => {
+            span.in_scope(|| {
+                error!("timed out resolving {}", host);
             });
             None
         }
@@ -539,5 +556,20 @@ mod tests {
         activity.touch();
         assert!(activity.idle_time() < Duration::from_secs(1));
         assert!(activity.remaining() > Duration::from_secs(14));
+    }
+
+    #[tokio::test]
+    async fn resolve_times_out_at_deadline() {
+        let resolver = DnsResolver::from_system_conf().unwrap();
+        let span = Span::none();
+        let server = Connection {
+            name: ServerName::try_from("slow.invalid").unwrap().to_owned(),
+            port: 53,
+            addr: None,
+            ttl: Instant::now(),
+        };
+        let deadline = Instant::now();
+        let res = resolve(&resolver, &span, &server, deadline).await;
+        assert_eq!(res, None);
     }
 }

@@ -1100,8 +1100,8 @@ impl ServerState {
         );
     }
 
-    pub async fn handle_udp_packet(
-        &mut self,
+    pub fn handle_udp_packet(
+        &self,
         index: usize,
         config_index: usize,
         addr: SocketAddr,
@@ -1110,9 +1110,12 @@ impl ServerState {
         let Some(listener) = self.udp_pool.socket(index) else {
             return;
         };
-        let port = self.ports.as_mut_slice().get_mut(config_index);
-        if let Some(PortContextKind::Udp(udp)) = port.map(PortContext::kind_mut) {
-            udp.forward(addr, &data, &listener).await;
+        let port = self.ports.as_slice().get(config_index);
+        if let Some(PortContextKind::Udp(udp)) = port.map(PortContext::kind) {
+            let udp = udp.clone();
+            tokio::spawn(async move {
+                udp.forward(addr, &data, &listener).await;
+            });
         }
     }
 
@@ -1834,6 +1837,9 @@ impl ServerState {
         self.tcp_pool = TcpListenerPool::new();
         self.udp_pool = UdpListenerPool::new();
         self.quic_pool = QuicListenerPool::new();
+        for port in self.ports.as_mut_slice() {
+            port.reset();
+        }
         let started = std::time::Instant::now();
         while crate::proxy::open_connections() > 0 {
             if started.elapsed() >= timeout {
