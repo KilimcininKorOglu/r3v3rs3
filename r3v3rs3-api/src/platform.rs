@@ -2256,6 +2256,13 @@ pub enum DeploymentStatus {
 }
 
 impl DeploymentStatus {
+    pub fn is_unfinished(self) -> bool {
+        matches!(
+            self,
+            Self::Queued | Self::PendingApproval | Self::Building | Self::Deploying
+        )
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Queued => "queued",

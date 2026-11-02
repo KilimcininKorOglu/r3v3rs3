@@ -432,6 +432,8 @@ pub enum AppCommand {
     Update { id: String, payload: String },
     /// Triggers a deployment for an application.
     Deploy { id: String },
+    /// Cancels an in-progress or pending deployment.
+    CancelDeploy { id: String },
     /// Rolls back an application to the previous deployment.
     Rollback { id: String },
     /// Starts an application container.
@@ -1494,6 +1496,7 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
         AppCommand::Add { payload } => api.add_app(&payload).await,
         AppCommand::Update { id, payload } => api.update_app(&id, &payload).await,
         AppCommand::Deploy { id } => api.deploy_app(&id).await,
+        AppCommand::CancelDeploy { id } => api.cancel_deployment(&id).await,
         AppCommand::Rollback { id } => api.rollback_app(&id).await,
         AppCommand::Start { id } => api.start_app(&id).await,
         AppCommand::Stop { id } => api.stop_app(&id).await,

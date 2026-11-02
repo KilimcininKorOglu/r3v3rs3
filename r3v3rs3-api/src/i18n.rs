@@ -213,6 +213,9 @@ mod tests {
             Error::DeploymentNotPendingApproval {
                 id: "abc".parse().unwrap(),
             },
+            Error::DeploymentNotActive {
+                id: "abc".parse().unwrap(),
+            },
             Error::NoNewRelease,
             Error::UpgradeFailed,
             Error::FailedToBuildDnsResolver { reason: text() },

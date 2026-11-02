@@ -2872,6 +2872,28 @@ impl McpServer {
         json_result(deployment)
     }
 
+    /// Cancel an in-progress or pending deployment.
+    #[tool(description = "Cancel an in-progress or pending deployment. Needs the edit scope.")]
+    async fn cancel_deployment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<RollbackParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let dep_id: ShortId = parse_id(&params.deployment_id)?;
+        let platform = self
+            .state
+            .platform(&caller, Permission::Edit)
+            .await
+            .map_err(any_error)?;
+        let deployment = platform
+            .cancel_deployment(dep_id, &caller.username)
+            .await
+            .map_err(any_error)?;
+        json_result(deployment)
+    }
+
     /// Check registry for updated container image.
     #[tool(description = "Check registry for updated container image. Needs the edit scope.")]
     async fn check_app_update(

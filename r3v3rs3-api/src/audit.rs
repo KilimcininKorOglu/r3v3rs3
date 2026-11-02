@@ -115,6 +115,8 @@ pub enum AuditAction {
     ApproveDeployment,
     /// An account rejected a pending deployment of an app.
     RejectDeployment,
+    /// An account cancelled an active or pending deployment of an app.
+    CancelDeployment,
     /// An account removed a login ban for an IP address.
     UnbanIp,
     /// An account upgraded an app to the latest version in the app store catalog.
@@ -214,7 +216,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 116] = [
+    pub const ALL: [AuditAction; 117] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -283,6 +285,7 @@ impl AuditAction {
         Self::RunScheduledCommand,
         Self::ApproveDeployment,
         Self::RejectDeployment,
+        Self::CancelDeployment,
         Self::UnbanIp,
         Self::UpgradeAppFromCatalog,
         Self::RotatePlatformKey,

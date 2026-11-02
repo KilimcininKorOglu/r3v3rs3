@@ -127,6 +127,7 @@ struct DeploymentCallbacks {
     rollback: Option<Callback<DeploymentEntry>>,
     approve: Option<Callback<DeploymentEntry>>,
     reject: Option<Callback<DeploymentEntry>>,
+    cancel: Option<Callback<DeploymentEntry>>,
 }
 
 fn build_callbacks(
@@ -136,17 +137,28 @@ fn build_callbacks(
     failure: &UseStateHandle<Option<String>>,
     reload: &UseStateHandle<u32>,
 ) -> DeploymentCallbacks {
-    if !can_edit || busy {
+    if !can_edit {
         return DeploymentCallbacks {
             rollback: None,
             approve: None,
             reject: None,
+            cancel: None,
+        };
+    }
+    let cancel = Some(cancel_callback(locale, failure, reload));
+    if busy {
+        return DeploymentCallbacks {
+            rollback: None,
+            approve: None,
+            reject: None,
+            cancel,
         };
     }
     DeploymentCallbacks {
         rollback: Some(rollback_callback(locale, failure, reload)),
         approve: Some(approve_callback(locale, failure, reload)),
         reject: Some(reject_callback(locale, failure, reload)),
+        cancel,
     }
 }
 
@@ -237,6 +249,11 @@ fn deployment_row(
         .then_some(callbacks.reject.as_ref())
         .flatten()
         .map(|cb| make_action(cb, deployment));
+    let cancel = (is_unfinished(deployment.status)
+        && deployment.status != DeploymentStatus::PendingApproval)
+        .then_some(callbacks.cancel.as_ref())
+        .flatten()
+        .map(|cb| make_action(cb, deployment));
     Row {
         key: deployment.id.to_string(),
         cells: vec![
@@ -262,6 +279,10 @@ fn deployment_row(
                         </a>
                     }
                 </div>
+            } else if let Some(onclick) = cancel {
+                <a class="font-medium text-red-600 dark:text-red-500 hover:underline cursor-pointer" {onclick}>
+                    {locale.t("common.cancel")}
+                </a>
             } else if let Some(onclick) = rollback {
                 <a class={LINK_CLASS} {onclick}>{locale.t("deployments.rollback")}</a>
             }
@@ -373,6 +394,28 @@ fn reject_callback(
         let (failure, reload) = (failure.clone(), reload.clone());
         dialog::confirm_then(locale, question, async move {
             let path = format!("{API_ENDPOINT}/deployments/{id}/reject");
+            match fetch_json::<DeploymentEntry>(locale, Request::post(&path)).await {
+                Ok(_) => failure.set(None),
+                Err(err) => failure.set(Some(err)),
+            }
+            reload.set(*reload + 1);
+        });
+    })
+}
+
+/// Asks for a confirmation, cancels the active or pending deployment and reloads the page.
+fn cancel_callback(
+    locale: Locale,
+    failure: &UseStateHandle<Option<String>>,
+    reload: &UseStateHandle<u32>,
+) -> Callback<DeploymentEntry> {
+    let (failure, reload) = (failure.clone(), reload.clone());
+    Callback::from(move |deployment: DeploymentEntry| {
+        let id = deployment.id;
+        let question = locale.tf("deployments.confirm_cancel", &[("id", &id.to_string())]);
+        let (failure, reload) = (failure.clone(), reload.clone());
+        dialog::confirm_then(locale, question, async move {
+            let path = format!("{API_ENDPOINT}/deployments/{id}/cancel");
             match fetch_json::<DeploymentEntry>(locale, Request::post(&path)).await {
                 Ok(_) => failure.set(None),
                 Err(err) => failure.set(Some(err)),

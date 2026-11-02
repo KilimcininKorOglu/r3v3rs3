@@ -258,11 +258,39 @@ impl Platform {
 
     fn spawn_job(self: &Arc<Self>, lock: AppLock, job: Job) {
         let platform = self.clone();
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        platform.register_cancellation(job.deployment, cancel_token.clone());
         tokio::spawn(async move {
-            platform.run_job(&job).await;
+            tokio::select! {
+                _ = platform.run_job(&job) => {}
+                _ = cancel_token.cancelled() => {
+                    platform.handle_cancelled_job(&job).await;
+                }
+            }
+            platform.remove_cancellation(job.deployment);
             drop(lock);
             platform.run_queued_hook(job.app).await;
         });
+    }
+
+    async fn handle_cancelled_job(&self, job: &Job) {
+        info!(deployment = %job.deployment, "deployment cancelled");
+        self.cleanup_cancelled_job(job).await;
+        self.notify_deployment(
+            NotificationEvent::DeploymentFailed,
+            job.notice(),
+            Some("Cancelled".to_string()),
+        )
+        .await;
+    }
+
+    async fn cleanup_cancelled_job(&self, job: &Job) {
+        if let Ok(name) = proxy::container_name(job.app, job.deployment) {
+            for target in job.spec.targets_or_default(job.app_target) {
+                let runtime = &*self.backend(target).runtime;
+                let _ = runtime.remove_container(&name).await;
+            }
+        }
     }
 
     /// Starts a deployment of the current spec and environment of an app, and returns it while
@@ -376,6 +404,30 @@ impl Platform {
         let message = format!("Rejected by {username}");
         if !self.store.reject_deployment(id, &message, unix_ms()).await? {
             return Err(Error::DeploymentNotPendingApproval { id }.into());
+        }
+        self.deployment(id).await
+    }
+
+    /// Cancels an in-progress or pending deployment.
+    pub async fn cancel_deployment(
+        self: &Arc<Self>,
+        id: ShortId,
+        username: &str,
+    ) -> anyhow::Result<DeploymentEntry> {
+        let entry = self.deployment(id).await?;
+        if !entry.status.is_unfinished() {
+            return Err(Error::DeploymentNotActive { id }.into());
+        }
+        if entry.status == DeploymentStatus::PendingApproval {
+            return self.reject_deployment(id, username).await;
+        }
+        let message = format!("Cancelled by {username}");
+        let now = unix_ms();
+        self.store
+            .fail_deployment(id, DeploymentStatus::Cancelled, &message, now)
+            .await?;
+        if !self.cancel_running_job(id) {
+            self.busy_apps().remove(&entry.app);
         }
         self.deployment(id).await
     }
@@ -2487,6 +2539,37 @@ mod tests {
         assert!(setup.runtime.names().is_empty());
 
         let err = setup.platform.approve_deployment(entry.id, "bob").await;
+        assert!(err.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_pending_deployment_can_be_cancelled() -> anyhow::Result<()> {
+        let mut req = request("shop");
+        req.spec.require_approval = true;
+        let setup = setup_with(req).await?;
+        let entry = setup
+            .platform
+            .deploy(setup.app.id, "alice", DeploymentTrigger::Manual)
+            .await?;
+        assert_eq!(entry.status, DeploymentStatus::PendingApproval);
+
+        let cancelled = setup.platform.cancel_deployment(entry.id, "lead").await?;
+        assert_eq!(cancelled.status, DeploymentStatus::Cancelled);
+        assert_eq!(cancelled.message.as_deref(), Some("Rejected by lead"));
+        assert!(setup.runtime.names().is_empty());
+
+        let err = setup.platform.cancel_deployment(entry.id, "lead").await;
+        assert!(err.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cancelling_completed_deployment_returns_not_active() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let dep = deploy(&setup).await?;
+        assert_eq!(dep.status, DeploymentStatus::Running);
+        let err = setup.platform.cancel_deployment(dep.id, "admin").await;
         assert!(err.is_err());
         Ok(())
     }

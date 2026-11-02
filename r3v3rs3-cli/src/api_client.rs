@@ -1056,6 +1056,13 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn cancel_deployment(&self, id: &str) -> anyhow::Result<()> {
+        let res = self
+            .request(Method::POST, &format!("/api/deployments/{id}/cancel"), None)
+            .await?;
+        print_json(&res)
+    }
+
     pub async fn rollback_app(&self, id: &str) -> anyhow::Result<()> {
         let dep_id = self.resolve_rollback_deployment_id(id).await?;
         self.request(

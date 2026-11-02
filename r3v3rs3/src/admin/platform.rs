@@ -1411,6 +1411,34 @@ pub async fn reject_deployment(
     Ok(Json(deployment))
 }
 
+/// Cancels an in-progress or pending deployment.
+#[utoipa::path(
+    post,
+    path = "/{id}/cancel",
+    tag = "platform",
+    operation_id = "cancel_deployment",
+    params(("id" = ShortId, Path, description = "The id of the active or pending deployment.")),
+    responses((status = 200, description = "The cancelled deployment.", body = DeploymentEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn cancel_deployment(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<DeploymentEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let deployment = platform
+        .cancel_deployment(id, &caller.username)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::CancelDeployment)
+        .id(deployment.app)
+        .summary(id.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(deployment))
+}
+
 /// Lists the scheduled commands configured for an app.
 #[utoipa::path(
     get,

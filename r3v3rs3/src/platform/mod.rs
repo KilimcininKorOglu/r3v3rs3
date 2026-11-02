@@ -204,6 +204,8 @@ pub struct Platform {
     sent: Mutex<Option<publish::Published>>,
     /// The apps that a pipeline or a deletion holds.
     busy: std::sync::Mutex<HashSet<ShortId>>,
+    /// Active cancellation tokens for in-progress deployments.
+    cancellations: std::sync::Mutex<HashMap<ShortId, tokio_util::sync::CancellationToken>>,
     /// Scheduled command IDs that are currently executing.
     running_commands: std::sync::Mutex<HashSet<ShortId>>,
     /// Scheduled backup retry tracking per app: (slot, attempts, next_attempt_at).
@@ -305,6 +307,7 @@ impl Platform {
             command,
             sent: Mutex::new(None),
             busy: std::sync::Mutex::new(HashSet::new()),
+            cancellations: std::sync::Mutex::new(HashMap::new()),
             running_commands: std::sync::Mutex::new(HashSet::new()),
             backup_attempts: std::sync::Mutex::new(HashMap::new()),
             queued: std::sync::Mutex::new(HashMap::new()),
@@ -340,6 +343,37 @@ impl Platform {
             Ok(busy) => busy,
             // The set stays valid when a holder panics.
             Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    pub fn register_cancellation(&self, id: ShortId, token: tokio_util::sync::CancellationToken) {
+        match self.cancellations.lock() {
+            Ok(mut map) => {
+                map.insert(id, token);
+            }
+            Err(poisoned) => {
+                poisoned.into_inner().insert(id, token);
+            }
+        }
+    }
+
+    pub fn remove_cancellation(&self, id: ShortId) -> Option<tokio_util::sync::CancellationToken> {
+        match self.cancellations.lock() {
+            Ok(mut map) => map.remove(&id),
+            Err(poisoned) => poisoned.into_inner().remove(&id),
+        }
+    }
+
+    pub fn cancel_running_job(&self, id: ShortId) -> bool {
+        let token = match self.cancellations.lock() {
+            Ok(mut map) => map.remove(&id),
+            Err(poisoned) => poisoned.into_inner().remove(&id),
+        };
+        if let Some(token) = token {
+            token.cancel();
+            true
+        } else {
+            false
         }
     }
 

@@ -429,7 +429,7 @@ When local storage is destroyed, disks fail, or a host is rebuilt from scratch, 
 4. It marks the deployment `running`, marks the previous one `superseded`, and routes the domains to the new container.
 5. After 10 seconds it stops and removes the old container, so that its open requests end.
 
-An app runs one deployment at a time. A second deploy, a rollback or a deletion during a deployment gets `409 app_busy`. A [webhook](#webhooks) push during a deployment queues one more deployment instead. A restart of the server marks an unfinished deployment as `failed` with the message `the server stopped during the deployment`, and sends its `deployment_failed` notification.
+An app runs one deployment at a time. A second deploy, a rollback or a deletion during a deployment gets `409 app_busy`. A [webhook](#webhooks) push during a deployment queues one more deployment instead. A restart of the server marks an unfinished deployment as `failed` with the message `the server stopped during the deployment`, and sends its `deployment_failed` notification. An active or pending deployment can be cancelled via `POST /api/deployments/{id}/cancel` (or CLI `r3v3rs3-cli app cancel-deploy <id>`), stopping the task immediately and releasing the app lock.
 
 | Status             | Meaning                                                                                         |
 |--------------------|-------------------------------------------------------------------------------------------------|

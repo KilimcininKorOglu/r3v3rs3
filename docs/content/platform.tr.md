@@ -429,7 +429,7 @@ Yerel depolama alanı kaybolduğunda, diskler arızalandığında veya sunucu s�
 4. Deployment'ı `running`, öncekini `superseded` olarak işaretler ve alan adlarını yeni container'a yönlendirir.
 5. 10 saniye sonra eski container'ı durdurur ve siler. Bu süre, eski container'daki açık isteklerin bitmesi içindir.
 
-Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment sürerken gelen ikinci deploy, geri alma veya silme isteği `409 app_busy` alır. Bir deployment sürerken gelen [webhook](#webhook-lar) push'u ise bir deployment daha kuyruğa alır. Sunucu yeniden başlarsa bitmemiş deployment `the server stopped during the deployment` mesajıyla `failed` olur ve `deployment_failed` bildirimi gönderilir.
+Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment sürerken gelen ikinci deploy, geri alma veya silme isteği `409 app_busy` alır. Bir deployment sürerken gelen [webhook](#webhook-lar) push'u ise bir deployment daha kuyruğa alır. Sunucu yeniden başlarsa bitmemiş deployment `the server stopped during the deployment` mesajıyla `failed` olur ve `deployment_failed` bildirimi gönderilir. Aktif veya bekleyen bir deployment `POST /api/deployments/{id}/cancel` (veya CLI üzerinden `r3v3rs3-cli app cancel-deploy <id>`) çağrılarak iptal edilebilir; işlem hemen durdurulur ve uygulama kilidi serbest bırakılır.
 
 | Durum              | Anlamı                                                                                         |
 |--------------------|------------------------------------------------------------------------------------------------|
