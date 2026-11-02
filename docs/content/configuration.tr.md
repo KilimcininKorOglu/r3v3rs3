@@ -2207,7 +2207,7 @@ $ r3v3rs3 start --log /var/log/r3v3rs3/r3v3rs3.log --access-log /var/log/r3v3rs3
 
 Dizin içeren bir yol o dizine yazar. Yalnız dosya adı verilirse dosya log dizinine yazılır. r3v3rs3 her saat yeni bir dosya açar ve ada tarihle saati ekler, örneğin `r3v3rs3.log.2026-09-25-10`.
 
-Log dizini bu dosyaları ve log sayfasıyla denetim kaydının veritabanı olan `log.db` dosyasını tutar. Dizini `R3V3RS3_LOG_DIR` ortam değişkeni veya `--log-dir` komut satırı seçeneği belirler. Varsayılan dizin `$XDG_DATA_HOME/r3v3rs3/logs` veya `$HOME/.local/share/r3v3rs3/logs` olur.
+Log dizini bu dosyaları ve log sayfasıyla denetim kaydının veritabanı olan `log.db` dosyasını tutar. Dizini `R3V3RS3_LOG_DIR` ortam değişkeni veya `--log-dir` komut satırı seçeneği belirler. Varsayılan dizin `$XDG_DATA_HOME/r3v3rs3/logs` veya `$HOME/.local/share/r3v3rs3/logs` olur. Periyodik log veritabanı temizliği ana sunucu event loop'u dışına alınarak arka planda asenkron çalışır, böylece döngü tıkanması ve bağlantı gecikmesi sıçramaları önlenir.
 
 Log seviyesini değiştirmek için `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` ortam değişkenlerini veya `--log-level`, `--access-log-level` komut satırı seçeneklerini kullanın. Varsayılan seviye `info` olur. `off` log'u kapatır. `R3V3RS3_LOG_FORMAT` veya `--log-format` iki log için `text` (varsayılan) veya `json` biçimini seçer.
 

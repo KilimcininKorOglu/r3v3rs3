@@ -43,6 +43,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::select;
 use tokio::{
@@ -97,6 +98,8 @@ pub struct ServerState {
     sent_notifications: HashSet<String>,
     /// The in-flight or cooling-down certificate notifications and when they were dispatched.
     notification_attempts: HashMap<String, Instant>,
+    /// True while the background SQLite log cleanup task is running.
+    log_cleanup_running: Arc<AtomicBool>,
     platform: PlatformHandle,
     /// The directory that holds the config files, the platform database and its key.
     config_dir: PathBuf,
@@ -361,6 +364,7 @@ impl ServerState {
             notifier: Notifier::spawn(),
             sent_notifications,
             notification_attempts: HashMap::new(),
+            log_cleanup_running: Arc::new(AtomicBool::new(false)),
             platform,
             config_dir: config_dir.to_path_buf(),
             worker_status: None,
@@ -1378,13 +1382,29 @@ impl ServerState {
     }
 
     pub async fn run_background_tasks(&mut self, app_info: &AppInfo) {
-        if let Err(err) = self.cleanup_old_logs(app_info).await {
-            error!(%err, "failed to cleanup old logs");
-        }
+        self.spawn_cleanup_old_logs(app_info);
 
         self.reload_proxies().await;
         if self.leader {
             self.run_leader_tasks().await;
+        }
+    }
+
+    fn spawn_cleanup_old_logs(&self, app_info: &AppInfo) {
+        if self
+            .log_cleanup_running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            let path = app_info.log_path.join("log.db");
+            let retention = self.config.log.database_log_retention;
+            let running = self.log_cleanup_running.clone();
+            tokio::spawn(async move {
+                if let Err(err) = Self::cleanup_database_logs(&path, retention).await {
+                    error!(%err, "failed to cleanup old logs");
+                }
+                running.store(false, Ordering::SeqCst);
+            });
         }
     }
 
@@ -1409,12 +1429,9 @@ impl ServerState {
         }
     }
 
-    async fn cleanup_old_logs(&mut self, app_info: &AppInfo) -> anyhow::Result<()> {
-        let path = app_info.log_path.join("log.db");
-        let database = DatabaseLayer::new(&path, tracing::level_filters::LevelFilter::OFF).await?;
-        database
-            .cleanup(self.config.log.database_log_retention)
-            .await?;
+    async fn cleanup_database_logs(path: &Path, retention: Duration) -> anyhow::Result<()> {
+        let database = DatabaseLayer::new(path, tracing::level_filters::LevelFilter::OFF).await?;
+        database.cleanup(retention).await?;
         Ok(())
     }
 

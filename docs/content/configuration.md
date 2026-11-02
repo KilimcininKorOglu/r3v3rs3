@@ -2207,7 +2207,7 @@ $ r3v3rs3 start --log /var/log/r3v3rs3/r3v3rs3.log --access-log /var/log/r3v3rs3
 
 A path with a directory writes into that directory, and a bare file name writes into the log directory. r3v3rs3 starts a new file every hour and adds the date and the hour to the name, for example `r3v3rs3.log.2026-09-25-10`.
 
-The log directory holds these files and `log.db`, the database of the log page and the audit log. The `R3V3RS3_LOG_DIR` environment variable or the `--log-dir` command-line option sets it. The default is `$XDG_DATA_HOME/r3v3rs3/logs` or `$HOME/.local/share/r3v3rs3/logs`.
+The log directory holds these files and `log.db`, the database of the log page and the audit log. The `R3V3RS3_LOG_DIR` environment variable or the `--log-dir` command-line option sets it. The default is `$XDG_DATA_HOME/r3v3rs3/logs` or `$HOME/.local/share/r3v3rs3/logs`. Periodic log database cleanup runs asynchronously off the main server event loop, avoiding event loop starvation and connection latency spikes.
 
 Set the log level with the `R3V3RS3_LOG_LEVEL`, `R3V3RS3_ACCESS_LOG_LEVEL` environment variable or the `--log-level`, `--access-log-level` command-line option. The default level is `info`, and `off` turns a log off. `R3V3RS3_LOG_FORMAT` or `--log-format` selects `text` (the default) or `json` for both logs.
 
