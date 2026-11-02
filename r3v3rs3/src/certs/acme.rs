@@ -236,20 +236,46 @@ impl AcmeEntry {
 
     /// The renewal time of the newest certificate of the target, or `None` without a certificate.
     pub fn next_renewal_for(&self, target: &AcmeTarget, certs: &CertList) -> Option<SystemTime> {
-        let last_issued = certs
+        let renewal_days = self.acme.config.renewal_days.clamp(1, MAX_RENEWAL_DAYS);
+        certs
             .find_certs_for_target(target)
             .iter()
-            .map(|cert| {
-                cert.metadata
-                    .as_ref()
-                    .map(|meta| meta.created_at)
-                    .unwrap_or(SystemTime::UNIX_EPOCH)
-            })
-            .max()?;
-        let renewal_days = self.acme.config.renewal_days.clamp(1, MAX_RENEWAL_DAYS);
-        let secs = renewal_days.checked_mul(86_400)?;
-        last_issued.checked_add(Duration::from_secs(secs))
+            .filter_map(|cert| cert_renewal_time(cert, renewal_days))
+            .max()
     }
+}
+
+fn cert_renewal_time(cert: &Cert, renewal_days: u64) -> Option<SystemTime> {
+    let not_before = cert.not_before.timestamp();
+    let not_after = cert.not_after.timestamp();
+    if not_after <= 0 {
+        return None;
+    }
+    let not_after_time =
+        SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(not_after as u64))?;
+    let validity_secs = not_after.saturating_sub(not_before).max(0) as u64;
+    let lead_secs = (validity_secs / 3).clamp(86_400.min(validity_secs / 2), 30 * 86_400);
+    let expiration_renewal = not_after_time.checked_sub(Duration::from_secs(lead_secs))?;
+
+    let configured_secs = renewal_days.clamp(1, MAX_RENEWAL_DAYS).checked_mul(86_400)?;
+    let start_time = cert
+        .metadata
+        .as_ref()
+        .map(|meta| meta.created_at)
+        .or_else(|| {
+            if not_before > 0 {
+                SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(not_before as u64))
+            } else {
+                None
+            }
+        });
+
+    if let Some(start) = start_time {
+        if let Some(configured_renewal) = start.checked_add(Duration::from_secs(configured_secs)) {
+            return Some(configured_renewal.min(expiration_renewal));
+        }
+    }
+    Some(expiration_renewal)
 }
 
 /// The domain names that one ACME entry orders together. The certificates of a target renew
@@ -803,5 +829,28 @@ mod tests {
         let (ok, headers) = send("http://acme.example/directory").await;
         assert!(!ok);
         assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn short_lived_certificate_renews_before_expiration_regardless_of_renewal_days() {
+        let mut distinguished_name = DistinguishedName::new();
+        distinguished_name.push(rcgen::DnType::CommonName, "short-lived");
+        let mut params = CertificateParams::default();
+        params.distinguished_name = distinguished_name;
+        let now = time::OffsetDateTime::now_utc();
+        params.not_before = now;
+        params.not_after = now + time::Duration::days(30);
+        let keypair = KeyPair::generate().unwrap();
+        let cert = params.self_signed(&keypair).unwrap();
+        let parsed = Cert::new(
+            CertKind::Server,
+            cert.pem().into_bytes(),
+            Some(keypair.serialize_pem().into_bytes()),
+        )
+        .unwrap();
+
+        let renewal = cert_renewal_time(&parsed, 60).unwrap();
+        let diff = renewal.duration_since(SystemTime::now()).unwrap().as_secs();
+        assert!(diff >= 19 * 86_400 && diff <= 21 * 86_400);
     }
 }
