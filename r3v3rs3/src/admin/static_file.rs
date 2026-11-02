@@ -57,7 +57,9 @@ pub async fn fallback(
     if is_webui_shell(path) && !is_signed_in(&state, &jar).await {
         // The shell of a WebUI route reaches the browser only with a session, so a
         // signed-out navigation never renders a page, not for a moment.
-        return Ok(Redirect::to(&login_target(path, query.as_deref())).into_response());
+        let mut response = Redirect::to(&login_target(path, query.as_deref())).into_response();
+        apply_frame_protection_headers(response.headers_mut());
+        return Ok(response);
     }
     serve_file(file_name, &req_headers).await
 }

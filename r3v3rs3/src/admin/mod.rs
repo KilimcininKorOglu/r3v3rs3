@@ -310,8 +310,7 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .merge(metrics_routes(&app_state))
         .split_for_parts();
     let docs: Router<AppState> = Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi))
-        .route_layer(verify)
-        .layer(middleware::map_response(docs_frame_protection));
+        .route_layer(verify);
     let mcp_verify = middleware::from_fn_with_state(app_state.clone(), oauth2::verify_bearer);
     let mcp_service = mcp::StreamableHttpService::new(
         {
@@ -335,17 +334,13 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
 }
 
 async fn no_store(mut res: Response) -> Response {
-    res.headers_mut()
-        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    res
-}
-
-async fn docs_frame_protection(mut res: Response) -> Response {
-    res.headers_mut().insert(
+    let headers = res.headers_mut();
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
         HeaderName::from_static("x-frame-options"),
         HeaderValue::from_static("DENY"),
     );
-    res.headers_mut().insert(
+    headers.insert(
         CONTENT_SECURITY_POLICY,
         HeaderValue::from_static("frame-ancestors 'none'"),
     );
