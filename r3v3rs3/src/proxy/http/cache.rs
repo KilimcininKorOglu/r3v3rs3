@@ -9,8 +9,9 @@ use hyper::{
     HeaderMap, Method, Request, Response, StatusCode,
     body::{Body, Frame, SizeHint},
     header::{
-        ACCEPT_ENCODING, AGE, CACHE_CONTROL, CONTENT_LENGTH, DATE, ETAG, EXPIRES, HeaderName,
-        IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, PRAGMA, RANGE, SET_COOKIE, UPGRADE, VARY,
+        ACCEPT_ENCODING, AGE, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LANGUAGE, CONTENT_LENGTH,
+        CONTENT_RANGE, CONTENT_TYPE, DATE, ETAG, EXPIRES, HeaderName, IF_MODIFIED_SINCE,
+        IF_NONE_MATCH, LAST_MODIFIED, PRAGMA, RANGE, SET_COOKIE, UPGRADE, VARY,
     },
     http::HeaderValue,
 };
@@ -483,7 +484,7 @@ impl CacheRequest {
         };
         *res.headers_mut() = entry.head.headers.clone();
         if not_modified {
-            res.headers_mut().remove(CONTENT_LENGTH);
+            Self::strip_304_headers(res.headers_mut());
         }
         res.headers_mut()
             .insert(AGE, HeaderValue::from(entry.age().as_secs()));
@@ -491,6 +492,15 @@ impl CacheRequest {
             .insert(X_CACHE, HeaderValue::from_static("HIT"));
         super::super::stats::count_cache_hit();
         res
+    }
+
+    /// Strips representation headers from a 304 Not Modified response (RFC 9110 15.4.5).
+    fn strip_304_headers(headers: &mut HeaderMap) {
+        headers.remove(CONTENT_LENGTH);
+        headers.remove(CONTENT_TYPE);
+        headers.remove(CONTENT_ENCODING);
+        headers.remove(CONTENT_LANGUAGE);
+        headers.remove(CONTENT_RANGE);
     }
 
     /// Sends a stale stored response while background revalidation is running.
@@ -1327,5 +1337,46 @@ mod tests {
 
         let flight3 = cache.start_flight("stampede-key");
         assert!(matches!(flight3, Flight::Leader(_)));
+    }
+
+    #[test]
+    fn not_modified_response_strips_representation_headers() {
+        let cache = Arc::new(HttpCache::new(CacheConfig::default(), None));
+        let req_headers = headers(&[("if-none-match", "\"v1\"")]);
+        let req = CacheRequest {
+            cache,
+            key: "test-key".into(),
+            head: false,
+            headers: req_headers,
+            lookup: true,
+            authorized: false,
+        };
+        let stored = CachedResponse {
+            head: StoredHead {
+                status: StatusCode::OK,
+                headers: headers(&[
+                    ("etag", "\"v1\""),
+                    ("content-type", "application/json"),
+                    ("content-encoding", "gzip"),
+                    ("content-language", "en"),
+                    ("content-range", "bytes 0-10/11"),
+                    ("content-length", "11"),
+                    ("cache-control", "max-age=60"),
+                ]),
+                vary: vec![],
+                initial_age: Duration::from_secs(5),
+                freshness: Duration::from_secs(60),
+            },
+            body: Bytes::from_static(b"hello world"),
+            stored_at: Instant::now(),
+        };
+        let res = req.respond(&stored);
+        assert_eq!(res.status(), StatusCode::NOT_MODIFIED);
+        assert!(!res.headers().contains_key(CONTENT_TYPE));
+        assert!(!res.headers().contains_key(CONTENT_ENCODING));
+        assert!(!res.headers().contains_key(CONTENT_LANGUAGE));
+        assert!(!res.headers().contains_key(CONTENT_RANGE));
+        assert!(!res.headers().contains_key(CONTENT_LENGTH));
+        assert_eq!(res.headers().get(ETAG).unwrap(), "\"v1\"");
     }
 }
