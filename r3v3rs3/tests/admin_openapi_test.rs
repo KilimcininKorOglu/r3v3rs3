@@ -45,7 +45,7 @@ const OPERATIONS: [(&str, &str); 265] = [
     ("put", "/api/ports/{id}"),
     ("delete", "/api/ports/{id}"),
     ("get", "/api/ports/{id}/status"),
-    ("get", "/api/ports/{id}/reset"),
+    ("post", "/api/ports/{id}/reset"),
     ("get", "/api/ports/interfaces"),
     ("get", "/api/proxies"),
     ("post", "/api/proxies"),

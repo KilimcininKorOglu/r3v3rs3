@@ -324,7 +324,7 @@ impl ApiClient {
     }
 
     pub async fn reset_port(&self, id: &str) -> anyhow::Result<()> {
-        self.request(Method::GET, &format!("/api/ports/{id}/reset"), None)
+        self.request(Method::POST, &format!("/api/ports/{id}/reset"), None)
             .await?;
         println!("port/{id} listener reset");
         Ok(())

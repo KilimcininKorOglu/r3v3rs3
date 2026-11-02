@@ -589,65 +589,92 @@ fn is_valid_origin(origin_str: &str, expected_rp_id: &str) -> bool {
     is_origin_local && is_rp_local
 }
 
-pub(crate) fn matches_host_or_local(origin_host: &str, req_host: &str) -> bool {
-    let req_clean = req_host.split(':').next().unwrap_or(req_host);
-    if origin_host.eq_ignore_ascii_case(req_clean) {
-        return true;
+pub(crate) fn matches_origin_host(origin: &url::Url, req_host: &str) -> bool {
+    let Some(origin_host) = origin.host_str() else {
+        return false;
+    };
+    let (req_hostname, req_port) = match req_host.split_once(':') {
+        Some((h, p)) => (h, p.parse::<u16>().ok()),
+        None => (req_host, None),
+    };
+    if !origin_host.eq_ignore_ascii_case(req_hostname) {
+        return false;
     }
-    let is_origin_local =
-        origin_host == "localhost" || origin_host == "127.0.0.1" || origin_host == "::1";
-    let is_req_local = req_clean == "localhost" || req_clean == "127.0.0.1" || req_clean == "::1";
-    is_origin_local && is_req_local
+    let origin_port = origin.port_or_known_default();
+    let expected_port = req_port.or_else(|| match origin.scheme() {
+        "https" => Some(443),
+        "http" => Some(80),
+        _ => None,
+    });
+    origin_port == expected_port
 }
 
-pub(crate) fn matches_public_url(origin_host: &str, public_url: Option<&str>) -> bool {
-    let Some(pub_url) = public_url else {
+pub(crate) fn matches_origin_public_url(origin: &url::Url, public_url: &str) -> bool {
+    let Ok(pub_url) = url::Url::parse(public_url) else {
         return false;
     };
-    let Ok(parsed) = url::Url::parse(pub_url) else {
-        return false;
-    };
-    parsed
-        .host_str()
-        .is_some_and(|h| origin_host.eq_ignore_ascii_case(h))
+    origin.scheme() == pub_url.scheme()
+        && origin.host_str() == pub_url.host_str()
+        && origin.port_or_known_default() == pub_url.port_or_known_default()
+}
+
+fn has_preflight_custom_header(headers: &axum::http::HeaderMap) -> bool {
+    headers.contains_key("x-requested-with")
+        || headers.contains_key("x-csrf-token")
+        || headers
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|ct| ct.starts_with("application/json"))
+}
+
+fn check_sec_fetch_site(headers: &axum::http::HeaderMap) -> Option<Result<(), Error>> {
+    let site = headers.get("sec-fetch-site")?.to_str().ok()?;
+    if site.eq_ignore_ascii_case("same-origin") {
+        Some(Ok(()))
+    } else if site.eq_ignore_ascii_case("cross-site") || site.eq_ignore_ascii_case("same-site") {
+        Some(Err(Error::Unauthorized))
+    } else {
+        None
+    }
+}
+
+fn matches_request_origin(
+    origin: &url::Url,
+    headers: &axum::http::HeaderMap,
+    public_url: Option<&str>,
+) -> bool {
+    let host_matches = headers
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|host| matches_origin_host(origin, host));
+    let public_matches =
+        public_url.is_some_and(|pub_url| matches_origin_public_url(origin, pub_url));
+    host_matches || public_matches
 }
 
 pub(crate) fn verify_origin(
     headers: &axum::http::HeaderMap,
     public_url: Option<&str>,
 ) -> Result<(), Error> {
-    let origin_val = headers
+    if let Some(res) = check_sec_fetch_site(headers) {
+        return res;
+    }
+    if has_preflight_custom_header(headers) {
+        return Ok(());
+    }
+    let Some(origin_val) = headers
         .get(axum::http::header::ORIGIN)
-        .or_else(|| headers.get(axum::http::header::REFERER));
-    let Some(origin_val) = origin_val else {
-        if headers.contains_key(axum::http::header::COOKIE) {
-            return Err(Error::Unauthorized);
-        }
+        .or_else(|| headers.get(axum::http::header::REFERER))
+    else {
         return Ok(());
     };
-    let Ok(origin_str) = origin_val.to_str() else {
-        return Err(Error::Unauthorized);
-    };
-    let Ok(origin_url) = url::Url::parse(origin_str) else {
-        return Err(Error::Unauthorized);
-    };
-    let Some(origin_host) = origin_url.host_str() else {
-        return Err(Error::Unauthorized);
-    };
-
-    if let Some(host_val) = headers
-        .get(axum::http::header::HOST)
-        .and_then(|v| v.to_str().ok())
-        && matches_host_or_local(origin_host, host_val)
-    {
-        return Ok(());
+    let origin_str = origin_val.to_str().map_err(|_| Error::Unauthorized)?;
+    let origin_url = url::Url::parse(origin_str).map_err(|_| Error::Unauthorized)?;
+    if matches_request_origin(&origin_url, headers, public_url) {
+        Ok(())
+    } else {
+        Err(Error::Unauthorized)
     }
-
-    if matches_public_url(origin_host, public_url) {
-        return Ok(());
-    }
-
-    Err(Error::Unauthorized)
 }
 
 pub async fn verify_and_consume_challenge(
@@ -710,6 +737,16 @@ async fn resolve_caller(
     Err(Error::Unauthorized)
 }
 
+fn is_state_changing(method: &axum::http::Method) -> bool {
+    matches!(
+        method,
+        &axum::http::Method::POST
+            | &axum::http::Method::PUT
+            | &axum::http::Method::DELETE
+            | &axum::http::Method::PATCH
+    )
+}
+
 /// Accepts a request with an active admin session, API token, or valid OAuth Bearer token and adds its `Caller` to the request.
 pub async fn verify(
     State(state): State<AppState>,
@@ -725,6 +762,15 @@ pub async fn verify(
     let cookie = jar.get("token").map(|c| c.value());
     match resolve_caller(&state, bearer, cookie).await {
         Ok((mut caller, session_token)) => {
+            if session_token.is_some() && bearer.is_none() && is_state_changing(request.method()) {
+                let public_url = {
+                    let data = state.data.lock().await;
+                    data.config.public_url.as_ref().map(|u| u.to_string())
+                };
+                if let Err(err) = verify_origin(request.headers(), public_url.as_deref()) {
+                    return AppError::R3v3rs3(err).into_response();
+                }
+            }
             caller.client = request
                 .extensions()
                 .get::<ConnectInfo<SocketAddr>>()
@@ -1049,5 +1095,28 @@ mod tests {
 
         let edit_only_caller = apply_scope_to_caller(caller, "edit");
         assert_eq!(edit_only_caller.role, Role::Admin);
+    }
+
+    #[test]
+    fn verify_origin_enforces_port_and_sec_fetch_site() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(axum::http::header::HOST, "localhost:46492".parse().unwrap());
+        headers.insert(axum::http::header::COOKIE, "token=xyz".parse().unwrap());
+
+        // Cross-origin with different port -> rejected
+        headers.insert(axum::http::header::ORIGIN, "http://localhost:3000".parse().unwrap());
+        assert!(verify_origin(&headers, None).is_err());
+
+        // Same-origin with exact port -> allowed
+        headers.insert(axum::http::header::ORIGIN, "http://localhost:46492".parse().unwrap());
+        assert!(verify_origin(&headers, None).is_ok());
+
+        // Sec-fetch-site same-site -> rejected
+        headers.insert("sec-fetch-site", "same-site".parse().unwrap());
+        assert!(verify_origin(&headers, None).is_err());
+
+        // Sec-fetch-site same-origin -> allowed
+        headers.insert("sec-fetch-site", "same-origin".parse().unwrap());
+        assert!(verify_origin(&headers, None).is_ok());
     }
 }

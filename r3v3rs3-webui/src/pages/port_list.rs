@@ -364,7 +364,7 @@ async fn delete_port(locale: Locale, id: ShortId) -> Result<(), String> {
 }
 
 async fn reset_port(locale: Locale, id: ShortId) -> Result<(), String> {
-    let req = Request::get(&format!("{API_ENDPOINT}/ports/{id}/reset"))
+    let req = Request::post(&format!("{API_ENDPOINT}/ports/{id}/reset"))
         .build()
         .map_err(|err| err.to_string())?;
     crate::pages::settings::send_request(locale, req).await?;

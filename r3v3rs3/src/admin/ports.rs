@@ -119,7 +119,7 @@ pub async fn put(
 
 /// Closes and opens the listener of a port again.
 #[utoipa::path(
-    get,
+    post,
     path = "/{id}/reset",
     tag = "ports",
     operation_id = "reset_port",
