@@ -139,7 +139,8 @@ pub async fn start_admin_on(
 
     spawn_rpc_callbacks(callback, data.clone());
     load_server_state(&app_state).await?;
-    spawn_config_events(event.clone(), data);
+    spawn_config_events(event.clone(), data.clone());
+    spawn_login_attempts_pruner(data);
 
     let mut event_recv = event.subscribe();
     let config_dir = app_state.data.lock().await.app_info.config_path.clone();
@@ -1242,6 +1243,19 @@ impl Data {
             mcp: oauth2::McpAuthorizations::default(),
         })
     }
+}
+
+fn spawn_login_attempts_pruner(data: Arc<Mutex<Data>>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            let mut data = data.lock().await;
+            let reset = data.config.admin.login_attempts_reset;
+            let now = std::time::Instant::now();
+            data.login_attempts.prune_expired(reset, now);
+        }
+    });
 }
 
 #[cfg(test)]

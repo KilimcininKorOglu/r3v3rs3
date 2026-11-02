@@ -885,6 +885,17 @@ pub(crate) async fn session_caller(state: &AppState, token: &str) -> Result<Call
 
 pub type LoginAttemptKey = (IpAddr, String);
 
+pub const MAX_LOGIN_USERNAME_LEN: usize = 128;
+pub const MAX_LOGIN_ATTEMPTS_ENTRIES: usize = 10_000;
+
+pub fn bounded_key(key: &LoginAttemptKey) -> LoginAttemptKey {
+    if key.1.len() <= MAX_LOGIN_USERNAME_LEN {
+        key.clone()
+    } else {
+        (key.0, key.1[..MAX_LOGIN_USERNAME_LEN].to_string())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct LoginAttempt {
     failures: u32,
@@ -900,7 +911,7 @@ pub struct LoginAttempts {
 }
 
 impl LoginAttempts {
-    /// Attempts to acquire an in-flight login attempt slot. Returns false if blocked or max attempts reached.
+    /// Attempts to acquire an in-flight login attempt slot in O(1) time.
     pub fn acquire(
         &mut self,
         key: &LoginAttemptKey,
@@ -908,15 +919,10 @@ impl LoginAttempts {
         reset: Duration,
         now: Instant,
     ) -> bool {
-        self.entries
-            .retain(|_, attempt| attempt.is_active(reset, now));
+        let key = bounded_key(key);
         let max = max_attempts.max(1);
-        let attempt = self.entries.entry(key.clone()).or_insert(LoginAttempt {
-            failures: 0,
-            in_flight: 0,
-            window_start: now,
-            blocked_until: None,
-        });
+        let attempt = self.get_or_insert_attempt(key, reset, now);
+
         if attempt.blocked_until.is_some_and(|until| until > now) {
             return false;
         }
@@ -929,19 +935,19 @@ impl LoginAttempts {
 
     /// Releases an in-flight attempt slot without recording a failure.
     pub fn release(&mut self, key: &LoginAttemptKey) {
-        if let Some(attempt) = self.entries.get_mut(key) {
+        let key = bounded_key(key);
+        if let Some(attempt) = self.entries.get_mut(&key) {
             attempt.in_flight = attempt.in_flight.saturating_sub(1);
         }
     }
 
-    /// Returns true while the key is blocked. Expired entries are dropped.
-    pub fn is_blocked(&mut self, key: &LoginAttemptKey, reset: Duration, now: Instant) -> bool {
-        self.entries
-            .retain(|_, attempt| attempt.is_active(reset, now));
-        self.entries
-            .get(key)
-            .and_then(|attempt| attempt.blocked_until)
-            .is_some_and(|until| until > now)
+    /// Returns true while the key is blocked. O(1) lookup without scanning the whole map.
+    pub fn is_blocked(&self, key: &LoginAttemptKey, reset: Duration, now: Instant) -> bool {
+        let key = bounded_key(key);
+        self.entries.get(&key).is_some_and(|attempt| {
+            attempt.is_active(reset, now)
+                && attempt.blocked_until.is_some_and(|until| until > now)
+        })
     }
 
     pub fn record_failure(
@@ -951,12 +957,8 @@ impl LoginAttempts {
         reset: Duration,
         now: Instant,
     ) {
-        let attempt = self.entries.entry(key).or_insert(LoginAttempt {
-            failures: 0,
-            in_flight: 0,
-            window_start: now,
-            blocked_until: None,
-        });
+        let key = bounded_key(&key);
+        let attempt = self.get_or_insert_attempt(key, reset, now);
         attempt.in_flight = attempt.in_flight.saturating_sub(1);
         attempt.failures += 1;
         if attempt.failures >= max_attempts.max(1) {
@@ -965,11 +967,60 @@ impl LoginAttempts {
     }
 
     pub fn clear(&mut self, key: &LoginAttemptKey) {
-        self.entries.remove(key);
+        let key = bounded_key(key);
+        self.entries.remove(&key);
+    }
+
+    /// Prunes expired attempt entries outside the request path.
+    pub fn prune_expired(&mut self, reset: Duration, now: Instant) {
+        self.entries.retain(|_, attempt| attempt.is_active(reset, now));
+    }
+
+    fn prune_oldest(&mut self) {
+        if let Some(oldest) = self
+            .entries
+            .iter()
+            .min_by_key(|(_, attempt)| attempt.window_start)
+            .map(|(k, _)| k.clone())
+        {
+            self.entries.remove(&oldest);
+        }
+    }
+
+    fn get_or_insert_attempt(
+        &mut self,
+        key: LoginAttemptKey,
+        reset: Duration,
+        now: Instant,
+    ) -> &mut LoginAttempt {
+        if self.entries.contains_key(&key) {
+            let attempt = self.entries.get_mut(&key).unwrap();
+            if !attempt.is_active(reset, now) {
+                *attempt = LoginAttempt::new(now);
+            }
+            return self.entries.get_mut(&key).unwrap();
+        }
+
+        if self.entries.len() >= MAX_LOGIN_ATTEMPTS_ENTRIES {
+            self.prune_expired(reset, now);
+            if self.entries.len() >= MAX_LOGIN_ATTEMPTS_ENTRIES {
+                self.prune_oldest();
+            }
+        }
+        self.entries.entry(key).or_insert_with(|| LoginAttempt::new(now))
     }
 }
 
 impl LoginAttempt {
+    fn new(now: Instant) -> Self {
+        Self {
+            failures: 0,
+            in_flight: 0,
+            window_start: now,
+            blocked_until: None,
+        }
+    }
+
     fn is_active(&self, reset: Duration, now: Instant) -> bool {
         if self.in_flight > 0 {
             return true;

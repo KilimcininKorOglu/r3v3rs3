@@ -57,7 +57,7 @@ pub struct SessionService {
     storage: Arc<dyn Storage>,
     backend: Arc<dyn SessionBackend>,
     accounts: watch::Receiver<Arc<AccountDirectory>>,
-    state: Mutex<SessionState>,
+    state: Arc<Mutex<SessionState>>,
 }
 
 struct SessionState {
@@ -117,16 +117,33 @@ impl SessionService {
         accounts: watch::Receiver<Arc<AccountDirectory>>,
         config: AdminConfig,
     ) -> Self {
+        let state = Arc::new(Mutex::new(SessionState {
+            config,
+            attempts: LoginAttempts::default(),
+            ban_tracker: Default::default(),
+            rate_limits: HashMap::new(),
+        }));
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let weak_state = Arc::downgrade(&state);
+            handle.spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    interval.tick().await;
+                    let Some(state_arc) = weak_state.upgrade() else {
+                        break;
+                    };
+                    let now = Instant::now();
+                    let mut state = state_arc.lock().unwrap_or_else(PoisonError::into_inner);
+                    let reset = state.config.login_attempts_reset;
+                    state.attempts.prune_expired(reset, now);
+                }
+            });
+        }
         Self {
             storage,
             backend,
             accounts,
-            state: Mutex::new(SessionState {
-                config,
-                attempts: LoginAttempts::default(),
-                ban_tracker: Default::default(),
-                rate_limits: HashMap::new(),
-            }),
+            state,
         }
     }
 
