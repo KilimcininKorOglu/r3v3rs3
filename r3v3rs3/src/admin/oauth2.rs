@@ -931,7 +931,7 @@ pub async fn authorize(
     RawQuery(raw_query): RawQuery,
     Query(query): Query<AuthorizeQuery>,
 ) -> Result<Response, AppError> {
-    let session_cookie = jar.get("token");
+    let session_cookie = jar.get(super::auth::ADMIN_SESSION_COOKIE);
     let caller = match session_cookie {
         Some(cookie) => super::auth::session_caller(&state, cookie.value())
             .await
@@ -1335,7 +1335,7 @@ pub async fn consent(
     let public_url = get_platform_public_url(&state).await;
     super::auth::verify_origin(&headers, public_url.as_deref())?;
 
-    let session_token = jar.get("token").map(|c| c.value());
+    let session_token = jar.get(super::auth::ADMIN_SESSION_COOKIE).map(|c| c.value());
     let mut data = state.data.lock().await;
     if !data
         .mcp

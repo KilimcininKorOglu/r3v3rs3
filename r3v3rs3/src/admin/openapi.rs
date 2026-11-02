@@ -18,7 +18,7 @@ pub const DOCS_PATH: &str = "/api/docs";
 const SESSION_SCHEME: &str = "session";
 
 /// Name of the cookie that `POST /api/login` sets.
-const SESSION_COOKIE: &str = "token";
+const SESSION_COOKIE: &str = super::auth::ADMIN_SESSION_COOKIE;
 
 #[derive(OpenApi)]
 #[openapi(

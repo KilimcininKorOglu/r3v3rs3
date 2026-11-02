@@ -203,7 +203,10 @@ fn is_webui_shell(path: &str) -> bool {
 
 /// Checks the session cookie the way the admin API does.
 async fn is_signed_in(state: &AppState, jar: &CookieJar) -> bool {
-    match jar.get("token").map(|cookie| cookie.value()) {
+    match jar
+        .get(super::auth::ADMIN_SESSION_COOKIE)
+        .map(|cookie| cookie.value())
+    {
         Some(token) => super::auth::session_caller(state, token).await.is_ok(),
         None => false,
     }

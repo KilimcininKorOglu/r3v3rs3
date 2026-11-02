@@ -108,7 +108,7 @@ pub async fn verify_metrics(
         request.extensions_mut().insert(caller);
         return next.run(request).await;
     }
-    if let Some(token) = jar.get("token") {
+    if let Some(token) = jar.get(super::auth::ADMIN_SESSION_COOKIE) {
         match super::auth::session_caller(&state, token.value()).await {
             Ok(caller) => {
                 request.extensions_mut().insert(caller);

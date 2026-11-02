@@ -34,6 +34,9 @@ use std::{
 };
 use tracing::warn;
 
+/// Name of the session cookie for the admin panel and admin API.
+pub const ADMIN_SESSION_COOKIE: &str = "token";
+
 fn resolve_login_username(state: &AppState, request: &mut LoginRequest) {
     if request.username.is_empty()
         && let LoginMethod::Passkey {
@@ -51,7 +54,7 @@ async fn verify_pre_login_conditions(
     request: &LoginRequest,
     attempt_key: &LoginAttemptKey,
 ) -> Result<(), Error> {
-    let token = jar.get("token").map(|c| c.value().to_string());
+    let token = jar.get(ADMIN_SESSION_COOKIE).map(|c| c.value().to_string());
     if let LoginMethod::Totp { .. } = &request.method
         && !verify_login_session(state, &token.unwrap_or_default(), &attempt_key.1).await
     {
@@ -170,7 +173,7 @@ pub async fn login(
     // cross-site top-level navigation. State-changing requests are POST, PUT or DELETE, which
     // Lax does not send on a cross-site navigation. The path covers the whole panel, because
     // a cookie without a path would stay on /api and a page reload would sign the client out.
-    let cookie = Cookie::build(("token", token))
+    let cookie = Cookie::build((ADMIN_SESSION_COOKIE, token))
         .http_only(true)
         .same_site(SameSite::Lax)
         .path("/")
@@ -254,7 +257,7 @@ pub async fn logout(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     jar: CookieJar,
 ) -> impl IntoResponse {
-    if let Some(token) = jar.get("token") {
+    if let Some(token) = jar.get(ADMIN_SESSION_COOKIE) {
         let (backend, _) = session_backend(&state).await;
         record_logout(&state, backend.as_ref(), token.value(), peer).await;
         for scope in [SessionScope::Admin, SessionScope::Login] {
@@ -264,7 +267,7 @@ pub async fn logout(
         }
     }
     // The removal cookie carries the path of the sign-in cookie, so the browser deletes it.
-    jar.add(Cookie::build(("token", "")).path("/").build())
+    jar.add(Cookie::build((ADMIN_SESSION_COOKIE, "")).path("/").build())
 }
 
 /// Records the sign-out of the account of an admin session.
@@ -759,7 +762,7 @@ pub async fn verify(
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|val| val.to_str().ok())
         .and_then(|val| val.strip_prefix("Bearer "));
-    let cookie = jar.get("token").map(|c| c.value());
+    let cookie = jar.get(ADMIN_SESSION_COOKIE).map(|c| c.value());
     match resolve_caller(&state, bearer, cookie).await {
         Ok((mut caller, session_token)) => {
             if session_token.is_some() && bearer.is_none() && is_state_changing(request.method()) {
@@ -1101,7 +1104,10 @@ mod tests {
     fn verify_origin_enforces_port_and_sec_fetch_site() {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(axum::http::header::HOST, "localhost:46492".parse().unwrap());
-        headers.insert(axum::http::header::COOKIE, "token=xyz".parse().unwrap());
+        headers.insert(
+            axum::http::header::COOKIE,
+            format!("{ADMIN_SESSION_COOKIE}=xyz").parse().unwrap(),
+        );
 
         // Cross-origin with different port -> rejected
         headers.insert(axum::http::header::ORIGIN, "http://localhost:3000".parse().unwrap());
