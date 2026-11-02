@@ -282,13 +282,21 @@ impl SessionService {
         }
     }
 
-    /// Verifies the credential on a blocking thread, because the password hash check takes CPU
-    /// time.
+    /// Verifies the credential on a blocking thread, bounded by PASSWORD_HASH_SEMAPHORE.
     async fn verify_account(
         &self,
         username: &str,
         method: LoginMethod,
     ) -> Result<LoginResponse, Error> {
+        let _permit = match tokio::time::timeout(
+            super::HASH_PERMIT_TIMEOUT,
+            super::PASSWORD_HASH_SEMAPHORE.acquire(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            _ => return Err(Error::TooManyLoginAttempts),
+        };
         let storage = self.storage.clone();
         let request = LoginRequest {
             username: username.to_string(),

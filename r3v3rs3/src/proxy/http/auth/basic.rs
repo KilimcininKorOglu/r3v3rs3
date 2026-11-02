@@ -3,13 +3,16 @@ use argon2::{Argon2, PasswordHasher, PasswordVerifier, password_hash::phc::Passw
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hyper::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use once_cell::sync::Lazy;
+use r3v3rs3_api::client_ip::canonical_client_ip;
 use r3v3rs3_api::policy::BasicAuth;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    net::IpAddr,
     path::{Path, PathBuf},
     sync::{Mutex, PoisonError},
+    time::{Duration, Instant},
 };
 use subtle::ConstantTimeEq;
 use tracing::error;
@@ -18,6 +21,8 @@ const DEFAULT_REALM: &str = "r3v3rs3";
 
 /// Maximum number of verified credentials kept in memory for each authenticator.
 const MAX_VERIFIED_CREDENTIALS: usize = 1024;
+const MAX_BASIC_ATTEMPTS: u32 = 10;
+const BASIC_ATTEMPTS_RESET: Duration = Duration::from_secs(60);
 
 /// Hash that the password of an unknown user is verified against, so the response time does not
 /// reveal which usernames exist.
@@ -36,6 +41,13 @@ enum StoredPassword {
     Plain(String),
 }
 
+#[derive(Clone, Debug)]
+struct ClientAttempts {
+    failures: u32,
+    window_start: Instant,
+    blocked_until: Option<Instant>,
+}
+
 #[derive(Default)]
 struct FileUsers {
     last_modified: Option<std::time::SystemTime>,
@@ -51,6 +63,7 @@ pub struct BasicAuthenticator {
     challenge: HeaderValue,
     /// SHA-256 digests of credentials that passed verification.
     verified: Mutex<HashSet<[u8; 32]>>,
+    attempts: Mutex<HashMap<IpAddr, ClientAttempts>>,
 }
 
 impl fmt::Debug for BasicAuthenticator {
@@ -120,17 +133,70 @@ impl BasicAuthenticator {
             file_users,
             challenge: challenge(&config.realm),
             verified: Mutex::new(HashSet::new()),
+            attempts: Mutex::new(HashMap::new()),
         }
     }
 
-    pub async fn authorize(&self, headers: &mut HeaderMap) -> Result<(), ProxyError> {
+    fn check_blocked(&self, client_ip: &IpAddr, now: Instant) -> Result<(), ProxyError> {
+        let mut attempts = self.attempts.lock().unwrap_or_else(PoisonError::into_inner);
+        attempts.retain(|_, a| {
+            a.blocked_until.map_or_else(
+                || now.duration_since(a.window_start) < BASIC_ATTEMPTS_RESET,
+                |until| until > now,
+            )
+        });
+        if let Some(attempt) = attempts.get(client_ip) {
+            if let Some(blocked_until) = attempt.blocked_until {
+                if blocked_until > now {
+                    let retry_after = blocked_until.duration_since(now);
+                    return Err(ProxyError::TooManyRequests { retry_after });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn record_failure(&self, client_ip: IpAddr, now: Instant) {
+        let mut attempts = self.attempts.lock().unwrap_or_else(PoisonError::into_inner);
+        let attempt = attempts.entry(client_ip).or_insert(ClientAttempts {
+            failures: 0,
+            window_start: now,
+            blocked_until: None,
+        });
+        if now.duration_since(attempt.window_start) >= BASIC_ATTEMPTS_RESET {
+            attempt.failures = 1;
+            attempt.window_start = now;
+            attempt.blocked_until = None;
+        } else {
+            attempt.failures = attempt.failures.saturating_add(1);
+            if attempt.failures >= MAX_BASIC_ATTEMPTS {
+                attempt.blocked_until = Some(now + BASIC_ATTEMPTS_RESET);
+            }
+        }
+    }
+
+    fn record_success(&self, client_ip: &IpAddr) {
+        let mut attempts = self.attempts.lock().unwrap_or_else(PoisonError::into_inner);
+        attempts.remove(client_ip);
+    }
+
+    pub async fn authorize(
+        &self,
+        headers: &mut HeaderMap,
+        client_ip: IpAddr,
+    ) -> Result<(), ProxyError> {
+        let client_ip = canonical_client_ip(client_ip);
+        let now = Instant::now();
+        self.check_blocked(&client_ip, now)?;
         let Some((username, password)) = headers.get(AUTHORIZATION).and_then(parse_credentials)
         else {
             return Err(self.unauthorized());
         };
-        if !self.verify(&username, password).await {
+        if !self.verify(&username, password).await? {
+            self.record_failure(client_ip, now);
             return Err(self.unauthorized());
         }
+        self.record_success(&client_ip);
         headers.remove(AUTHORIZATION);
         Ok(())
     }
@@ -175,29 +241,33 @@ impl BasicAuthenticator {
         }
     }
 
-    async fn verify(&self, username: &str, password: String) -> bool {
+    async fn verify(&self, username: &str, password: String) -> Result<bool, ProxyError> {
         let Some(stored) = self.get_user(username) else {
             if let Some(hash) = UNKNOWN_USER_HASH.as_ref() {
-                verify_password(hash.clone(), password).await;
+                verify_password(hash.clone(), password).await?;
             }
-            return false;
+            return Ok(false);
         };
         let digest = credential_digest(&stored, &password);
         if self.lock_verified().contains(&digest) {
-            return true;
+            return Ok(true);
         }
         let valid = match stored {
-            StoredPassword::Argon2(hash) => verify_password(hash, password).await,
+            StoredPassword::Argon2(hash) => verify_password(hash, password).await?,
             StoredPassword::Plain(plain) => bool::from(plain.as_bytes().ct_eq(password.as_bytes())),
         };
         if valid {
-            let mut verified = self.lock_verified();
-            if verified.len() >= MAX_VERIFIED_CREDENTIALS {
-                verified.clear();
-            }
-            verified.insert(digest);
+            self.store_verified(digest);
         }
-        valid
+        Ok(valid)
+    }
+
+    fn store_verified(&self, digest: [u8; 32]) {
+        let mut verified = self.lock_verified();
+        if verified.len() >= MAX_VERIFIED_CREDENTIALS {
+            verified.clear();
+        }
+        verified.insert(digest);
     }
 
     fn lock_verified(&self) -> std::sync::MutexGuard<'_, HashSet<[u8; 32]>> {
@@ -258,9 +328,18 @@ fn credential_digest(secret: &StoredPassword, password: &str) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// Verifies the password on a blocking thread, because argon2 takes CPU time.
-async fn verify_password(hash: String, password: String) -> bool {
-    tokio::task::spawn_blocking(move || {
+/// Verifies the password on a blocking thread, bounded by PASSWORD_HASH_SEMAPHORE.
+async fn verify_password(hash: String, password: String) -> Result<bool, ProxyError> {
+    let _permit = match tokio::time::timeout(
+        super::HASH_PERMIT_TIMEOUT,
+        super::PASSWORD_HASH_SEMAPHORE.acquire(),
+    )
+    .await
+    {
+        Ok(Ok(permit)) => permit,
+        _ => return Err(ProxyError::TooManyConcurrentRequests),
+    };
+    let ok = tokio::task::spawn_blocking(move || {
         Argon2::default()
             .verify_password(password.as_bytes(), hash.as_str())
             .is_ok()
@@ -269,7 +348,8 @@ async fn verify_password(hash: String, password: String) -> bool {
     .unwrap_or_else(|err| {
         error!(%err, "password verification task failed");
         false
-    })
+    });
+    Ok(ok)
 }
 
 #[cfg(test)]
@@ -336,24 +416,25 @@ mod tests {
     #[tokio::test]
     async fn authorize_checks_the_password_and_removes_the_header() {
         let auth = authenticator("Staff");
+        let client_ip = IpAddr::from([127, 0, 0, 1]);
         assert!(auth.users.contains_key("alice"));
         assert!(!auth.users.contains_key("broken"));
 
         let mut headers = basic("alice:s3cr:et");
-        assert!(auth.authorize(&mut headers).await.is_ok());
+        assert!(auth.authorize(&mut headers, client_ip).await.is_ok());
         assert!(headers.get(AUTHORIZATION).is_none());
         assert_eq!(auth.lock_verified().len(), 1);
 
         let mut headers = basic("alice:s3cr:et");
-        assert!(auth.authorize(&mut headers).await.is_ok());
+        assert!(auth.authorize(&mut headers, client_ip).await.is_ok());
 
         for credentials in ["alice:wrong", "bob:s3cr:et", "broken:"] {
             let mut headers = basic(credentials);
-            let err = auth.authorize(&mut headers).await.unwrap_err();
+            let err = auth.authorize(&mut headers, client_ip).await.unwrap_err();
             assert!(matches!(err, ProxyError::Unauthorized { .. }));
             assert!(headers.get(AUTHORIZATION).is_some());
         }
-        let err = auth.authorize(&mut HeaderMap::new()).await.unwrap_err();
+        let err = auth.authorize(&mut HeaderMap::new(), client_ip).await.unwrap_err();
         let ProxyError::Unauthorized { challenge } = err else {
             panic!("expected unauthorized");
         };
@@ -381,16 +462,31 @@ mod tests {
             users: vec![],
             user_file: Some(file_path.to_str().unwrap().to_string()),
         });
+        let client_ip = IpAddr::from([127, 0, 0, 1]);
 
         let mut headers = basic("plainuser:plainpass");
-        assert!(auth.authorize(&mut headers).await.is_ok());
+        assert!(auth.authorize(&mut headers, client_ip).await.is_ok());
 
         let mut headers = basic("hashuser:argonpass");
-        assert!(auth.authorize(&mut headers).await.is_ok());
+        assert!(auth.authorize(&mut headers, client_ip).await.is_ok());
 
         let mut headers = basic("plainuser:wrong");
-        assert!(auth.authorize(&mut headers).await.is_err());
+        assert!(auth.authorize(&mut headers, client_ip).await.is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn rate_limiting_failed_basic_attempts_blocks_client() {
+        let auth = authenticator("Staff");
+        let client_ip = IpAddr::from([192, 168, 1, 100]);
+        for _ in 0..10 {
+            let mut headers = basic("alice:wrong");
+            let err = auth.authorize(&mut headers, client_ip).await.unwrap_err();
+            assert!(matches!(err, ProxyError::Unauthorized { .. }));
+        }
+        let mut headers = basic("alice:s3cr:et");
+        let err = auth.authorize(&mut headers, client_ip).await.unwrap_err();
+        assert!(matches!(err, ProxyError::TooManyRequests { .. }));
     }
 }

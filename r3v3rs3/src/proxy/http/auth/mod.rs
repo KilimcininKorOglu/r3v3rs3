@@ -3,8 +3,10 @@ use super::page::PagePreferences;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{HeaderMap, Request, Response, body::Body};
+use once_cell::sync::Lazy;
 use r3v3rs3_api::{id::ShortId, policy::AuthPolicy, vhost::VirtualHost};
-use std::{error::Error, fmt, net::IpAddr, ops::ControlFlow, sync::Arc};
+use std::{error::Error, fmt, net::IpAddr, ops::ControlFlow, sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
 use tokio_rustls::rustls::ClientConfig;
 
 mod basic;
@@ -12,6 +14,15 @@ mod bearer;
 pub(crate) mod forward;
 mod oidc;
 mod session;
+
+pub(crate) static PASSWORD_HASH_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    Semaphore::new(cpus.clamp(2, 4))
+});
+
+pub(crate) const HASH_PERMIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 use basic::BasicAuthenticator;
 use bearer::BearerAuthenticator;
@@ -130,7 +141,7 @@ impl Authenticator {
         ctx: &AuthContext<'_>,
     ) -> Result<(), AuthRejection> {
         match self {
-            Self::Basic(basic) => Ok(basic.authorize(req.headers_mut()).await?),
+            Self::Basic(basic) => Ok(basic.authorize(req.headers_mut(), ctx.client).await?),
             Self::Bearer(bearer) => Ok(bearer.authorize(req.headers_mut())?),
             Self::Forward(forward) => forward.authorize(req, ctx).await,
             Self::Session(session) => session.authorize(req, ctx).await,
