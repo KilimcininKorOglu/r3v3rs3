@@ -303,6 +303,13 @@ struct ConsentCsrf {
     expires_at: u64,
 }
 
+/// The outcome of attempting to rotate an OAuth 2.1 refresh token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshError {
+    Invalid,
+    Reused,
+}
+
 /// The codes and tokens of the signed-in MCP clients, in memory and backed by SQLite.
 #[derive(Default)]
 pub struct McpAuthorizations {
@@ -311,6 +318,7 @@ pub struct McpAuthorizations {
     tokens: HashMap<String, AccessToken>,
     refresh: HashMap<String, String>,
     by_id: HashMap<String, String>,
+    rotated_refresh: HashMap<String, (String, u64)>,
     /// The clients that registered themselves through RFC 7591.
     clients: HashMap<String, DynamicClientEntry>,
     csrf_tokens: HashMap<String, ConsentCsrf>,
@@ -343,6 +351,7 @@ impl McpAuthorizations {
             tokens,
             refresh,
             by_id,
+            rotated_refresh: HashMap::new(),
             clients,
             csrf_tokens: HashMap::new(),
             client_seq,
@@ -553,17 +562,31 @@ impl McpAuthorizations {
 
     /// Issues a fresh pair of tokens for the account and persists them.
     async fn issue_tokens(&mut self, client_id: &str, scope: &str, username: &str) -> IssuedTokens {
+        self.issue_tokens_with_session(None, client_id, scope, username)
+            .await
+    }
+
+    async fn issue_tokens_with_session(
+        &mut self,
+        session_id: Option<&str>,
+        client_id: &str,
+        scope: &str,
+        username: &str,
+    ) -> IssuedTokens {
         let access_token = new_token();
         let refresh_token = new_token();
         let access_hash = hash_token(&access_token);
         let refresh_hash = hash_token(&refresh_token);
         let now = unix_now();
-        let session_id = format!(
-            "mcp-{}",
-            &hex::encode(Sha256::digest(access_token.as_bytes()))[..16]
-        );
+        let id = match session_id {
+            Some(sid) => sid.to_string(),
+            None => format!(
+                "mcp-{}",
+                &hex::encode(Sha256::digest(access_token.as_bytes()))[..16]
+            ),
+        };
         let grant = AccessToken {
-            id: session_id.clone(),
+            id: id.clone(),
             expires_at: now + ACCESS_TOKEN_LIFETIME.as_secs(),
             refresh_expires_at: now + REFRESH_TOKEN_LIFETIME.as_secs(),
             client_id: client_id.to_string(),
@@ -580,7 +603,7 @@ impl McpAuthorizations {
         self.tokens.insert(access_hash.clone(), grant);
         self.refresh
             .insert(refresh_hash, access_hash.clone());
-        self.by_id.insert(session_id, access_hash);
+        self.by_id.insert(id, access_hash);
         IssuedTokens {
             access_token,
             token_type: "Bearer",
@@ -590,25 +613,52 @@ impl McpAuthorizations {
         }
     }
 
+    async fn check_token_reuse(&mut self, ref_hash: &str, now: u64) -> Result<(), RefreshError> {
+        if let Some((session_id, exp)) = self.rotated_refresh.get(ref_hash)
+            && *exp > now
+        {
+            tracing::warn!(
+                session_id = %session_id,
+                "refresh token reuse detected; revoking compromised token family"
+            );
+            let sid = session_id.clone();
+            self.revoke_session(&sid).await;
+            return Err(RefreshError::Reused);
+        }
+        Ok(())
+    }
+
     /// Rotates the tokens of a refresh token: both tokens get fresh values.
-    async fn refresh_tokens(&mut self, refresh_token: &str) -> Option<IssuedTokens> {
+    /// Revokes the entire token family if an already-rotated token is reused.
+    async fn refresh_tokens(&mut self, refresh_token: &str) -> Result<IssuedTokens, RefreshError> {
         let ref_hash = hash_token(refresh_token);
-        let access = self.refresh.remove(&ref_hash)?;
-        let grant = self.tokens.remove(&access)?;
+        let now = unix_now();
+        self.check_token_reuse(&ref_hash, now).await?;
+        let access = self.refresh.remove(&ref_hash).ok_or(RefreshError::Invalid)?;
+        let grant = self.tokens.remove(&access).ok_or(RefreshError::Invalid)?;
         self.by_id.remove(&grant.id);
         if let Some(pool) = &self.pool
             && let Err(err) = db_delete_token(pool, &ref_hash).await
         {
             tracing::warn!(err = %err, "failed to delete rotated MCP refresh token");
         }
-        if grant.refresh_expires_at <= unix_now() {
-            self.refresh.remove(&grant.refresh_token);
-            return None;
+        if grant.refresh_expires_at <= now {
+            return Err(RefreshError::Invalid);
         }
-        Some(
-            self.issue_tokens(&grant.client_id, &grant.scope, &grant.username)
-                .await,
-        )
+        let session_id = grant.id.clone();
+        self.rotated_refresh
+            .insert(ref_hash, (session_id.clone(), grant.refresh_expires_at));
+        if self.rotated_refresh.len() > 1000 {
+            self.rotated_refresh.retain(|_, (_, exp)| *exp > now);
+        }
+        Ok(self
+            .issue_tokens_with_session(
+                Some(&session_id),
+                &grant.client_id,
+                &grant.scope,
+                &grant.username,
+            )
+            .await)
     }
 
     /// Validates an access token and returns the client that it belongs to.
@@ -660,6 +710,7 @@ impl McpAuthorizations {
     fn cleanup(&mut self) {
         let now = unix_now();
         self.csrf_tokens.retain(|_, csrf| csrf.expires_at > now);
+        self.rotated_refresh.retain(|_, (_, exp)| *exp > now);
         let unauth_cutoff = now.saturating_sub(UNAUTH_CLIENT_TTL.as_secs());
         let dynamic_cutoff = now.saturating_sub(DYNAMIC_CLIENT_TTL.as_secs());
         let active = self.active_clients(now);
@@ -1646,8 +1697,16 @@ pub async fn token(
             };
             let mut data = state.data.lock().await;
             match data.mcp.refresh_tokens(refresh_token).await {
-                Some(issued) => Json(issued).into_response(),
-                None => {
+                Ok(issued) => Json(issued).into_response(),
+                Err(RefreshError::Reused) => {
+                    drop(data);
+                    record_token_failure(&state, ip).await;
+                    oauth_error(
+                        "invalid_grant",
+                        "token reuse detected: the token family has been revoked",
+                    )
+                }
+                Err(RefreshError::Invalid) => {
                     drop(data);
                     record_token_failure(&state, ip).await;
                     oauth_error("invalid_grant", "the refresh token is unknown or expired")
@@ -1998,5 +2057,51 @@ mod tests {
         assert!(auth.dynamic_client(&extra_id).is_some());
         assert!(auth.dynamic_client(&c0_id).is_some());
         assert!(auth.dynamic_client(&c1_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn refresh_token_reuse_detection_revokes_token_family() -> anyhow::Result<()> {
+        let dir = TempDir(std::env::temp_dir().join(format!("mcp-reuse-{}", rand::random::<u64>())));
+        std::fs::create_dir_all(&dir.0)?;
+        let db_path = dir.0.join("tokens.db");
+        let mut auth = McpAuthorizations::open(&db_path).await?;
+
+        // 1. Issue initial grant (A1, R1)
+        let t1 = auth.issue_tokens("client-1", "read", "alice").await;
+        assert!(auth.verify(&t1.access_token).is_some());
+
+        // 2. Rotate R1 -> (A2, R2)
+        let t2 = auth
+            .refresh_tokens(&t1.refresh_token)
+            .await
+            .expect("rotation succeeds");
+        assert_ne!(t1.access_token, t2.access_token);
+        assert_ne!(t1.refresh_token, t2.refresh_token);
+        assert!(auth.verify(&t2.access_token).is_some());
+        assert!(auth.verify(&t1.access_token).is_none());
+
+        // 3. Attacker attempts to reuse rotated R1
+        let reuse_err = auth
+            .refresh_tokens(&t1.refresh_token)
+            .await
+            .unwrap_err();
+        assert_eq!(reuse_err, RefreshError::Reused);
+
+        // 4. Verify the active token family (A2, R2) was completely revoked
+        assert!(auth.verify(&t2.access_token).is_none());
+        let r2_err = auth
+            .refresh_tokens(&t2.refresh_token)
+            .await
+            .unwrap_err();
+        assert_eq!(r2_err, RefreshError::Invalid);
+
+        // 5. Verify database records for this session were purged
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_path.display())).await?;
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM mcp_tokens")
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(count.0, 0);
+
+        Ok(())
     }
 }
