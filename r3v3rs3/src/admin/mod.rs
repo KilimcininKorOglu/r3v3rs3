@@ -1208,6 +1208,7 @@ pub struct Data {
     /// The server replaces these sessions with its own sessions at the start of the admin API.
     pub sessions: Arc<dyn SessionBackend>,
     pub login_attempts: LoginAttempts,
+    pub totp_attempts: auth::TotpAttempts,
     pub passkey_challenges: auth::PasskeyChallenges,
     pub ban_tracker: ban::IpBanTracker,
     pub log: Arc<LogReader>,
@@ -1230,6 +1231,7 @@ impl Data {
             config: AppConfig::default(),
             sessions: Arc::new(LocalSessions::default()),
             login_attempts: Default::default(),
+            totp_attempts: Default::default(),
             passkey_challenges: Default::default(),
             ban_tracker: Default::default(),
             log: Arc::new(LogReader::new(&log).await?),

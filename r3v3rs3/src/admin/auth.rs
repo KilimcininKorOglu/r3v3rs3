@@ -48,17 +48,34 @@ fn resolve_login_username(state: &AppState, request: &mut LoginRequest) {
     }
 }
 
+async fn verify_totp_preconditions(
+    state: &AppState,
+    token: Option<&str>,
+    username: &str,
+) -> Result<(), Error> {
+    let Some(token) = token else {
+        return Err(Error::InvalidLoginCredentials);
+    };
+    if !verify_login_session(state, token, username).await {
+        return Err(Error::InvalidLoginCredentials);
+    }
+    let mut data = state.data.lock().await;
+    let reset = data.config.admin.login_attempts_reset;
+    if data.totp_attempts.is_account_blocked(username, reset, Instant::now()) {
+        return Err(Error::TooManyLoginAttempts);
+    }
+    Ok(())
+}
+
 async fn verify_pre_login_conditions(
     state: &AppState,
     jar: &CookieJar,
     request: &LoginRequest,
     attempt_key: &LoginAttemptKey,
 ) -> Result<(), Error> {
-    let token = jar.get(ADMIN_SESSION_COOKIE).map(|c| c.value().to_string());
-    if let LoginMethod::Totp { .. } = &request.method
-        && !verify_login_session(state, &token.unwrap_or_default(), &attempt_key.1).await
-    {
-        return Err(Error::InvalidLoginCredentials);
+    let token = jar.get(ADMIN_SESSION_COOKIE).map(|c| c.value());
+    if let LoginMethod::Totp { .. } = &request.method {
+        verify_totp_preconditions(state, token, &attempt_key.1).await?;
     }
     if let LoginMethod::Passkey {
         ref client_data_json,
@@ -69,6 +86,30 @@ async fn verify_pre_login_conditions(
         return Err(Error::InvalidLoginCredentials);
     }
     Ok(())
+}
+
+async fn cleanup_login_session(state: &AppState, token: &str, username: &str) {
+    let backend = {
+        let mut data = state.data.lock().await;
+        data.totp_attempts.clear(token, username);
+        data.sessions.clone()
+    };
+    let _ = backend.remove(SessionScope::Login, token).await;
+}
+
+async fn record_totp_failure(state: &AppState, token: &str, username: &str) {
+    let (exhausted, backend) = {
+        let mut data = state.data.lock().await;
+        let max = data.config.admin.max_login_attempts;
+        let reset = data.config.admin.login_attempts_reset;
+        let exhausted =
+            data.totp_attempts
+                .record_failure(token, username, max, reset, Instant::now());
+        (exhausted, data.sessions.clone())
+    };
+    if exhausted {
+        let _ = backend.remove(SessionScope::Login, token).await;
+    }
 }
 
 async fn record_successful_login(
@@ -139,6 +180,9 @@ pub async fn login(
     let attempt_key = (canonical_client_ip(client_ip), username.clone());
     ensure_login_allowed(&state, &attempt_key).await?;
 
+    let is_totp = matches!(request.method, LoginMethod::Totp { .. });
+    let login_cookie_token = jar.get(ADMIN_SESSION_COOKIE).map(|c| c.value().to_string());
+
     if let Err(err) = verify_pre_login_conditions(&state, &jar, &request, &attempt_key).await {
         record_login_failure(&state, attempt_key).await;
         return Err(err.into());
@@ -148,6 +192,9 @@ pub async fn login(
     let result = match state.call_system(VerifyAccount { request }).await {
         Ok(result) => result,
         Err(err) => {
+            if is_totp && let Some(token) = &login_cookie_token {
+                record_totp_failure(&state, token, &username).await;
+            }
             record_login_failure(&state, attempt_key).await;
             return Err(err.into());
         }
@@ -155,6 +202,9 @@ pub async fn login(
 
     let scope = match *result {
         LoginResponse::Success => {
+            if let Some(token) = &login_cookie_token {
+                cleanup_login_session(&state, token, &username).await;
+            }
             record_successful_login(&state, &username, &client_ip, &attempt_key).await;
             SessionScope::Admin
         }
@@ -931,6 +981,59 @@ impl LoginAttempt {
     }
 }
 
+pub const MAX_SESSION_TOTP_ATTEMPTS: u32 = 3;
+
+#[derive(Default)]
+pub struct TotpAttempts {
+    sessions: HashMap<String, u32>,
+    accounts: HashMap<String, LoginAttempt>,
+}
+
+impl TotpAttempts {
+    pub fn record_failure(
+        &mut self,
+        session_token: &str,
+        username: &str,
+        max_account_attempts: u32,
+        reset: Duration,
+        now: Instant,
+    ) -> bool {
+        let session_fails = self.sessions.entry(session_token.to_string()).or_insert(0);
+        *session_fails += 1;
+        let session_exhausted = *session_fails >= MAX_SESSION_TOTP_ATTEMPTS;
+        if session_exhausted {
+            self.sessions.remove(session_token);
+        }
+
+        let max = max_account_attempts.max(1);
+        let attempt = self.accounts.entry(username.to_string()).or_insert(LoginAttempt {
+            failures: 0,
+            in_flight: 0,
+            window_start: now,
+            blocked_until: None,
+        });
+        attempt.failures += 1;
+        if attempt.failures >= max {
+            attempt.blocked_until = Some(now + reset);
+        }
+
+        session_exhausted
+    }
+
+    pub fn is_account_blocked(&mut self, username: &str, reset: Duration, now: Instant) -> bool {
+        self.accounts.retain(|_, attempt| attempt.is_active(reset, now));
+        self.accounts
+            .get(username)
+            .and_then(|attempt| attempt.blocked_until)
+            .is_some_and(|until| until > now)
+    }
+
+    pub fn clear(&mut self, session_token: &str, username: &str) {
+        self.sessions.remove(session_token);
+        self.accounts.remove(username);
+    }
+}
+
 /// Maximum number of active WebAuthn challenges held in memory.
 const MAX_PASSKEY_CHALLENGES: usize = 1024;
 
@@ -1124,5 +1227,31 @@ mod tests {
         // Sec-fetch-site same-origin -> allowed
         headers.insert("sec-fetch-site", "same-origin".parse().unwrap());
         assert!(verify_origin(&headers, None).is_ok());
+    }
+
+    #[test]
+    fn totp_attempts_limit_and_account_blocking() {
+        let mut totp = TotpAttempts::default();
+        let reset = Duration::from_secs(60);
+        let now = Instant::now();
+
+        // 1st and 2nd failed attempt on session_1 do not exhaust it
+        assert!(!totp.record_failure("token_1", "admin", 5, reset, now));
+        assert!(!totp.record_failure("token_1", "admin", 5, reset, now));
+        assert!(!totp.is_account_blocked("admin", reset, now));
+
+        // 3rd failed attempt on session_1 exhausts the session
+        assert!(totp.record_failure("token_1", "admin", 5, reset, now));
+
+        // Another session for the same user fails 2 more times (total 5 for user)
+        assert!(!totp.record_failure("token_2", "admin", 5, reset, now));
+        assert!(!totp.record_failure("token_2", "admin", 5, reset, now));
+
+        // Now user is blocked across all sessions and source IPs
+        assert!(totp.is_account_blocked("admin", reset, now));
+
+        // Clear resets both
+        totp.clear("token_2", "admin");
+        assert!(!totp.is_account_blocked("admin", reset, now));
     }
 }
