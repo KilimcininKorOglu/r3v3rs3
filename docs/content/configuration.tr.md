@@ -1337,7 +1337,7 @@ r3v3rs3 şu olaylar için bildirim webhook'una bir JSON `POST` isteği gönderir
 - Token varsa istek `Authorization: Bearer <token>` header'ını taşır. Admin API token'ı döndürmez.
 - 2xx durum kodu başarı sayılır. r3v3rs3 başarısız isteği en fazla üç kez gönderir: 1 saniye sonra bir kez daha, 2 saniye sonra bir kez daha. "Webhook Timeout" (varsayılan `10s`) her denemeyi sınırlar.
 - r3v3rs3 sertifikaları her "Arka Plan Görevi Aralığı" süresinde kontrol eder. Bir sertifikanın her olayı bir kez gönderilir. Yenilenen sertifikanın fingerprint'i değişir. Bu yüzden onun olayları yeniden gönderilir. r3v3rs3 gönderilen olayları yapılandırma dizinindeki `notifications.json` dosyasında tutar.
-- r3v3rs3 bildirimleri arka planda gönderir. Kuyruk en fazla 64 bildirim tutar. Kuyruk doluysa r3v3rs3 bildirimi göndermez ve bir hata log'u yazar.
+- r3v3rs3 bildirimleri 16 eşzamanlı worker ile arka planda gönderir; böylece yavaş webhook endpoint'lerinin diğer uyarıları kuyrukta tıkaması (head-of-line blocking) engellenir. Kuyruk en fazla 1024 bildirim tutar. Kuyruk dolarsa kritik alarmlar (sertifika süresi bitimleri, ACME hataları ve deployment arızaları) doğrudan arka plan görevine devredilerek sessizce düşürülmeden iletilir.
 - Webhook URL'i HTTPS kullanmalıdır. HTTP yalnız loopback adresinde kullanılabilir.
 
 Webhook'u "Ayarlar" sayfasının "Bildirimler" bölümünde ayarlayın. "Test Bildirimi Gönder" butonu kayıtlı ayarlardaki webhook'a bir `test` olayı gönderir. `POST /api/config/notifications/test` aynı işi yapar. Bu endpoint'i yalnız admin hesabı çağırabilir. Webhook ayarlı değilse yanıt `400 notification_webhook_missing` olur. Webhook isteği başarısız olursa yanıt `502 notification_failed` olur.

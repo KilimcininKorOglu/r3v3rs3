@@ -1337,7 +1337,7 @@ r3v3rs3 sends a JSON `POST` request to the notification webhook for these events
 - With a token, the request has the header `Authorization: Bearer <token>`. The admin API does not return the token.
 - A 2xx status is a success. r3v3rs3 sends a failed request at most three times: again after 1 second, and again 2 seconds later. "Webhook Timeout" (default `10s`) limits each try.
 - r3v3rs3 checks the certificates at each "Background Task Interval". Each event of a certificate is sent once. A renewed certificate has a new fingerprint, so its events are sent again. r3v3rs3 keeps the sent events in `notifications.json` in the configuration directory.
-- r3v3rs3 sends the notifications in the background. The queue holds at most 64 notifications. When the queue is full, r3v3rs3 drops the notification and logs an error.
+- r3v3rs3 sends notifications in the background concurrently across up to 16 workers, preventing slow endpoints from causing head-of-line blocking. The queue holds at most 1024 notifications. If the queue ever fills up, critical alerts (such as certificate expirations, ACME failures, and deployment failures) fall back to direct background dispatch so they are never silently dropped.
 - The webhook URL must use HTTPS. HTTP is allowed only for a loopback address.
 
 Set the webhook in the "Notifications" section of the "Settings" page. "Send Test Notification" sends a `test` event to the webhook of the saved settings. `POST /api/config/notifications/test` does the same, and only an admin account can call it. The response is `400 notification_webhook_missing` without a webhook, and `502 notification_failed` when the webhook request fails.

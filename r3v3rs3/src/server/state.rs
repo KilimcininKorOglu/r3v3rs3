@@ -37,7 +37,7 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyKind};
 use rand::seq::IndexedRandom;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -52,6 +52,9 @@ use tokio::{
 use tokio_rustls::rustls::ServerConfig;
 use tracing::{Instrument, Level, error, info, span, warn};
 use x509_parser::time::ASN1Time;
+
+/// Wait time before re-attempting a failed certificate notification.
+const FAILED_NOTIFICATION_COOLDOWN: Duration = Duration::from_secs(60);
 
 pub struct ServerState {
     pub proxies: ProxyList,
@@ -92,6 +95,8 @@ pub struct ServerState {
     notifier: Notifier,
     /// The keys of the certificate events that the webhook got.
     sent_notifications: HashSet<String>,
+    /// The in-flight or cooling-down certificate notifications and when they were dispatched.
+    notification_attempts: HashMap<String, Instant>,
     platform: PlatformHandle,
     /// The directory that holds the config files, the platform database and its key.
     config_dir: PathBuf,
@@ -355,6 +360,7 @@ impl ServerState {
             audit_cleaned_day: 0,
             notifier: Notifier::spawn(),
             sent_notifications,
+            notification_attempts: HashMap::new(),
             platform,
             config_dir: config_dir.to_path_buf(),
             worker_status: None,
@@ -546,6 +552,7 @@ impl ServerState {
     }
 
     async fn record_certificate_notification_sent(&mut self, key: String) {
+        self.notification_attempts.remove(&key);
         if self.sent_notifications.insert(key) {
             log_save_error(
                 self.storage
@@ -641,7 +648,17 @@ impl ServerState {
             log_save_error(self.storage.save_sent_notifications(&pruned).await);
             self.sent_notifications = pruned;
         }
+        self.notification_attempts.retain(|k, sent_at| {
+            current_keys.contains(k) && sent_at.elapsed() < FAILED_NOTIFICATION_COOLDOWN
+        });
         for (notification, key) in notifications {
+            if let Some(sent_at) = self.notification_attempts.get(&key) {
+                if sent_at.elapsed() < FAILED_NOTIFICATION_COOLDOWN {
+                    continue;
+                }
+            }
+            self.notification_attempts
+                .insert(key.clone(), Instant::now());
             let command = self.command_sender.clone();
             self.notifier
                 .send_with_success(&webhook, notification, move || {

@@ -13,16 +13,19 @@ use r3v3rs3_api::cert::{CertInfo, ExpiryState, expiry_state};
 use r3v3rs3_api::id::ShortId;
 use serde::Serialize;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 use tracing::{error, warn};
 
 /// The attempts of one notification.
 const ATTEMPTS: u32 = 3;
 /// The wait before the second attempt. Each later attempt waits one more step.
 const RETRY_DELAY: Duration = Duration::from_secs(1);
-/// The notifications that wait for delivery. A full queue drops a new notification.
-const QUEUE_SIZE: usize = 64;
+/// The notifications that wait for delivery.
+const QUEUE_SIZE: usize = 1024;
+/// The maximum concurrent notification deliveries across all destinations.
+const MAX_CONCURRENT_DELIVERIES: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,6 +43,16 @@ pub enum NotificationEvent {
 }
 
 impl NotificationEvent {
+    pub fn is_critical(&self) -> bool {
+        matches!(
+            self,
+            Self::CertificateExpiring
+                | Self::CertificateExpired
+                | Self::AcmeOrderFailed
+                | Self::DeploymentFailed
+        )
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             Self::CertificateExpiring => "certificate_expiring",
@@ -265,24 +278,59 @@ pub struct Notifier {
 impl Notifier {
     pub fn spawn() -> Self {
         let (sender, mut receiver) = mpsc::channel::<NotificationTask>(QUEUE_SIZE);
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DELIVERIES));
         tokio::spawn(async move {
             while let Some(task) = receiver.recv().await {
-                deliver_with_retry(&task.webhook, &task.notification, task.on_success).await;
+                let sem = semaphore.clone();
+                let permit = match sem.acquire_owned().await {
+                    Ok(permit) => permit,
+                    Err(_) => break,
+                };
+                tokio::spawn(async move {
+                    let _permit = permit;
+                    deliver_with_retry(&task.webhook, &task.notification, task.on_success).await;
+                });
             }
         });
         Self { sender }
     }
 
-    /// Queues the notification. A full queue drops it and logs an error.
+    fn enqueue_or_spawn(&self, task: NotificationTask) {
+        let is_critical = task.notification.event.is_critical();
+        match self.sender.try_send(task) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(task)) => {
+                if is_critical {
+                    warn!(
+                        event = ?task.notification.event,
+                        "notification queue full; dispatching critical alert in background task"
+                    );
+                    tokio::spawn(async move {
+                        deliver_with_retry(&task.webhook, &task.notification, task.on_success).await;
+                    });
+                } else {
+                    error!(
+                        event = ?task.notification.event,
+                        "notification queue full; non-critical notification dropped"
+                    );
+                }
+            }
+            Err(mpsc::error::TrySendError::Closed(task)) => {
+                error!(
+                    event = ?task.notification.event,
+                    "notification channel closed"
+                );
+            }
+        }
+    }
+
+    /// Queues the notification. Critical alerts fall back to direct background dispatch on full queue.
     pub fn send(&self, webhook: &WebhookConfig, notification: Notification) {
-        let task = NotificationTask {
+        self.enqueue_or_spawn(NotificationTask {
             webhook: webhook.clone(),
             notification,
             on_success: None,
-        };
-        if let Err(err) = self.sender.try_send(task) {
-            error!(%err, "failed to queue the notification");
-        }
+        });
     }
 
     /// Queues the notification and calls `on_success` only after delivery succeeds.
@@ -294,14 +342,11 @@ impl Notifier {
     ) where
         F: FnOnce() + Send + 'static,
     {
-        let task = NotificationTask {
+        self.enqueue_or_spawn(NotificationTask {
             webhook: webhook.clone(),
             notification,
             on_success: Some(Box::new(on_success)),
-        };
-        if let Err(err) = self.sender.try_send(task) {
-            error!(%err, "failed to queue the notification");
-        }
+        });
     }
 }
 
@@ -460,5 +505,21 @@ mod tests {
                 "target": {"id": "edge", "name": "edge-1"},
             })
         );
+    }
+
+    #[tokio::test]
+    async fn critical_notifications_dispatch_even_when_queue_full() {
+        let (sender, _receiver) = mpsc::channel::<NotificationTask>(1);
+        let notifier = Notifier { sender };
+        let webhook = WebhookConfig {
+            url: "http://127.0.0.1:9/nowhere".to_string(),
+            timeout: Duration::from_millis(50),
+            ..Default::default()
+        };
+        // Fill the 1-slot channel
+        notifier.send(&webhook, Notification::new(NotificationEvent::AppAlert, "node-1"));
+
+        // Sending a critical notification when channel is full dispatches directly without panicking
+        notifier.send(&webhook, Notification::new(NotificationEvent::CertificateExpired, "node-1"));
     }
 }
