@@ -8,7 +8,7 @@ use axum::{
     Json,
     body::Bytes,
     extract::{ConnectInfo, Path, Query, State},
-    http::{HeaderMap, HeaderValue, StatusCode},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use r3v3rs3_api::{
@@ -60,14 +60,14 @@ pub async fn app_hook(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path(id): Path<ShortId>,
     Query(query): Query<WebhookQuery>,
-    mut headers: HeaderMap,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, AppError> {
-    if let Some(token) = query.secret.as_deref().or(query.token.as_deref())
-        && !headers.contains_key("x-webhook-token")
-        && let Ok(val) = HeaderValue::from_str(token)
-    {
-        headers.insert("x-webhook-token", val);
+    if query.secret.is_some() || query.token.is_some() {
+        return Err(r3v3rs3_api::error::Error::InvalidWebhookPayload {
+            reason: "webhook authentication secrets must be passed via HTTP headers (X-Webhook-Token or Authorization), not URL query parameters".to_string(),
+        }
+        .into());
     }
     let platform = state
         .call_system(crate::server::rpc::auth::GetPlatform)

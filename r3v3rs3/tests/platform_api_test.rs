@@ -331,6 +331,14 @@ async fn check_hook_requests(
         json!({"outcome": "ignored"})
     );
 
+    let query_resp = reqwest::Client::new()
+        .post(format!("http://{addr}/hooks/apps/{id}?secret={secret}"))
+        .header("content-type", "application/json")
+        .body(r#"{"zen":"Keep it logically awesome."}"#)
+        .send()
+        .await?;
+    assert_eq!(query_resp.status().as_u16(), 400);
+
     let (status, text) = send(addr, Method::DELETE, &path, admin, None).await?;
     assert_eq!(status, 200, "{text}");
     assert_eq!(
