@@ -160,6 +160,11 @@ impl AgentListener {
                 return Err(err);
             }
         };
+        let current_target = self.directory.target_of(certificate).await?;
+        if current_target != Some(target) {
+            task.abort();
+            bail!("the agent certificate is no longer valid for target {target}");
+        }
         let initial_latency_ms = ping_start.elapsed().as_secs_f64() * 1000.0;
         info!(%target, version, "an agent connected");
         let now = unix_ms();
