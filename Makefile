@@ -1,4 +1,4 @@
-.PHONY: all build release webui webui-release test test-api test-server test-webui test-acme-pebble test-discovery-e2e test-runtime-docker lint fmt fmt-check check check-fast run clean cdn-snapshot
+.PHONY: all build release webui webui-release test test-api test-server test-webui test-acme-pebble test-discovery-e2e test-runtime-docker lint fmt fmt-check check check-fast deny run clean cdn-snapshot
 
 CARGO ?= cargo
 TRUNK ?= trunk
@@ -72,6 +72,9 @@ check: fmt-check lint test webui
 # between edits; run the full `make check` before a push.
 check-fast:
 	$(CARGO) check --workspace --all-targets --all-features
+
+deny:
+	$(CARGO) deny check
 
 run:
 	$(CARGO) run --bin r3-server -- start
