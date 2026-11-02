@@ -1,7 +1,7 @@
 use super::openapi::{ErrorResponses, NotFoundResponse};
 use super::{AppError, AppState};
 use crate::accounts::{Caller, Permission};
-use crate::server::rpc::proxies::{GetProxy, UpdateProxy};
+use crate::server::rpc::proxies::{ApplyProxySecurityHeadersProfile, GetProxy};
 use axum::{
     Extension, Json,
     extract::{Path, State},
@@ -11,7 +11,7 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::proxy::ProxyKind;
 use r3v3rs3_api::security_headers::{
     AnalyzeHeadersRequest, ApplySecurityProfileRequest, SecurityHeadersAudit, SecurityProfile,
-    SecurityProfileInfo, analyze_response_rules, apply_profile_to_rules,
+    SecurityProfileInfo, analyze_response_rules,
 };
 
 /// Lists all available predefined OWASP security hardening profiles.
@@ -91,16 +91,14 @@ pub async fn apply_proxy_security_header_profile(
     Path(id): Path<ShortId>,
     Json(body): Json<ApplySecurityProfileRequest>,
 ) -> Result<Json<SecurityHeadersAudit>, AppError> {
-    let mut entry = *state.call(&caller, GetProxy { id }).await?;
-    match &mut entry.proxy.kind {
-        ProxyKind::Http(http) => {
-            let updated_response_rules =
-                apply_profile_to_rules(&http.headers.response, body.profile);
-            http.headers.response = updated_response_rules;
-            let audit = analyze_response_rules(&http.headers.response);
-            state.call(&caller, UpdateProxy { entry }).await?;
-            Ok(Json(audit))
-        }
-        _ => Err(Error::NotHttpProxy { id }.into()),
-    }
+    let audit = state
+        .call(
+            &caller,
+            ApplyProxySecurityHeadersProfile {
+                id,
+                profile: body.profile,
+            },
+        )
+        .await?;
+    Ok(Json(*audit))
 }

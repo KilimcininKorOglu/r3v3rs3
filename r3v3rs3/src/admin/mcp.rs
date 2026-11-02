@@ -26,7 +26,9 @@ use crate::server::rpc::ports::{
     UpdatePort,
 };
 use crate::server::rpc::proxies::{
-    AddProxy, DeleteProxy, GetProxy, GetProxyList, GetProxyStatus, PurgeProxyCache, UpdateProxy,
+    AddProxy, ApplyProxySecurityHeadersProfile, DeleteProxy, GetProxy, GetProxyList,
+    GetProxyStatus, PurgeProxyCache, StreamPriorityMutation, UpdateProxy,
+    UpdateProxyStreamPriority,
 };
 use crate::server::rpc::workers::GetWorkers;
 use http::request::Parts;
@@ -1705,32 +1707,18 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         let profile = parse_mcp_security_profile(&params.profile)?;
         let id: ShortId = parse_id(&params.proxy_id)?;
-        let mut entry: ProxyEntry = *self
+        let audit = self
             .state
-            .call(&caller, GetProxy { id })
+            .call(
+                &caller,
+                ApplyProxySecurityHeadersProfile {
+                    id,
+                    profile,
+                },
+            )
             .await
             .map_err(tool_error)?;
-
-        match &mut entry.proxy.kind {
-            r3v3rs3_api::proxy::ProxyKind::Http(http) => {
-                let updated = r3v3rs3_api::security_headers::apply_profile_to_rules(
-                    &http.headers.response,
-                    profile,
-                );
-                http.headers.response = updated;
-                let audit =
-                    r3v3rs3_api::security_headers::analyze_response_rules(&http.headers.response);
-                self.state
-                    .call(&caller, UpdateProxy { entry })
-                    .await
-                    .map_err(tool_error)?;
-                json_result(audit)
-            }
-            _ => Err(ErrorData::invalid_params(
-                format!("proxy {} is not an HTTP proxy", id),
-                None,
-            )),
-        }
+        json_result(*audit)
     }
 
     /// Returns the HTTP/2 and HTTP/3 stream priority configuration of a proxy.
@@ -1768,30 +1756,18 @@ impl McpServer {
         require_edit(&parts)?;
         let caller = caller_of(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let mut entry: ProxyEntry = *self
-            .state
-            .call(&caller, GetProxy { id })
-            .await
-            .map_err(tool_error)?;
-        match &mut entry.proxy.kind {
-            r3v3rs3_api::proxy::ProxyKind::Http(http) => {
-                http.stream_priority.enabled = params.enabled;
-                if let Some(inject) = params.inject_header {
-                    http.stream_priority.inject_header = inject;
-                }
-                if let Some(adaptive) = params.adaptive_concurrency {
-                    http.stream_priority.adaptive_concurrency = adaptive;
-                }
-            }
-            _ => {
-                return Err(ErrorData::invalid_params(
-                    format!("proxy {} is not an HTTP proxy", id),
-                    None,
-                ));
-            }
-        }
         self.state
-            .call(&caller, UpdateProxy { entry })
+            .call(
+                &caller,
+                UpdateProxyStreamPriority {
+                    id,
+                    mutation: StreamPriorityMutation::Patch {
+                        enabled: params.enabled,
+                        inject_header: params.inject_header,
+                        adaptive_concurrency: params.adaptive_concurrency,
+                    },
+                },
+            )
             .await
             .map_err(tool_error)?;
         json_result(json!({ "id": id.to_string(), "stream_priority_enabled": params.enabled }))

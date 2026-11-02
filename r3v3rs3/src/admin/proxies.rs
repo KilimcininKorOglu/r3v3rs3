@@ -5,7 +5,8 @@ use crate::accounts::Permission;
 use crate::proxy::http::filter::{FilterResult, MatchRank, RequestFilter};
 use crate::proxy::http::rewrite::Rewrite;
 use crate::server::rpc::proxies::{
-    AddProxy, DeleteProxy, GetProxy, GetProxyList, GetProxyStatus, PurgeProxyCache, UpdateProxy,
+    AddProxy, DeleteProxy, GetProxy, GetProxyList, GetProxyStatus, PurgeProxyCache,
+    StreamPriorityMutation, UpdateProxy, UpdateProxyStreamPriority,
 };
 use axum::{
     Extension, Json,
@@ -224,14 +225,15 @@ pub async fn put_priority(
     Path(id): Path<ShortId>,
     Json(payload): Json<r3v3rs3_api::priority::SetStreamPriorityRequest>,
 ) -> Result<Json<()>, AppError> {
-    let mut entry: ProxyEntry = *state.call(&caller, GetProxy { id }).await?;
-    match &mut entry.proxy.kind {
-        r3v3rs3_api::proxy::ProxyKind::Http(http) => {
-            http.stream_priority = payload.config;
-        }
-        _ => return Err(r3v3rs3_api::error::Error::NotHttpProxy { id }.into()),
-    }
-    state.call(&caller, UpdateProxy { entry }).await?;
+    state
+        .call(
+            &caller,
+            UpdateProxyStreamPriority {
+                id,
+                mutation: StreamPriorityMutation::Replace(payload.config),
+            },
+        )
+        .await?;
     Ok(Json(()))
 }
 

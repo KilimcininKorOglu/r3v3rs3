@@ -8,7 +8,11 @@ use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::policy::AuthPolicy;
+use r3v3rs3_api::priority::StreamPriorityConfig;
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, ProxyStatus};
+use r3v3rs3_api::security_headers::{
+    SecurityHeadersAudit, SecurityProfile, analyze_response_rules, apply_profile_to_rules,
+};
 use r3v3rs3_api::subject_name::SubjectName;
 use r3v3rs3_api::vhost::VirtualHost;
 
@@ -227,6 +231,144 @@ impl RpcMethod for UpdateProxy {
     fn audit(&self) -> Option<AuditRecord> {
         let record = AuditRecord::new(AuditAction::UpdateProxy).id(self.entry.id);
         Some(record.summary(self.entry.proxy.name.clone()))
+    }
+}
+
+pub enum StreamPriorityMutation {
+    Replace(StreamPriorityConfig),
+    Patch {
+        enabled: bool,
+        inject_header: Option<bool>,
+        adaptive_concurrency: Option<bool>,
+    },
+}
+
+impl StreamPriorityMutation {
+    fn apply(self, priority: &mut StreamPriorityConfig) {
+        match self {
+            Self::Replace(config) => {
+                *priority = config;
+            }
+            Self::Patch {
+                enabled,
+                inject_header,
+                adaptive_concurrency,
+            } => {
+                priority.enabled = enabled;
+                if let Some(inject) = inject_header {
+                    priority.inject_header = inject;
+                }
+                if let Some(adaptive) = adaptive_concurrency {
+                    priority.adaptive_concurrency = adaptive;
+                }
+            }
+        }
+    }
+}
+
+pub struct UpdateProxyStreamPriority {
+    pub id: ShortId,
+    pub mutation: StreamPriorityMutation,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for UpdateProxyStreamPriority {
+    type Output = ();
+    const MUTATES: bool = true;
+    const PERMISSION: Permission = Permission::EditProxies;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        self.call_with_caller(state, &Caller::system()).await
+    }
+
+    async fn call_with_caller(
+        self,
+        state: &mut ServerState,
+        caller: &Caller,
+    ) -> Result<Self::Output, Error> {
+        ensure_manual(state, self.id)?;
+        let ctx = state
+            .proxies
+            .get(self.id)
+            .ok_or(Error::IdNotFound {
+                id: self.id.to_string(),
+            })?;
+        let mut proxy = ctx.entry.proxy.clone();
+        match &mut proxy.kind {
+            ProxyKind::Http(http) => self.mutation.apply(&mut http.stream_priority),
+            _ => return Err(Error::NotHttpProxy { id: self.id }),
+        }
+        validate_proxy_rules(&proxy, Some(self.id), caller, state)?;
+        let proxy = seal(proxy).await?;
+        let previous = proxy_entries(state);
+        if state.proxies.set((self.id, proxy).into()) {
+            state.commit_proxies(previous).await?;
+        }
+        Ok(())
+    }
+
+    fn proxy_scope(&self) -> Option<ShortId> {
+        Some(self.id)
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        let record = AuditRecord::new(AuditAction::UpdateProxy).id(self.id);
+        Some(record.summary("update_proxy_stream_priority"))
+    }
+}
+
+pub struct ApplyProxySecurityHeadersProfile {
+    pub id: ShortId,
+    pub profile: SecurityProfile,
+}
+
+#[async_trait::async_trait]
+impl RpcMethod for ApplyProxySecurityHeadersProfile {
+    type Output = SecurityHeadersAudit;
+    const MUTATES: bool = true;
+    const PERMISSION: Permission = Permission::EditProxies;
+
+    async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        self.call_with_caller(state, &Caller::system()).await
+    }
+
+    async fn call_with_caller(
+        self,
+        state: &mut ServerState,
+        caller: &Caller,
+    ) -> Result<Self::Output, Error> {
+        ensure_manual(state, self.id)?;
+        let ctx = state
+            .proxies
+            .get(self.id)
+            .ok_or(Error::IdNotFound {
+                id: self.id.to_string(),
+            })?;
+        let mut proxy = ctx.entry.proxy.clone();
+        let audit = match &mut proxy.kind {
+            ProxyKind::Http(http) => {
+                let updated = apply_profile_to_rules(&http.headers.response, self.profile);
+                http.headers.response = updated;
+                analyze_response_rules(&http.headers.response)
+            }
+            _ => return Err(Error::NotHttpProxy { id: self.id }),
+        };
+        validate_proxy_rules(&proxy, Some(self.id), caller, state)?;
+        let proxy = seal(proxy).await?;
+        let previous = proxy_entries(state);
+        if state.proxies.set((self.id, proxy).into()) {
+            state.commit_proxies(previous).await?;
+        }
+        Ok(audit)
+    }
+
+    fn proxy_scope(&self) -> Option<ShortId> {
+        Some(self.id)
+    }
+
+    fn audit(&self) -> Option<AuditRecord> {
+        let record = AuditRecord::new(AuditAction::UpdateProxy).id(self.id);
+        Some(record.summary("apply_proxy_security_headers_profile"))
     }
 }
 
