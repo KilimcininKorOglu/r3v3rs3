@@ -592,7 +592,7 @@ fn token_view(locale: Locale, token: &TargetToken) -> Html {
             <p>{locale.tf("targets.token_created", &[("name", name)])}</p>
             <p class="mt-1">{locale.t("targets.token_once")}</p>
             { copy_box(locale.t("targets.token"), &token.token, 1) }
-            { copy_box(locale.t("targets.install_command"), &install_command(&master, &token.token), 3) }
+            { copy_box(locale.t("targets.install_command"), &install_command(&master), 3) }
         </>
     }
 }
@@ -621,11 +621,10 @@ fn master_address(token: &TargetToken) -> String {
     format!("{host}:{}", token.agent_port)
 }
 
-fn install_command(master: &str, token: &str) -> String {
+fn install_command(master: &str) -> String {
     format!(
-        "curl -fsSL {INSTALL_SCRIPT} | sudo bash -s -- --agent --master {} --token {}",
-        shell_word(master),
-        shell_word(token)
+        "curl -fsSL {INSTALL_SCRIPT} | sudo bash -s -- --agent --master {}",
+        shell_word(master)
     )
 }
 
@@ -1484,12 +1483,13 @@ mod tests {
     }
 
     #[test]
-    fn the_commands_carry_the_master_and_the_token_as_shell_words() {
-        let install = install_command("master.example.com:9443", "abc.def");
+    fn the_commands_carry_the_master_and_omit_the_token_from_argv() {
+        let install = install_command("master.example.com:9443");
         assert!(
-            install.ends_with("--agent --master master.example.com:9443 --token abc.def"),
+            install.ends_with("--agent --master master.example.com:9443"),
             "{install}"
         );
+        assert!(!install.contains("--token"), "{install}");
         assert_eq!(shell_word("a b;c'd"), r"'a b;c'\''d'");
         assert_eq!(shell_word(""), "''");
     }

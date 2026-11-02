@@ -145,10 +145,10 @@ An [agent target](@/platform.md#agent-targets) of the deployment platform runs a
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
-    | sudo bash -s -- --agent --master master.example.com:9443 --token <token>
+    | sudo bash -s -- --agent --master master.example.com:9443
 ```
 
-The script installs the same binary and runs `r3-agent` as the systemd service `r3-agent`:
+The script asks for the enrollment token interactively without echoing it, keeping it out of process arguments and shell history. It installs the same binary and runs `r3-agent` as the systemd service `r3-agent`:
 
 ```ini
 [Service]

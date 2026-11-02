@@ -710,10 +710,10 @@ Set `agent_port` in the `[platform]` section and restart the server. At the firs
 
 The remote server needs Docker Engine, and the `docker` binary with the Compose plugin for Compose apps. It needs no `git`, because the master clones the repository and sends the files to the agent.
 
-The **Targets** page shows both commands with the address of the master and the token filled in. With `install.sh` on a Linux server with systemd:
+The **Targets** page shows the install command with the address of the master. When run without `--token`, the script prompts for the enrollment token interactively without echoing it, keeping the secret out of process arguments and shell history. With `install.sh` on a Linux server with systemd:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --agent --master master.example.com:9443 --token <token>
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --agent --master master.example.com:9443
 ```
 
 The script installs the binary, creates the systemd service `r3v3rs3-agent` with the data directory `/var/lib/r3v3rs3-agent`, waits until the agent enrolls and then deletes the token. The token never enters the unit file. Run the script again with `--agent` to upgrade; an enrolled agent needs no token. With a new token the script enrolls the agent again, and when that enrollment fails it restores the earlier identity.

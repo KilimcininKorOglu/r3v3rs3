@@ -145,10 +145,10 @@ Deploy platformunun bir [agent hedefi](@/platform.tr.md#agent-hedefleri), uygula
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
-    | sudo bash -s -- --agent --master master.example.com:9443 --token <token>
+    | sudo bash -s -- --agent --master master.example.com:9443
 ```
 
-Script aynı binary'yi kurar ve `r3-agent` komutunu `r3-agent` systemd servisi olarak çalıştırır:
+Script kayıt token'ını gizli (echo olmadan) ister, böylece secret süreç argümanlarında veya shell geçmişinde görünmez. Aynı binary'yi kurar ve `r3-agent` komutunu `r3-agent` systemd servisi olarak çalıştırır:
 
 ```ini
 [Service]

@@ -710,10 +710,10 @@ Agent hedefi, uygulamaları uzak bir sunucuda çalıştırır. Bu sunucu `r3v3rs
 
 Uzak sunucuda Docker Engine, Compose uygulamaları için de Compose eklentili `docker` binary'si gerekir. `git` gerekmez, çünkü master repoyu clone eder ve dosyaları agent'a gönderir.
 
-**Hedefler** sayfası iki komutu da master adresi ve token dolu olarak gösterir. systemd kullanan bir Linux sunucusunda `install.sh` ile:
+**Hedefler** sayfası kurulum komutunu master adresiyle gösterir. Script `--token` verilmeden çalıştırıldığında kayıt token'ını terminalden gizli (echo olmadan) ister, böylece secret süreç argümanlarında veya shell geçmişinde görünmez. systemd kullanan bir Linux sunucusunda `install.sh` ile:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --agent --master master.example.com:9443 --token <token>
+curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --agent --master master.example.com:9443
 ```
 
 Script binary'yi kurar, `/var/lib/r3v3rs3-agent` veri dizinini kullanan `r3v3rs3-agent` systemd servisini oluşturur, agent kaydolana kadar bekler ve sonra token'ı siler. Token unit dosyasına hiç yazılmaz. Güncellemek için script'i `--agent` ile yeniden çalıştırın. Kayıtlı bir agent token istemez. Yeni bir token ile script agent'ı yeniden kaydeder. Bu kayıt başarısız olursa önceki kimliği geri yükler.
