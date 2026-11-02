@@ -65,7 +65,7 @@ pub fn self_sign() -> Html {
     let error = entry.as_ref().err().filter(|_| *validation).cloned();
     let is_loading = use_state(|| false);
 
-    let onsubmit = submit_callback(entry, validation, is_loading, navigator);
+    let onsubmit = submit_callback(locale, entry, validation, is_loading, navigator);
 
     html! {
         <>
@@ -119,6 +119,7 @@ fn use_ca_certs() -> (UseStateHandle<ShortId>, UseStateHandle<Vec<CertInfo>>) {
 
 /// Signs the certificate and opens the certificate tab. A submit during a request does nothing.
 fn submit_callback(
+    locale: Locale,
     entry: Result<SelfSignedCertRequest, String>,
     validation: UseStateHandle<bool>,
     is_loading: UseStateHandle<bool>,
@@ -137,8 +138,13 @@ fn submit_callback(
         let navigator = navigator.clone();
         let is_loading = is_loading.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            if request_self_sign(&entry).await.is_ok() {
-                show_certs(&navigator, entry.kind);
+            match request_self_sign(locale, &entry).await {
+                Ok(()) => {
+                    show_certs(&navigator, entry.kind);
+                }
+                Err(err) => {
+                    crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await;
+                }
             }
             is_loading.set(false);
         });
@@ -213,13 +219,15 @@ fn get_request(
     })
 }
 
-async fn request_self_sign(req: &SelfSignedCertRequest) -> Result<(), gloo_net::Error> {
-    Request::post(&format!("{API_ENDPOINT}/certs/self_sign"))
-        .json(&req)?
-        .send()
-        .await?
-        .json()
-        .await
+async fn request_self_sign(
+    locale: Locale,
+    req: &SelfSignedCertRequest,
+) -> Result<(), String> {
+    let request = Request::post(&format!("{API_ENDPOINT}/certs/self_sign"))
+        .json(&req)
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, request).await?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -119,8 +119,13 @@ pub fn new_proxy() -> Html {
         if let Ok(entry) = (*entry_cloned).clone() {
             is_loading_cloned.set(true);
             wasm_bindgen_futures::spawn_local(async move {
-                if create_port(&entry).await.is_ok() {
-                    navigator.push(&Route::Proxies);
+                match create_proxy(locale, &entry).await {
+                    Ok(()) => {
+                        navigator.push(&Route::Proxies);
+                    }
+                    Err(err) => {
+                        crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await;
+                    }
                 }
                 is_loading_cloned.set(false);
             });
@@ -169,13 +174,12 @@ fn preset_field(locale: Locale, preset: &UseStateHandle<Preset>) -> Html {
     }
 }
 
-async fn create_port(entry: &Proxy) -> Result<(), gloo_net::Error> {
-    Request::post(&format!("{API_ENDPOINT}/proxies"))
-        .json(entry)?
-        .send()
-        .await?
-        .json()
-        .await
+async fn create_proxy(locale: Locale, entry: &Proxy) -> Result<(), String> {
+    let req = Request::post(&format!("{API_ENDPOINT}/proxies"))
+        .json(entry)
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, req).await?;
+    Ok(())
 }
 
 #[cfg(test)]

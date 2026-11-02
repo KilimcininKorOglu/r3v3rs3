@@ -684,9 +684,14 @@ fn add_command_submit(
             let Ok(req) = Request::post(&path).json(&body) else {
                 return;
             };
-            if send_request(locale, req).await.is_ok() {
-                form.reset();
-                load_commands(locale, app_id, commands);
+            match send_request(locale, req).await {
+                Ok(_) => {
+                    form.reset();
+                    load_commands(locale, app_id, commands);
+                }
+                Err(err) => {
+                    dialog::message(locale, &err, Icon::Error).await;
+                }
             }
         });
     })
@@ -743,8 +748,13 @@ fn delete_command_callback(
             let Ok(req) = Request::delete(&path).build() else {
                 return;
             };
-            if send_request(locale, req).await.is_ok() {
-                load_commands(locale, app_id, commands);
+            match send_request(locale, req).await {
+                Ok(_) => {
+                    load_commands(locale, app_id, commands);
+                }
+                Err(err) => {
+                    dialog::message(locale, &err, Icon::Error).await;
+                }
             }
         });
     })

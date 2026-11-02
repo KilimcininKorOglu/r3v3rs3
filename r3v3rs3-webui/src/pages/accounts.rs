@@ -815,10 +815,17 @@ async fn delete_passkey_action(locale: Locale, id: String, accounts: AccountList
     let res = Request::delete(&format!("{API_ENDPOINT}/auth/passkey/{id}"))
         .send()
         .await;
-    if let Ok(res) = res
-        && res.ok()
-    {
-        load(accounts, PATH);
+    match res {
+        Ok(res) if res.ok() => {
+            load(accounts, PATH);
+        }
+        Ok(res) => {
+            let msg = crate::pages::settings::error_message(locale, res).await;
+            crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await;
+        }
+        Err(err) => {
+            crate::dialog::message(locale, &err.to_string(), crate::dialog::Icon::Error).await;
+        }
     }
 }
 
@@ -894,13 +901,20 @@ async fn delete_token_action(
     let res = Request::delete(&format!("{API_ENDPOINT}/auth/tokens/{id}"))
         .send()
         .await;
-    if let Ok(res) = res
-        && res.ok()
-    {
-        let mut updated = (*form).clone();
-        updated.tokens.retain(|t| t.id != id);
-        form.set(updated);
-        load(accounts, PATH);
+    match res {
+        Ok(res) if res.ok() => {
+            let mut updated = (*form).clone();
+            updated.tokens.retain(|t| t.id != id);
+            form.set(updated);
+            load(accounts, PATH);
+        }
+        Ok(res) => {
+            let msg = crate::pages::settings::error_message(locale, res).await;
+            crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await;
+        }
+        Err(err) => {
+            crate::dialog::message(locale, &err.to_string(), crate::dialog::Icon::Error).await;
+        }
     }
 }
 

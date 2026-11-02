@@ -5,6 +5,7 @@ use super::settings::{failure_box, fetch_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::data_list::{Column, Row, list_card};
+use crate::dialog::{self, Icon};
 use crate::format::format_time;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
@@ -254,9 +255,14 @@ fn retention_callback(
             let Ok(req) = Request::put(&format!("{API_ENDPOINT}/config")).json(&cfg) else {
                 return;
             };
-            if send_request(locale, req).await.is_ok() {
-                config.set(Some(cfg));
-                notice.set(Some(locale.t("audit.retention_saved").to_string()));
+            match send_request(locale, req).await {
+                Ok(_) => {
+                    config.set(Some(cfg));
+                    notice.set(Some(locale.t("audit.retention_saved").to_string()));
+                }
+                Err(err) => {
+                    dialog::message(locale, &err, Icon::Error).await;
+                }
             }
         });
     })

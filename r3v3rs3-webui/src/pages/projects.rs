@@ -252,10 +252,17 @@ fn render_project_row(
                 .await;
                 if confirmed {
                     let url = format!("{API_ENDPOINT}{PATH}/{p_id}");
-                    if let Ok(res) = Request::delete(&url).send().await
-                        && res.ok()
-                    {
-                        reload.set(*reload + 1);
+                    match Request::delete(&url).send().await {
+                        Ok(res) if res.ok() => {
+                            reload.set(*reload + 1);
+                        }
+                        Ok(res) => {
+                            let msg = crate::pages::settings::error_message(locale, res).await;
+                            dialog::message(locale, &msg, dialog::Icon::Error).await;
+                        }
+                        Err(err) => {
+                            dialog::message(locale, &err.to_string(), dialog::Icon::Error).await;
+                        }
                     }
                 }
             });
@@ -433,9 +440,18 @@ fn run_environment_sync(
         let Ok(req_builder) = Request::post(&url).json(&req) else {
             return;
         };
-        let Ok(resp) = req_builder.send().await else {
-            return;
+        let resp = match req_builder.send().await {
+            Ok(r) => r,
+            Err(err) => {
+                dialog::message(locale, &err.to_string(), dialog::Icon::Error).await;
+                return;
+            }
         };
+        if !resp.ok() {
+            let msg = crate::pages::settings::error_message(locale, resp).await;
+            dialog::message(locale, &msg, dialog::Icon::Error).await;
+            return;
+        }
         if let Ok(report) = resp.json::<EnvironmentSyncReport>().await {
             let msg = locale.tf(
                 "projects.sync_success",
@@ -540,16 +556,21 @@ fn render_project_form(
                         .map(ToString::to_string)
                         .collect(),
                 };
-                let success = if let Some(id) = data.editing_id {
+                let res = if let Some(id) = data.editing_id {
                     let url = format!("{API_ENDPOINT}{PATH}/{id}");
-                    send_json(locale, Request::put(&url), &spec).await.is_ok()
+                    send_json(locale, Request::put(&url), &spec).await
                 } else {
                     let url = format!("{API_ENDPOINT}{PATH}");
-                    send_json(locale, Request::post(&url), &spec).await.is_ok()
+                    send_json(locale, Request::post(&url), &spec).await
                 };
-                if success {
-                    form.set(None);
-                    reload.set(*reload + 1);
+                match res {
+                    Ok(()) => {
+                        form.set(None);
+                        reload.set(*reload + 1);
+                    }
+                    Err(err) => {
+                        dialog::message(locale, &err, dialog::Icon::Error).await;
+                    }
                 }
             });
         })
@@ -758,9 +779,14 @@ fn render_env_variables_tab(
                     "{API_ENDPOINT}{PATH}/{}/environments/{}/env",
                     state.project_id, state.selected_env_id
                 );
-                if send_json(locale, Request::put(&url), &spec).await.is_ok() {
-                    env_modal.set(None);
-                    reload.set(*reload + 1);
+                match send_json(locale, Request::put(&url), &spec).await {
+                    Ok(()) => {
+                        env_modal.set(None);
+                        reload.set(*reload + 1);
+                    }
+                    Err(err) => {
+                        dialog::message(locale, &err, dialog::Icon::Error).await;
+                    }
                 }
             });
         })

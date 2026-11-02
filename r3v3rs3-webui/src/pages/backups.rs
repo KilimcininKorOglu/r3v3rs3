@@ -615,9 +615,14 @@ fn render_backup_row(
                 let Ok(req) = Request::post(&path).build() else {
                     return;
                 };
-                if send_request(locale, req).await.is_ok() {
-                    dialog::message(locale, locale.t("backups.tested"), Icon::Success).await;
-                    reload.emit(());
+                match send_request(locale, req).await {
+                    Ok(_) => {
+                        dialog::message(locale, locale.t("backups.tested"), Icon::Success).await;
+                        reload.emit(());
+                    }
+                    Err(err) => {
+                        dialog::message(locale, &err, Icon::Error).await;
+                    }
                 }
             });
         });
@@ -1513,10 +1518,14 @@ fn render_dr_row(
             dialog::confirm_then(locale, question, async move {
                 let req =
                     Request::delete(&format!("{API_ENDPOINT}/disaster-recovery/backups/{id}"));
-                if let Ok(built) = req.build()
-                    && send_request(locale, built).await.is_ok()
-                {
-                    load_backups.emit(());
+                let Ok(built) = req.build() else {
+                    return;
+                };
+                match send_request(locale, built).await {
+                    Ok(_) => load_backups.emit(()),
+                    Err(err) => {
+                        dialog::message(locale, &err, Icon::Error).await;
+                    }
                 }
             });
         })
