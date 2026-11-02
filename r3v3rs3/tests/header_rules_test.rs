@@ -111,3 +111,51 @@ async fn header_rules_change_requests_and_responses() -> anyhow::Result<()> {
     mock_api.assert_async().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn hop_by_hop_and_connection_headers_are_stripped_before_forwarding() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let mut upstream = mockito::Server::new_async().await;
+    let mock_upstream = upstream
+        .mock("GET", "/test")
+        .match_header("x-kept", "preserved")
+        .match_header("x-drop-me", Matcher::Missing)
+        .match_header("keep-alive", Matcher::Missing)
+        .match_header("proxy-connection", Matcher::Missing)
+        .match_header("upgrade", Matcher::Missing)
+        .with_body("ok")
+        .expect(1)
+        .create_async()
+        .await;
+
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("phop", &port)])
+        .proxies(vec![http_proxy_entry(
+            "pxhop",
+            "phop",
+            HttpProxy {
+                routes: vec![http_route("/test", &format!("{}/test", upstream.url()), None)],
+                ..Default::default()
+            },
+        )])
+        .build();
+
+    with_server(storage, |_| async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let mut stream = tokio::net::TcpStream::connect(port.socket_addr()).await?;
+        let raw_req = format!(
+            "GET /test HTTP/1.1\r\nHost: {}\r\nConnection: close, X-Drop-Me\r\nX-Drop-Me: secret-value\r\nKeep-Alive: 300\r\nProxy-Connection: keep-alive\r\nUpgrade: h2c\r\nX-Kept: preserved\r\n\r\n",
+            port.socket_addr()
+        );
+        stream.write_all(raw_req.as_bytes()).await?;
+
+        let mut buf = vec![0u8; 1024];
+        let n = stream.read(&mut buf).await?;
+        let resp = String::from_utf8_lossy(&buf[..n]);
+        assert!(resp.starts_with("HTTP/1.1 200 OK"), "unexpected response: {resp}");
+        mock_upstream.assert_async().await;
+        Ok(())
+    })
+    .await
+}

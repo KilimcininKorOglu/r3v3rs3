@@ -145,6 +145,87 @@ impl RequestRewriter {
     }
 }
 
+const HOP_BY_HOP_HEADERS: &[&str] = &[
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "proxy-connection",
+    "trailer",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+    "http2-settings",
+];
+
+fn is_websocket_upgrade(headers: &HeaderMap, method: &hyper::Method) -> bool {
+    if method != hyper::Method::GET {
+        return false;
+    }
+    let has_ws = headers
+        .get_all(hyper::header::UPGRADE)
+        .iter()
+        .any(|v| v.to_str().is_ok_and(|s| s.eq_ignore_ascii_case("websocket")));
+    let has_upgrade = headers
+        .get_all(hyper::header::CONNECTION)
+        .iter()
+        .any(|v| {
+            v.to_str().is_ok_and(|s| {
+                s.split(',').any(|p| p.trim().eq_ignore_ascii_case("upgrade"))
+            })
+        });
+    has_ws && has_upgrade
+}
+
+fn remove_connection_named_headers(headers: &mut HeaderMap) {
+    let mut to_remove = Vec::new();
+    for value in headers.get_all(hyper::header::CONNECTION) {
+        if let Ok(val_str) = value.to_str() {
+            for token in val_str.split(',') {
+                let trimmed = token.trim();
+                if !trimmed.is_empty() && !trimmed.eq_ignore_ascii_case("upgrade") {
+                    if let Ok(name) = hyper::header::HeaderName::from_bytes(trimmed.as_bytes()) {
+                        to_remove.push(name);
+                    }
+                }
+            }
+        }
+    }
+    for name in to_remove {
+        headers.remove(name);
+    }
+}
+
+fn sanitize_te_header(headers: &mut HeaderMap) {
+    let is_trailers = headers
+        .get(hyper::header::TE)
+        .and_then(|v| v.to_str().ok())
+        .map_or(false, |s| s.trim().eq_ignore_ascii_case("trailers"));
+    if !is_trailers {
+        headers.remove(hyper::header::TE);
+    }
+}
+
+/// Removes RFC 9110 hop-by-hop headers and any header named in the `Connection` header
+/// from the request headers before forwarding to upstream.
+pub fn remove_hop_by_hop_headers(headers: &mut HeaderMap, method: &hyper::Method) {
+    let ws = is_websocket_upgrade(headers, method);
+    remove_connection_named_headers(headers);
+    sanitize_te_header(headers);
+
+    for &name in HOP_BY_HOP_HEADERS {
+        if ws && (name == "connection" || name == "upgrade") {
+            continue;
+        }
+        headers.remove(name);
+    }
+
+    if ws {
+        headers.insert(hyper::header::CONNECTION, HeaderValue::from_static("upgrade"));
+        headers.insert(hyper::header::UPGRADE, HeaderValue::from_static("websocket"));
+    }
+}
+
 #[derive(Default)]
 pub struct RequestRewriterBuilder {
     inner: RequestRewriter,
@@ -607,5 +688,69 @@ mod test {
             .build();
         rewriter.post_process(&mut headers);
         assert_eq!(headers.get("via").unwrap(), "r3v3rs3");
+    }
+
+    #[test]
+    fn removes_hop_by_hop_and_connection_named_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("connection", "close, X-Custom-Hop, X-Another".parse().unwrap());
+        headers.insert("x-custom-hop", "drop-this".parse().unwrap());
+        headers.insert("x-another", "also-drop".parse().unwrap());
+        headers.insert("keep-alive", "timeout=5".parse().unwrap());
+        headers.insert("proxy-connection", "keep-alive".parse().unwrap());
+        headers.insert("proxy-authorization", "basic secret".parse().unwrap());
+        headers.insert("te", "deflate".parse().unwrap());
+        headers.insert("trailer", "x-checksum".parse().unwrap());
+        headers.insert("upgrade", "h2c".parse().unwrap());
+        headers.insert("http2-settings", "settings".parse().unwrap());
+        headers.insert("x-survivor", "keep-me".parse().unwrap());
+
+        remove_hop_by_hop_headers(&mut headers, &hyper::Method::GET);
+
+        assert!(!headers.contains_key("connection"));
+        assert!(!headers.contains_key("x-custom-hop"));
+        assert!(!headers.contains_key("x-another"));
+        assert!(!headers.contains_key("keep-alive"));
+        assert!(!headers.contains_key("proxy-connection"));
+        assert!(!headers.contains_key("proxy-authorization"));
+        assert!(!headers.contains_key("te"));
+        assert!(!headers.contains_key("trailer"));
+        assert!(!headers.contains_key("upgrade"));
+        assert!(!headers.contains_key("http2-settings"));
+        assert_eq!(headers.get("x-survivor").unwrap(), "keep-me");
+    }
+
+    #[test]
+    fn preserves_te_trailers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("te", "trailers".parse().unwrap());
+        remove_hop_by_hop_headers(&mut headers, &hyper::Method::GET);
+        assert_eq!(headers.get("te").unwrap(), "trailers");
+    }
+
+    #[test]
+    fn preserves_websocket_upgrade_on_get() {
+        let mut headers = HeaderMap::new();
+        headers.insert("upgrade", "websocket".parse().unwrap());
+        headers.insert("connection", "Upgrade, X-Named".parse().unwrap());
+        headers.insert("x-named", "drop".parse().unwrap());
+
+        remove_hop_by_hop_headers(&mut headers, &hyper::Method::GET);
+
+        assert_eq!(headers.get("upgrade").unwrap(), "websocket");
+        assert_eq!(headers.get("connection").unwrap(), "upgrade");
+        assert!(!headers.contains_key("x-named"));
+    }
+
+    #[test]
+    fn drops_websocket_upgrade_on_post() {
+        let mut headers = HeaderMap::new();
+        headers.insert("upgrade", "websocket".parse().unwrap());
+        headers.insert("connection", "Upgrade".parse().unwrap());
+
+        remove_hop_by_hop_headers(&mut headers, &hyper::Method::POST);
+
+        assert!(!headers.contains_key("upgrade"));
+        assert!(!headers.contains_key("connection"));
     }
 }
