@@ -103,11 +103,7 @@ impl RequestRewriter {
             &forwarded
                 .into_iter()
                 .chain(iter::once(forwarded_for_directive(remote_addr)))
-                .chain(
-                    request_host
-                        .as_ref()
-                        .map(|host| forwarded_host_directive(host)),
-                )
+                .chain(request_host.as_deref().and_then(forwarded_host_directive))
                 .chain(iter::once(forwarded_proto_directive(forwarded_proto)))
                 .collect::<Vec<_>>()
                 .join(", "),
@@ -250,8 +246,57 @@ fn forwarded_for_directive(addr: IpAddr) -> String {
     }
 }
 
-fn forwarded_host_directive(host: &str) -> String {
-    format!("host={host}")
+fn is_rfc7230_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes().all(|b| {
+            matches!(
+                b,
+                b'a'..=b'z'
+                    | b'A'..=b'Z'
+                    | b'0'..=b'9'
+                    | b'!'
+                    | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'|'
+                    | b'~'
+            )
+        })
+}
+
+fn has_control_chars(s: &str) -> bool {
+    s.bytes().any(|b| b < 0x20 || b == 0x7f)
+}
+
+fn escape_quoted_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        if c == '"' || c == '\\' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn forwarded_host_directive(host: &str) -> Option<String> {
+    if host.is_empty() || has_control_chars(host) {
+        return None;
+    }
+    if is_rfc7230_token(host) {
+        Some(format!("host={host}"))
+    } else {
+        Some(format!("host=\"{}\"", escape_quoted_string(host)))
+    }
 }
 
 fn forwarded_proto_directive(proto: &str) -> String {
@@ -752,5 +797,48 @@ mod test {
 
         assert!(!headers.contains_key("upgrade"));
         assert!(!headers.contains_key("connection"));
+    }
+
+    #[test]
+    fn forwarded_host_directive_token_unquoted() {
+        assert_eq!(
+            forwarded_host_directive("example.com"),
+            Some("host=example.com".to_string())
+        );
+        assert_eq!(
+            forwarded_host_directive("sub.domain-name.org"),
+            Some("host=sub.domain-name.org".to_string())
+        );
+    }
+
+    #[test]
+    fn forwarded_host_directive_quotes_port_and_ipv6() {
+        assert_eq!(
+            forwarded_host_directive("example.com:8080"),
+            Some("host=\"example.com:8080\"".to_string())
+        );
+        assert_eq!(
+            forwarded_host_directive("[::1]:443"),
+            Some("host=\"[::1]:443\"".to_string())
+        );
+    }
+
+    #[test]
+    fn forwarded_host_directive_escapes_and_contains_special_chars() {
+        assert_eq!(
+            forwarded_host_directive("evil.com;for=1.1.1.1"),
+            Some("host=\"evil.com;for=1.1.1.1\"".to_string())
+        );
+        assert_eq!(
+            forwarded_host_directive(r#"evil.com"nested\"#),
+            Some(r#"host="evil.com\"nested\\""#.to_string())
+        );
+    }
+
+    #[test]
+    fn forwarded_host_directive_rejects_invalid() {
+        assert_eq!(forwarded_host_directive(""), None);
+        assert_eq!(forwarded_host_directive("evil.com\r\ninjected"), None);
+        assert_eq!(forwarded_host_directive("evil.com\0"), None);
     }
 }
