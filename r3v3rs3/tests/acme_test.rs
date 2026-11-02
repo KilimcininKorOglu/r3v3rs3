@@ -111,3 +111,23 @@ async fn an_order_request_for_an_unknown_entry_answers_id_not_found() -> anyhow:
     assert!(matches!(result, Err(Error::IdNotFound { id }) if id == "zzz-zzz"));
     Ok(())
 }
+
+#[tokio::test]
+async fn adding_acme_with_invalid_renewal_days_is_rejected() -> anyhow::Result<()> {
+    let mut req = request(vec!["example.com".parse()?], HTTP_01, None);
+    req.acme.config.renewal_days = 0;
+    let result = add_acme(req).await?;
+    assert!(matches!(
+        result,
+        Err(Error::AcmeRenewalDaysInvalid { min: 1, max: 89, days: 0 })
+    ));
+
+    let mut req_overflow = request(vec!["example.com".parse()?], HTTP_01, None);
+    req_overflow.acme.config.renewal_days = 90;
+    let result_overflow = add_acme(req_overflow).await?;
+    assert!(matches!(
+        result_overflow,
+        Err(Error::AcmeRenewalDaysInvalid { min: 1, max: 89, days: 90 })
+    ));
+    Ok(())
+}

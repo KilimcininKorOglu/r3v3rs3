@@ -18,7 +18,7 @@ use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, BodyWrapper, BytesResponse, ChallengeType,
     ExternalAccountKey, HttpClient, Identifier, NewAccount, NewOrder, Order, OrderStatus,
 };
-use r3v3rs3_api::acme::{AcmeInfo, DNS_01, DnsProvider, HTTP_01, TLS_ALPN_01};
+use r3v3rs3_api::acme::{AcmeInfo, DNS_01, DnsProvider, HTTP_01, MAX_RENEWAL_DAYS, TLS_ALPN_01};
 use r3v3rs3_api::app::AcmeExecConfig;
 use r3v3rs3_api::{
     acme::Acme,
@@ -246,8 +246,9 @@ impl AcmeEntry {
                     .unwrap_or(SystemTime::UNIX_EPOCH)
             })
             .max()?;
-        let renewal_days = self.acme.config.renewal_days.max(1);
-        Some(last_issued + Duration::from_secs(60 * 60 * 24 * renewal_days))
+        let renewal_days = self.acme.config.renewal_days.clamp(1, MAX_RENEWAL_DAYS);
+        let secs = renewal_days.checked_mul(86_400)?;
+        last_issued.checked_add(Duration::from_secs(secs))
     }
 }
 
