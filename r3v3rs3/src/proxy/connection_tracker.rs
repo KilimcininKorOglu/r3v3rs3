@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
 use std::task::{Context, Poll};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use time::OffsetDateTime;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::sync::watch;
@@ -200,13 +200,66 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for CountingStream<S> {
     }
 }
 
+async fn idle_watchdog(
+    bytes_sent: Arc<AtomicU64>,
+    bytes_received: Arc<AtomicU64>,
+    idle_timeout: Duration,
+) {
+    if idle_timeout.is_zero() {
+        std::future::pending::<()>().await;
+    }
+    let check_interval = std::cmp::max(
+        std::cmp::min(idle_timeout / 4, Duration::from_secs(5)),
+        Duration::from_millis(50),
+    );
+    let mut last_total =
+        bytes_sent.load(Ordering::Relaxed) + bytes_received.load(Ordering::Relaxed);
+    let mut last_active = Instant::now();
+
+    loop {
+        tokio::time::sleep(check_interval).await;
+        let current_total =
+            bytes_sent.load(Ordering::Relaxed) + bytes_received.load(Ordering::Relaxed);
+        if current_total != last_total {
+            last_total = current_total;
+            last_active = Instant::now();
+        } else if last_active.elapsed() >= idle_timeout {
+            break;
+        }
+    }
+}
+
 /// Copies data bidirectionally while updating byte counters and listening for termination signals.
 pub async fn copy_tracked_bidirectional<A, B>(
+    a: A,
+    b: B,
+    bytes_sent: Arc<AtomicU64>,
+    bytes_received: Arc<AtomicU64>,
+    cancel_rx: watch::Receiver<bool>,
+) -> IoResult<()>
+where
+    A: AsyncRead + AsyncWrite + Unpin,
+    B: AsyncRead + AsyncWrite + Unpin,
+{
+    copy_tracked_bidirectional_with_timeout(
+        a,
+        b,
+        bytes_sent,
+        bytes_received,
+        cancel_rx,
+        Duration::ZERO,
+    )
+    .await
+}
+
+/// Copies data bidirectionally with an idle timeout, byte counters and termination listener.
+pub async fn copy_tracked_bidirectional_with_timeout<A, B>(
     a: A,
     mut b: B,
     bytes_sent: Arc<AtomicU64>,
     bytes_received: Arc<AtomicU64>,
     mut cancel_rx: watch::Receiver<bool>,
+    idle_timeout: Duration,
 ) -> IoResult<()>
 where
     A: AsyncRead + AsyncWrite + Unpin,
@@ -214,8 +267,8 @@ where
 {
     let mut tracked_a = CountingStream {
         inner: a,
-        bytes_read: bytes_received,
-        bytes_written: bytes_sent,
+        bytes_read: bytes_received.clone(),
+        bytes_written: bytes_sent.clone(),
     };
 
     tokio::select! {
@@ -232,6 +285,11 @@ where
                 }
             }
         } => {
+            let _ = tracked_a.inner.shutdown().await;
+            let _ = b.shutdown().await;
+            Ok(())
+        }
+        _ = idle_watchdog(bytes_sent, bytes_received, idle_timeout) => {
             let _ = tracked_a.inner.shutdown().await;
             let _ = b.shutdown().await;
             Ok(())
@@ -280,5 +338,33 @@ mod tests {
 
         // Terminating non-existent returns error
         assert!(terminate(id).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_copy_tracked_bidirectional_idle_timeout() {
+        let (client_a, server_a) = tokio::io::duplex(64);
+        let (client_b, server_b) = tokio::io::duplex(64);
+
+        let sent = Arc::new(AtomicU64::new(0));
+        let recv = Arc::new(AtomicU64::new(0));
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+
+        let start = Instant::now();
+        let timeout = Duration::from_millis(150);
+
+        copy_tracked_bidirectional_with_timeout(
+            server_a,
+            server_b,
+            sent,
+            recv,
+            cancel_rx,
+            timeout,
+        )
+        .await
+        .unwrap();
+
+        assert!(start.elapsed() >= timeout);
+        drop(client_a);
+        drop(client_b);
     }
 }

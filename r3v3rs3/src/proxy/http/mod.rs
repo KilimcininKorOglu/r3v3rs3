@@ -98,7 +98,12 @@ pub(crate) fn http_server_builder(
 ) -> hyper_util::server::conn::auto::Builder<TokioExecutor> {
     let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
     builder
+        .http1()
+        .timer(hyper_util::rt::TokioTimer::new())
+        .header_read_timeout(std::time::Duration::from_secs(30));
+    builder
         .http2()
+        .timer(hyper_util::rt::TokioTimer::new())
         .max_header_list_size(limits.max_header_list_size)
         .max_pending_accept_reset_streams(limits.max_pending_accept_reset_streams);
     builder

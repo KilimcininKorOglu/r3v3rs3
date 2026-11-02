@@ -197,7 +197,12 @@ impl ConnectionPool {
                 cloned_res.extensions_mut().insert(UpgradeGuardSender(
                     Arc::new(std::sync::Mutex::new(Some(guard_tx))),
                 ));
-                tokio::spawn(upgrade_connection(upgrading_req, res, guard_rx));
+                tokio::spawn(upgrade_connection(
+                    upgrading_req,
+                    res,
+                    guard_rx,
+                    request_timeout,
+                ));
                 Ok(cloned_res)
             }
             _ => Ok(res),
@@ -865,6 +870,7 @@ async fn upgrade_connection(
     req: Request<ProxyBody>,
     res: Response<ProxyBody>,
     mut guard_rx: tokio::sync::oneshot::Receiver<Option<ConnGuard>>,
+    idle_timeout: Duration,
 ) {
     let is_ws = req
         .headers()
@@ -902,10 +908,16 @@ async fn upgrade_connection(
                 upstream_addr,
             );
 
-            if let Err(err) = crate::proxy::connection_tracker::copy_tracked_bidirectional(
-                &mut req, &mut res, sent, recv, cancel_rx,
-            )
-            .await
+            if let Err(err) =
+                crate::proxy::connection_tracker::copy_tracked_bidirectional_with_timeout(
+                    &mut req,
+                    &mut res,
+                    sent,
+                    recv,
+                    cancel_rx,
+                    idle_timeout,
+                )
+                .await
             {
                 error!("upgraded io error: {}", err);
             }
