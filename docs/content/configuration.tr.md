@@ -1568,7 +1568,7 @@ Master, güncel yapılandırmayı ve dinleme socket'lerinin descriptor'larını 
 
 ## Kesintisiz Yükseltme
 
-`kill -USR2 <pid>` dinleyicileri yeni bir sürece devreder. Eski süreç yeni binary'yi başlatır, yeni sürecin durumunu yüklemesini bekler, dinleme socket'lerinin descriptor'larını bir Unix socket üzerinden geçirir ve ardından açık bağlantılarını `shutdown_graceful_timeout` (varsayılan 30 saniye) süresince boşaltıp 0 çıkış koduyla çıkar.
+`kill -USR2 <pid>` dinleyicileri yeni bir sürece devreder. Eski süreç yeni binary'yi başlatır, yeni sürecin durumunu yüklemesini bekler, dinleme socket'lerinin descriptor'larını bir Unix socket üzerinden geçirir ve ardından açık bağlantılarını ve aktif platform arka plan görevlerini (veritabanı dump'ları, deployment'lar ve zamanlanmış komutlar) `shutdown_graceful_timeout` (varsayılan 30 saniye) süresince koordine ederek boşaltıp 0 çıkış koduyla çıkar. Kapanma sırasında cancellation token'lar zamanlayıcıları ve çalışan deployment'ları uyararak güvenli temizlik sağlar, bozuk container durumlarını veya hasarlı yedek dosyalarını engeller.
 
 Yeni süreç aynı dizinden yapılandırmayı okur, bu yüzden yükseltme `config.toml` içindeki her ayar için geçerli olur. `worker_mode = "workers"` ile portları worker'lar tuttuğu için yükseltme devredilecek bir şey bulmaz ve master'ın sıralı yeniden başlatması worker'ın açık bağlantılarına dokunmadan olur.
 

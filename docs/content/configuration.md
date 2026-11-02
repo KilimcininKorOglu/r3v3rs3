@@ -1568,7 +1568,7 @@ The master sends the current configuration and the descriptors of the listening 
 
 ## Zero-Downtime Upgrade
 
-`kill -USR2 <pid>` hands the listeners to a new process. The old process starts the new binary, waits until the new process loads its state, passes the descriptors of the listening sockets over a Unix socket, and then drains its open connections up to `shutdown_graceful_timeout` (30 seconds by default) before it exits with status 0.
+`kill -USR2 <pid>` hands the listeners to a new process. The old process starts the new binary, waits until the new process loads its state, passes the descriptors of the listening sockets over a Unix socket, and then drains its open connections and coordinates active platform background tasks (database dumps, deployments, and scheduled commands) up to `shutdown_graceful_timeout` (30 seconds by default) before it exits with status 0. During shutdown, cancellation tokens notify schedulers and running deployments to checkpoint and clean up safely, preventing broken container states or corrupt backup files.
 
 The new process reads the configuration from the same directory, so the upgrade takes effect for every setting that `config.toml` holds. With `worker_mode = "workers"` the workers keep the ports, so an upgrade hands over nothing and a rolling restart of the master happens without touching the open connections of the worker.
 

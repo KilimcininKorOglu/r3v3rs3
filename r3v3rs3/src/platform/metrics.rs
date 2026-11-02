@@ -74,14 +74,18 @@ impl Previous {
 
 /// Runs the collector until the platform shuts down.
 pub(super) fn spawn_collector(platform: &Arc<Platform>) {
-    let platform = Arc::downgrade(platform);
+    let weak = Arc::downgrade(platform);
+    let cancel = platform.shutdown_token().clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(COLLECT_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let previous = Previous::default();
         loop {
-            interval.tick().await;
-            let Some(platform) = platform.upgrade() else {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = interval.tick() => {}
+            }
+            let Some(platform) = weak.upgrade() else {
                 return;
             };
             if let Err(err) = collect_round(&platform, &previous).await {

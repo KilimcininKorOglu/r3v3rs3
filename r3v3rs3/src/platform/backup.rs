@@ -495,28 +495,37 @@ impl Platform {
     /// Dumps the database of the local target into the backup directory, and applies the
     /// retention of the settings.
     pub async fn run_backup(&self, db_id: ShortId) -> anyhow::Result<BackupEntry> {
+        let _guard = self.track_job();
         let dir = self.backup_dir(db_id).await?;
         tokio::fs::create_dir_all(&dir).await?;
         let id = backup_id();
         let dump_path = dir.join(format!("{id}.dump.gz"));
-        let (app, engine, size, sha256) =
-            self.capture_database_dump(db_id, &dump_path).await?;
+        let res = async {
+            let (app, engine, size, sha256) =
+                self.capture_database_dump(db_id, &dump_path).await?;
 
-        let entry = BackupEntry {
-            id,
-            app: db_id,
-            name: app.name.to_string(),
-            engine,
-            size,
-            sha256,
-            created_at: unix_ms() as i64,
-            verified_at: None,
-            verification_status: None,
-            drill: None,
-        };
-        self.store_backup(db_id, &entry, &dump_path).await?;
-        self.apply_retention(db_id).await?;
-        Ok(entry)
+            let entry = BackupEntry {
+                id,
+                app: db_id,
+                name: app.name.to_string(),
+                engine,
+                size,
+                sha256,
+                created_at: unix_ms() as i64,
+                verified_at: None,
+                verification_status: None,
+                drill: None,
+            };
+            self.store_backup(db_id, &entry, &dump_path).await?;
+            self.apply_retention(db_id).await?;
+            Ok(entry)
+        }
+        .await;
+
+        if res.is_err() {
+            let _ = tokio::fs::remove_file(&dump_path).await;
+        }
+        res
     }
 
     /// Writes one backup file manifest, uploads it to remote targets, and runs initial
@@ -2066,10 +2075,18 @@ const SCHEDULER_ROUND: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Runs the backup scheduler until the server stops: every round it reads the settings and
 /// takes the backups that their daily time has passed since the last backup.
-pub fn spawn_scheduler(platform: Arc<Platform>) {
+pub fn spawn_scheduler(platform: &Arc<Platform>) {
+    let weak = Arc::downgrade(platform);
+    let cancel = platform.shutdown_token().clone();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(SCHEDULER_ROUND).await;
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = tokio::time::sleep(SCHEDULER_ROUND) => {}
+            }
+            let Some(platform) = weak.upgrade() else {
+                return;
+            };
             if let Err(err) = platform.run_scheduled_backups().await {
                 tracing::error!(err = format!("{err:#}"), "the backup scheduler failed");
             }

@@ -67,6 +67,7 @@ impl Platform {
         id: ShortId,
         volume: &str,
     ) -> anyhow::Result<VolumeBackupEntry> {
+        let _guard = self.track_job();
         let (app, name, runtime) = self.file_runtime(id).await?;
         let mount = Self::find_volume_mount(&app, volume)?;
         let tar_bytes = runtime

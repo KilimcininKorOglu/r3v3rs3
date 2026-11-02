@@ -37,11 +37,15 @@ impl Drop for ScheduledCommandLock {
 
 /// Spawns the background scheduler loop.
 pub fn spawn_command_scheduler(platform: &Arc<Platform>) {
-    let platform = Arc::downgrade(platform);
+    let weak = Arc::downgrade(platform);
+    let cancel = platform.shutdown_token().clone();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(SCHEDULER_INTERVAL).await;
-            let Some(platform) = platform.upgrade() else {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = tokio::time::sleep(SCHEDULER_INTERVAL) => {}
+            }
+            let Some(platform) = weak.upgrade() else {
                 break;
             };
             platform.run_due_commands().await;
@@ -118,6 +122,7 @@ impl Platform {
         &self,
         cmd_id: ShortId,
     ) -> anyhow::Result<ScheduledCommandRunResult> {
+        let _guard = self.track_job();
         let Some(cmd) = self.store.scheduled_command(cmd_id).await? else {
             anyhow::bail!("scheduled command {cmd_id} not found");
         };

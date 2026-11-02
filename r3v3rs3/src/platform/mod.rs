@@ -70,10 +70,13 @@ use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 use store::{GIT_TOKEN, PlatformStore, StoredEnv, StoredEnvGroup, Write};
 use tokio::sync::{Mutex, Semaphore, broadcast, mpsc};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
-use tracing::error;
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
 
 /// The database of the platform in the config directory.
 pub const DATABASE_FILE: &str = "r3v3rs3.db";
@@ -99,6 +102,17 @@ const MAX_ENV_VALUE_LENGTH: usize = 64 * 1024;
 /// The longest Git token.
 const MAX_GIT_TOKEN_LENGTH: usize = 4096;
 
+/// An RAII guard that tracks an active background platform job.
+pub struct JobGuard {
+    counter: Arc<AtomicUsize>,
+}
+
+impl Drop for JobGuard {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// The state of the platform after the start of the server.
 #[derive(Clone, Default)]
 pub enum PlatformHandle {
@@ -110,6 +124,12 @@ pub enum PlatformHandle {
 }
 
 impl PlatformHandle {
+    pub async fn shutdown(&self, timeout: Duration) {
+        if let Self::Ready(platform) = self {
+            platform.shutdown(timeout).await;
+        }
+    }
+
     pub fn pool(&self) -> Option<sqlx::SqlitePool> {
         match self {
             Self::Ready(platform) => Some(platform.pool().clone()),
@@ -134,7 +154,7 @@ impl PlatformHandle {
             Ok(platform) => {
                 let platform = Arc::new(platform);
                 tokio::spawn(publish::refresh(Arc::downgrade(&platform)));
-                backup::spawn_scheduler(platform.clone());
+                backup::spawn_scheduler(&platform);
                 metrics::spawn_collector(&platform);
                 image_check::spawn_checker(&platform);
                 scheduler::spawn_command_scheduler(&platform);
@@ -243,6 +263,10 @@ pub struct Platform {
     public_url: std::sync::RwLock<Option<PublicUrl>>,
     /// Records the last auto-upgrade attempt time for each target to avoid repeated attempts.
     agent_upgrade_attempts: std::sync::Mutex<HashMap<ShortId, std::time::Instant>>,
+    /// A cancellation token that fires when the platform is shutting down.
+    shutdown_token: CancellationToken,
+    /// Counter of active background jobs (deployments, backups, commands, prunes).
+    active_jobs: Arc<AtomicUsize>,
 }
 
 /// The public address of the config, or the address that an earlier release stored in the
@@ -326,6 +350,8 @@ impl Platform {
             renewing: Mutex::new(()),
             public_url: std::sync::RwLock::new(public_url),
             agent_upgrade_attempts: std::sync::Mutex::new(HashMap::new()),
+            shutdown_token: CancellationToken::new(),
+            active_jobs: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -378,6 +404,51 @@ impl Platform {
         } else {
             false
         }
+    }
+
+    pub fn track_job(&self) -> JobGuard {
+        self.active_jobs.fetch_add(1, Ordering::SeqCst);
+        JobGuard {
+            counter: self.active_jobs.clone(),
+        }
+    }
+
+    pub fn active_job_count(&self) -> usize {
+        self.active_jobs.load(Ordering::SeqCst)
+    }
+
+    pub fn shutdown_token(&self) -> &CancellationToken {
+        &self.shutdown_token
+    }
+
+    pub fn cancel_all_running_jobs(&self) {
+        let tokens: Vec<CancellationToken> = match self.cancellations.lock() {
+            Ok(mut map) => map.drain().map(|(_, token)| token).collect(),
+            Err(poisoned) => poisoned.into_inner().drain().map(|(_, token)| token).collect(),
+        };
+        for token in tokens {
+            token.cancel();
+        }
+    }
+
+    pub async fn shutdown(&self, timeout: Duration) {
+        info!("initiating graceful shutdown of platform background tasks");
+        self.shutdown_token.cancel();
+        self.cancel_all_running_jobs();
+        let started = std::time::Instant::now();
+        while self.active_job_count() > 0 && started.elapsed() < timeout {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if self.active_job_count() > 0 {
+            warn!(
+                active_jobs = self.active_job_count(),
+                ?timeout,
+                "platform graceful shutdown timed out with active jobs"
+            );
+        } else {
+            info!("platform drained all background jobs");
+        }
+        self.close().await;
     }
 
     pub fn check_and_record_delivery(&self, key: &str) -> Result<(), Error> {
@@ -2192,6 +2263,31 @@ mod tests {
                 .is_err()
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn platform_shutdown_cancels_jobs_and_drains() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        assert_eq!(platform.active_job_count(), 0);
+        let guard = platform.track_job();
+        assert_eq!(platform.active_job_count(), 1);
+
+        let job_id: ShortId = "job-1".parse().unwrap();
+        let token = tokio_util::sync::CancellationToken::new();
+        platform.register_cancellation(job_id, token.clone());
+        assert!(!token.is_cancelled());
+
+        // Spawn a background task to release the job after 50ms
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            drop(guard);
+        });
+
+        platform.shutdown(Duration::from_millis(500)).await;
+        assert!(token.is_cancelled());
+        assert!(platform.shutdown_token().is_cancelled());
+        assert_eq!(platform.active_job_count(), 0);
         Ok(())
     }
 }

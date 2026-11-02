@@ -1820,6 +1820,7 @@ impl ServerState {
     /// Opens or closes the platform for the config that `apply_config` keeps, so the
     /// settings page turns the deployment platform on and off while the server runs.
     async fn restart_platform(&mut self) {
+        self.platform.shutdown(Duration::from_secs(5)).await;
         self.platform = PlatformHandle::Disabled;
         if !self.config.platform.enabled {
             return;
@@ -1887,25 +1888,31 @@ impl ServerState {
         self.tcp_pool = TcpListenerPool::new();
         self.udp_pool = UdpListenerPool::new();
         self.quic_pool = QuicListenerPool::new();
+        let platform_drain = self.platform.shutdown(timeout);
+        let network_drain = async {
+            let started = std::time::Instant::now();
+            while crate::proxy::open_connections() > 0 {
+                if started.elapsed() >= timeout {
+                    warn!(
+                        connections = crate::proxy::open_connections(),
+                        ?timeout,
+                        "graceful drain timed out with open connections"
+                    );
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            info!("drained every open connection");
+        };
+        tokio::join!(platform_drain, network_drain);
+    }
+
+    pub async fn shutdown(mut self) {
         for port in self.ports.as_mut_slice() {
             port.reset();
         }
-        let started = std::time::Instant::now();
-        while crate::proxy::open_connections() > 0 {
-            if started.elapsed() >= timeout {
-                warn!(
-                    connections = crate::proxy::open_connections(),
-                    ?timeout,
-                    "graceful drain timed out with open connections"
-                );
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        info!("drained every open connection");
-    }
-
-    pub async fn shutdown(self) {
+        let timeout = self.config.shutdown_graceful_timeout;
+        self.platform.shutdown(timeout).await;
         std::mem::drop(self.quic_pool);
     }
 }

@@ -260,6 +260,7 @@ impl Platform {
         let platform = self.clone();
         let cancel_token = tokio_util::sync::CancellationToken::new();
         platform.register_cancellation(job.deployment, cancel_token.clone());
+        let _guard = platform.track_job();
         tokio::spawn(async move {
             tokio::select! {
                 _ = platform.run_job(&job) => {}
@@ -270,6 +271,7 @@ impl Platform {
             platform.remove_cancellation(job.deployment);
             drop(lock);
             platform.run_queued_hook(job.app).await;
+            drop(_guard);
         });
     }
 

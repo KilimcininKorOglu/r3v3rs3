@@ -144,7 +144,14 @@ impl Platform {
 pub async fn refresh(platform: Weak<Platform>) {
     let mut interval = tokio::time::interval(REFRESH_INTERVAL);
     loop {
-        interval.tick().await;
+        let cancel = match platform.upgrade() {
+            Some(p) => p.shutdown_token().clone(),
+            None => return,
+        };
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = interval.tick() => {}
+        }
         let Some(platform) = platform.upgrade() else {
             return;
         };

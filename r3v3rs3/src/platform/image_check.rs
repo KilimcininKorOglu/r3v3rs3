@@ -393,13 +393,17 @@ async fn check_all_apps(platform: &Arc<Platform>) {
 }
 
 pub fn spawn_checker(platform: &Arc<Platform>) {
-    let platform = Arc::downgrade(platform);
+    let weak = Arc::downgrade(platform);
+    let cancel = platform.shutdown_token().clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(CHECK_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            interval.tick().await;
-            let Some(platform) = platform.upgrade() else {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = interval.tick() => {}
+            }
+            let Some(platform) = weak.upgrade() else {
                 return;
             };
             check_all_apps(&platform).await;

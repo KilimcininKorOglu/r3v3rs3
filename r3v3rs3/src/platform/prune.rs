@@ -13,13 +13,17 @@ use std::time::Duration;
 use tracing::{error, info, warn};
 
 pub(super) fn spawn_prune_scheduler(platform: &Arc<Platform>) {
-    let platform = Arc::downgrade(platform);
+    let weak = Arc::downgrade(platform);
+    let cancel = platform.shutdown_token().clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            interval.tick().await;
-            let Some(platform) = platform.upgrade() else {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = interval.tick() => {}
+            }
+            let Some(platform) = weak.upgrade() else {
                 return;
             };
             if let Err(err) = check_and_run_prune(&platform).await {
@@ -30,6 +34,7 @@ pub(super) fn spawn_prune_scheduler(platform: &Arc<Platform>) {
 }
 
 async fn check_and_run_prune(platform: &Platform) -> anyhow::Result<()> {
+    let _guard = platform.track_job();
     let policy = platform.prune_policy().await?;
     if !policy.enabled {
         return Ok(());

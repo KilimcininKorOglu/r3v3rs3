@@ -22,7 +22,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
-use tracing::error;
+use tracing::{error, warn};
 
 /// The username of the deployments that a webhook starts.
 pub const HOOK_USERNAME: &str = "webhook";
@@ -1119,6 +1119,10 @@ impl Platform {
         id: ShortId,
     ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(async move {
+            if self.shutdown_token.is_cancelled() {
+                warn!(app = %id, "skipping queued webhook deployment during shutdown");
+                return;
+            }
             let Some(target_ref) = self.queued_hooks().remove(&id) else {
                 return;
             };
