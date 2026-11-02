@@ -109,6 +109,16 @@ async fn test_controller_backpressure_and_counters() {
     assert!(stats.total_requests >= initial_stats.total_requests + 2);
     assert!(stats.critical_requests > initial_stats.critical_requests);
     assert!(stats.background_requests > initial_stats.background_requests);
+
+    let permit = GLOBAL_STREAM_CONTROLLER.acquire_permit(bg);
+    assert!(GLOBAL_STREAM_CONTROLLER.stats().active_streams > 0);
+
+    // Throttle when max background concurrency is reached
+    assert!(GLOBAL_STREAM_CONTROLLER.should_throttle_background(1));
+    assert!(GLOBAL_STREAM_CONTROLLER.stats().throttled_background > initial_stats.throttled_background);
+
+    drop(permit);
+    assert!(!GLOBAL_STREAM_CONTROLLER.should_throttle_background(1));
 }
 
 #[tokio::test]

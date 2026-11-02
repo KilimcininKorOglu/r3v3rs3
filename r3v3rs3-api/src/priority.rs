@@ -5,9 +5,12 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 use utoipa::ToSchema;
 
+/// Default limit for concurrent low-priority background streams when adaptive concurrency is enabled.
+pub const DEFAULT_MAX_BACKGROUND_CONCURRENCY: usize = 32;
+
 /// Global singleton tracking stream priority metrics and adaptive backpressure.
-pub static GLOBAL_STREAM_CONTROLLER: LazyLock<AdaptiveStreamController> =
-    LazyLock::new(AdaptiveStreamController::new);
+pub static GLOBAL_STREAM_CONTROLLER: LazyLock<Arc<AdaptiveStreamController>> =
+    LazyLock::new(|| Arc::new(AdaptiveStreamController::new()));
 
 /// RFC 9218 Stream Priority parameters (`Priority: u=urgency, i=?incremental`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

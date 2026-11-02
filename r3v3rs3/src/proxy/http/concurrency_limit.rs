@@ -116,19 +116,25 @@ impl ConcurrencyRegistry {
 }
 
 pin_project_lite::pin_project! {
-    /// Wraps a response body and releases the concurrency permit when the body is dropped.
+    /// Wraps a response body and releases the concurrency permit and stream permit when the body is dropped.
     pub struct GuardedBody<B> {
         #[pin]
         inner: B,
         _guard: Option<ConcurrencyGuard>,
+        _stream_permit: Option<r3v3rs3_api::priority::StreamPermit>,
     }
 }
 
 impl<B> GuardedBody<B> {
-    pub fn new(inner: B, guard: Option<ConcurrencyGuard>) -> Self {
+    pub fn new(
+        inner: B,
+        guard: Option<ConcurrencyGuard>,
+        stream_permit: Option<r3v3rs3_api::priority::StreamPermit>,
+    ) -> Self {
         Self {
             inner,
             _guard: guard,
+            _stream_permit: stream_permit,
         }
     }
 }

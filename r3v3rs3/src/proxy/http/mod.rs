@@ -1001,6 +1001,7 @@ enum ProxiedRequest<R> {
         Span,
         Option<CacheRequest>,
         Option<concurrency_limit::ConcurrencyGuard>,
+        Option<r3v3rs3_api::priority::StreamPermit>,
     ),
     /// A response that r3v3rs3 sends without contacting the upstream server.
     Respond(Response<Full<Bytes>>),
@@ -1522,7 +1523,18 @@ where
     info!(target: "r3v3rs3::access_log", remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
     let span: Span = span!(Level::INFO, "http", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
 
-    apply_stream_priority(route, &mut req);
+    let stream_permit = match apply_stream_priority(route, &mut req) {
+        Ok(permit) => permit,
+        Err(err) => {
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
+            return (
+                ProxiedRequest::Err(err),
+                response_rewriter,
+                Some(resource_id),
+                client.ip,
+            );
+        }
+    };
 
     auth::remove_auth_cookies(req.headers_mut());
     let method = req.method().clone();
@@ -1547,16 +1559,26 @@ where
         super::stats::count_cache_bypass();
     }
     (
-        ProxiedRequest::Ok(req, upstream, span, cache_request, concurrency_guard),
+        ProxiedRequest::Ok(
+            req,
+            upstream,
+            span,
+            cache_request,
+            concurrency_guard,
+            stream_permit,
+        ),
         response_rewriter,
         Some(resource_id),
         client.ip,
     )
 }
 
-fn apply_stream_priority<B>(route: &FilteredRoute, req: &mut Request<B>) {
+fn apply_stream_priority<B>(
+    route: &FilteredRoute,
+    req: &mut Request<B>,
+) -> Result<Option<r3v3rs3_api::priority::StreamPermit>, ProxyError> {
     if !route.stream_priority.enabled {
-        return;
+        return Ok(None);
     }
     let client_priority = req.headers().get("priority").and_then(|v| v.to_str().ok());
     let path_and_query = req.uri().path_and_query().map_or("/", |p| p.as_str());
@@ -1571,6 +1593,15 @@ fn apply_stream_priority<B>(route: &FilteredRoute, req: &mut Request<B>) {
         &route.stream_priority,
     );
     r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER.record_request(&priority);
+
+    if route.stream_priority.adaptive_concurrency
+        && priority.is_background()
+        && r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER
+            .should_throttle_background(r3v3rs3_api::priority::DEFAULT_MAX_BACKGROUND_CONCURRENCY)
+    {
+        return Err(ProxyError::TooManyConcurrentRequests);
+    }
+
     if route.stream_priority.inject_header
         && let (Ok(hname), Ok(hval)) = (
             hyper::header::HeaderName::from_bytes(b"priority"),
@@ -1579,6 +1610,9 @@ fn apply_stream_priority<B>(route: &FilteredRoute, req: &mut Request<B>) {
     {
         req.headers_mut().insert(hname, hval);
     }
+    Ok(Some(
+        r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER.acquire_permit(priority),
+    ))
 }
 
 /// Applies the request header rules of the route and hands the response header rules to the
@@ -1848,7 +1882,7 @@ where
     B::Error: Into<anyhow::Error>,
 {
     match req {
-        ProxiedRequest::Ok(req, upstream, span, cache_request, guard) => {
+        ProxiedRequest::Ok(req, upstream, span, cache_request, guard, stream_permit) => {
             let req = req.map(|b| BoxBody::new(b.map_err(Into::into)));
             let res = cache::fetch(&upstream, req, cache_request)
                 .instrument(span)
@@ -1856,11 +1890,13 @@ where
             match res {
                 Ok(resp) => {
                     let (parts, body) = resp.into_parts();
-                    let guarded = concurrency_limit::GuardedBody::new(body, guard);
+                    let guarded =
+                        concurrency_limit::GuardedBody::new(body, guard, stream_permit);
                     Ok(Response::from_parts(parts, BoxBody::new(guarded)))
                 }
                 Err(err) => {
                     drop(guard);
+                    drop(stream_permit);
                     Err(err)
                 }
             }
