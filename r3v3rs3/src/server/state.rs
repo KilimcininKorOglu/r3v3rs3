@@ -1757,21 +1757,46 @@ impl ServerState {
         self.storage.save_ports(&backup.ports).await?;
         self.reload_ports().await;
 
-        self.storage.save_access_lists(&backup.access_lists).await?;
+        let mut access_lists = backup.access_lists;
+        restore_access_list_secrets(&mut access_lists, &self.access_lists);
+        self.storage.save_access_lists(&access_lists).await?;
         self.reload_access_lists().await;
 
         let mut proxies = backup.proxies;
-        for entry in &mut proxies {
-            if let Some(existing) = self.proxies.get(entry.id) {
-                super::credentials::restore_secrets(&mut entry.proxy, &existing.entry.proxy);
-            }
-        }
+        restore_proxy_secrets(&mut proxies, &self.proxies);
         self.storage.save_proxies(&proxies).await?;
         self.reload_manual_proxies().await;
+
+        self.restore_acme_configs(backup.acme).await?;
 
         self.set_config(backup.config).await?;
         self.reload_proxies().await;
         Ok(())
+    }
+
+    async fn restore_acme_configs(
+        &mut self,
+        backup_acme: Vec<r3v3rs3_api::config_backup::AcmeBackupEntry>,
+    ) -> Result<(), Error> {
+        let backup_ids: HashSet<ShortId> = backup_acme.iter().map(|e| e.id).collect();
+        for existing in self.acmes.entries() {
+            if !backup_ids.contains(&existing.id) {
+                self.storage.delete_acme(existing.id).await?;
+            }
+        }
+        for entry in backup_acme {
+            let id = entry.id;
+            let restored = restore_acme_entry(entry, self.acmes.get(id))?;
+            self.storage.save_acme(&restored).await?;
+        }
+        self.reload_acmes().await;
+        Ok(())
+    }
+
+    async fn reload_acmes(&mut self) {
+        let entries = self.storage.load_acmes().await;
+        self.acmes = entries.into_iter().collect();
+        self.update_acmes().await;
     }
 
     /// Opens or closes the platform for the config that `apply_config` keeps, so the
@@ -1898,6 +1923,52 @@ fn mask_acme_for_backup(state: &ServerState) -> Vec<r3v3rs3_api::config_backup::
             r3v3rs3_api::config_backup::AcmeBackupEntry { id: entry.id, acme }
         })
         .collect()
+}
+
+fn restore_access_list_secrets(
+    backup_lists: &mut [AccessListEntry],
+    existing_lists: &[AccessListEntry],
+) {
+    for entry in backup_lists {
+        if let Some(existing) = existing_lists.iter().find(|item| item.id == entry.id) {
+            let mut existing_auth = existing.list.auth.clone();
+            super::credentials::restore_policy(&mut entry.list.auth, &mut existing_auth);
+        }
+    }
+}
+
+fn restore_proxy_secrets(proxies: &mut [ProxyEntry], state_proxies: &ProxyList) {
+    for entry in proxies {
+        if let Some(existing) = state_proxies.get(entry.id) {
+            super::credentials::restore_secrets(&mut entry.proxy, &existing.entry.proxy);
+        }
+    }
+}
+
+fn restore_acme_entry(
+    backup_acme: r3v3rs3_api::config_backup::AcmeBackupEntry,
+    existing: Option<&AcmeEntry>,
+) -> Result<AcmeEntry, Error> {
+    let mut acme = backup_acme.acme;
+    let account = if let Some(existing) = existing {
+        acme.restore_secrets(&existing.acme);
+        existing.account.clone()
+    } else {
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        let key = rcgen::KeyPair::generate().map_err(|_| Error::FailedToSaveConfig)?;
+        let account = serde_json::from_value(serde_json::json!({
+            "id": format!("https://acme.internal/acct/{}", backup_acme.id),
+            "key_pkcs8": URL_SAFE_NO_PAD.encode(key.serialize_der()),
+            "directory": "https://acme.internal/directory",
+        }))
+        .map_err(|_| Error::FailedToSaveConfig)?;
+        Arc::new(account)
+    };
+    Ok(AcmeEntry {
+        id: backup_acme.id,
+        acme,
+        account,
+    })
 }
 
 fn serialize_table_for_backup<T: serde::Serialize>(

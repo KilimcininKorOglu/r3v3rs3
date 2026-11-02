@@ -116,6 +116,12 @@ impl Acme {
         }
     }
 
+    pub fn restore_secrets(&mut self, previous: &Self) {
+        if let (Some(provider), Some(old)) = (&mut self.dns_provider, &previous.dns_provider) {
+            provider.restore_secrets(old);
+        }
+    }
+
     /// Derives the target FQDN where TXT records should be placed when using a DNS alias pattern.
     pub fn compute_dns_alias_target(alias_pattern: &str, domain: &str) -> String {
         let clean_domain = domain.trim_start_matches("*.").trim_end_matches('.');
@@ -195,6 +201,12 @@ pub struct TokenProvider {
 impl TokenProvider {
     pub fn mask(&mut self) {
         self.api_token.clear();
+    }
+
+    pub fn restore_secrets(&mut self, previous: &Self) {
+        if self.api_token.is_empty() && self.provider == previous.provider {
+            self.api_token.clone_from(&previous.api_token);
+        }
     }
 }
 
@@ -324,6 +336,55 @@ impl KeyedProvider {
             }
         }
     }
+
+    pub fn restore_secrets(&mut self, previous: &Self) {
+        match (self, previous) {
+            (
+                Self::Route53 {
+                    secret_access_key, ..
+                },
+                Self::Route53 {
+                    secret_access_key: old,
+                    ..
+                },
+            ) => {
+                if secret_access_key.is_empty() {
+                    secret_access_key.clone_from(old);
+                }
+            }
+            (
+                Self::Porkbun { secret_api_key, .. },
+                Self::Porkbun {
+                    secret_api_key: old,
+                    ..
+                },
+            ) => {
+                if secret_api_key.is_empty() {
+                    secret_api_key.clone_from(old);
+                }
+            }
+            (
+                Self::Ovh {
+                    application_secret,
+                    consumer_key,
+                    ..
+                },
+                Self::Ovh {
+                    application_secret: old_sec,
+                    consumer_key: old_ck,
+                    ..
+                },
+            ) => {
+                if application_secret.is_empty() {
+                    application_secret.clone_from(old_sec);
+                }
+                if consumer_key.is_empty() {
+                    consumer_key.clone_from(old_ck);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// A cloud platform API that authenticates with a service account of the platform.
@@ -386,6 +447,36 @@ impl CloudProvider {
                 service_account_key,
                 ..
             } => service_account_key.clear(),
+        }
+    }
+
+    pub fn restore_secrets(&mut self, previous: &Self) {
+        match (self, previous) {
+            (
+                Self::Azure { client_secret, .. },
+                Self::Azure {
+                    client_secret: old, ..
+                },
+            ) => {
+                if client_secret.is_empty() {
+                    client_secret.clone_from(old);
+                }
+            }
+            (
+                Self::GoogleCloud {
+                    service_account_key,
+                    ..
+                },
+                Self::GoogleCloud {
+                    service_account_key: old,
+                    ..
+                },
+            ) => {
+                if service_account_key.is_empty() {
+                    service_account_key.clone_from(old);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -485,6 +576,27 @@ impl LocalProvider {
             Self::Rfc2136 { key_secret, .. } => key_secret.clear(),
         }
     }
+
+    pub fn restore_secrets(&mut self, previous: &Self) {
+        match (self, previous) {
+            (Self::Webhook { token, .. }, Self::Webhook { token: old, .. }) => {
+                if token.is_empty() {
+                    token.clone_from(old);
+                }
+            }
+            (
+                Self::Rfc2136 { key_secret, .. },
+                Self::Rfc2136 {
+                    key_secret: old, ..
+                },
+            ) => {
+                if key_secret.is_empty() {
+                    key_secret.clone_from(old);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Whether a webhook URL uses HTTPS, or HTTP on a loopback address.
@@ -523,6 +635,16 @@ impl DnsProvider {
             Self::Keyed(provider) => provider.mask(),
             Self::Cloud(provider) => provider.mask(),
             Self::Local(provider) => provider.mask(),
+        }
+    }
+
+    pub fn restore_secrets(&mut self, previous: &Self) {
+        match (self, previous) {
+            (Self::Token(provider), Self::Token(old)) => provider.restore_secrets(old),
+            (Self::Keyed(provider), Self::Keyed(old)) => provider.restore_secrets(old),
+            (Self::Cloud(provider), Self::Cloud(old)) => provider.restore_secrets(old),
+            (Self::Local(provider), Self::Local(old)) => provider.restore_secrets(old),
+            _ => {}
         }
     }
 

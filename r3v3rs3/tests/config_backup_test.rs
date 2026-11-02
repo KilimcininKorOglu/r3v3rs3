@@ -1,5 +1,7 @@
+use base64::Engine as _;
 use r3v3rs3::{
     accounts::Caller,
+    certs::acme::AcmeEntry,
     command::ServerCommand,
     config::storage::Storage,
     server::rpc::{
@@ -9,8 +11,10 @@ use r3v3rs3::{
 };
 use r3v3rs3_api::{
     access_list::{AccessList, AccessListEntry},
+    acme::{Acme, AcmeConfig, HTTP_01},
     app::AppConfig,
     config_backup::ConfigBackup,
+    policy::{AuthPolicy, BasicAuth, BasicAuthUser},
     proxy::HttpProxy,
 };
 use std::sync::{Arc, Mutex};
@@ -32,10 +36,40 @@ async fn export_and_import_config_backup_round_trip() -> anyhow::Result<()> {
         id: "list-1".parse()?,
         list: AccessList {
             name: "trusted".into(),
-            ..Default::default()
+            ip_filter: Default::default(),
+            auth: AuthPolicy::Basic(BasicAuth {
+                realm: "Test".into(),
+                user_file: None,
+                users: vec![BasicAuthUser {
+                    username: "alice".into(),
+                    password: "".into(),
+                    password_hash: "$argon2id$mockedhash".into(),
+                    password_set: true,
+                }],
+            }),
         },
     };
-    storage.save_access_lists(&[access_list_entry]).await?;
+    storage.save_access_lists(&[access_list_entry.clone()]).await?;
+
+    let key = rcgen::KeyPair::generate()?;
+    let account = serde_json::from_value(serde_json::json!({
+        "id": "https://acme.example/acct/1",
+        "key_pkcs8": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key.serialize_der()),
+        "directory": "https://acme.example/directory",
+    }))?;
+    let acme_entry = AcmeEntry {
+        id: "acme-1".parse()?,
+        acme: Acme {
+            config: AcmeConfig::default(),
+            identifiers: vec!["example.com".parse()?],
+            challenge_type: HTTP_01.to_string(),
+            dns_provider: None,
+            dns_credential: None,
+            dns_alias: None,
+        },
+        account: Arc::new(account),
+    };
+    storage.save_acme(&acme_entry).await?;
 
     let mut config = AppConfig::default();
     config.admin.max_login_attempts = 5;
@@ -68,7 +102,13 @@ async fn export_and_import_config_backup_round_trip() -> anyhow::Result<()> {
         assert_eq!(backup.ports.len(), 1);
         assert_eq!(backup.proxies.len(), 1);
         assert_eq!(backup.access_lists.len(), 1);
+        assert_eq!(backup.acme.len(), 1);
         assert_eq!(backup.config.admin.max_login_attempts, 5);
+
+        if let AuthPolicy::Basic(basic) = &backup.access_lists[0].list.auth {
+            assert!(basic.users[0].password_hash.is_empty());
+            assert!(basic.users[0].password_set);
+        }
 
         assert!(backup.files.contains_key("config.toml"));
         assert!(backup.files.contains_key("ports.toml"));
@@ -87,8 +127,9 @@ async fn export_and_import_config_backup_round_trip() -> anyhow::Result<()> {
         .take()
         .expect("exported backup missing");
 
-    // Clear storage to simulate a fresh second server
+    // Target storage with existing access list to verify secrets preservation
     let target_storage = TestStorage::builder().build();
+    target_storage.save_access_lists(&[access_list_entry]).await?;
 
     with_server(target_storage.clone(), |mut channels| async move {
         let arg = Box::new(RpcWrapper::new(ImportConfigBackup {
@@ -116,6 +157,11 @@ async fn export_and_import_config_backup_round_trip() -> anyhow::Result<()> {
     assert_eq!(target_storage.load_ports().await.len(), 1);
     assert_eq!(target_storage.load_proxies().await.len(), 1);
     assert_eq!(target_storage.load_access_lists().await.len(), 1);
+    assert_eq!(target_storage.load_acmes().await.len(), 1);
+    let restored_lists = target_storage.load_access_lists().await;
+    if let AuthPolicy::Basic(basic) = &restored_lists[0].list.auth {
+        assert_eq!(basic.users[0].password_hash, "$argon2id$mockedhash");
+    }
     assert_eq!(
         target_storage
             .load_app_config()
