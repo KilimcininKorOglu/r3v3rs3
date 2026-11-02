@@ -11,7 +11,7 @@ use hyper::{
     header::{
         ACCEPT_ENCODING, AGE, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LANGUAGE, CONTENT_LENGTH,
         CONTENT_RANGE, CONTENT_TYPE, DATE, ETAG, EXPIRES, HeaderName, IF_MODIFIED_SINCE,
-        IF_NONE_MATCH, LAST_MODIFIED, PRAGMA, RANGE, SET_COOKIE, UPGRADE, VARY,
+        IF_NONE_MATCH, LAST_MODIFIED, PRAGMA, RANGE, SET_COOKIE, TRANSFER_ENCODING, UPGRADE, VARY,
     },
     http::HeaderValue,
 };
@@ -585,6 +585,7 @@ impl CacheRequest {
             cache: self.cache.clone(),
             key: self.key.clone(),
             guard,
+            chunked: is_chunked(res.headers()),
         };
         res.map(|inner| BoxBody::new(RecordingBody { inner, recorder }))
     }
@@ -592,6 +593,9 @@ impl CacheRequest {
     fn storable_head(&self, res: &Response<ProxyBody>) -> Option<StoredHead> {
         let headers = res.headers();
         if self.head || !is_storable(res.status(), headers, self.authorized) {
+            return None;
+        }
+        if content_length(headers).is_none() && !is_chunked(headers) {
             return None;
         }
         let freshness = freshness(headers, self.cache.config.default_ttl);
@@ -857,6 +861,13 @@ fn is_cacheable_request<B>(req: &Request<B>) -> bool {
         && !has_directive(headers, CACHE_CONTROL, "no-store")
 }
 
+fn is_chunked(headers: &HeaderMap) -> bool {
+    headers
+        .get_all(TRANSFER_ENCODING)
+        .iter()
+        .any(|v| v.to_str().map(|s| s.eq_ignore_ascii_case("chunked")).unwrap_or(false))
+}
+
 /// Returns true when a comma-separated header has the directive, with or without a value.
 fn has_directive(headers: &HeaderMap, name: HeaderName, directive: &str) -> bool {
     header_items(headers, name).any(|item| {
@@ -997,37 +1008,49 @@ struct Recorder {
     cache: Arc<HttpCache>,
     key: String,
     guard: Option<FlightGuard>,
+    chunked: bool,
 }
 
 impl Recorder {
+    fn abort(&mut self) {
+        self.head = None;
+        self.buffer = BytesMut::new();
+        if let Some(guard) = self.guard.take() {
+            guard.finish();
+        }
+    }
+
     fn record(&mut self, frame: &Frame<Bytes>) {
         let Some(data) = frame.data_ref() else {
             // Trailers are not stored, so a response with trailers is not stored.
-            self.head = None;
+            self.abort();
             return;
         };
         if self.head.is_none() {
             return;
         }
         if (self.buffer.len() + data.len()) as u64 > self.max_size {
-            self.head = None;
+            self.abort();
             return;
         }
         self.buffer.extend_from_slice(data);
         if self.expected == Some(self.buffer.len() as u64) {
-            self.finish();
+            self.finish(true);
         }
     }
 
-    fn finish(&mut self) {
+    fn finish(&mut self, completed_cleanly: bool) {
         let guard = self.guard.take();
         let Some(head) = self.head.take() else {
+            self.buffer = BytesMut::new();
             return;
         };
         if self
             .expected
             .is_some_and(|length| length != self.buffer.len() as u64)
+            || (self.expected.is_none() && (!self.chunked || !completed_cleanly))
         {
+            self.buffer = BytesMut::new();
             return;
         }
         let entry = Arc::new(CachedResponse {
@@ -1073,12 +1096,15 @@ impl Body for RecordingBody {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, anyhow::Error>>> {
-        let this = self.project();
-        let frame = ready!(this.inner.poll_frame(cx));
+        let mut this = self.project();
+        let frame = ready!(this.inner.as_mut().poll_frame(cx));
         match &frame {
             Some(Ok(frame)) => this.recorder.record(frame),
-            Some(Err(_)) => this.recorder.head = None,
-            None => this.recorder.finish(),
+            Some(Err(_)) => this.recorder.abort(),
+            None => {
+                let clean = this.inner.is_end_stream();
+                this.recorder.finish(clean);
+            }
         }
         Poll::Ready(frame)
     }
@@ -1378,5 +1404,77 @@ mod tests {
         assert!(!res.headers().contains_key(CONTENT_RANGE));
         assert!(!res.headers().contains_key(CONTENT_LENGTH));
         assert_eq!(res.headers().get(ETAG).unwrap(), "\"v1\"");
+    }
+
+    #[test]
+    fn unchunked_responses_without_content_length_are_not_storable() {
+        let cache = Arc::new(HttpCache::new(CacheConfig::default(), None));
+        let req = CacheRequest {
+            cache,
+            key: "test-key".into(),
+            head: false,
+            headers: HeaderMap::new(),
+            lookup: true,
+            authorized: false,
+        };
+        let res = Response::builder()
+            .status(StatusCode::OK)
+            .header(CACHE_CONTROL, "max-age=60")
+            .body(BoxBody::new(Full::new(Bytes::new()).map_err(Into::into)))
+            .unwrap();
+        assert!(req.storable_head(&res).is_none());
+
+        let chunked_res = Response::builder()
+            .status(StatusCode::OK)
+            .header(CACHE_CONTROL, "max-age=60")
+            .header(TRANSFER_ENCODING, "chunked")
+            .body(BoxBody::new(Full::new(Bytes::new()).map_err(Into::into)))
+            .unwrap();
+        assert!(req.storable_head(&chunked_res).is_some());
+    }
+
+    #[test]
+    fn aborted_or_unclean_chunked_stream_is_not_stored_and_frees_buffer() {
+        let cache = Arc::new(HttpCache::new(CacheConfig::default(), None));
+        let mut recorder = Recorder {
+            head: Some(StoredHead {
+                status: StatusCode::OK,
+                headers: HeaderMap::new(),
+                vary: vec![],
+                initial_age: Duration::ZERO,
+                freshness: Duration::from_secs(60),
+            }),
+            buffer: BytesMut::from(&b"partial data"[..]),
+            expected: None,
+            max_size: 10,
+            cache: cache.clone(),
+            key: "chunked-key".into(),
+            guard: None,
+            chunked: true,
+        };
+
+        recorder.record(&Frame::data(Bytes::from_static(b"extra overflow")));
+        assert!(recorder.head.is_none());
+        assert!(recorder.buffer.is_empty());
+
+        let mut unclean_recorder = Recorder {
+            head: Some(StoredHead {
+                status: StatusCode::OK,
+                headers: HeaderMap::new(),
+                vary: vec![],
+                initial_age: Duration::ZERO,
+                freshness: Duration::from_secs(60),
+            }),
+            buffer: BytesMut::from(&b"truncated"[..]),
+            expected: None,
+            max_size: 100,
+            cache: cache.clone(),
+            key: "truncated-key".into(),
+            guard: None,
+            chunked: true,
+        };
+        unclean_recorder.finish(false);
+        assert!(cache.entries.get("truncated-key").is_none());
+        assert!(unclean_recorder.buffer.is_empty());
     }
 }
