@@ -52,19 +52,19 @@ async fn verify_totp_preconditions(
     state: &AppState,
     token: Option<&str>,
     username: &str,
-) -> Result<(), Error> {
+) -> Result<SessionRecord, Error> {
     let Some(token) = token else {
         return Err(Error::InvalidLoginCredentials);
     };
-    if !verify_login_session(state, token, username).await {
+    let Some(record) = verify_login_session(state, token, username).await else {
         return Err(Error::InvalidLoginCredentials);
-    }
+    };
     let mut data = state.data.lock().await;
     let reset = data.config.admin.login_attempts_reset;
     if data.totp_attempts.is_account_blocked(username, reset, Instant::now()) {
         return Err(Error::TooManyLoginAttempts);
     }
-    Ok(())
+    Ok(record)
 }
 
 async fn verify_pre_login_conditions(
@@ -72,10 +72,12 @@ async fn verify_pre_login_conditions(
     jar: &CookieJar,
     request: &LoginRequest,
     attempt_key: &LoginAttemptKey,
-) -> Result<(), Error> {
+) -> Result<Option<SessionRecord>, Error> {
     let token = jar.get(ADMIN_SESSION_COOKIE).map(|c| c.value());
+    let mut login_record = None;
     if let LoginMethod::Totp { .. } = &request.method {
-        verify_totp_preconditions(state, token, &attempt_key.1).await?;
+        let rec = verify_totp_preconditions(state, token, &attempt_key.1).await?;
+        login_record = Some(rec);
     }
     if let LoginMethod::Passkey {
         ref client_data_json,
@@ -85,7 +87,7 @@ async fn verify_pre_login_conditions(
     {
         return Err(Error::InvalidLoginCredentials);
     }
-    Ok(())
+    Ok(login_record)
 }
 
 async fn cleanup_login_session(state: &AppState, token: &str, username: &str) {
@@ -183,11 +185,16 @@ pub async fn login(
     let is_totp = matches!(request.method, LoginMethod::Totp { .. });
     let login_cookie_token = jar.get(ADMIN_SESSION_COOKIE).map(|c| c.value().to_string());
 
-    if let Err(err) = verify_pre_login_conditions(&state, &jar, &request, &attempt_key).await {
-        record_login_failure(&state, attempt_key).await;
-        return Err(err.into());
-    }
+    let login_record = match verify_pre_login_conditions(&state, &jar, &request, &attempt_key).await
+    {
+        Ok(rec) => rec,
+        Err(err) => {
+            record_login_failure(&state, attempt_key).await;
+            return Err(err.into());
+        }
+    };
 
+    let start_record = SessionRecord::new(&username);
     let insecure = request.insecure;
     let result = match state.call_system(VerifyAccount { request }).await {
         Ok(result) => result,
@@ -200,23 +207,23 @@ pub async fn login(
         }
     };
 
-    let scope = match *result {
+    let (scope, session_record) = match *result {
         LoginResponse::Success => {
             if let Some(token) = &login_cookie_token {
                 cleanup_login_session(&state, token, &username).await;
             }
             record_successful_login(&state, &username, &client_ip, &attempt_key).await;
-            SessionScope::Admin
+            (SessionScope::Admin, login_record.unwrap_or(start_record))
         }
         _ => {
             release_login_attempt(&state, &attempt_key).await;
-            SessionScope::Login
+            (SessionScope::Login, start_record)
         }
     };
 
     let (backend, expiry) = session_backend(&state).await;
     let token = backend
-        .create(scope, SessionRecord::new(&username), expiry)
+        .create(scope, session_record, expiry)
         .await?;
 
     // Lax instead of Strict, because the MCP authorization flow reaches /oauth/authorize as a
@@ -280,16 +287,26 @@ async fn record_login_failure(state: &AppState, key: LoginAttemptKey) {
     );
 }
 
-async fn verify_login_session(state: &AppState, token: &str, username: &str) -> bool {
+async fn verify_login_session(
+    state: &AppState,
+    token: &str,
+    username: &str,
+) -> Option<SessionRecord> {
     let (backend, expiry) = session_backend(state).await;
-    match backend.get(SessionScope::Login, token).await {
-        Ok(record) => {
-            record.is_some_and(|record| record.is_active(expiry) && record.subject == username)
-        }
+    let record = match backend.get(SessionScope::Login, token).await {
+        Ok(rec) => rec?,
         Err(err) => {
             warn!(%err, "failed to read the sign-in session");
-            false
+            return None;
         }
+    };
+    let is_active = record.is_active(expiry);
+    let is_user = record.subject == username;
+    let has_caller = state.accounts.borrow().caller(&record).is_some();
+    if is_active && is_user && has_caller {
+        Some(record)
+    } else {
+        None
     }
 }
 
