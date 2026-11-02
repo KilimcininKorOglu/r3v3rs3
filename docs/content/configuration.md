@@ -626,7 +626,7 @@ routes = [
 - r3v3rs3 removes the cookie from the request, so the upstream server does not receive it.
 - The cookie has the `Path` of the route, `HttpOnly` and `SameSite=Lax`. On HTTPS and HTTP/3 it also has `Secure`. `sticky.max_age` sets `Max-Age`. Without `max_age`, the cookie ends with the browser session.
 - The name must be a cookie token of RFC 6265: visible ASCII characters without spaces and separators.
-- r3v3rs3 creates a new signature key at each start. After a restart, the old cookies are invalid, and each client gets a server from `load_balancing` again.
+- The signature key is derived from the master encryption key in `r3v3rs3.key`. Sticky cookies remain valid across process restarts, zero-downtime upgrades, and worker respawns.
 - A response from the cache does not set the cookie.
 
 A TCP or UDP proxy, and a client that does not keep cookies, can use `load_balancing = "client_ip_hash"` instead.

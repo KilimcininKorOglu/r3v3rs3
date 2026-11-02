@@ -626,7 +626,7 @@ routes = [
 - r3v3rs3 cookie'yi istekten siler, bu yüzden upstream sunucu cookie'yi almaz.
 - Cookie route'un `Path` değerini, `HttpOnly` ve `SameSite=Lax` özelliklerini taşır. HTTPS ve HTTP/3'te `Secure` de eklenir. `sticky.max_age`, `Max-Age` değerini belirler. `max_age` yoksa cookie tarayıcı kapanınca silinir.
 - Ad, RFC 6265'teki cookie token kuralına uymalıdır: boşluk ve ayırıcı karakter içermeyen görünür ASCII karakterler.
-- r3v3rs3 her başlangıçta yeni bir imza key'i üretir. Yeniden başlatmadan sonra eski cookie'ler geçersiz olur ve her istemci sunucusunu yine `load_balancing` ile alır.
+- İmza key'i `r3v3rs3.key` dosyasındaki ana şifreleme anahtarından türetilir. Sticky cookie'ler süreç yeniden başlatmalarında, kesintisiz yükseltmelerde ve worker yenilenmelerinde geçerliliğini korur.
 - Cache'ten gelen yanıt cookie yazmaz.
 
 TCP veya UDP proxy ve cookie saklamayan istemciler bunun yerine `load_balancing = "client_ip_hash"` kullanabilir.

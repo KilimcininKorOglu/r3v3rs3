@@ -2,13 +2,17 @@
 
 use super::cookie::{cookie_values, remove_cookie};
 use crate::proxy::health::GroupKey;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use base64::{
+    Engine,
+    engine::general_purpose::URL_SAFE_NO_PAD,
+    prelude::BASE64_STANDARD,
+};
 use hmac::{Hmac, KeyInit, Mac};
 use hyper::header::{HeaderMap, HeaderValue};
-use once_cell::sync::Lazy;
 use r3v3rs3_api::{proxy::Server, upstream::StickyCookie};
 use sha2::Sha256;
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::sync::{Arc, Mutex, RwLock};
 use subtle::ConstantTimeEq;
 use tracing::error;
 
@@ -16,9 +20,77 @@ use tracing::error;
 /// the client keeps its server.
 pub type CookieSlot = Arc<Mutex<Option<HeaderValue>>>;
 
-/// Signs the cookie values. Each start creates a new key, so the cookies of the previous process
-/// are invalid.
-static KEY: Lazy<[u8; 32]> = Lazy::new(rand::random);
+/// Signs the cookie values. Derived from the persistent master key (`r3v3rs3.key`) or generated
+/// randomly on demand when uninitialized.
+static KEY: RwLock<Option<[u8; 32]>> = RwLock::new(None);
+
+/// Derives a 32-byte HMAC key from a master key using domain separation.
+pub fn derive_affinity_key(master_key: &[u8]) -> [u8; 32] {
+    let mut mac = match Hmac::<Sha256>::new_from_slice(master_key) {
+        Ok(mac) => mac,
+        Err(_) => {
+            use sha2::Digest;
+            let mut hasher = Sha256::new();
+            hasher.update(master_key);
+            hasher.update(b"r3v3rs3-sticky-session-affinity-v1");
+            return hasher.finalize().into();
+        }
+    };
+    mac.update(b"r3v3rs3-sticky-session-affinity-v1");
+    mac.finalize().into_bytes().into()
+}
+
+/// Sets the global HMAC signing key for sticky session cookies.
+pub fn init_key(key: [u8; 32]) {
+    if let Ok(mut guard) = KEY.write() {
+        *guard = Some(key);
+    }
+}
+
+/// Initializes the affinity key by reading the persistent master key (`r3v3rs3.key`)
+/// from the configuration directory.
+pub fn init_from_config_dir(config_dir: &Path) {
+    let primary = config_dir.join("r3v3rs3.key");
+    let legacy = config_dir.join("platform.key");
+    let key_bytes = load_key_from_file(&primary).or_else(|| load_key_from_file(&legacy));
+    if let Some(bytes) = key_bytes {
+        init_key(derive_affinity_key(&bytes));
+    }
+}
+
+fn load_key_from_file(path: &Path) -> Option<Vec<u8>> {
+    let text = std::fs::read_to_string(path).ok()?;
+    parse_master_key_bytes(&text)
+}
+
+fn parse_master_key_bytes(text: &str) -> Option<Vec<u8>> {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#'))?;
+    BASE64_STANDARD.decode(line).ok()
+}
+
+fn get_key() -> [u8; 32] {
+    if let Ok(guard) = KEY.read() {
+        if let Some(key) = *guard {
+            return key;
+        }
+    }
+    generate_and_store_key()
+}
+
+fn generate_and_store_key() -> [u8; 32] {
+    if let Ok(mut guard) = KEY.write() {
+        if let Some(key) = *guard {
+            return key;
+        }
+        let generated: [u8; 32] = rand::random();
+        *guard = Some(generated);
+        return generated;
+    }
+    rand::random()
+}
 
 /// The sticky cookie of a route.
 #[derive(Debug)]
@@ -97,7 +169,8 @@ impl Affinity {
 
 /// The HMAC-SHA256 of the input with the process key, in unpadded base64url.
 fn sign(input: &str) -> Option<String> {
-    let mut mac = match Hmac::<Sha256>::new_from_slice(KEY.as_slice()) {
+    let key = get_key();
+    let mut mac = match Hmac::<Sha256>::new_from_slice(&key) {
         Ok(mac) => mac,
         Err(err) => {
             error!(%err, "failed to create the sticky cookie signer");
@@ -197,5 +270,26 @@ mod tests {
         );
         assert!(persistent.set_cookie(2, true).is_none());
         assert_ne!(cookie_value(&session, 0), cookie_value(&session, 1));
+    }
+
+    #[test]
+    fn affinity_key_is_persistent_when_derived_from_same_master_key() {
+        let master_key = b"01234567890123456789012345678901";
+        let derived1 = derive_affinity_key(master_key);
+        let derived2 = derive_affinity_key(master_key);
+        assert_eq!(derived1, derived2);
+
+        init_key(derived1);
+        let aff1 = affinity(0, "", None);
+        let val1 = cookie_value(&aff1, 0);
+
+        init_key(derived2);
+        let aff2 = affinity(0, "", None);
+        let val2 = cookie_value(&aff2, 0);
+
+        assert_eq!(val1, val2);
+
+        let req_headers = headers(&[&format!("r3v3rs3_affinity={val1}")]);
+        assert_eq!(aff2.pinned(&req_headers), Some(0));
     }
 }

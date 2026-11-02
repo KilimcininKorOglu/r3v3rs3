@@ -292,6 +292,7 @@ impl ServerState {
         if let Some(catalog) = storage.load_engines().await {
             crate::engines::install(catalog);
         }
+        crate::proxy::http::affinity::init_from_config_dir(config_dir);
 
         let certs = storage.load_certs().await;
         let acmes = storage.load_acmes().await;
