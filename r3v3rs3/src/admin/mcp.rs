@@ -4212,6 +4212,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         require_edit(&parts)?;
         let caller = caller_of(&parts)?;
+        caller.authorize(Permission::Edit).map_err(tool_error)?;
         let conn_id = params
             .id
             .parse::<ShortId>()
@@ -4236,8 +4237,10 @@ impl McpServer {
     )]
     async fn get_ct_monitor_config(
         &self,
-        Extension(_parts): Extension<Parts>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        caller.authorize(Permission::Read).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
         let monitor = crate::certs::ct::get_or_init_state(&config_dir);
         json_result(monitor.get_config())
@@ -4254,6 +4257,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         require_edit(&parts)?;
         let caller = caller_of(&parts)?;
+        caller.authorize(Permission::Edit).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
         let monitor = crate::certs::ct::get_or_init_state(&config_dir);
         let mut config = monitor.get_config();
@@ -4277,8 +4281,10 @@ impl McpServer {
     )]
     async fn get_ct_monitor_status(
         &self,
-        Extension(_parts): Extension<Parts>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        caller.authorize(Permission::Read).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
         let monitor = crate::certs::ct::get_or_init_state(&config_dir);
         json_result(monitor.get_status())
@@ -4291,8 +4297,10 @@ impl McpServer {
     async fn list_ct_log_entries(
         &self,
         Parameters(params): Parameters<ListCtEntriesParams>,
-        Extension(_parts): Extension<Parts>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        caller.authorize(Permission::Read).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
         let monitor = crate::certs::ct::get_or_init_state(&config_dir);
         let query = r3v3rs3_api::ct::CtEntriesQuery {
@@ -4314,6 +4322,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         require_edit(&parts)?;
         let caller = caller_of(&parts)?;
+        caller.authorize(Permission::Edit).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
         let monitor = crate::certs::ct::get_or_init_state(&config_dir);
         let count = monitor
@@ -4344,6 +4353,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         require_edit(&parts)?;
         let caller = caller_of(&parts)?;
+        caller.authorize(Permission::Edit).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
         let monitor = crate::certs::ct::get_or_init_state(&config_dir);
         let status = match params.status.as_deref() {
