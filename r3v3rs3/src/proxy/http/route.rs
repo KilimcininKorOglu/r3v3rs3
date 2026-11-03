@@ -109,11 +109,17 @@ impl Router {
                     .stream_priority
                     .map(Arc::new)
                     .unwrap_or_else(|| Arc::new(http.stream_priority.clone()));
+                let route_path = if route.path.is_empty() {
+                    "/".to_string()
+                } else {
+                    route.path.clone()
+                };
                 routes.push(FilteredRoute {
                     resource_id: id,
                     metric_key: entry_source.as_ref().map(|source| source.resource.clone()),
                     filter,
                     base_path,
+                    route_path,
                     https_port,
                     quic_port,
                     upgrade_insecure: http.upgrade_insecure,
@@ -262,6 +268,12 @@ impl ProxyUpstream {
         );
         group.set_geoip(self.geoip.clone());
         Some(Upstream {
+            proxy_id: key.0,
+            route_path: if route.path.is_empty() {
+                "/".to_string()
+            } else {
+                route.path.clone()
+            },
             pool,
             request_timeout: timeouts.request,
             servers: servers.into(),
@@ -348,6 +360,7 @@ pub struct FilteredRoute {
     pub filter: RequestFilter,
     /// Path of the route without a trailing slash, e.g. `/admin`. Empty for `/`.
     pub base_path: String,
+    pub route_path: String,
     pub https_port: Option<u16>,
     pub quic_port: Option<u16>,
     pub upgrade_insecure: bool,

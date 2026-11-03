@@ -270,6 +270,8 @@ fn is_timeout(err: &(dyn std::error::Error + 'static)) -> bool {
 /// The upstream servers of a route, their connections and the time limit of their requests.
 #[derive(Debug, Clone)]
 pub struct Upstream {
+    pub proxy_id: ShortId,
+    pub route_path: String,
     pub pool: Arc<ConnectionPool>,
     /// `Duration::ZERO` disables the limit.
     pub request_timeout: Duration,
@@ -422,7 +424,12 @@ impl Upstream {
                 err
             }
         });
-        finish(result)
+        let proxy_id = self.proxy_id.to_string();
+        finish(
+            result,
+            Some(&proxy_id),
+            Some(&self.route_path),
+        )
     }
 
     /// Starts the copy of the request for the mirror servers when the mirror admits the request.
@@ -649,11 +656,17 @@ fn is_dot_segment(segment: &str) -> bool {
 /// Logs a failed request, and turns the error into the error response for the client.
 fn finish(
     result: Result<Response<ProxyBody>, SendError>,
+    proxy: Option<&str>,
+    route: Option<&str>,
 ) -> Result<Response<ProxyBody>, anyhow::Error> {
     let result = result.map_err(|err| err.error);
     if let Err(err) = &result {
         error!(%err);
-        crate::proxy::stats::count_upstream_error_kind(classify_upstream_error(err.as_ref()));
+        crate::proxy::stats::count_upstream_error_with_kind(
+            proxy,
+            route,
+            classify_upstream_error(err.as_ref()),
+        );
     }
     ResponseRewriter::default().map_response(result)
 }

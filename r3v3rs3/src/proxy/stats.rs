@@ -2,8 +2,8 @@
 //! one process: with worker mode, the worker serves the ports and keeps its own counters.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const HISTOGRAM_BUCKETS: [f64; 11] = [
@@ -48,6 +48,38 @@ static UPSTREAM_ERROR_OTHER: AtomicU64 = AtomicU64::new(0);
 /// names its proxy after its id, so the collector reads the requests of an app here.
 static RESOURCE_REQUESTS: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RouteKey {
+    pub proxy: String,
+    pub route: String,
+}
+
+impl RouteKey {
+    pub fn new(proxy: Option<&str>, route: Option<&str>) -> Self {
+        Self {
+            proxy: proxy.unwrap_or_default().to_string(),
+            route: route.unwrap_or_default().to_string(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct RouteCounters {
+    requests: AtomicU64,
+    upstream_errors: AtomicU64,
+    buckets: [AtomicU64; HISTOGRAM_BUCKETS.len()],
+    duration_sum_micros: AtomicU64,
+    duration_count: AtomicU64,
+}
+
+static ROUTE_COUNTERS: Mutex<BTreeMap<RouteKey, Arc<RouteCounters>>> = Mutex::new(BTreeMap::new());
+
+fn get_or_create_route(proxy: Option<&str>, route: Option<&str>) -> Arc<RouteCounters> {
+    let key = RouteKey::new(proxy, route);
+    let mut map = ROUTE_COUNTERS.lock().unwrap();
+    map.entry(key).or_default().clone()
+}
+
 /// The proxy counters of this process.
 #[derive(Default)]
 struct Counters {
@@ -91,8 +123,10 @@ impl Counters {
 }
 
 /// Counts one served HTTP request on a TCP or TLS port.
-pub(crate) fn count_http_request() {
+pub(crate) fn count_http_request(proxy: Option<&str>, route: Option<&str>) {
     COUNTERS.http_requests.fetch_add(1, Ordering::Relaxed);
+    let rc = get_or_create_route(proxy, route);
+    rc.requests.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Counts one served request of the resource with this id, for example the app behind a
@@ -112,13 +146,24 @@ pub(crate) fn snapshot_resources() -> Vec<(String, u64)> {
 }
 
 /// Counts one served HTTP/3 request on a QUIC port.
-pub(crate) fn count_h3_request() {
+pub(crate) fn count_h3_request(proxy: Option<&str>, route: Option<&str>) {
     COUNTERS.h3_requests.fetch_add(1, Ordering::Relaxed);
+    let rc = get_or_create_route(proxy, route);
+    rc.requests.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Counts an upstream failure of a specific kind.
 pub(crate) fn count_upstream_error_kind(kind: UpstreamErrorKind) {
-    COUNTERS.upstream_errors.fetch_add(1, Ordering::Relaxed);
+    count_upstream_error_with_kind(None, None, kind);
+}
+
+/// Counts an upstream error for a specific proxy and route with failure kind.
+pub(crate) fn count_upstream_error_with_kind(
+    proxy: Option<&str>,
+    route: Option<&str>,
+    kind: UpstreamErrorKind,
+) {
+    count_upstream_error(proxy, route);
     match kind {
         UpstreamErrorKind::Timeout => UPSTREAM_ERROR_TIMEOUT.fetch_add(1, Ordering::Relaxed),
         UpstreamErrorKind::Connect => UPSTREAM_ERROR_CONNECT.fetch_add(1, Ordering::Relaxed),
@@ -126,6 +171,13 @@ pub(crate) fn count_upstream_error_kind(kind: UpstreamErrorKind) {
         UpstreamErrorKind::NoRoute => UPSTREAM_ERROR_NO_ROUTE.fetch_add(1, Ordering::Relaxed),
         UpstreamErrorKind::Other => UPSTREAM_ERROR_OTHER.fetch_add(1, Ordering::Relaxed),
     };
+}
+
+/// Counts an upstream failure labeled by proxy and route.
+pub(crate) fn count_upstream_error(proxy: Option<&str>, route: Option<&str>) {
+    COUNTERS.upstream_errors.fetch_add(1, Ordering::Relaxed);
+    let rc = get_or_create_route(proxy, route);
+    rc.upstream_errors.fetch_add(1, Ordering::Relaxed);
 }
 
 /// The upstream errors partitioned by kind.
@@ -142,8 +194,40 @@ pub(crate) fn snapshot_upstream_errors() -> Vec<(&'static str, u64)> {
     ]
 }
 
+/// The HTTP requests partitioned by proxy and route.
+pub(crate) fn snapshot_http_requests() -> Vec<(String, String, u64)> {
+    let map = ROUTE_COUNTERS.lock().unwrap();
+    map.iter()
+        .map(|(k, v)| {
+            (
+                k.proxy.clone(),
+                k.route.clone(),
+                v.requests.load(Ordering::Relaxed),
+            )
+        })
+        .collect()
+}
+
+/// The upstream error totals partitioned by proxy and route.
+pub(crate) fn snapshot_upstream_error_totals() -> Vec<(String, String, u64)> {
+    let map = ROUTE_COUNTERS.lock().unwrap();
+    map.iter()
+        .map(|(k, v)| {
+            (
+                k.proxy.clone(),
+                k.route.clone(),
+                v.upstream_errors.load(Ordering::Relaxed),
+            )
+        })
+        .collect()
+}
+
 /// Records the observed duration of a served HTTP request.
-pub(crate) fn record_request_duration(duration: Duration) {
+pub(crate) fn record_request_duration(
+    duration: Duration,
+    proxy: Option<&str>,
+    route: Option<&str>,
+) {
     let secs = duration.as_secs_f64();
     let micros = duration.as_micros().min(u32::MAX as u128) as u32;
 
@@ -157,10 +241,24 @@ pub(crate) fn record_request_duration(duration: Duration) {
 
     let idx = (SAMPLE_CURSOR.fetch_add(1, Ordering::Relaxed) as usize) % SAMPLES_LEN;
     SAMPLES[idx].store(micros, Ordering::Relaxed);
+
+    let rc = get_or_create_route(proxy, route);
+    for (i, &limit) in HISTOGRAM_BUCKETS.iter().enumerate() {
+        if secs <= limit {
+            rc.buckets[i].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    rc.duration_count.fetch_add(1, Ordering::Relaxed);
+    rc.duration_sum_micros.fetch_add(micros as u64, Ordering::Relaxed);
 }
 
+/// A snapshot of latency histogram buckets, inf count, sum in seconds, and total count.
+pub type LatencyHistogramSnapshot = (Vec<(f64, u64)>, u64, f64, u64);
+/// A labeled latency histogram snapshot for a specific proxy and route.
+pub type LabeledLatencyHistogram = (String, String, LatencyHistogramSnapshot);
+
 /// The latency histogram buckets and summary: `(buckets, +Inf count, sum seconds, count)`.
-pub(crate) fn snapshot_latency_histogram() -> (Vec<(f64, u64)>, u64, f64, u64) {
+pub(crate) fn snapshot_latency_histogram() -> LatencyHistogramSnapshot {
     let count = DURATION_COUNT.load(Ordering::Relaxed);
     let sum = DURATION_SUM_MICROS.load(Ordering::Relaxed) as f64 / 1_000_000.0;
     let buckets = HISTOGRAM_BUCKETS
@@ -169,6 +267,23 @@ pub(crate) fn snapshot_latency_histogram() -> (Vec<(f64, u64)>, u64, f64, u64) {
         .map(|(i, &le)| (le, BUCKETS[i].load(Ordering::Relaxed)))
         .collect();
     (buckets, count, sum, count)
+}
+
+/// The latency histograms partitioned by proxy and route.
+pub(crate) fn snapshot_labeled_latency_histograms() -> Vec<LabeledLatencyHistogram> {
+    let map = ROUTE_COUNTERS.lock().unwrap();
+    map.iter()
+        .map(|(k, v)| {
+            let count = v.duration_count.load(Ordering::Relaxed);
+            let sum = v.duration_sum_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+            let buckets = HISTOGRAM_BUCKETS
+                .iter()
+                .enumerate()
+                .map(|(i, &le)| (le, v.buckets[i].load(Ordering::Relaxed)))
+                .collect();
+            (k.proxy.clone(), k.route.clone(), (buckets, count, sum, count))
+        })
+        .collect()
 }
 
 /// Returns the estimated p50, p95, and p99 latencies in seconds from the recent samples reservoir.
@@ -347,9 +462,9 @@ mod tests {
 
     #[test]
     fn latency_histogram_and_quantiles_record_values() {
-        record_request_duration(Duration::from_millis(10));
-        record_request_duration(Duration::from_millis(50));
-        record_request_duration(Duration::from_millis(100));
+        record_request_duration(Duration::from_millis(10), None, None);
+        record_request_duration(Duration::from_millis(50), None, None);
+        record_request_duration(Duration::from_millis(100), None, None);
 
         let (buckets, inf, sum, count) = snapshot_latency_histogram();
         assert!(count >= 3);
@@ -361,6 +476,40 @@ mod tests {
         assert!(p50 > 0.0);
         assert!(p95 >= p50);
         assert!(p99 >= p95);
+    }
+
+    #[test]
+    fn labeled_route_metrics_accumulate() {
+        let p = "proxy-test";
+        let r = "/api/v1";
+        count_http_request(Some(p), Some(r));
+        count_http_request(Some(p), Some(r));
+        count_upstream_error(Some(p), Some(r));
+        record_request_duration(Duration::from_millis(25), Some(p), Some(r));
+
+        let reqs = snapshot_http_requests();
+        let req_count = reqs
+            .iter()
+            .find(|(proxy, route, _)| proxy == p && route == r)
+            .map(|(_, _, c)| *c);
+        assert_eq!(req_count, Some(2));
+
+        let errs = snapshot_upstream_error_totals();
+        let err_count = errs
+            .iter()
+            .find(|(proxy, route, _)| proxy == p && route == r)
+            .map(|(_, _, c)| *c);
+        assert_eq!(err_count, Some(1));
+
+        let hist = snapshot_labeled_latency_histograms();
+        let item = hist
+            .iter()
+            .find(|(proxy, route, _)| proxy == p && route == r);
+        assert!(item.is_some());
+        let (_, _, (_, inf, sum, count)) = item.unwrap();
+        assert_eq!(*count, 1);
+        assert_eq!(*inf, 1);
+        assert!(*sum > 0.0);
     }
 
     #[test]

@@ -1661,12 +1661,12 @@ Stream prioritization can be managed directly from the WebUI:
 
 `GET /api/metrics` returns the counters of the running process in the Prometheus text format (`text/plain; version=0.0.4`):
 
-- `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: the proxied requests across TCP/TLS and QUIC.
+- `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: the proxied requests across TCP/TLS and QUIC, labeled by proxy ID (`proxy="..."`) and route (`route="..."`).
 - `r3v3rs3_rx_bytes_total`, `r3v3rs3_tx_bytes_total`: total network throughput in bytes received and transmitted to clients.
 - `r3v3rs3_http_responses_by_status_total`: HTTP responses partitioned by status class (`2xx`, `3xx`, `4xx`, `5xx`).
-- `r3v3rs3_upstream_errors_total`: the requests that were answered without a successful upstream response.
+- `r3v3rs3_upstream_errors_total`: the requests that were answered without a successful upstream response, labeled by proxy ID (`proxy="..."`) and route (`route="..."`).
 - `r3v3rs3_upstream_errors_by_kind_total`: upstream errors partitioned by failure kind (`timeout`, `connect`, `circuit_open`, `no_route`, `other`).
-- `r3v3rs3_http_request_duration_seconds`: request duration latency histogram with standard buckets (`0.005s` to `10s`), sum, and count.
+- `r3v3rs3_http_request_duration_seconds`: request duration latency histogram labeled by proxy ID (`proxy="..."`) and route (`route="..."`) with standard buckets (`0.005s` to `10s`), sum, and count.
 - `r3v3rs3_http_request_duration_quantiles_seconds`: recent request duration quantiles (`p50`, `p95`, `p99`) in seconds.
 - `r3v3rs3_tls_handshakes_total`, `r3v3rs3_tls_handshake_errors_total`: total completed and failed TLS handshakes.
 - `r3v3rs3_tls_handshake_duration_seconds`: TLS handshake duration latency histogram with buckets (`0.001s` to `2.5s`), sum, and count.

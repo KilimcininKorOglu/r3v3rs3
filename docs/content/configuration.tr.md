@@ -1661,12 +1661,12 @@ Akış önceliklendirmesi doğrudan WebUI üzerinden yönetilebilir:
 
 `GET /api/metrics` çalışan sürecin sayaçlarını Prometheus text formatında (`text/plain; version=0.0.4`) döndürür:
 
-- `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: TCP/TLS ve QUIC üzerinde proxy'lenen istekler.
+- `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: TCP/TLS ve QUIC üzerinde proxy'lenen istekler, proxy ID (`proxy="..."`) ve route (`route="..."`) etiketleriyle.
 - `r3v3rs3_rx_bytes_total`, `r3v3rs3_tx_bytes_total`: istemcilerden alınan ve istemcilere iletilen toplam ağ bant genişliği (bayt).
 - `r3v3rs3_http_responses_by_status_total`: durum sınıfına göre ayrılmış HTTP yanıtları (`2xx`, `3xx`, `4xx`, `5xx`).
-- `r3v3rs3_upstream_errors_total`: başarılı bir upstream yanıtı olmadan yanıtlanan istekler.
+- `r3v3rs3_upstream_errors_total`: başarılı bir upstream yanıtı olmadan yanıtlanan istekler, proxy ID (`proxy="..."`) ve route (`route="..."`) etiketleriyle.
 - `r3v3rs3_upstream_errors_by_kind_total`: hata türüne göre ayrılmış upstream hataları (`timeout`, `connect`, `circuit_open`, `no_route`, `other`).
-- `r3v3rs3_http_request_duration_seconds`: standart sepetlerle (`0.005s` - `10s`), toplam süre ve sayaç içeren istek gecikme histogramı.
+- `r3v3rs3_http_request_duration_seconds`: proxy ID (`proxy="..."`) ve route (`route="..."`) etiketli, standart sepetlerle (`0.005s` - `10s`), toplam süre ve sayaç içeren istek gecikme histogramı.
 - `r3v3rs3_http_request_duration_quantiles_seconds`: son isteklerin saniye cinsinden gecikme dilimleri (`p50`, `p95`, `p99`).
 - `r3v3rs3_tls_handshakes_total`, `r3v3rs3_tls_handshake_errors_total`: tamamlanan ve başarısız olan toplam TLS el sıkışmaları.
 - `r3v3rs3_tls_handshake_duration_seconds`: sepetlerle (`0.001s` - `2.5s`), toplam süre ve sayaç içeren TLS el sıkışma gecikme histogramı.

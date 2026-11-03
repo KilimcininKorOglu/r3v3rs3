@@ -616,7 +616,6 @@ async fn proxied_response(
     fronting: bool,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let start = std::time::Instant::now();
-    crate::proxy::stats::count_http_request();
     if let Some(cl) = req
         .headers()
         .get(hyper::header::CONTENT_LENGTH)
@@ -646,23 +645,33 @@ async fn proxied_response(
         .map(ToString::to_string);
     let (req, request_body) = buffer_request_body(req, is_websocket).await;
 
-    let (req, response_rewriter, resource_id, client_ip) = if fronting {
+    let (req, response_rewriter, resource_id, route_path, client_ip) = if fronting {
         (
             ProxiedRequest::Err(ProxyError::DomainFrontingDetected),
             ResponseRewriter::builder(),
+            None,
             None,
             info.remote.ip(),
         )
     } else {
         route_request(shared, req, info).await
     };
+    let proxy_id = resource_id.map(|id| id.to_string());
+    crate::proxy::stats::count_http_request(
+        proxy_id.as_deref(),
+        route_path.as_deref(),
+    );
     if shared.quarantine.is_quarantined(&client_ip) {
         return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
     }
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
     let duration = start.elapsed();
-    crate::proxy::stats::record_request_duration(duration);
+    crate::proxy::stats::record_request_duration(
+        duration,
+        proxy_id.as_deref(),
+        route_path.as_deref(),
+    );
 
     let country = shared.geoip.lookup_country(client_ip);
     check_and_record_quarantine(&shared.quarantine, client_ip, &uri, &mapped);
@@ -1139,6 +1148,7 @@ fn no_route_fallback<B>(
     ProxiedRequest<Request<B>>,
     ResponseRewriterBuilder,
     Option<ShortId>,
+    Option<String>,
     std::net::IpAddr,
 ) {
     let error_pages = shared.router.find_error_pages(request_host.as_deref());
@@ -1161,6 +1171,7 @@ fn no_route_fallback<B>(
         response_rewriter
             .error_pages(error_pages)
             .variables(fallback_vars),
+        None,
         None,
         info.remote.ip(),
     )
@@ -1204,6 +1215,7 @@ async fn route_request<B>(
     ProxiedRequest<Request<B>>,
     ResponseRewriterBuilder,
     Option<ShortId>,
+    Option<String>,
     std::net::IpAddr,
 )
 where
@@ -1215,6 +1227,7 @@ where
         return (
             ProxiedRequest::Respond(early_resp),
             ResponseRewriter::builder(),
+            None,
             None,
             info.remote.ip(),
         );
@@ -1230,6 +1243,7 @@ where
     let response_rewriter = configure_response_rewriter(response_rewriter, route, &req);
 
     let resource_id = route.resource_id;
+    let route_path = route.route_path.clone();
     if let Some(key) = &route.metric_key {
         crate::proxy::stats::count_resource_request(key);
     }
@@ -1253,6 +1267,7 @@ where
                 ProxiedRequest::Err(err),
                 response_rewriter,
                 Some(resource_id),
+                Some(route_path),
                 client.ip,
             );
         }
@@ -1264,6 +1279,7 @@ where
                 ProxiedRequest::Respond(*response),
                 response_rewriter,
                 Some(resource_id),
+                Some(route_path),
                 client.ip,
             );
         }
@@ -1292,7 +1308,13 @@ where
     let req = match authenticate_request(route, req, &auth_ctx, info, &client, &action).await {
         Ok(req) => req,
         Err(proxied) => {
-            return (*proxied, response_rewriter, Some(resource_id), client.ip);
+            return (
+                *proxied,
+                response_rewriter,
+                Some(resource_id),
+                Some(route_path),
+                client.ip,
+            );
         }
     };
     if let Some(response) =
@@ -1302,6 +1324,7 @@ where
             ProxiedRequest::Respond(response),
             response_rewriter,
             Some(resource_id),
+            Some(route_path),
             client.ip,
         );
     }
@@ -1312,6 +1335,7 @@ where
             ProxiedRequest::Err(err),
             response_rewriter,
             Some(resource_id),
+            Some(route_path),
             client.ip,
         );
     }
@@ -1324,6 +1348,7 @@ where
                 ProxiedRequest::Err(err),
                 response_rewriter,
                 Some(resource_id),
+                Some(route_path),
                 client.ip,
             );
         }
@@ -1470,6 +1495,7 @@ fn prepare_upstream_request<B>(
     ProxiedRequest<Request<B>>,
     ResponseRewriterBuilder,
     Option<ShortId>,
+    Option<String>,
     std::net::IpAddr,
 )
 where
@@ -1488,6 +1514,7 @@ where
         concurrency_guard,
     } = prepared;
     let resource_id = route.resource_id;
+    let route_path = route.route_path.clone();
     let secure = info.proto != "http";
     let sticky_cookie = match upstream.select(&mut req, res.path_segments, client.ip, secure) {
         Ok(sticky_cookie) => sticky_cookie,
@@ -1497,6 +1524,7 @@ where
                 ProxiedRequest::Err(err),
                 response_rewriter,
                 Some(resource_id),
+                Some(route_path),
                 client.ip,
             );
         }
@@ -1531,6 +1559,7 @@ where
                 ProxiedRequest::Err(err),
                 response_rewriter,
                 Some(resource_id),
+                Some(route_path),
                 client.ip,
             );
         }
@@ -1569,6 +1598,7 @@ where
         ),
         response_rewriter,
         Some(resource_id),
+        Some(route_path),
         client.ip,
     )
 }
@@ -1762,7 +1792,6 @@ where
     let enter = span.clone();
     let _enter = enter.enter();
 
-    crate::proxy::stats::count_h3_request();
     let shared = shared_cache.load();
     let info = RequestInfo {
         remote: ctx.remote,
@@ -1799,8 +1828,13 @@ where
     // The body is attached before routing, so an authenticator can read a form submission.
     let (mut send, recv) = stream.split();
     let body = BoxBody::new(StreamBody::new(StreamWrapper::<T> { stream: recv }));
-    let (req, response_rewriter, resource_id, client_ip) =
+    let (req, response_rewriter, resource_id, route_path, client_ip) =
         route_request(shared, req.map(|()| body), &info).await;
+    let proxy_id = resource_id.map(|id| id.to_string());
+    crate::proxy::stats::count_h3_request(
+        proxy_id.as_deref(),
+        route_path.as_deref(),
+    );
     if shared.quarantine.is_quarantined(&client_ip) {
         return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
     }
@@ -1808,7 +1842,11 @@ where
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
     let duration = start.elapsed();
-    crate::proxy::stats::record_request_duration(duration);
+    crate::proxy::stats::record_request_duration(
+        duration,
+        proxy_id.as_deref(),
+        route_path.as_deref(),
+    );
     let country = shared.geoip.lookup_country(client_ip);
     check_and_record_quarantine(&shared.quarantine, client_ip, &uri, &mapped);
     record_access_log(

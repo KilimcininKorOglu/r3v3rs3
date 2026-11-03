@@ -123,6 +123,9 @@ async fn the_metrics_need_a_session_or_a_bearer_token() -> anyhow::Result<()> {
                 "the metrics miss {name}"
             );
         }
+        assert!(body.contains("r3v3rs3_http_requests_total{proxy=\"\",route=\"\"}"));
+        assert!(body.contains("r3v3rs3_upstream_errors_total{proxy=\"\",route=\"\"}"));
+        assert!(body.contains("r3v3rs3_http_request_duration_seconds_bucket{proxy=\"\",route=\"\",le=\""));
         assert!(body.contains("status=\"2xx\""));
         assert!(body.contains("quantile=\"0.5\""));
         assert!(body.contains("quantile=\"0.95\""));

@@ -14,12 +14,7 @@ use axum::{
 use axum_extra::extract::CookieJar;
 
 /// The exported metrics with their Prometheus HELP and TYPE lines.
-const METRICS: [(&str, &str, &str); 11] = [
-    (
-        "r3v3rs3_http_requests_total",
-        "The proxied HTTP requests on the TCP and TLS ports of this process.",
-        "counter",
-    ),
+const METRICS: [(&str, &str, &str); 9] = [
     (
         "r3v3rs3_h3_requests_total",
         "The proxied HTTP/3 requests on the QUIC ports of this process.",
@@ -33,11 +28,6 @@ const METRICS: [(&str, &str, &str); 11] = [
     (
         "r3v3rs3_tx_bytes_total",
         "The total bytes transmitted to clients by this process.",
-        "counter",
-    ),
-    (
-        "r3v3rs3_upstream_errors_total",
-        "The requests that this process answered without a successful upstream response.",
         "counter",
     ),
     (
@@ -152,26 +142,87 @@ fn format_upstream_error_metrics(out: &mut String) {
     }
 }
 
+fn escape_label_value(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+fn format_http_request_metrics(out: &mut String) {
+    out.push_str("# HELP r3v3rs3_http_requests_total The proxied HTTP requests on the TCP and TLS ports of this process.\n");
+    out.push_str("# TYPE r3v3rs3_http_requests_total counter\n");
+    let items = stats::snapshot_http_requests();
+    if items.is_empty() {
+        out.push_str("r3v3rs3_http_requests_total{proxy=\"\",route=\"\"} 0\n");
+    } else {
+        for (proxy, route, count) in items {
+            let p = escape_label_value(&proxy);
+            let r = escape_label_value(&route);
+            out.push_str(&format!(
+                "r3v3rs3_http_requests_total{{proxy=\"{p}\",route=\"{r}\"}} {count}\n"
+            ));
+        }
+    }
+}
+
+fn format_upstream_error_total_metrics(out: &mut String) {
+    out.push_str("# HELP r3v3rs3_upstream_errors_total The requests that this process answered without a successful upstream response.\n");
+    out.push_str("# TYPE r3v3rs3_upstream_errors_total counter\n");
+    let items = stats::snapshot_upstream_error_totals();
+    if items.is_empty() {
+        out.push_str("r3v3rs3_upstream_errors_total{proxy=\"\",route=\"\"} 0\n");
+    } else {
+        for (proxy, route, count) in items {
+            let p = escape_label_value(&proxy);
+            let r = escape_label_value(&route);
+            out.push_str(&format!(
+                "r3v3rs3_upstream_errors_total{{proxy=\"{p}\",route=\"{r}\"}} {count}\n"
+            ));
+        }
+    }
+}
+
+fn format_single_latency_histogram(
+    out: &mut String,
+    proxy: &str,
+    route: &str,
+    buckets: &[(f64, u64)],
+    inf_count: u64,
+    sum: f64,
+    count: u64,
+) {
+    let p = escape_label_value(proxy);
+    let r = escape_label_value(route);
+    for (le, bucket_count) in buckets {
+        out.push_str(&format!(
+            "r3v3rs3_http_request_duration_seconds_bucket{{proxy=\"{p}\",route=\"{r}\",le=\"{le}\"}} {bucket_count}\n"
+        ));
+    }
+    out.push_str(&format!(
+        "r3v3rs3_http_request_duration_seconds_bucket{{proxy=\"{p}\",route=\"{r}\",le=\"+Inf\"}} {inf_count}\n"
+    ));
+    out.push_str(&format!(
+        "r3v3rs3_http_request_duration_seconds_sum{{proxy=\"{p}\",route=\"{r}\"}} {sum:.6}\n"
+    ));
+    out.push_str(&format!(
+        "r3v3rs3_http_request_duration_seconds_count{{proxy=\"{p}\",route=\"{r}\"}} {count}\n"
+    ));
+}
+
 fn format_latency_histogram_metrics(out: &mut String) {
     out.push_str(
         "# HELP r3v3rs3_http_request_duration_seconds HTTP request latencies in seconds.\n",
     );
     out.push_str("# TYPE r3v3rs3_http_request_duration_seconds histogram\n");
-    let (buckets, inf_count, sum, count) = stats::snapshot_latency_histogram();
-    for (le, bucket_count) in buckets {
-        out.push_str("r3v3rs3_http_request_duration_seconds_bucket{le=\"");
-        out.push_str(&le.to_string());
-        out.push_str("\"} ");
-        out.push_str(&bucket_count.to_string());
-        out.push('\n');
+    let items = stats::snapshot_labeled_latency_histograms();
+    if items.is_empty() {
+        let (buckets, inf, sum, count) = stats::snapshot_latency_histogram();
+        format_single_latency_histogram(out, "", "", &buckets, inf, sum, count);
+    } else {
+        for (proxy, route, (buckets, inf, sum, count)) in items {
+            format_single_latency_histogram(out, &proxy, &route, &buckets, inf, sum, count);
+        }
     }
-    out.push_str("r3v3rs3_http_request_duration_seconds_bucket{le=\"+Inf\"} ");
-    out.push_str(&inf_count.to_string());
-    out.push_str("\nr3v3rs3_http_request_duration_seconds_sum ");
-    out.push_str(&format!("{sum:.6}"));
-    out.push_str("\nr3v3rs3_http_request_duration_seconds_count ");
-    out.push_str(&count.to_string());
-    out.push('\n');
 }
 
 fn format_latency_quantile_metrics(out: &mut String) {
@@ -338,6 +389,8 @@ pub async fn metrics(
     let mut out = String::new();
     let values = stats::snapshot();
     format_basic_metrics(&mut out, &values);
+    format_http_request_metrics(&mut out);
+    format_upstream_error_total_metrics(&mut out);
     format_http_status_metrics(&mut out);
     format_upstream_error_metrics(&mut out);
     format_latency_histogram_metrics(&mut out);
