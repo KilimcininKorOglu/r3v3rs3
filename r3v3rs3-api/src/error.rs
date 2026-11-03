@@ -379,6 +379,9 @@ pub enum Error {
     #[error("health check path must start with / and only HTTP proxies use it: {path}")]
     InvalidHealthCheckPath { path: String },
 
+    #[error("active health check interval must be at least one second")]
+    InvalidHealthCheckInterval,
+
     #[error("at least one upstream server must have a weight above 0")]
     AllServersDrained,
 

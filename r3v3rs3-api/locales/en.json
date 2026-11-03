@@ -584,6 +584,7 @@
   "error.invalid_header_rule": "Invalid header rule: {rule}",
   "error.invalid_header_value": "Invalid header value: {value}",
   "error.invalid_health_check_path": "Health check path must start with /, and only HTTP proxies use a path: {path}",
+  "error.invalid_health_check_interval": "Active health check interval must be at least one second.",
   "error.invalid_listening_address": "Invalid listening address: {addr}",
   "error.invalid_login_credentials": "Invalid login credentials.",
   "error.invalid_passkey": "Invalid passkey credentials.",

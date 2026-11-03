@@ -584,6 +584,7 @@
   "error.invalid_header_rule": "Geçersiz header kuralı: {rule}",
   "error.invalid_header_value": "Geçersiz header değeri: {value}",
   "error.invalid_health_check_path": "Sağlık kontrolü yolu / ile başlamalıdır ve yalnız HTTP proxy'leri yol kullanır: {path}",
+  "error.invalid_health_check_interval": "Aktif sağlık kontrolü aralığı en az bir saniye olmalıdır.",
   "error.invalid_listening_address": "Geçersiz dinleme adresi: {addr}",
   "error.invalid_login_credentials": "Giriş bilgileri geçersiz.",
   "error.invalid_passkey": "Geçersiz passkey kimlik bilgileri.",

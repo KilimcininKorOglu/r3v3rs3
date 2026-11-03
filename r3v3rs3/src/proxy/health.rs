@@ -566,7 +566,10 @@ fn spawn_checker(group: &Arc<UpstreamGroup>) {
         return;
     };
     let weak = Arc::downgrade(group);
-    let interval = group.health_check.interval;
+    let interval = group
+        .health_check
+        .interval
+        .max(r3v3rs3_api::upstream::MIN_HEALTH_CHECK_INTERVAL);
     handle.spawn(async move {
         let mut ticks = tokio::time::interval(interval);
         ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);

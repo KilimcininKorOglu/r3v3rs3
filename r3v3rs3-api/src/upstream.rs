@@ -252,6 +252,9 @@ impl Default for HealthCheck {
     }
 }
 
+/// The minimum allowed interval for active background health checks.
+pub const MIN_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+
 impl HealthCheck {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
@@ -261,11 +264,23 @@ impl HealthCheck {
         !self.interval.is_zero()
     }
 
-    /// Rejects a zero fail timeout or check timeout, and a path that does not start with `/`.
-    /// Only an HTTP proxy can have a path or a gRPC health check service.
+    /// Rejects a zero fail timeout or check timeout, an active interval below 1 second,
+    /// and a path that does not start with `/`. Only an HTTP proxy can have a path or a gRPC health check service.
     pub fn validate(&self, http: bool) -> Result<(), Error> {
+        self.validate_intervals()?;
+        self.validate_path(http)
+    }
+
+    fn validate_intervals(&self) -> Result<(), Error> {
         validate_timeout(self.fail_timeout)?;
         validate_timeout(self.timeout)?;
+        if self.is_active() && self.interval < MIN_HEALTH_CHECK_INTERVAL {
+            return Err(Error::InvalidHealthCheckInterval);
+        }
+        Ok(())
+    }
+
+    fn validate_path(&self, http: bool) -> Result<(), Error> {
         if self.grpc_service.is_some() && !http {
             return Err(Error::InvalidHealthCheckPath {
                 path: "gRPC health check is only supported for HTTP proxies".to_string(),
@@ -670,6 +685,30 @@ mod tests {
             ..Default::default()
         };
         assert!(no_timeout.validate(true).is_err());
+    }
+
+    #[test]
+    fn active_health_check_requires_minimum_interval() {
+        let zero_interval = HealthCheck {
+            interval: Duration::ZERO,
+            ..Default::default()
+        };
+        assert!(zero_interval.validate(true).is_ok());
+
+        let sub_second = HealthCheck {
+            interval: Duration::from_millis(500),
+            ..Default::default()
+        };
+        assert!(matches!(
+            sub_second.validate(true),
+            Err(Error::InvalidHealthCheckInterval)
+        ));
+
+        let min_interval = HealthCheck {
+            interval: Duration::from_secs(1),
+            ..Default::default()
+        };
+        assert!(min_interval.validate(true).is_ok());
     }
 
     #[test]

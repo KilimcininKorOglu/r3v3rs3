@@ -341,6 +341,7 @@ mod tests {
             Error::InvalidTimeout,
             Error::InvalidDatagramSize,
             Error::InvalidHealthCheckPath { path: text() },
+            Error::InvalidHealthCheckInterval,
             Error::AllServersDrained,
             Error::InvalidCircuitBreaker,
             Error::InvalidRetryAttempts,
