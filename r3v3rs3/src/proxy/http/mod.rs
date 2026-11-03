@@ -46,6 +46,7 @@ use r3v3rs3_api::app::{Http2Limits, Http3Limits};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::port::{PortStatus, SocketState};
+use r3v3rs3_api::vhost::VirtualHost;
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry, proxy_protocol::ProxyProtocolReceive};
 use rewriter::{RequestRewriter, ResponseRewriter, ResponseRewriterBuilder};
 use std::{net::SocketAddr, ops::ControlFlow, sync::Arc, time::SystemTime};
@@ -468,7 +469,7 @@ async fn start(
     client: Client,
     tls: Option<PortTls>,
     http2: Http2Limits,
-    shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
+    mut shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
     stop_notifier: Arc<Notify>,
     span: Span,
 ) -> anyhow::Result<()> {
@@ -486,7 +487,13 @@ async fn start(
     spawn_pipe(stream, client_stream, stop_notifier, span.clone());
 
     if tls.is_some() && local.port() != 80 && first_byte != 0x16 {
-        spawn_redirect(server_stream, http2, span.clone());
+        spawn_redirect(
+            server_stream,
+            http2,
+            shared_cache.load().clone(),
+            local,
+            span.clone(),
+        );
         return Ok(());
     }
 
@@ -596,12 +603,22 @@ fn spawn_pipe(
 }
 
 /// Answers a plain HTTP request on a TLS port with a redirect to the secure address.
-fn spawn_redirect(server_stream: tokio::io::DuplexStream, limits: Http2Limits, span: Span) {
+fn spawn_redirect(
+    server_stream: tokio::io::DuplexStream,
+    limits: Http2Limits,
+    shared: Arc<SharedContext>,
+    local: SocketAddr,
+    span: Span,
+) {
     tokio::task::spawn(
         async move {
             let server_stream = TokioIo::new(server_stream);
+            let service = service_fn(move |req| {
+                let shared = shared.clone();
+                async move { redirect(req, &shared.router, local).await }
+            });
             if let Err(err) = http_server_builder(&limits)
-                .serve_connection(server_stream, service_fn(redirect))
+                .serve_connection(server_stream, service)
                 .await
             {
                 error!("Failed to serve the connection: {:?}", err);
@@ -1029,8 +1046,12 @@ pub struct Connection {
     pub tls: bool,
 }
 
-async fn redirect(req: hyper::Request<Incoming>) -> Result<Response<String>, hyper::http::Error> {
-    if let Ok(uri) = get_secure_uri(&req) {
+async fn redirect(
+    req: hyper::Request<Incoming>,
+    router: &Router,
+    local: SocketAddr,
+) -> Result<Response<String>, hyper::http::Error> {
+    if let Ok(uri) = get_secure_uri(&req, router, local) {
         Response::builder()
             .header("Location", uri.to_string())
             .status(StatusCode::PERMANENT_REDIRECT)
@@ -1042,11 +1063,40 @@ async fn redirect(req: hyper::Request<Incoming>) -> Result<Response<String>, hyp
     }
 }
 
-fn get_secure_uri(req: &hyper::Request<Incoming>) -> anyhow::Result<Uri> {
-    let mut parts = req.uri().clone().into_parts();
-    if let Some(host) = req.headers().get(HOST) {
-        parts.authority = Some(host.to_str()?.parse()?);
+fn is_valid_secure_redirect_host(host_clean: &str, router: &Router, local: SocketAddr) -> bool {
+    if host_clean.is_empty() {
+        return false;
     }
+    if is_local_or_ip(host_clean) || host_clean == local.ip().to_string() {
+        return true;
+    }
+    router.has_matching_vhost(host_clean)
+}
+
+fn is_local_or_ip(host: &str) -> bool {
+    host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host.parse::<std::net::IpAddr>().is_ok()
+}
+
+fn get_secure_uri(
+    req: &hyper::Request<Incoming>,
+    router: &Router,
+    local: SocketAddr,
+) -> anyhow::Result<Uri> {
+    let mut parts = req.uri().clone().into_parts();
+    let host_str = req
+        .headers()
+        .get(HOST)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default();
+    let host_only = host_str.split(':').next().unwrap_or(host_str);
+    let host_clean = host_only.trim_start_matches('[').trim_end_matches(']');
+    if !is_valid_secure_redirect_host(host_clean, router, local) {
+        anyhow::bail!("unrecognized host for secure redirect");
+    }
+    parts.authority = Some(host_str.parse()?);
     parts.scheme = Some(Scheme::HTTPS);
     Ok(Uri::from_parts(parts)?)
 }
@@ -1748,6 +1798,18 @@ fn rejected<R>(rejection: AuthRejection) -> ProxiedRequest<R> {
     }
 }
 
+fn is_valid_vhost_target(host_str: &str, vhosts: &[VirtualHost]) -> bool {
+    let host_only = host_str.split(':').next().unwrap_or(host_str);
+    let host_clean = host_only.trim_start_matches('[').trim_end_matches(']');
+    if host_clean.is_empty() {
+        return false;
+    }
+    if !vhosts.is_empty() {
+        return vhosts.iter().any(|vhost| vhost.test(host_clean));
+    }
+    is_local_or_ip(host_clean)
+}
+
 /// Builds the HTTPS redirect for a plain HTTP request when the route upgrades insecure requests.
 fn upgrade_redirect<B>(
     route: &FilteredRoute,
@@ -1758,8 +1820,12 @@ fn upgrade_redirect<B>(
     if proto != "http" || !route.upgrade_insecure {
         return None;
     }
+    let host_str = header_host?;
+    if !is_valid_vhost_target(host_str, &route.filter.vhosts) {
+        return None;
+    }
     let port = route.https_port?;
-    let mut parts = Parts::from(header_host?.parse::<Uri>().ok()?);
+    let mut parts = Parts::from(host_str.parse::<Uri>().ok()?);
     parts.scheme = Some(Scheme::HTTPS);
     if let Some(authority) = parts.authority {
         parts.authority = format!("{}:{}", authority.host(), port).parse().ok();
@@ -2254,5 +2320,32 @@ mod tests {
         let mut auth_headers = HeaderMap::new();
         auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer token123"));
         assert!(is_authorized_request_headers(&auth_headers, false));
+    }
+
+    #[test]
+    fn test_is_valid_vhost_target() {
+        let vhost: VirtualHost = "example.com".parse().unwrap();
+        let vhosts = vec![vhost];
+
+        assert!(is_valid_vhost_target("example.com", &vhosts));
+        assert!(is_valid_vhost_target("example.com:8080", &vhosts));
+        assert!(!is_valid_vhost_target("evil.com", &vhosts));
+        assert!(!is_valid_vhost_target("evil.com:8080", &vhosts));
+
+        let empty_vhosts: Vec<VirtualHost> = vec![];
+        assert!(is_valid_vhost_target("localhost", &empty_vhosts));
+        assert!(is_valid_vhost_target("127.0.0.1", &empty_vhosts));
+        assert!(is_valid_vhost_target("192.168.1.1:8080", &empty_vhosts));
+        assert!(!is_valid_vhost_target("evil.com", &empty_vhosts));
+    }
+
+    #[test]
+    fn test_is_valid_secure_redirect_host() {
+        let router = Router::default();
+        let local: SocketAddr = "127.0.0.1:443".parse().unwrap();
+
+        assert!(is_valid_secure_redirect_host("localhost", &router, local));
+        assert!(is_valid_secure_redirect_host("127.0.0.1", &router, local));
+        assert!(!is_valid_secure_redirect_host("evil.com", &router, local));
     }
 }

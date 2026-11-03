@@ -176,6 +176,13 @@ impl Router {
         }
         best.map(|(_, route)| (route.filter.result(req), route))
     }
+
+    /// Checks if a hostname matches any virtual host configured across any route in this router.
+    pub fn has_matching_vhost(&self, host: &str) -> bool {
+        self.routes
+            .iter()
+            .any(|r| r.filter.vhosts.iter().any(|vhost| vhost.test(host)))
+    }
 }
 
 fn resolve_route_limiters(
