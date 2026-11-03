@@ -1325,7 +1325,14 @@ impl Platform {
             return Ok(None);
         }
         let key_path = std::env::temp_dir().join(format!("sftp-key-{}", backup_id()));
-        tokio::fs::write(&key_path, secret).await?;
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create_new(true).mode(0o600);
+        let mut file = options
+            .open(&key_path)
+            .await
+            .with_context(|| format!("failed to create temporary key file {}", key_path.display()))?;
+        file.write_all(secret.as_bytes()).await?;
+        file.flush().await?;
         Ok(Some(key_path))
     }
 
@@ -3365,5 +3372,15 @@ mod tests {
         assert!(validate_backup_engine_format("mongodb", b"\x16\x00\x00\x00\x02name\x00").is_ok());
         assert!(validate_backup_engine_format("mongodb", b"REDIS0009").is_err());
         assert!(validate_backup_engine_format("mongodb", b"-- PostgreSQL dump").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_prepare_sftp_key_mode_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dummy_key = "-----BEGIN OPENSSH PRIVATE KEY-----\ndummy\n-----END OPENSSH PRIVATE KEY-----";
+        let key_path = Platform::prepare_sftp_key(dummy_key).await.unwrap().unwrap();
+        let meta = std::fs::metadata(&key_path).unwrap();
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        let _ = tokio::fs::remove_file(key_path).await;
     }
 }
