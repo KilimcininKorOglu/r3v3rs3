@@ -3353,6 +3353,7 @@ dependencies = [
  "dirs",
  "flate2",
  "hex",
+ "r3v3rs3-api",
  "rand 0.10.2",
  "reqwest",
  "rustls",

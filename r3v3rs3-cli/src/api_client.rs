@@ -1,7 +1,7 @@
 use anyhow::{Context, bail};
 use rand::distr::SampleString;
 use reqwest::Method;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 pub struct ApiClient {
     pub client: reqwest::Client,
@@ -42,51 +42,56 @@ pub struct SetPrunePolicyArgs {
     pub dangling_layers_only: Option<bool>,
 }
 
-fn apply_prune_args(cur: &mut Value, args: &SetPrunePolicyArgs) {
+fn apply_prune_args(cur: &mut r3v3rs3_api::platform::PrunePolicy, args: &SetPrunePolicyArgs) {
     if let Some(en) = args.enabled {
-        cur["enabled"] = json!(en);
+        cur.enabled = en;
     }
     if let Some(ref intv) = args.interval {
-        cur["interval"] = json!(intv);
+        cur.interval = intv.clone();
     }
     if let Some(dp) = args.disk_pressure {
-        cur["disk_pressure_threshold"] = json!(dp);
+        cur.disk_pressure_threshold = Some(dp);
     }
     apply_prune_flags(cur, args);
     apply_prune_limits(cur, args);
 }
 
-fn apply_prune_flags(cur: &mut Value, args: &SetPrunePolicyArgs) {
+fn apply_prune_flags(cur: &mut r3v3rs3_api::platform::PrunePolicy, args: &SetPrunePolicyArgs) {
     if let Some(pi) = args.prune_images {
-        cur["prune_images"] = json!(pi);
+        cur.prune_images = pi;
     }
     if let Some(pv) = args.prune_volumes {
-        cur["prune_volumes"] = json!(pv);
+        cur.prune_volumes = pv;
     }
     if let Some(pb) = args.prune_build_cache {
-        cur["prune_build_cache"] = json!(pb);
+        cur.prune_build_cache = pb;
     }
     if let Some(pc) = args.prune_containers {
-        cur["prune_containers"] = json!(pc);
+        cur.prune_containers = pc;
     }
     if let Some(pl) = args.prune_logs {
-        cur["prune_logs"] = json!(pl);
+        cur.prune_logs = pl;
     }
 }
 
-fn apply_prune_limits(cur: &mut Value, args: &SetPrunePolicyArgs) {
+fn apply_prune_limits(cur: &mut r3v3rs3_api::platform::PrunePolicy, args: &SetPrunePolicyArgs) {
     if let Some(lt) = args.log_threshold_mb {
-        cur["log_vacuum_threshold_mb"] = json!(lt);
+        cur.log_vacuum_threshold_mb = Some(lt);
     }
     if let Some(kc) = args.keep_cache_mb {
-        cur["build_cache_keep_storage_mb"] = json!(kc);
+        cur.build_cache_keep_storage_mb = Some(kc);
     }
     if let Some(kb) = args.kept_builds {
-        cur["kept_builds_count"] = json!(kb);
+        cur.kept_builds_count = Some(kb);
     }
     if let Some(dl) = args.dangling_layers_only {
-        cur["dangling_layers_only"] = json!(dl);
+        cur.dangling_layers_only = dl;
     }
+}
+
+pub fn load_typed_payload<T: serde::de::DeserializeOwned>(input: &str) -> anyhow::Result<T> {
+    let val = load_payload(input)?;
+    serde_json::from_value(val).context("failed to parse payload into domain type")
 }
 
 pub fn load_payload(input: &str) -> anyhow::Result<Value> {
@@ -127,20 +132,42 @@ fn build_registry_payload(
     username: Option<String>,
     password: Option<String>,
     payload: Option<String>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<r3v3rs3_api::platform::RegistryRequest> {
     if let Some(p) = payload {
-        load_payload(&p)
+        load_typed_payload(&p)
     } else {
         let s = server
             .ok_or_else(|| anyhow::anyhow!("--server is required when payload is omitted"))?;
         let u = username
             .ok_or_else(|| anyhow::anyhow!("--username is required when payload is omitted"))?;
-        Ok(json!({
-            "server": s,
-            "username": u,
-            "password": password,
-        }))
+        Ok(r3v3rs3_api::platform::RegistryRequest {
+            server: s,
+            username: u,
+            password,
+        })
     }
+}
+
+fn parse_git_provider(provider_str: &str) -> anyhow::Result<r3v3rs3_api::git_connection::GitProvider> {
+    match provider_str.to_ascii_lowercase().as_str() {
+        "github" => Ok(r3v3rs3_api::git_connection::GitProvider::Github),
+        "gitlab" => Ok(r3v3rs3_api::git_connection::GitProvider::Gitlab),
+        "gitea" => Ok(r3v3rs3_api::git_connection::GitProvider::Gitea),
+        other => anyhow::bail!("unknown provider: {other}. Expected github, gitlab, or gitea"),
+    }
+}
+
+fn parse_git_url(url: Option<String>) -> anyhow::Result<Option<r3v3rs3_api::git_connection::ProviderUrl>> {
+    match url {
+        Some(u) => Ok(Some(u.parse().map_err(|e| anyhow::anyhow!("invalid url: {e}"))?)),
+        None => Ok(None),
+    }
+}
+
+fn parse_git_name(name: Option<String>) -> anyhow::Result<r3v3rs3_api::container::AppName> {
+    name.ok_or_else(|| anyhow::anyhow!("--name is required when payload is omitted"))?
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid name: {e}"))
 }
 
 fn build_git_connection_payload(
@@ -150,24 +177,25 @@ fn build_git_connection_payload(
     client_id: Option<String>,
     client_secret: Option<String>,
     payload: Option<String>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<r3v3rs3_api::git_connection::GitConnectionRequest> {
     if let Some(p) = payload {
-        load_payload(&p)
-    } else {
-        let n =
-            name.ok_or_else(|| anyhow::anyhow!("--name is required when payload is omitted"))?;
-        let p = provider
-            .ok_or_else(|| anyhow::anyhow!("--provider is required when payload is omitted"))?;
-        let cid = client_id
-            .ok_or_else(|| anyhow::anyhow!("--client-id is required when payload is omitted"))?;
-        Ok(json!({
-            "name": n,
-            "provider": p,
-            "url": url,
-            "client_id": cid,
-            "client_secret": client_secret,
-        }))
+        return load_typed_payload(&p);
     }
+    let n = parse_git_name(name)?;
+    let p_str = provider
+        .ok_or_else(|| anyhow::anyhow!("--provider is required when payload is omitted"))?;
+    let p = parse_git_provider(&p_str)?;
+    let cid = client_id
+        .ok_or_else(|| anyhow::anyhow!("--client-id is required when payload is omitted"))?;
+    let parsed_url = parse_git_url(url)?;
+
+    Ok(r3v3rs3_api::git_connection::GitConnectionRequest {
+        name: n,
+        provider: p,
+        url: parsed_url,
+        client_id: cid,
+        client_secret,
+    })
 }
 
 fn build_account_create_payload(
@@ -175,19 +203,27 @@ fn build_account_create_payload(
     password: Option<String>,
     role: &str,
     payload: Option<String>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<r3v3rs3_api::auth::NewAccount> {
     if let Some(p) = payload {
-        load_payload(&p)
+        load_typed_payload(&p)
     } else {
         let u = username
             .ok_or_else(|| anyhow::anyhow!("--username is required when payload is omitted"))?;
         let p = password
             .ok_or_else(|| anyhow::anyhow!("--password is required when payload is omitted"))?;
-        Ok(json!({
-            "username": u,
-            "password": p,
-            "role": role,
-        }))
+        let r = match role.to_ascii_lowercase().as_str() {
+            "admin" => r3v3rs3_api::auth::Role::Admin,
+            "editor" => r3v3rs3_api::auth::Role::Editor,
+            "viewer" => r3v3rs3_api::auth::Role::Viewer,
+            other => anyhow::bail!("unknown role: {other}. Expected admin, editor, or viewer"),
+        };
+        Ok(r3v3rs3_api::auth::NewAccount {
+            username: u,
+            password: p,
+            role: r,
+            proxies: None,
+            totp: false,
+        })
     }
 }
 
@@ -195,18 +231,22 @@ fn build_account_update_payload(
     password: Option<String>,
     role: Option<String>,
     payload: Option<String>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<r3v3rs3_api::auth::AccountUpdate> {
     if let Some(p) = payload {
-        load_payload(&p)
+        load_typed_payload(&p)
     } else {
-        let mut map = serde_json::Map::new();
-        if let Some(pwd) = password {
-            map.insert("password".to_string(), json!(pwd));
-        }
-        if let Some(r) = role {
-            map.insert("role".to_string(), json!(r));
-        }
-        Ok(Value::Object(map))
+        let r = match role.as_deref() {
+            Some("admin") => r3v3rs3_api::auth::Role::Admin,
+            Some("editor") => r3v3rs3_api::auth::Role::Editor,
+            Some("viewer") => r3v3rs3_api::auth::Role::Viewer,
+            Some(other) => anyhow::bail!("unknown role: {other}. Expected admin, editor, or viewer"),
+            None => r3v3rs3_api::auth::Role::Editor,
+        };
+        Ok(r3v3rs3_api::auth::AccountUpdate {
+            password,
+            role: r,
+            proxies: None,
+        })
     }
 }
 
@@ -214,16 +254,21 @@ fn build_token_create_payload(
     name: Option<String>,
     scope: &str,
     payload: Option<String>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<r3v3rs3_api::auth::CreateApiTokenRequest> {
     if let Some(p) = payload {
-        load_payload(&p)
+        load_typed_payload(&p)
     } else {
         let n =
             name.ok_or_else(|| anyhow::anyhow!("--name is required when payload is omitted"))?;
-        Ok(json!({
-            "name": n,
-            "scope": scope,
-        }))
+        let sc = match scope.to_ascii_lowercase().as_str() {
+            "read" => r3v3rs3_api::auth::TokenScope::Read,
+            "edit" | "write" => r3v3rs3_api::auth::TokenScope::Edit,
+            other => anyhow::bail!("unknown scope: {other}. Expected 'read' or 'edit'"),
+        };
+        Ok(r3v3rs3_api::auth::CreateApiTokenRequest {
+            name: n,
+            scope: sc,
+        })
     }
 }
 
@@ -234,6 +279,31 @@ impl ApiClient {
             server,
             token,
         }
+    }
+
+    pub async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
+        let val = self.request(Method::GET, path, None).await?;
+        serde_json::from_value(val).context("failed to deserialize response")
+    }
+
+    pub async fn post_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> anyhow::Result<T> {
+        let body_val = serde_json::to_value(body)?;
+        let res_val = self.request(Method::POST, path, Some(&body_val)).await?;
+        serde_json::from_value(res_val).context("failed to deserialize response")
+    }
+
+    pub async fn put_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> anyhow::Result<T> {
+        let body_val = serde_json::to_value(body)?;
+        let res_val = self.request(Method::PUT, path, Some(&body_val)).await?;
+        serde_json::from_value(res_val).context("failed to deserialize response")
     }
 
     pub async fn request(
@@ -268,27 +338,12 @@ impl ApiClient {
     // --- Port operations ---
 
     pub async fn list_ports(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/ports", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<32} STATUS", "ID", "LISTEN ADDRESS");
-            println!("{:-<26} {:-<32} {:-<10}", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let listen = item
-                    .get("port")
-                    .and_then(|p| p.get("listen"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("-");
-                let active = item
-                    .get("port")
-                    .and_then(|p| p.get("active"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
-                let status = if active { "active" } else { "inactive" };
-                println!("{:<26} {:<32} {}", id, listen, status);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::port::PortEntry> = self.get_json("/api/ports").await?;
+        println!("{:<26} {:<32} STATUS", "ID", "LISTEN ADDRESS");
+        println!("{:-<26} {:-<32} {:-<10}", "", "", "");
+        for item in &entries {
+            let status = if item.port.active { "active" } else { "inactive" };
+            println!("{:<26} {:<32} {}", item.id, item.port.listen, status);
         }
         Ok(())
     }
@@ -301,16 +356,18 @@ impl ApiClient {
     }
 
     pub async fn add_port(&self, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
-        let res = self.request(Method::POST, "/api/ports", Some(&val)).await?;
+        let port: r3v3rs3_api::port::Port = load_typed_payload(payload)?;
+        let res = self
+            .request(Method::POST, "/api/ports", Some(&serde_json::to_value(&port)?))
+            .await?;
         println!("port added");
         print_json(&res)
     }
 
     pub async fn update_port(&self, id: &str, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let port: r3v3rs3_api::port::Port = load_typed_payload(payload)?;
         let res = self
-            .request(Method::PUT, &format!("/api/ports/{id}"), Some(&val))
+            .request(Method::PUT, &format!("/api/ports/{id}"), Some(&serde_json::to_value(&port)?))
             .await?;
         println!("port/{id} updated");
         print_json(&res)
@@ -331,19 +388,15 @@ impl ApiClient {
     }
 
     pub async fn set_port_early_data(&self, id: &str, enable: bool) -> anyhow::Result<()> {
-        let entry = self
-            .request(Method::GET, &format!("/api/ports/{id}"), None)
-            .await?;
-        let mut port = entry.get("port").cloned().unwrap_or(entry);
-        if let Some(opts) = port.get_mut("opts") {
-            if let Some(tls) = opts.get_mut("tls_termination") {
-                tls["early_data"] = serde_json::json!(enable);
-            } else if enable {
-                anyhow::bail!("port/{id} does not have TLS termination configured");
-            }
+        let entry: r3v3rs3_api::port::PortEntry = self.get_json(&format!("/api/ports/{id}")).await?;
+        let mut port = entry.port;
+        if let Some(ref mut tls) = port.opts.tls_termination {
+            tls.early_data = enable;
+        } else if enable {
+            anyhow::bail!("port/{id} does not have TLS termination configured");
         }
         let res = self
-            .request(Method::PUT, &format!("/api/ports/{id}"), Some(&port))
+            .request(Method::PUT, &format!("/api/ports/{id}"), Some(&serde_json::to_value(&port)?))
             .await?;
         println!("port/{id} early_data set to {enable}");
         print_json(&res)
@@ -352,31 +405,23 @@ impl ApiClient {
     // --- Proxy operations ---
 
     pub async fn list_proxies(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/proxies", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<24} {:<12} PORTS", "ID", "NAME", "PROTOCOL");
-            println!("{:-<26} {:-<24} {:-<12} {:-<16}", "", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let protocol = item
-                    .get("protocol")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("http");
-                let ports = item
-                    .get("ports")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|p| p.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-                println!("{:<26} {:<24} {:<12} {}", id, name, protocol, ports);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::proxy::ProxyEntry> = self.get_json("/api/proxies").await?;
+        println!("{:<26} {:<24} {:<12} PORTS", "ID", "NAME", "PROTOCOL");
+        println!("{:-<26} {:-<24} {:-<12} {:-<16}", "", "", "", "");
+        for item in &entries {
+            let protocol = match &item.proxy.kind {
+                r3v3rs3_api::proxy::ProxyKind::Http(_) => "http",
+                r3v3rs3_api::proxy::ProxyKind::Tcp(_) => "tcp",
+                r3v3rs3_api::proxy::ProxyKind::Udp(_) => "udp",
+            };
+            let ports = item
+                .proxy
+                .ports
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("{:<26} {:<24} {:<12} {}", item.id, item.proxy.name, protocol, ports);
         }
         Ok(())
     }
@@ -389,18 +434,18 @@ impl ApiClient {
     }
 
     pub async fn add_proxy(&self, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let proxy: r3v3rs3_api::proxy::Proxy = load_typed_payload(payload)?;
         let res = self
-            .request(Method::POST, "/api/proxies", Some(&val))
+            .request(Method::POST, "/api/proxies", Some(&serde_json::to_value(&proxy)?))
             .await?;
         println!("proxy added");
         print_json(&res)
     }
 
     pub async fn update_proxy(&self, id: &str, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let proxy: r3v3rs3_api::proxy::Proxy = load_typed_payload(payload)?;
         let res = self
-            .request(Method::PUT, &format!("/api/proxies/{id}"), Some(&val))
+            .request(Method::PUT, &format!("/api/proxies/{id}"), Some(&serde_json::to_value(&proxy)?))
             .await?;
         println!("proxy/{id} updated");
         print_json(&res)
@@ -419,53 +464,31 @@ impl ApiClient {
         service: Option<&str>,
         target_url: Option<&str>,
     ) -> anyhow::Result<()> {
-        let mut map = serde_json::Map::new();
-        if let Some(t) = target_url {
-            map.insert(
-                "target_url".to_string(),
-                serde_json::Value::String(t.to_string()),
-            );
-        }
-        if let Some(s) = service {
-            map.insert(
-                "service".to_string(),
-                serde_json::Value::String(s.to_string()),
-            );
-        }
-        let body = serde_json::Value::Object(map);
-        let res = self
-            .request(
-                Method::POST,
-                &format!("/api/proxies/{id}/grpc/health"),
-                Some(&body),
-            )
+        let body = r3v3rs3_api::grpc::GrpcHealthCheckRequest {
+            service: service.map(str::to_string),
+            target_url: target_url.map(str::to_string),
+        };
+        let res: r3v3rs3_api::grpc::GrpcHealthCheckResponse = self
+            .post_json(&format!("/api/proxies/{id}/grpc/health"), &body)
             .await?;
-        let healthy = res
-            .get("healthy")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let status = res
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("UNKNOWN");
-        let status_code = res.get("status_code").and_then(|v| v.as_u64()).unwrap_or(0);
-        let grpc_status = res.get("grpc_status").and_then(|v| v.as_u64()).unwrap_or(0);
-        let grpc_name = res
-            .get("grpc_status_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("UNKNOWN");
-        let latency_ms = res.get("latency_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+        let healthy = res.healthy;
+        let status = res.status;
+        let status_code = res.status_code;
+        let grpc_status = res.grpc_status;
+        let grpc_name = &res.grpc_status_name;
+        let latency_ms = res.latency_ms;
 
+        let status_str = status.as_str();
         let status_colored = if healthy {
-            format!("\x1b[32m{status}\x1b[0m")
+            format!("\x1b[32m{status_str}\x1b[0m")
         } else {
-            format!("\x1b[31m{status}\x1b[0m")
+            format!("\x1b[31m{status_str}\x1b[0m")
         };
         println!("Proxy ID:       {id}");
         println!("Healthy:        {}", if healthy { "yes" } else { "no" });
         println!("Serving Status: {status_colored} (code {status_code})");
         println!("gRPC Status:    {grpc_status} ({grpc_name})");
-        if let Some(msg) = res.get("grpc_message").and_then(|v| v.as_str()) {
+        if let Some(ref msg) = res.grpc_message {
             println!("gRPC Message:   {msg}");
         }
         println!("Latency:        {latency_ms} ms");
@@ -493,63 +516,52 @@ impl ApiClient {
     }
 
     pub async fn list_proxy_dictionaries(&self, proxy_id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, &format!("/api/proxies/{proxy_id}"), None)
+        let entry: r3v3rs3_api::proxy::ProxyEntry = self
+            .get_json(&format!("/api/proxies/{proxy_id}"))
             .await?;
-        let dicts = res
-            .pointer("/proxy/compression/dictionaries")
-            .and_then(|v| v.as_array());
-        let Some(arr) = dicts else {
-            println!("No compression dictionaries found for proxy {proxy_id}");
+        let r3v3rs3_api::proxy::ProxyKind::Http(ref http) = entry.proxy.kind else {
+            println!("Proxy {proxy_id} is not an HTTP proxy");
             return Ok(());
         };
-        if arr.is_empty() {
+        let compression = &http.compression;
+        if compression.dictionaries.is_empty() {
             println!("No compression dictionaries configured for proxy {proxy_id}");
             return Ok(());
         }
         println!(
-            "{:<26} {:<20} {:<15} {:<30} HASH",
+            "{:<26} {:<20} {:<15} {:<30} PATH",
             "ID", "NAME", "MATCH", "PATH"
         );
         println!(
             "{:-<26} {:-<20} {:-<15} {:-<30} {:-<30}",
             "", "", "", "", ""
         );
-        for item in arr {
-            let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-            let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-            let match_pat = item
-                .get("match_pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
-            let path = item.get("path").and_then(|v| v.as_str()).unwrap_or("-");
-            let hash = item
-                .get("sha256_sf")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
+        for item in &compression.dictionaries {
             println!(
                 "{:<26} {:<20} {:<15} {:<30} {}",
-                id, name, match_pat, path, hash
+                item.id, item.name, item.match_pattern, item.path, item.path
             );
         }
         Ok(())
     }
 
     pub async fn get_proxy_dictionary(&self, proxy_id: &str, dict_id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, &format!("/api/proxies/{proxy_id}"), None)
+        let entry: r3v3rs3_api::proxy::ProxyEntry = self
+            .get_json(&format!("/api/proxies/{proxy_id}"))
             .await?;
-        let dict = res
-            .pointer("/proxy/compression/dictionaries")
-            .and_then(|v| v.as_array())
-            .and_then(|arr| {
-                arr.iter()
-                    .find(|d| d.get("id").and_then(|id| id.as_str()) == Some(dict_id))
-            });
+        let r3v3rs3_api::proxy::ProxyKind::Http(ref http) = entry.proxy.kind else {
+            bail!("Proxy {proxy_id} is not an HTTP proxy");
+        };
+        let compression = &http.compression;
+        let dict = compression
+            .dictionaries
+            .iter()
+            .find(|d| d.id.to_string() == dict_id);
         let Some(d) = dict else {
             bail!("Dictionary {dict_id} not found in proxy {proxy_id}");
         };
-        print_json(d)
+        println!("{}", serde_json::to_string_pretty(d)?);
+        Ok(())
     }
 
     pub async fn add_proxy_dictionary(
@@ -566,33 +578,30 @@ impl ApiClient {
         } else {
             data.to_string()
         };
-        let mut res = self
-            .request(Method::GET, &format!("/api/proxies/{proxy_id}"), None)
+        let mut entry: r3v3rs3_api::proxy::ProxyEntry = self
+            .get_json(&format!("/api/proxies/{proxy_id}"))
             .await?;
         let dict_id = rand::distr::Alphanumeric
             .sample_string(&mut rand::rng(), 24)
             .to_ascii_lowercase();
-        let dict = json!({
-            "id": dict_id,
-            "name": name,
-            "match_pattern": match_pattern,
-            "path": path,
-            "raw_data": raw_data,
-        });
-        let Some(proxy) = res.get_mut("proxy") else {
-            bail!("Invalid proxy response from server");
+        let dict = r3v3rs3_api::compression_dictionary::CompressionDictionary {
+            id: dict_id.parse().map_err(|e| anyhow::anyhow!("invalid dict id: {e}"))?,
+            name: name.to_string(),
+            match_pattern: match_pattern.to_string(),
+            path: path.to_string(),
+            raw_data,
+            sha256_sf: String::new(),
         };
-        if proxy.get("compression").is_none() {
-            proxy["compression"] = json!({});
-        }
-        if proxy["compression"].get("dictionaries").is_none() {
-            proxy["compression"]["dictionaries"] = json!([]);
-        }
-        if let Some(arr) = proxy["compression"]["dictionaries"].as_array_mut() {
-            arr.push(dict);
-        }
+        let r3v3rs3_api::proxy::ProxyKind::Http(ref mut http) = entry.proxy.kind else {
+            bail!("Proxy {proxy_id} is not an HTTP proxy");
+        };
+        http.compression.dictionaries.push(dict);
         let updated = self
-            .request(Method::PUT, &format!("/api/proxies/{proxy_id}"), Some(&res))
+            .request(
+                Method::PUT,
+                &format!("/api/proxies/{proxy_id}"),
+                Some(&serde_json::to_value(&entry.proxy)?),
+            )
             .await?;
         println!("Compression dictionary added to proxy {proxy_id}");
         print_json(&updated)
@@ -603,22 +612,25 @@ impl ApiClient {
         proxy_id: &str,
         dict_id: &str,
     ) -> anyhow::Result<()> {
-        let mut res = self
-            .request(Method::GET, &format!("/api/proxies/{proxy_id}"), None)
+        let mut entry: r3v3rs3_api::proxy::ProxyEntry = self
+            .get_json(&format!("/api/proxies/{proxy_id}"))
             .await?;
-        let Some(arr) = res
-            .pointer_mut("/proxy/compression/dictionaries")
-            .and_then(|v| v.as_array_mut())
-        else {
-            bail!("No compression dictionaries found in proxy {proxy_id}");
+        let r3v3rs3_api::proxy::ProxyKind::Http(ref mut http) = entry.proxy.kind else {
+            bail!("Proxy {proxy_id} is not an HTTP proxy");
         };
-        let initial_len = arr.len();
-        arr.retain(|d| d.get("id").and_then(|id| id.as_str()) != Some(dict_id));
-        if arr.len() == initial_len {
+        let initial_len = http.compression.dictionaries.len();
+        http.compression
+            .dictionaries
+            .retain(|d| d.id.to_string() != dict_id);
+        if http.compression.dictionaries.len() == initial_len {
             bail!("Dictionary {dict_id} not found in proxy {proxy_id}");
         }
         let updated = self
-            .request(Method::PUT, &format!("/api/proxies/{proxy_id}"), Some(&res))
+            .request(
+                Method::PUT,
+                &format!("/api/proxies/{proxy_id}"),
+                Some(&serde_json::to_value(&entry.proxy)?),
+            )
             .await?;
         println!("Compression dictionary {dict_id} deleted from proxy {proxy_id}");
         print_json(&updated)
@@ -627,28 +639,13 @@ impl ApiClient {
     // --- Certificate operations ---
 
     pub async fn list_certs(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/certs", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<30} {:<12} ISSUER", "ID", "DOMAINS", "EXPIRES");
-            println!("{:-<26} {:-<30} {:-<12} {:-<20}", "", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let domains = item
-                    .get("domains")
-                    .and_then(|v| v.as_array())
-                    .map(|d| {
-                        d.iter()
-                            .filter_map(|s| s.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-                let expires = item.get("expiration").and_then(|v| v.as_u64()).unwrap_or(0);
-                let issuer = item.get("issuer").and_then(|v| v.as_str()).unwrap_or("-");
-                println!("{:<26} {:<30} {:<12} {}", id, domains, expires, issuer);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::cert::CertInfo> = self.get_json("/api/certs").await?;
+        println!("{:<26} {:<30} {:<12} ISSUER", "ID", "DOMAINS", "EXPIRES");
+        println!("{:-<26} {:-<30} {:-<12} {:-<20}", "", "", "", "");
+        for item in &entries {
+            let domains = item.san.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+            let expires = item.not_after.to_string();
+            println!("{:<26} {:<30} {:<12} {}", item.id, domains, expires, item.issuer);
         }
         Ok(())
     }
@@ -715,27 +712,12 @@ impl ApiClient {
     // --- ACME operations ---
 
     pub async fn list_acme(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/acme", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<32} IDENTIFIERS", "ID", "ACME SERVER");
-            println!("{:-<26} {:-<32} {:-<30}", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let server = item.get("server").and_then(|v| v.as_str()).unwrap_or("-");
-                let identifiers = item
-                    .get("identifiers")
-                    .and_then(|v| v.as_array())
-                    .map(|d| {
-                        d.iter()
-                            .filter_map(|s| s.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-                println!("{:<26} {:<32} {}", id, server, identifiers);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::acme::AcmeInfo> = self.get_json("/api/acme").await?;
+        println!("{:<26} {:<32} IDENTIFIERS", "ID", "ACME SERVER");
+        println!("{:-<26} {:-<32} {:-<30}", "", "", "");
+        for item in &entries {
+            let identifiers = item.identifiers.join(", ");
+            println!("{:<26} {:<32} {}", item.id, item.config.provider, identifiers);
         }
         Ok(())
     }
@@ -748,16 +730,22 @@ impl ApiClient {
     }
 
     pub async fn add_acme(&self, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
-        let res = self.request(Method::POST, "/api/acme", Some(&val)).await?;
+        let req: r3v3rs3_api::acme::AcmeRequest = load_typed_payload(payload)?;
+        let res = self
+            .request(Method::POST, "/api/acme", Some(&serde_json::to_value(&req)?))
+            .await?;
         println!("acme order added");
         print_json(&res)
     }
 
     pub async fn update_acme(&self, id: &str, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let req: r3v3rs3_api::acme::AcmeRequest = load_typed_payload(payload)?;
         let res = self
-            .request(Method::PUT, &format!("/api/acme/{id}"), Some(&val))
+            .request(
+                Method::PUT,
+                &format!("/api/acme/{id}"),
+                Some(&serde_json::to_value(&req)?),
+            )
             .await?;
         println!("acme/{id} updated");
         print_json(&res)
@@ -818,27 +806,12 @@ impl ApiClient {
     // --- Access List operations ---
 
     pub async fn list_acls(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/access-lists", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<30} RULES", "ID", "NAME");
-            println!("{:-<26} {:-<30} {:-<10}", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item
-                    .get("entry")
-                    .and_then(|e| e.get("name"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("-");
-                let rules = item
-                    .get("entry")
-                    .and_then(|e| e.get("rules"))
-                    .and_then(|r| r.as_array())
-                    .map(|a| a.len())
-                    .unwrap_or(0);
-                println!("{:<26} {:<30} {}", id, name, rules);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::access_list::AccessListEntry> = self.get_json("/api/access-lists").await?;
+        println!("{:<26} {:<30} RULES", "ID", "NAME");
+        println!("{:-<26} {:-<30} {:-<10}", "", "", "");
+        for item in &entries {
+            let rules = item.list.ip_filter.allow.len() + item.list.ip_filter.deny.len();
+            println!("{:<26} {:<30} {}", item.id, item.list.name, rules);
         }
         Ok(())
     }
@@ -851,18 +824,18 @@ impl ApiClient {
     }
 
     pub async fn add_acl(&self, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let list: r3v3rs3_api::access_list::AccessList = load_typed_payload(payload)?;
         let res = self
-            .request(Method::POST, "/api/access-lists", Some(&val))
+            .request(Method::POST, "/api/access-lists", Some(&serde_json::to_value(&list)?))
             .await?;
         println!("access-list added");
         print_json(&res)
     }
 
     pub async fn update_acl(&self, id: &str, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let list: r3v3rs3_api::access_list::AccessList = load_typed_payload(payload)?;
         let res = self
-            .request(Method::PUT, &format!("/api/access-lists/{id}"), Some(&val))
+            .request(Method::PUT, &format!("/api/access-lists/{id}"), Some(&serde_json::to_value(&list)?))
             .await?;
         println!("access-list/{id} updated");
         print_json(&res)
@@ -878,28 +851,13 @@ impl ApiClient {
     // --- Error Page Themes operations ---
 
     pub async fn list_error_page_themes(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/error-page-themes", None)
+        let entries: Vec<r3v3rs3_api::error_page_theme::ErrorPageTheme> = self
+            .get_json("/api/error-page-themes")
             .await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<28} {:<10} DESCRIPTION", "ID", "NAME", "PAGES");
-            println!("{:-<26} {:-<28} {:-<10} {:-<30}", "", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let pages = item
-                    .get("pages")
-                    .and_then(|p| p.as_array())
-                    .map(|a| a.len())
-                    .unwrap_or(0);
-                let desc = item
-                    .get("description")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("-");
-                println!("{:<26} {:<28} {:<10} {}", id, name, pages, desc);
-            }
-        } else {
-            print_json(&res)?;
+        println!("{:<26} {:<28} {:<10} DESCRIPTION", "ID", "NAME", "PAGES");
+        println!("{:-<26} {:-<28} {:-<10} {:-<30}", "", "", "", "");
+        for item in &entries {
+            println!("{:<26} {:<28} {:<10} {}", item.id, item.name, item.pages.len(), item.description);
         }
         Ok(())
     }
@@ -912,21 +870,21 @@ impl ApiClient {
     }
 
     pub async fn add_error_page_theme(&self, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let theme: r3v3rs3_api::error_page_theme::ErrorPageTheme = load_typed_payload(payload)?;
         let res = self
-            .request(Method::POST, "/api/error-page-themes", Some(&val))
+            .request(Method::POST, "/api/error-page-themes", Some(&serde_json::to_value(&theme)?))
             .await?;
         println!("error-page-theme added");
         print_json(&res)
     }
 
     pub async fn update_error_page_theme(&self, id: &str, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let theme: r3v3rs3_api::error_page_theme::ErrorPageTheme = load_typed_payload(payload)?;
         let res = self
             .request(
                 Method::PUT,
                 &format!("/api/error-page-themes/{id}"),
-                Some(&val),
+                Some(&serde_json::to_value(&theme)?),
             )
             .await?;
         println!("error-page-theme/{id} updated");
@@ -955,20 +913,13 @@ impl ApiClient {
     // --- DNS Credentials operations ---
 
     pub async fn list_dns(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/dns-credentials", None)
+        let entries: Vec<r3v3rs3_api::acme::DnsCredentialInfo> = self
+            .get_json("/api/dns-credentials")
             .await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<30} PROVIDER", "ID", "NAME");
-            println!("{:-<26} {:-<30} {:-<20}", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let provider = item.get("provider").and_then(|v| v.as_str()).unwrap_or("-");
-                println!("{:<26} {:<30} {}", id, name, provider);
-            }
-        } else {
-            print_json(&res)?;
+        println!("{:<26} {:<30} PROVIDER", "ID", "NAME");
+        println!("{:-<26} {:-<30} {:-<20}", "", "", "");
+        for item in &entries {
+            println!("{:<26} {:<30} {}", item.id, item.name, item.provider.as_str());
         }
         Ok(())
     }
@@ -981,21 +932,21 @@ impl ApiClient {
     }
 
     pub async fn add_dns(&self, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let req: r3v3rs3_api::acme::DnsCredentialRequest = load_typed_payload(payload)?;
         let res = self
-            .request(Method::POST, "/api/dns-credentials", Some(&val))
+            .request(Method::POST, "/api/dns-credentials", Some(&serde_json::to_value(&req)?))
             .await?;
         println!("dns credential added");
         print_json(&res)
     }
 
     pub async fn update_dns(&self, id: &str, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let req: r3v3rs3_api::acme::DnsCredentialRequest = load_typed_payload(payload)?;
         let res = self
             .request(
                 Method::PUT,
                 &format!("/api/dns-credentials/{id}"),
-                Some(&val),
+                Some(&serde_json::to_value(&req)?),
             )
             .await?;
         println!("dns-credential/{id} updated");
@@ -1012,32 +963,18 @@ impl ApiClient {
     // --- App operations ---
 
     pub async fn list_apps(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/apps", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<20} {:<14} DOMAINS", "ID", "NAME", "STATUS");
-            println!("{:-<26} {:-<20} {:-<14} {:-<20}", "", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let spec = item.get("spec");
-                let name = spec
-                    .and_then(|s| s.get("name"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("-");
-                let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("-");
-                let domains = spec
-                    .and_then(|s| s.get("domains"))
-                    .and_then(|v| v.as_array())
-                    .map(|d| {
-                        d.iter()
-                            .filter_map(|dom| dom.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-                println!("{:<26} {:<20} {:<14} {}", id, name, status, domains);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::platform::AppEntry> = self.get_json("/api/apps").await?;
+        println!("{:<26} {:<20} {:<14} DOMAINS", "ID", "NAME", "TARGET");
+        println!("{:-<26} {:-<20} {:-<14} {:-<20}", "", "", "", "");
+        for item in &entries {
+            let domains = item
+                .spec
+                .domains
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("{:<26} {:<20} {:<14} {}", item.id, item.name, item.target, domains);
         }
         Ok(())
     }
@@ -1119,16 +1056,22 @@ impl ApiClient {
     }
 
     pub async fn add_app(&self, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
-        let res = self.request(Method::POST, "/api/apps", Some(&val)).await?;
+        let req: r3v3rs3_api::platform::AppRequest = load_typed_payload(payload)?;
+        let res = self
+            .request(Method::POST, "/api/apps", Some(&serde_json::to_value(&req)?))
+            .await?;
         println!("app created");
         print_json(&res)
     }
 
     pub async fn update_app(&self, id: &str, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
+        let req: r3v3rs3_api::platform::AppRequest = load_typed_payload(payload)?;
         let res = self
-            .request(Method::PUT, &format!("/api/apps/{id}"), Some(&val))
+            .request(
+                Method::PUT,
+                &format!("/api/apps/{id}"),
+                Some(&serde_json::to_value(&req)?),
+            )
             .await?;
         println!("app/{id} updated");
         print_json(&res)
@@ -1195,22 +1138,28 @@ impl ApiClient {
     }
 
     pub async fn set_app_env(&self, id: &str, pairs: &[String]) -> anyhow::Result<()> {
-        let mut entries = Vec::new();
+        let mut entries = Vec::with_capacity(pairs.len());
         for pair in pairs {
             if let Some((k, v)) = pair.split_once('=') {
+                let key: r3v3rs3_api::container::EnvKey = k
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("invalid env key '{k}': {e}"))?;
                 let is_secret = is_likely_secret_key(k);
-                entries.push(json!({
-                    "key": k,
-                    "value": v,
-                    "secret": is_secret,
-                }));
+                entries.push(r3v3rs3_api::platform::EnvEntry {
+                    key,
+                    value: Some(v.to_string()),
+                    secret: is_secret,
+                });
             } else {
                 bail!("invalid env pair '{pair}', expected KEY=VALUE format");
             }
         }
-        let body = Value::Array(entries);
-        self.request(Method::PUT, &format!("/api/apps/{id}/env"), Some(&body))
-            .await?;
+        self.request(
+            Method::PUT,
+            &format!("/api/apps/{id}/env"),
+            Some(&serde_json::to_value(&entries)?),
+        )
+        .await?;
         println!("app/{id} environment variables updated");
         Ok(())
     }
@@ -1221,15 +1170,12 @@ impl ApiClient {
         save: bool,
         overwrite: bool,
     ) -> anyhow::Result<()> {
-        let body = json!({
-            "save": save,
-            "overwrite": overwrite,
-        });
+        let body = r3v3rs3_api::compose_env::GenerateAppEnvSecretsRequest { save, overwrite };
         let res = self
             .request(
                 Method::POST,
                 &format!("/api/apps/{id}/env/generate"),
-                Some(&body),
+                Some(&serde_json::to_value(&body)?),
             )
             .await?;
         print_json(&res)
@@ -1246,12 +1192,17 @@ impl ApiClient {
         } else {
             template.map(|t| t.to_string())
         };
-        let body = json!({
-            "template": template_content,
-            "overwrite": overwrite,
-        });
+        let body = r3v3rs3_api::compose_env::ResolveEnvTemplateRequest {
+            template: template_content,
+            entries: None,
+            overwrite,
+        };
         let res = self
-            .request(Method::POST, "/api/compose/env/generate", Some(&body))
+            .request(
+                Method::POST,
+                "/api/compose/env/generate",
+                Some(&serde_json::to_value(&body)?),
+            )
             .await?;
         print_json(&res)
     }
@@ -1267,7 +1218,114 @@ fn is_likely_secret_key(key: &str) -> bool {
         || upper.contains("SECRET")
 }
 
+fn resolve_store_source(store_app: &r3v3rs3_api::store::StoreApp) -> anyhow::Result<r3v3rs3_api::platform::AppSource> {
+    if let Some(ref image) = store_app.image {
+        return Ok(r3v3rs3_api::platform::AppSource::Image {
+            image: image.parse().map_err(|e| anyhow::anyhow!("invalid image: {e}"))?,
+        });
+    }
+    if let Some(ref repo) = store_app.repository {
+        let service_str = store_app.service.as_deref().unwrap_or("web");
+        return Ok(r3v3rs3_api::platform::AppSource::Compose {
+            repository: Some(
+                repo.parse()
+                    .map_err(|e| anyhow::anyhow!("invalid repository URL: {e}"))?,
+            ),
+            branch: store_app
+                .branch
+                .as_deref()
+                .unwrap_or("main")
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid branch: {e}"))?,
+            file: store_app.file.as_deref().and_then(|f| f.parse().ok()),
+            service: service_str
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid service: {e}"))?,
+            connection: None,
+            compose_yaml: None,
+        });
+    }
+    anyhow::bail!("store app '{}' has neither image nor repository", store_app.id)
+}
+
+fn build_store_spec(
+    store_app: r3v3rs3_api::store::StoreApp,
+    domains: Vec<r3v3rs3_api::subject_name::SubjectName>,
+) -> anyhow::Result<r3v3rs3_api::platform::AppSpec> {
+    let source = resolve_store_source(&store_app)?;
+    Ok(r3v3rs3_api::platform::AppSpec {
+        source,
+        port: store_app.port,
+        domains,
+        ports: Vec::new(),
+        health_check_path: store_app.health_check_path,
+        volumes: Vec::new(),
+        restart: Default::default(),
+        limits: Default::default(),
+        host_port: None,
+        database: None,
+        uses_database: None,
+        replica_of: None,
+        auto_deploy: false,
+        require_approval: false,
+        deploy_window: None,
+        tag_trigger: None,
+        store_app_id: Some(store_app.id),
+        targets: Vec::new(),
+        load_balancing: None,
+        alert_rules: None,
+        sticky: None,
+        git_config: None,
+        env_groups: Vec::new(),
+        preview: None,
+        preview_of: None,
+        buildkit: None,
+        bot_blocker: false,
+        grpc_web: false,
+        project_id: None,
+        environment_id: None,
+        lifecycle_hooks: None,
+    })
+}
+
 impl ApiClient {
+    async fn clear_app_hooks(&self, id: &str, mut entry: r3v3rs3_api::platform::AppEntry) -> anyhow::Result<()> {
+        entry.spec.lifecycle_hooks = None;
+        let req = r3v3rs3_api::platform::AppRequest {
+            name: entry.name,
+            target: entry.target,
+            spec: entry.spec,
+        };
+        let _res: r3v3rs3_api::platform::AppEntry = self.put_json(&format!("/api/apps/{id}"), &req).await?;
+        println!("app/{id} lifecycle hooks cleared");
+        Ok(())
+    }
+
+    async fn update_app_hooks(
+        &self,
+        id: &str,
+        mut entry: r3v3rs3_api::platform::AppEntry,
+        pre_deploy: Option<String>,
+        post_deploy: Option<String>,
+    ) -> anyhow::Result<()> {
+        let mut hooks = entry.spec.lifecycle_hooks.take().unwrap_or_default();
+        if let Some(cmd) = pre_deploy {
+            hooks.pre_deploy = Some(cmd);
+        }
+        if let Some(cmd) = post_deploy {
+            hooks.post_deploy = Some(cmd);
+        }
+        entry.spec.lifecycle_hooks = Some(hooks);
+        let req = r3v3rs3_api::platform::AppRequest {
+            name: entry.name,
+            target: entry.target,
+            spec: entry.spec,
+        };
+        let _res: r3v3rs3_api::platform::AppEntry = self.put_json(&format!("/api/apps/{id}"), &req).await?;
+        println!("app/{id} lifecycle hooks updated");
+        Ok(())
+    }
+
     pub async fn app_hooks(
         &self,
         id: &str,
@@ -1275,84 +1333,43 @@ impl ApiClient {
         post_deploy: Option<String>,
         clear: bool,
     ) -> anyhow::Result<()> {
-        let mut app_val = self
-            .request(Method::GET, &format!("/api/apps/{id}"), None)
+        let entry: r3v3rs3_api::platform::AppEntry = self
+            .get_json(&format!("/api/apps/{id}"))
             .await?;
         if clear {
-            app_val["spec"]["lifecycle_hooks"] = serde_json::Value::Null;
-            self.request(
-                Method::PUT,
-                &format!("/api/apps/{id}"),
-                Some(&json!({
-                    "name": app_val["name"],
-                    "target": app_val["target"],
-                    "spec": app_val["spec"],
-                })),
-            )
-            .await?;
-            println!("app/{id} lifecycle hooks cleared");
-            return Ok(());
+            return self.clear_app_hooks(id, entry).await;
         }
         if pre_deploy.is_some() || post_deploy.is_some() {
-            let mut hooks = app_val["spec"]["lifecycle_hooks"]
-                .as_object()
-                .cloned()
-                .unwrap_or_default();
-            if let Some(cmd) = pre_deploy {
-                hooks.insert("pre_deploy".to_string(), json!(cmd));
-            }
-            if let Some(cmd) = post_deploy {
-                hooks.insert("post_deploy".to_string(), json!(cmd));
-            }
-            app_val["spec"]["lifecycle_hooks"] = json!(hooks);
-            self.request(
-                Method::PUT,
-                &format!("/api/apps/{id}"),
-                Some(&json!({
-                    "name": app_val["name"],
-                    "target": app_val["target"],
-                    "spec": app_val["spec"],
-                })),
-            )
-            .await?;
-            println!("app/{id} lifecycle hooks updated");
-            return Ok(());
+            return self.update_app_hooks(id, entry, pre_deploy, post_deploy).await;
         }
-        let hooks = &app_val["spec"]["lifecycle_hooks"];
-        print_json(hooks)
+        if let Some(ref hooks) = entry.spec.lifecycle_hooks {
+            print_json(&serde_json::to_value(hooks)?)?;
+        } else {
+            println!("No lifecycle hooks configured for app/{id}");
+        }
+        Ok(())
     }
 
     // --- Backup operations ---
 
     pub async fn list_backups(&self, database_id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(
-                Method::GET,
-                &format!("/api/databases/{database_id}/backups"),
-                None,
-            )
+        let entries: Vec<r3v3rs3_api::platform::BackupEntry> = self
+            .get_json(&format!("/api/databases/{database_id}/backups"))
             .await?;
-        if let Some(arr) = res.as_array() {
+        println!(
+            "{:<26} {:<10} {:<10} CREATED",
+            "BACKUP ID", "SIZE", "STATUS"
+        );
+        println!("{:-<26} {:-<10} {:-<10} {:-<20}", "", "", "", "");
+        for item in &entries {
+            let status = item.verification_status.as_deref().unwrap_or("-");
             println!(
-                "{:<26} {:<10} {:<10} CREATED",
-                "BACKUP ID", "SIZE", "STATUS"
+                "{:<26} {:<10} {:<10} {}",
+                item.id,
+                format_cli_bytes(item.size),
+                status,
+                item.created_at
             );
-            println!("{:-<26} {:-<10} {:-<10} {:-<20}", "", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let size = item.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-                let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("-");
-                let time = item.get("time").and_then(|v| v.as_u64()).unwrap_or(0);
-                println!(
-                    "{:<26} {:<10} {:<10} {}",
-                    id,
-                    format!("{size}B"),
-                    status,
-                    time
-                );
-            }
-        } else {
-            print_json(&res)?;
         }
         Ok(())
     }
@@ -1431,12 +1448,12 @@ impl ApiClient {
         new_name: Option<&str>,
         host_port: Option<u16>,
     ) -> anyhow::Result<()> {
-        let body = build_pitr_restore_payload(target_time, new_name.map(str::to_string), host_port);
+        let body = build_pitr_restore_payload(target_time, new_name.map(str::to_string), host_port)?;
         let res = self
             .request(
                 Method::POST,
                 &format!("/api/databases/{database_id}/pitr/restore"),
-                Some(&body),
+                Some(&serde_json::to_value(&body)?),
             )
             .await?;
         println!("database/{database_id} PITR restore initiated to timestamp {target_time}");
@@ -1480,38 +1497,23 @@ impl ApiClient {
     // --- Disaster Recovery operations ---
 
     pub async fn list_dr_backups(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/disaster-recovery/backups", None)
+        let entries: Vec<r3v3rs3_api::platform::DisasterRecoveryBackupEntry> = self
+            .get_json("/api/disaster-recovery/backups")
             .await?;
-        if let Some(arr) = res.as_array() {
+        println!(
+            "{:<26} {:<10} {:<8} {:<15} CREATED",
+            "SNAPSHOT ID", "SIZE", "FILES", "S3 REPLICATED"
+        );
+        println!("{:-<26} {:-<10} {:-<8} {:-<15} {:-<20}", "", "", "", "", "");
+        for item in &entries {
             println!(
-                "{:<26} {:<10} {:<8} {:<15} CREATED",
-                "SNAPSHOT ID", "SIZE", "FILES", "S3 REPLICATED"
+                "{:<26} {:<10} {:<8} {:<15} {}",
+                item.id,
+                format_cli_bytes(item.size),
+                item.files_count,
+                if item.s3_replicated { "yes" } else { "no" },
+                item.created_at
             );
-            println!("{:-<26} {:-<10} {:-<8} {:-<15} {:-<20}", "", "", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let size = item.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-                let files = item
-                    .get("files_count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let s3 = item
-                    .get("s3_replicated")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let time = item.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
-                println!(
-                    "{:<26} {:<10} {:<8} {:<15} {}",
-                    id,
-                    format!("{size}B"),
-                    files,
-                    if s3 { "yes" } else { "no" },
-                    time
-                );
-            }
-        } else {
-            print_json(&res)?;
         }
         Ok(())
     }
@@ -1521,15 +1523,15 @@ impl ApiClient {
         passphrase: Option<&str>,
         upload_s3: bool,
     ) -> anyhow::Result<()> {
-        let payload = json!({
-            "passphrase": passphrase,
-            "upload_s3": upload_s3
-        });
+        let payload = r3v3rs3_api::platform::CreateDisasterRecoveryRequest {
+            passphrase: passphrase.map(str::to_string),
+            upload_s3,
+        };
         let res = self
             .request(
                 Method::POST,
                 "/api/disaster-recovery/backups",
-                Some(&payload),
+                Some(&serde_json::to_value(&payload)?),
             )
             .await?;
         println!("Disaster recovery snapshot created successfully:");
@@ -1541,13 +1543,13 @@ impl ApiClient {
         backup_id: &str,
         passphrase: Option<&str>,
     ) -> anyhow::Result<()> {
-        let payload = json!({
-            "passphrase": passphrase
-        });
+        let payload = r3v3rs3_api::platform::RestoreDisasterRecoveryRequest {
+            passphrase: passphrase.map(str::to_string),
+        };
         self.request(
             Method::POST,
             &format!("/api/disaster-recovery/backups/{backup_id}/restore"),
-            Some(&payload),
+            Some(&serde_json::to_value(&payload)?),
         )
         .await?;
         println!(
@@ -1639,19 +1641,14 @@ impl ApiClient {
     // --- Database operations ---
 
     pub async fn list_dbs(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/databases", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<20} {:<12} STATUS", "ID", "NAME", "ENGINE");
-            println!("{:-<26} {:-<20} {:-<12} {:-<10}", "", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let engine = item.get("engine").and_then(|v| v.as_str()).unwrap_or("-");
-                let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("-");
-                println!("{:<26} {:<20} {:<12} {}", id, name, engine, status);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::platform::AppEntry> = self
+            .get_json("/api/databases")
+            .await?;
+        println!("{:<26} {:<20} {:<12} TARGET", "ID", "NAME", "ENGINE");
+        println!("{:-<26} {:-<20} {:-<12} {:-<10}", "", "", "", "");
+        for item in &entries {
+            let engine = item.spec.database.as_deref().unwrap_or("-");
+            println!("{:<26} {:<20} {:<12} {}", item.id, item.name, engine, item.target);
         }
         Ok(())
     }
@@ -1678,14 +1675,22 @@ impl ApiClient {
             "mongo" | "mongodb" => "7.0",
             _ => "latest",
         };
-        let body = serde_json::json!({
-            "name": name,
-            "engine": engine,
-            "version": version.unwrap_or(default_ver),
-            "password": password,
-        });
+        let _ = password;
+        let req = r3v3rs3_api::platform::DatabaseRequest {
+            name: name.parse().map_err(|e| anyhow::anyhow!("invalid db name: {e}"))?,
+            engine: engine.to_string(),
+            version: version.unwrap_or(default_ver).to_string(),
+            host_port: None,
+            limits: Default::default(),
+            project_id: None,
+            environment_id: None,
+        };
         let res = self
-            .request(Method::POST, "/api/databases", Some(&body))
+            .request(
+                Method::POST,
+                "/api/databases",
+                Some(&serde_json::to_value(&req)?),
+            )
             .await?;
         println!("database created");
         print_json(&res)
@@ -1699,12 +1704,16 @@ impl ApiClient {
     }
 
     pub async fn clone_db(&self, id: &str, name: &str) -> anyhow::Result<()> {
-        let body = serde_json::json!({ "name": name });
+        let req = r3v3rs3_api::platform::DatabaseCloneRequest {
+            name: name.parse().map_err(|e| anyhow::anyhow!("invalid clone name: {e}"))?,
+            host_port: None,
+            limits: Default::default(),
+        };
         let res = self
             .request(
                 Method::POST,
                 &format!("/api/databases/{id}/clone"),
-                Some(&body),
+                Some(&serde_json::to_value(&req)?),
             )
             .await?;
         println!("database/{id} clone triggered");
@@ -1712,12 +1721,18 @@ impl ApiClient {
     }
 
     pub async fn replica_db(&self, id: &str, name: &str) -> anyhow::Result<()> {
-        let body = serde_json::json!({ "name": name });
+        let req = r3v3rs3_api::platform::DatabaseReplicaRequest {
+            name: name.parse().map_err(|e| anyhow::anyhow!("invalid replica name: {e}"))?,
+            host_port: None,
+            limits: Default::default(),
+            project_id: None,
+            environment_id: None,
+        };
         let res = self
             .request(
                 Method::POST,
                 &format!("/api/databases/{id}/replica"),
-                Some(&body),
+                Some(&serde_json::to_value(&req)?),
             )
             .await?;
         println!("database/{id} replica created");
@@ -1738,19 +1753,18 @@ impl ApiClient {
     // --- Target operations ---
 
     pub async fn list_targets(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/targets", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<20} {:<24} STATUS", "ID", "NAME", "ADDRESS");
-            println!("{:-<26} {:-<20} {:-<24} {:-<10}", "", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let addr = item.get("address").and_then(|v| v.as_str()).unwrap_or("-");
-                let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("-");
-                println!("{:<26} {:<20} {:<24} {}", id, name, addr, status);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::platform::TargetEntry> = self
+            .get_json("/api/targets")
+            .await?;
+        println!("{:<26} {:<20} {:<12} STATUS", "ID", "NAME", "KIND");
+        println!("{:-<26} {:-<20} {:-<12} {:-<10}", "", "", "", "");
+        for item in &entries {
+            let kind = match item.kind {
+                r3v3rs3_api::platform::TargetKind::Local => "local",
+                r3v3rs3_api::platform::TargetKind::Agent => "agent",
+            };
+            let status = if item.online { "online" } else { "offline" };
+            println!("{:<26} {:<20} {:<12} {}", item.id, item.name, kind, status);
         }
         Ok(())
     }
@@ -1762,17 +1776,16 @@ impl ApiClient {
         print_json(&res)
     }
 
-    pub async fn add_target(&self, name: &str, host: &str, port: u16) -> anyhow::Result<()> {
-        let body = serde_json::json!({
-            "name": name,
-            "host": host,
-            "port": port,
-        });
-        let res = self
-            .request(Method::POST, "/api/targets", Some(&body))
+    pub async fn add_target(&self, name: &str, region: Option<&str>) -> anyhow::Result<()> {
+        let req = r3v3rs3_api::platform::TargetRequest {
+            name: name.parse().map_err(|e| anyhow::anyhow!("invalid target name: {e}"))?,
+            region: region.map(str::to_string),
+        };
+        let res: r3v3rs3_api::platform::TargetToken = self
+            .post_json("/api/targets", &req)
             .await?;
-        println!("target added");
-        print_json(&res)
+        println!("target added: id={}, enrollment token={}", res.target.id, res.token);
+        Ok(())
     }
 
     pub async fn delete_target(&self, id: &str) -> anyhow::Result<()> {
@@ -1797,12 +1810,14 @@ impl ApiClient {
     }
 
     pub async fn set_target_region(&self, id: &str, region: Option<&str>) -> anyhow::Result<()> {
-        let payload = serde_json::json!({ "region": region });
+        let payload = r3v3rs3_api::platform::SetTargetRegionRequest {
+            region: region.map(str::to_string),
+        };
         let updated: serde_json::Value = self
             .request(
                 Method::PUT,
                 &format!("/api/targets/{id}/region"),
-                Some(&payload),
+                Some(&serde_json::to_value(&payload)?),
             )
             .await?;
         println!(
@@ -1838,27 +1853,16 @@ impl ApiClient {
     // --- Project operations ---
 
     pub async fn list_projects(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/projects", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<30} ENVIRONMENTS", "ID", "NAME");
-            println!("{:-<26} {:-<30} {:-<20}", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let envs = item
-                    .get("environments")
-                    .and_then(|e| e.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|x| x.get("name").and_then(|n| n.as_str()))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-                println!("{:<26} {:<30} {}", id, name, envs);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::platform::ProjectSummary> = self
+            .get_json("/api/projects")
+            .await?;
+        println!("{:<26} {:<30} {:<15} APPS", "ID", "NAME", "ENVIRONMENTS");
+        println!("{:-<26} {:-<30} {:-<15} {:-<10}", "", "", "", "");
+        for item in &entries {
+            println!(
+                "{:<26} {:<30} {:<15} {}",
+                item.id, item.name, item.environments_count, item.apps_count
+            );
         }
         Ok(())
     }
@@ -1875,12 +1879,17 @@ impl ApiClient {
         name: &str,
         description: Option<&str>,
     ) -> anyhow::Result<()> {
-        let body = serde_json::json!({
-            "name": name,
-            "description": description.unwrap_or_default(),
-        });
+        let body = r3v3rs3_api::platform::ProjectSpec {
+            name: name.to_string(),
+            description: description.map(str::to_string),
+            default_environments: Vec::new(),
+        };
         let res = self
-            .request(Method::POST, "/api/projects", Some(&body))
+            .request(
+                Method::POST,
+                "/api/projects",
+                Some(&serde_json::to_value(&body)?),
+            )
             .await?;
         println!("project created");
         print_json(&res)
@@ -1899,15 +1908,21 @@ impl ApiClient {
         from: &str,
         to: &str,
     ) -> anyhow::Result<()> {
-        let body = serde_json::json!({
-            "source_env": from,
-            "target_env": to,
-        });
+        let body = r3v3rs3_api::platform::EnvironmentSyncRequest {
+            source_env_id: from
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid source env id: {e}"))?,
+            target_env_id: to
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid target env id: {e}"))?,
+            mode: r3v3rs3_api::platform::EnvironmentSyncMode::SyncMissing,
+            keys: Vec::new(),
+        };
         let res = self
             .request(
                 Method::POST,
                 &format!("/api/projects/{project_id}/environments/sync"),
-                Some(&body),
+                Some(&serde_json::to_value(&body)?),
             )
             .await?;
         println!("project/{project_id} environment variables synchronized from {from} to {to}");
@@ -1917,23 +1932,17 @@ impl ApiClient {
     // --- App Store operations ---
 
     pub async fn list_store(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/store", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<24} {:<24} {:<16} TYPE", "ID", "NAME", "CATEGORY");
-            println!("{:-<24} {:-<24} {:-<16} {:-<10}", "", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let cat = item.get("category").and_then(|v| v.as_str()).unwrap_or("-");
-                let typ = if item.get("compose").is_some() {
-                    "compose"
-                } else {
-                    "image"
-                };
-                println!("{:<24} {:<24} {:<16} {}", id, name, cat, typ);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::store::StoreApp> = self.get_json("/api/store").await?;
+        println!("{:<24} {:<24} {:<16} TYPE", "ID", "NAME", "CATEGORY");
+        println!("{:-<24} {:-<24} {:-<16} {:-<10}", "", "", "", "");
+        for item in &entries {
+            let cat = item.category.as_deref().unwrap_or("-");
+            let typ = if item.file.is_some() || item.repository.is_some() {
+                "compose"
+            } else {
+                "image"
+            };
+            println!("{:<24} {:<24} {:<16} {}", item.id, item.name, cat, typ);
         }
         Ok(())
     }
@@ -1953,72 +1962,60 @@ impl ApiClient {
     ) -> anyhow::Result<()> {
         let mut domains = Vec::new();
         if let Some(d) = domain {
-            domains.push(d.to_string());
+            domains.push(d.parse().map_err(|e| anyhow::anyhow!("invalid domain: {e}"))?);
         }
-        let body = serde_json::json!({
-            "name": name,
-            "store_app_id": app_id,
-            "domains": domains,
-        });
-        let res = self.request(Method::POST, "/api/apps", Some(&body)).await?;
-        println!("app store application '{app_id}' installed as '{name}'");
-        print_json(&res)
+        let catalog: r3v3rs3_api::store::StoreCatalog = self.get_json("/api/store").await?;
+        let store_app = catalog
+            .apps
+            .into_iter()
+            .find(|a| a.id == app_id)
+            .ok_or_else(|| anyhow::anyhow!("app '{app_id}' not found in store catalog"))?;
+
+        let spec = build_store_spec(store_app, domains)?;
+        let req = r3v3rs3_api::platform::AppRequest {
+            name: name.parse().map_err(|e| anyhow::anyhow!("invalid app name: {e}"))?,
+            target: "local".parse().map_err(|e| anyhow::anyhow!("invalid target id: {e}"))?,
+            spec,
+        };
+
+        let res: r3v3rs3_api::platform::AppEntry = self.post_json("/api/apps", &req).await?;
+        println!("app store application '{app_id}' installed as '{name}' (id: {})", res.id);
+        Ok(())
     }
 
     // --- Security operations ---
 
     pub async fn list_banned_ips(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/ban/ips", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<20} {:<30} BANNED AT", "IP ADDRESS", "REASON");
-            println!("{:-<20} {:-<30} {:-<20}", "", "", "");
-            for item in arr {
-                let ip = item.get("ip").and_then(|v| v.as_str()).unwrap_or("-");
-                let reason = item
-                    .get("reason")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("brute force");
-                let time = item.get("banned_at").and_then(|v| v.as_u64()).unwrap_or(0);
-                println!("{:<20} {:<30} {}", ip, reason, time);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::auth::BannedIpEntry> = self.get_json("/api/banned-ips").await?;
+        println!("{:<20} {:<10} {:<20} REMAINING", "IP ADDRESS", "FAILURES", "BANNED UNTIL");
+        println!("{:-<20} {:-<10} {:-<20} {:-<10}", "", "", "", "");
+        for item in &entries {
+            println!("{:<20} {:<10} {:<20} {}s", item.ip, item.failures, item.banned_until, item.remaining_seconds);
         }
         Ok(())
     }
 
     pub async fn unban_ip(&self, ip: &str) -> anyhow::Result<()> {
-        self.request(Method::DELETE, &format!("/api/ban/ips/{ip}"), None)
+        self.request(Method::DELETE, &format!("/api/banned-ips/{ip}"), None)
             .await?;
         println!("ip/{ip} unbanned");
         Ok(())
     }
 
     pub async fn list_quarantined_ips(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/security/quarantine", None)
+        let entries: Vec<r3v3rs3_api::quarantine::QuarantinedIpEntry> = self
+            .get_json("/api/security/quarantine")
             .await?;
-        if let Some(arr) = res.as_array() {
+        println!(
+            "{:<18} {:<32} {:<12} {:<10}",
+            "IP ADDRESS", "REASON", "VIOLATIONS", "REMAINING"
+        );
+        println!("{:-<18} {:-<32} {:-<12} {:-<10}", "", "", "", "");
+        for item in &entries {
             println!(
-                "{:<18} {:<32} {:<12} {:<10}",
-                "IP ADDRESS", "REASON", "VIOLATIONS", "REMAINING"
+                "{:<18} {:<32} {:<12} {}s",
+                item.ip, item.reason, item.violations, item.remaining_seconds
             );
-            println!("{:-<18} {:-<32} {:-<12} {:-<10}", "", "", "", "");
-            for item in arr {
-                let ip = item.get("ip").and_then(|v| v.as_str()).unwrap_or("-");
-                let reason = item.get("reason").and_then(|v| v.as_str()).unwrap_or("-");
-                let violations = item.get("violations").and_then(|v| v.as_u64()).unwrap_or(0);
-                let remaining = item
-                    .get("remaining_seconds")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                println!(
-                    "{:<18} {:<32} {:<12} {}s",
-                    ip, reason, violations, remaining
-                );
-            }
-        } else {
-            print_json(&res)?;
         }
         Ok(())
     }
@@ -2029,13 +2026,17 @@ impl ApiClient {
         reason: Option<&str>,
         duration_seconds: Option<u64>,
     ) -> anyhow::Result<()> {
-        let payload = serde_json::json!({
-            "ip": ip,
-            "reason": reason,
-            "duration_seconds": duration_seconds,
-        });
+        let payload = r3v3rs3_api::quarantine::QuarantineIpRequest {
+            ip: ip.parse().map_err(|e| anyhow::anyhow!("invalid IP address: {e}"))?,
+            reason: reason.map(str::to_string),
+            duration_seconds,
+        };
         let res = self
-            .request(Method::POST, "/api/security/quarantine", Some(&payload))
+            .request(
+                Method::POST,
+                "/api/security/quarantine",
+                Some(&serde_json::to_value(&payload)?),
+            )
             .await?;
         println!("ip/{ip} quarantined successfully");
         print_json(&res)?;
@@ -2054,10 +2055,10 @@ impl ApiClient {
     }
 
     pub async fn get_quarantine_config(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/security/quarantine/config", None)
+        let config: r3v3rs3_api::quarantine::AutoQuarantineConfig = self
+            .get_json("/api/security/quarantine/config")
             .await?;
-        print_json(&res)?;
+        print_json(&serde_json::to_value(&config)?)?;
         Ok(())
     }
 
@@ -2068,37 +2069,26 @@ impl ApiClient {
         window_seconds: Option<u64>,
         ban_duration_seconds: Option<u64>,
     ) -> anyhow::Result<()> {
-        let current = self
-            .request(Method::GET, "/api/security/quarantine/config", None)
-            .await?;
-        let mut config = current;
-        if let Some(obj) = config.as_object_mut() {
-            if let Some(enabled) = enabled {
-                obj.insert("enabled".to_string(), serde_json::json!(enabled));
-            }
-            if let Some(max_violations) = max_violations {
-                obj.insert(
-                    "max_violations".to_string(),
-                    serde_json::json!(max_violations),
-                );
-            }
-            if let Some(window_seconds) = window_seconds {
-                obj.insert(
-                    "window_seconds".to_string(),
-                    serde_json::json!(window_seconds),
-                );
-            }
-            if let Some(ban_duration_seconds) = ban_duration_seconds {
-                obj.insert(
-                    "ban_duration_seconds".to_string(),
-                    serde_json::json!(ban_duration_seconds),
-                );
-            }
+        let mut config: r3v3rs3_api::quarantine::AutoQuarantineConfig = self
+            .get_json("/api/security/quarantine/config")
+            .await
+            .unwrap_or_default();
+        if let Some(en) = enabled {
+            config.enabled = en;
+        }
+        if let Some(mv) = max_violations {
+            config.max_violations = mv;
+        }
+        if let Some(ws) = window_seconds {
+            config.window_seconds = ws;
+        }
+        if let Some(bd) = ban_duration_seconds {
+            config.ban_duration_seconds = bd;
         }
         self.request(
             Method::PUT,
             "/api/security/quarantine/config",
-            Some(&config),
+            Some(&serde_json::to_value(&config)?),
         )
         .await?;
         println!("auto-quarantine configuration updated");
@@ -2110,8 +2100,7 @@ impl ApiClient {
             Some(id) => format!("/api/traffic/connections?proxy_id={id}"),
             None => "/api/traffic/connections".to_string(),
         };
-        let res = self.request(Method::GET, &path, None).await?;
-        let conns = res.as_array().context("expected connection array")?;
+        let conns: Vec<r3v3rs3_api::traffic::ActiveConnectionInfo> = self.get_json(&path).await?;
         if conns.is_empty() {
             println!("No active long-lived connections found.");
             return Ok(());
@@ -2126,23 +2115,16 @@ impl ApiClient {
             "", "", "", "", "", "", "", ""
         );
 
-        for c in conns {
-            let id = c["id"].as_str().unwrap_or("-");
-            let proto = c["protocol"].as_str().unwrap_or("-");
-            let proxy = c["proxy_name"].as_str().unwrap_or("-");
-            let client = c["client_addr"].as_str().unwrap_or("-");
-            let uptime_secs = c["uptime_secs"].as_u64().unwrap_or(0);
-            let uptime = format_duration_secs(uptime_secs);
-            let sent = format_cli_bytes(c["bytes_sent"].as_u64().unwrap_or(0));
-            let recv = format_cli_bytes(c["bytes_received"].as_u64().unwrap_or(0));
-            let speed = format!(
-                "{}/s",
-                format_cli_bytes(c["current_rate_bps"].as_u64().unwrap_or(0))
-            );
+        for c in &conns {
+            let proto = c.protocol.as_str();
+            let uptime = format_duration_secs(c.uptime_secs);
+            let sent = format_cli_bytes(c.bytes_sent);
+            let recv = format_cli_bytes(c.bytes_received);
+            let speed = format!("{}/s", format_cli_bytes(c.current_rate_bps));
 
             println!(
                 "{:<10} {:<12} {:<20} {:<24} {:<12} {:<14} {:<14} {}",
-                id, proto, proxy, client, uptime, sent, recv, speed
+                c.id, proto, c.proxy_name, c.client_addr, uptime, sent, recv, speed
             );
         }
         Ok(())
@@ -2156,69 +2138,42 @@ impl ApiClient {
     }
 
     pub async fn get_geoip_status(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/security/geoip/status", None)
+        let status: r3v3rs3_api::geoip::GeoIpStatus = self
+            .get_json("/api/security/geoip/status")
             .await?;
-        if let Some(obj) = res.as_object() {
-            let loaded = obj.get("loaded").and_then(|v| v.as_bool()).unwrap_or(false);
-            let path = obj
-                .get("database_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
-            let size = obj
-                .get("file_size_bytes")
-                .and_then(|v| v.as_u64())
-                .map(|b| format!("{:.2} MB", b as f64 / (1024.0 * 1024.0)))
-                .unwrap_or_else(|| "-".to_string());
-            let build = obj
-                .get("build_epoch")
-                .and_then(|v| v.as_i64())
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "-".to_string());
-            let auto_update = obj
-                .get("auto_update")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let interval = obj
-                .get("update_interval_days")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(7);
-            let license_set = obj
-                .get("license_key_configured")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let account_id = obj
-                .get("account_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
+        let size = status
+            .file_size_bytes
+            .map(|b| format!("{:.2} MB", b as f64 / (1024.0 * 1024.0)))
+            .unwrap_or_else(|| "-".to_string());
+        let build = status
+            .build_epoch
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "-".to_string());
 
-            println!(
-                "{:<22} {:<10}",
-                "GeoIP Status:",
-                if loaded { "Loaded" } else { "Not Loaded" }
-            );
-            println!("{:<22} {}", "Database Path:", path);
-            println!("{:<22} {}", "Database Size:", size);
-            println!("{:<22} {}", "Build Epoch:", build);
-            println!(
-                "{:<22} {}",
-                "Auto Update:",
-                if auto_update { "Enabled" } else { "Disabled" }
-            );
-            println!("{:<22} {} days", "Update Interval:", interval);
-            println!(
-                "{:<22} {}",
-                "License Key:",
-                if license_set {
-                    "Configured"
-                } else {
-                    "Not Configured"
-                }
-            );
-            println!("{:<22} {}", "Account ID:", account_id);
-        } else {
-            print_json(&res)?;
-        }
+        println!(
+            "{:<22} {:<10}",
+            "GeoIP Status:",
+            if status.loaded { "Loaded" } else { "Not Loaded" }
+        );
+        println!("{:<22} {}", "Database Path:", status.database_path.as_deref().unwrap_or("-"));
+        println!("{:<22} {}", "Database Size:", size);
+        println!("{:<22} {}", "Build Epoch:", build);
+        println!(
+            "{:<22} {}",
+            "Auto Update:",
+            if status.auto_update { "Enabled" } else { "Disabled" }
+        );
+        println!("{:<22} {} days", "Update Interval:", status.update_interval_days);
+        println!(
+            "{:<22} {}",
+            "License Key:",
+            if status.license_key_configured {
+                "Configured"
+            } else {
+                "Not Configured"
+            }
+        );
+        println!("{:<22} {}", "Account ID:", status.account_id.as_deref().unwrap_or("-"));
         Ok(())
     }
 
@@ -2233,10 +2188,10 @@ impl ApiClient {
     }
 
     pub async fn get_geoip_config(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/security/geoip/status", None)
+        let status: r3v3rs3_api::geoip::GeoIpStatus = self
+            .get_json("/api/security/geoip/status")
             .await?;
-        print_json(&res)?;
+        print_json(&serde_json::to_value(&status)?)?;
         Ok(())
     }
 
@@ -2248,28 +2203,24 @@ impl ApiClient {
         auto_update: Option<bool>,
         interval_days: Option<u32>,
     ) -> anyhow::Result<()> {
-        let current = self
-            .request(Method::GET, "/api/security/geoip/status", None)
+        let current: r3v3rs3_api::geoip::GeoIpStatus = self
+            .get_json("/api/security/geoip/status")
             .await?;
-        let curr_auto = current
-            .get("auto_update")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let curr_interval = current
-            .get("update_interval_days")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(7) as u32;
 
-        let payload = serde_json::json!({
-            "account_id": account_id.or_else(|| current.get("account_id").and_then(|v| v.as_str()).map(String::from)),
-            "license_key": license_key,
-            "database": database.or_else(|| current.get("database_path").and_then(|v| v.as_str()).map(String::from)),
-            "auto_update": auto_update.unwrap_or(curr_auto),
-            "update_interval_days": interval_days.unwrap_or(curr_interval),
-        });
+        let payload = r3v3rs3_api::geoip::UpdateGeoIpConfigRequest {
+            account_id: account_id.or_else(|| current.account_id.clone()),
+            license_key,
+            database: database.or(current.database_path).map(std::path::PathBuf::from),
+            auto_update: auto_update.unwrap_or(current.auto_update),
+            update_interval_days: interval_days.unwrap_or(current.update_interval_days),
+        };
 
         let res = self
-            .request(Method::PUT, "/api/security/geoip/config", Some(&payload))
+            .request(
+                Method::PUT,
+                "/api/security/geoip/config",
+                Some(&serde_json::to_value(&payload)?),
+            )
             .await?;
         println!("GeoIP configuration updated successfully.");
         print_json(&res)?;
@@ -2279,45 +2230,40 @@ impl ApiClient {
     // --- Webhook operations ---
 
     pub async fn list_webhooks(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/webhooks", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<40} ACTIVE", "ID", "URL");
-            println!("{:-<26} {:-<40} {:-<10}", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("-");
-                let active = item.get("active").and_then(|v| v.as_bool()).unwrap_or(true);
-                println!("{:<26} {:<40} {}", id, url, active);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::webhook::OutboundWebhook> = self.get_json("/api/webhooks").await?;
+        println!("{:<26} {:<20} {:<40} ENABLED", "ID", "NAME", "URL");
+        println!("{:-<26} {:-<20} {:-<40} {:-<10}", "", "", "", "");
+        for item in &entries {
+            println!("{:<26} {:<20} {:<40} {}", item.id, item.name, item.url, item.enabled);
         }
         Ok(())
     }
 
     pub async fn get_webhook(&self, id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, &format!("/api/webhooks/{id}"), None)
+        let res: r3v3rs3_api::webhook::OutboundWebhook = self
+            .get_json(&format!("/api/webhooks/{id}"))
             .await?;
-        print_json(&res)
+        let text = serde_json::to_string_pretty(&res)?;
+        println!("{text}");
+        Ok(())
     }
 
     pub async fn add_webhook(&self, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
-        let res = self
-            .request(Method::POST, "/api/webhooks", Some(&val))
+        let req: r3v3rs3_api::webhook::CreateWebhookRequest = load_typed_payload(payload)?;
+        let res: r3v3rs3_api::webhook::OutboundWebhook = self
+            .post_json("/api/webhooks", &req)
             .await?;
-        println!("webhook added");
-        print_json(&res)
+        println!("webhook added: id={}", res.id);
+        Ok(())
     }
 
     pub async fn update_webhook(&self, id: &str, payload: &str) -> anyhow::Result<()> {
-        let val = load_payload(payload)?;
-        let res = self
-            .request(Method::PUT, &format!("/api/webhooks/{id}"), Some(&val))
+        let req: r3v3rs3_api::webhook::UpdateWebhookRequest = load_typed_payload(payload)?;
+        let _res: r3v3rs3_api::webhook::OutboundWebhook = self
+            .put_json(&format!("/api/webhooks/{id}"), &req)
             .await?;
         println!("webhook/{id} updated");
-        print_json(&res)
+        Ok(())
     }
 
     pub async fn delete_webhook(&self, id: &str) -> anyhow::Result<()> {
@@ -2328,28 +2274,33 @@ impl ApiClient {
     }
 
     pub async fn test_webhook(&self, id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::POST, &format!("/api/webhooks/{id}/test"), None)
+        let req = r3v3rs3_api::webhook::TestWebhookRequest {
+            webhook_id: Some(id.parse().map_err(|e| anyhow::anyhow!("invalid webhook id: {e}"))?),
+            url: None,
+            secret: None,
+            event: None,
+        };
+        let res: r3v3rs3_api::webhook::TestWebhookResponse = self
+            .post_json("/api/webhooks/test", &req)
             .await?;
-        println!("webhook/{id} test ping sent");
-        print_json(&res)
+        println!(
+            "webhook/{id} test: success={}, status={:?}, elapsed={}ms",
+            res.success, res.status_code, res.elapsed_ms
+        );
+        println!("message: {}", res.message);
+        Ok(())
     }
 
     // --- Container Registry operations ---
 
     pub async fn list_registries(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/registries", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<32} USERNAME", "ID", "SERVER");
-            println!("{:-<26} {:-<32} {:-<20}", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let server = item.get("server").and_then(|v| v.as_str()).unwrap_or("-");
-                let username = item.get("username").and_then(|v| v.as_str()).unwrap_or("-");
-                println!("{:<26} {:<32} {}", id, server, username);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::platform::RegistryEntry> = self
+            .get_json("/api/registries")
+            .await?;
+        println!("{:<26} {:<32} USERNAME", "ID", "SERVER");
+        println!("{:-<26} {:-<32} {:-<20}", "", "", "");
+        for item in &entries {
+            println!("{:<26} {:<32} {}", item.id, item.server, item.username);
         }
         Ok(())
     }
@@ -2363,7 +2314,7 @@ impl ApiClient {
     ) -> anyhow::Result<()> {
         let val = build_registry_payload(server, username, password, payload)?;
         let res = self
-            .request(Method::POST, "/api/registries", Some(&val))
+            .request(Method::POST, "/api/registries", Some(&serde_json::to_value(&val)?))
             .await?;
         println!("registry added");
         print_json(&res)
@@ -2379,7 +2330,7 @@ impl ApiClient {
     ) -> anyhow::Result<()> {
         let val = build_registry_payload(server, username, password, payload)?;
         let res = self
-            .request(Method::PUT, &format!("/api/registries/{id}"), Some(&val))
+            .request(Method::PUT, &format!("/api/registries/{id}"), Some(&serde_json::to_value(&val)?))
             .await?;
         println!("registry/{id} updated");
         print_json(&res)
@@ -2395,31 +2346,28 @@ impl ApiClient {
     // --- Git Provider Connection operations ---
 
     pub async fn list_git_connections(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/git/connections", None)
+        let entries: Vec<r3v3rs3_api::git_connection::GitConnectionEntry> = self
+            .get_json("/api/git/connections")
             .await?;
-        if let Some(arr) = res.as_array() {
+        println!(
+            "{:<26} {:<20} {:<12} {:<14} ACCOUNT",
+            "ID", "NAME", "PROVIDER", "STATUS"
+        );
+        println!(
+            "{:-<26} {:-<20} {:-<12} {:-<14} {:-<20}",
+            "", "", "", "", ""
+        );
+        for item in &entries {
+            let status = match item.status {
+                r3v3rs3_api::git_connection::ConnectionStatus::NotConnected => "not_connected",
+                r3v3rs3_api::git_connection::ConnectionStatus::Connected => "connected",
+                r3v3rs3_api::git_connection::ConnectionStatus::Expired => "expired",
+            };
+            let account = item.account.as_deref().unwrap_or("-");
             println!(
-                "{:<26} {:<20} {:<12} {:<14} ACCOUNT",
-                "ID", "NAME", "PROVIDER", "STATUS"
+                "{:<26} {:<20} {:<12} {:<14} {}",
+                item.id, item.name, item.provider.as_str(), status, account
             );
-            println!(
-                "{:-<26} {:-<20} {:-<12} {:-<14} {:-<20}",
-                "", "", "", "", ""
-            );
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let provider = item.get("provider").and_then(|v| v.as_str()).unwrap_or("-");
-                let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("-");
-                let account = item.get("account").and_then(|v| v.as_str()).unwrap_or("-");
-                println!(
-                    "{:<26} {:<20} {:<12} {:<14} {}",
-                    id, name, provider, status, account
-                );
-            }
-        } else {
-            print_json(&res)?;
         }
         Ok(())
     }
@@ -2443,7 +2391,7 @@ impl ApiClient {
         let val =
             build_git_connection_payload(name, provider, url, client_id, client_secret, payload)?;
         let res = self
-            .request(Method::POST, "/api/git/connections", Some(&val))
+            .request(Method::POST, "/api/git/connections", Some(&serde_json::to_value(&val)?))
             .await?;
         println!("git connection added");
         print_json(&res)
@@ -2513,22 +2461,21 @@ impl ApiClient {
     // --- Account operations ---
 
     pub async fn list_accounts(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/accounts", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<24} {:<12} PROXIES", "USERNAME", "ROLE");
-            println!("{:-<24} {:-<12} {:-<20}", "", "", "");
-            for item in arr {
-                let username = item.get("username").and_then(|v| v.as_str()).unwrap_or("-");
-                let role = item.get("role").and_then(|v| v.as_str()).unwrap_or("-");
-                let proxies = item
-                    .get("proxies")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| format!("{} proxies", arr.len()))
-                    .unwrap_or_else(|| "all".to_string());
-                println!("{:<24} {:<12} {}", username, role, proxies);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::auth::AccountInfo> = self.get_json("/api/accounts").await?;
+        println!("{:<24} {:<12} PROXIES", "USERNAME", "ROLE");
+        println!("{:-<24} {:-<12} {:-<20}", "", "", "");
+        for item in &entries {
+            let role = match item.role {
+                r3v3rs3_api::auth::Role::Admin => "admin",
+                r3v3rs3_api::auth::Role::Editor => "editor",
+                r3v3rs3_api::auth::Role::Viewer => "viewer",
+            };
+            let proxies = item
+                .proxies
+                .as_ref()
+                .map(|s| format!("{} proxies", s.len()))
+                .unwrap_or_else(|| "all".to_string());
+            println!("{:<24} {:<12} {}", item.username, role, proxies);
         }
         Ok(())
     }
@@ -2542,7 +2489,7 @@ impl ApiClient {
     ) -> anyhow::Result<()> {
         let val = build_account_create_payload(username, password, role, payload)?;
         let res = self
-            .request(Method::POST, "/api/accounts", Some(&val))
+            .request(Method::POST, "/api/accounts", Some(&serde_json::to_value(&val)?))
             .await?;
         println!("account created");
         print_json(&res)
@@ -2560,7 +2507,7 @@ impl ApiClient {
             .request(
                 Method::PUT,
                 &format!("/api/accounts/{username}"),
-                Some(&val),
+                Some(&serde_json::to_value(&val)?),
             )
             .await?;
         println!("account/{username} updated");
@@ -2577,18 +2524,15 @@ impl ApiClient {
     // --- Token operations ---
 
     pub async fn list_tokens(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/auth/tokens", None).await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<24} SCOPE", "ID", "NAME");
-            println!("{:-<26} {:-<24} {:-<10}", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let scope = item.get("scope").and_then(|v| v.as_str()).unwrap_or("-");
-                println!("{:<26} {:<24} {}", id, name, scope);
-            }
-        } else {
-            print_json(&res)?;
+        let entries: Vec<r3v3rs3_api::auth::ApiTokenInfo> = self.get_json("/api/auth/tokens").await?;
+        println!("{:<26} {:<24} SCOPE", "ID", "NAME");
+        println!("{:-<26} {:-<24} {:-<10}", "", "", "");
+        for item in &entries {
+            let scope = match item.scope {
+                r3v3rs3_api::auth::TokenScope::Read => "read",
+                r3v3rs3_api::auth::TokenScope::Edit => "edit",
+            };
+            println!("{:<26} {:<24} {}", item.id, item.name, scope);
         }
         Ok(())
     }
@@ -2601,7 +2545,7 @@ impl ApiClient {
     ) -> anyhow::Result<()> {
         let val = build_token_create_payload(name, scope, payload)?;
         let res = self
-            .request(Method::POST, "/api/auth/tokens", Some(&val))
+            .request(Method::POST, "/api/auth/tokens", Some(&serde_json::to_value(&val)?))
             .await?;
         println!("token created");
         print_json(&res)
@@ -2617,21 +2561,13 @@ impl ApiClient {
     // --- Cron operations ---
 
     pub async fn list_cron(&self, app_id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, &format!("/api/apps/{app_id}/commands"), None)
+        let entries: Vec<r3v3rs3_api::platform::AppScheduledCommand> = self
+            .get_json(&format!("/api/apps/{app_id}/commands"))
             .await?;
-        if let Some(arr) = res.as_array() {
-            println!("{:<26} {:<18} {:<16} COMMAND", "ID", "NAME", "CRON");
-            println!("{:-<26} {:-<18} {:-<16} {:-<30}", "", "", "", "");
-            for item in arr {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let cron = item.get("cron").and_then(|v| v.as_str()).unwrap_or("-");
-                let cmd = item.get("command").and_then(|v| v.as_str()).unwrap_or("-");
-                println!("{:<26} {:<18} {:<16} {}", id, name, cron, cmd);
-            }
-        } else {
-            print_json(&res)?;
+        println!("{:<26} {:<18} {:<16} COMMAND", "ID", "NAME", "CRON");
+        println!("{:-<26} {:-<18} {:-<16} {:-<30}", "", "", "", "");
+        for item in &entries {
+            println!("{:<26} {:<18} {:<16} {}", item.id, item.name, item.schedule, item.command);
         }
         Ok(())
     }
@@ -2643,22 +2579,17 @@ impl ApiClient {
         command: &str,
         name: Option<&str>,
     ) -> anyhow::Result<()> {
-        let body = serde_json::json!({
-            "schedule": cron,
-            "cron": cron,
-            "command": command,
-            "name": name.unwrap_or(command),
-            "enabled": true,
-        });
-        let res = self
-            .request(
-                Method::POST,
-                &format!("/api/apps/{app_id}/commands"),
-                Some(&body),
-            )
+        let req = r3v3rs3_api::platform::ScheduledCommandRequest {
+            name: name.unwrap_or(command).to_string(),
+            schedule: cron.to_string(),
+            command: command.to_string(),
+            enabled: true,
+        };
+        let res: r3v3rs3_api::platform::AppScheduledCommand = self
+            .post_json(&format!("/api/apps/{app_id}/commands"), &req)
             .await?;
-        println!("scheduled command added to app/{app_id}");
-        print_json(&res)
+        println!("scheduled command added to app/{app_id}: id={}", res.id);
+        Ok(())
     }
 
     pub async fn update_cron(
@@ -2671,27 +2602,19 @@ impl ApiClient {
         payload: Option<&str>,
     ) -> anyhow::Result<()> {
         let existing = if payload.is_none() {
-            let list = self
-                .request(Method::GET, &format!("/api/apps/{app_id}/commands"), None)
+            let list: Vec<r3v3rs3_api::platform::AppScheduledCommand> = self
+                .get_json(&format!("/api/apps/{app_id}/commands"))
                 .await?;
-            list.as_array().and_then(|arr| {
-                arr.iter()
-                    .find(|it| it.get("id").and_then(|v| v.as_str()) == Some(id))
-                    .cloned()
-            })
+            list.into_iter().find(|it| it.id.to_string() == id)
         } else {
             None
         };
         let body = build_cron_update_payload(existing.as_ref(), cron, command, name, payload)?;
-        let res = self
-            .request(
-                Method::PUT,
-                &format!("/api/apps/{app_id}/commands/{id}"),
-                Some(&body),
-            )
+        let _res: r3v3rs3_api::platform::AppScheduledCommand = self
+            .put_json(&format!("/api/apps/{app_id}/commands/{id}"), &body)
             .await?;
         println!("scheduled command/{id} updated on app/{app_id}");
-        print_json(&res)
+        Ok(())
     }
 
     pub async fn delete_cron(&self, app_id: &str, id: &str) -> anyhow::Result<()> {
@@ -2706,15 +2629,17 @@ impl ApiClient {
     }
 
     pub async fn run_cron(&self, app_id: &str, id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(
-                Method::POST,
-                &format!("/api/apps/{app_id}/commands/{id}/run"),
-                None,
-            )
+        let res: r3v3rs3_api::platform::ScheduledCommandRunResult = self
+            .post_json(&format!("/api/apps/{app_id}/commands/{id}/run"), &serde_json::json!({}))
             .await?;
-        println!("scheduled command/{id} executed on app/{app_id}");
-        print_json(&res)
+        println!(
+            "scheduled command/{id} executed on app/{app_id}: success={}, status={}, duration={}ms",
+            res.success, res.status, res.duration_ms
+        );
+        if !res.output.is_empty() {
+            println!("output:\n{}", res.output);
+        }
+        Ok(())
     }
 
     // --- Platform & System operations ---
@@ -2752,20 +2677,24 @@ impl ApiClient {
     }
 
     pub async fn get_prune_policy(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/platform/prune", None)
+        let res: r3v3rs3_api::platform::PrunePolicy = self
+            .get_json("/api/platform/prune")
             .await?;
-        print_json(&res)
+        print_json(&serde_json::to_value(&res)?)
     }
 
     pub async fn set_prune_policy(&self, args: &SetPrunePolicyArgs) -> anyhow::Result<()> {
-        let mut cur = self
-            .request(Method::GET, "/api/platform/prune", None)
+        let mut cur: r3v3rs3_api::platform::PrunePolicy = self
+            .get_json("/api/platform/prune")
             .await
-            .unwrap_or(serde_json::json!({}));
+            .unwrap_or_default();
         apply_prune_args(&mut cur, args);
         let res = self
-            .request(Method::PUT, "/api/platform/prune", Some(&cur))
+            .request(
+                Method::PUT,
+                "/api/platform/prune",
+                Some(&serde_json::to_value(&cur)?),
+            )
             .await?;
         println!("Platform prune policy updated successfully.");
         print_json(&res)
@@ -2792,10 +2721,12 @@ impl ApiClient {
     }
 
     pub async fn get_node_alerts(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/platform/node_alerts", None)
+        let res: r3v3rs3_api::platform::NodeAlertRules = self
+            .get_json("/api/platform/node_alerts")
             .await?;
-        print_json(&res)
+        let text = serde_json::to_string_pretty(&res)?;
+        println!("{text}");
+        Ok(())
     }
 
     pub async fn set_node_alerts(
@@ -2806,21 +2737,19 @@ impl ApiClient {
         max_fd_percent: Option<u8>,
         max_time_wait: Option<u32>,
     ) -> anyhow::Result<()> {
-        let body = serde_json::json!({
-            "enabled": enabled,
-            "min_free_disk_percent": min_disk_percent,
-            "bandwidth_spike_bytes_per_sec": bandwidth_spike,
-            "max_fd_ratio_percent": max_fd_percent,
-            "max_time_wait_sockets": max_time_wait,
-        });
-        let res = self
-            .request(Method::PUT, "/api/platform/node_alerts", Some(&body))
+        let rules = r3v3rs3_api::platform::NodeAlertRules {
+            enabled,
+            min_free_disk_percent: min_disk_percent,
+            bandwidth_spike_bytes_per_sec: bandwidth_spike,
+            max_fd_ratio_percent: max_fd_percent,
+            max_time_wait_sockets: max_time_wait,
+        };
+        let res: r3v3rs3_api::platform::NodeAlertRules = self
+            .put_json("/api/platform/node_alerts", &rules)
             .await?;
-        println!("Node threshold alert rules updated successfully.");
-        print_json(&res)
+        println!("Node threshold alert rules updated successfully (enabled: {}).", res.enabled);
+        Ok(())
     }
-
-    // --- Apply operation ---
 
     // --- Apply operation ---
 
@@ -2839,15 +2768,14 @@ impl ApiClient {
         if ports.is_empty() {
             return Ok(());
         }
-        let existing = self.request(Method::GET, "/api/ports", None).await?;
-        let existing_list = existing.as_array().cloned().unwrap_or_default();
+        let existing_list: Vec<r3v3rs3_api::port::PortEntry> = self.get_json("/api/ports").await?;
         for item in ports {
             self.apply_single_port(item, &existing_list).await?;
         }
         Ok(())
     }
 
-    async fn apply_single_port(&self, item: &Value, existing: &[Value]) -> anyhow::Result<()> {
+    async fn apply_single_port(&self, item: &Value, existing: &[r3v3rs3_api::port::PortEntry]) -> anyhow::Result<()> {
         let target_id = item.get("id").and_then(|v| v.as_str());
         let target_listen = item
             .get("listen")
@@ -2855,20 +2783,12 @@ impl ApiClient {
             .and_then(|v| v.as_str());
 
         let matched = existing.iter().find(|e| {
-            let e_id = e.get("id").and_then(|v| v.as_str());
-            let e_listen = e
-                .get("port")
-                .and_then(|p| p.get("listen"))
-                .and_then(|v| v.as_str());
-            (target_id.is_some() && e_id == target_id)
-                || (target_listen.is_some() && e_listen == target_listen)
+            (target_id.is_some() && e.id.to_string() == target_id.unwrap_or_default())
+                || (target_listen.is_some() && e.port.listen.to_string() == target_listen.unwrap_or_default())
         });
 
         if let Some(matched_entry) = matched {
-            let id = matched_entry
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let id = matched_entry.id.to_string();
             self.request(Method::PUT, &format!("/api/ports/{id}"), Some(item))
                 .await?;
             println!("port/{id} configured");
@@ -2884,30 +2804,24 @@ impl ApiClient {
         if proxies.is_empty() {
             return Ok(());
         }
-        let existing = self.request(Method::GET, "/api/proxies", None).await?;
-        let existing_list = existing.as_array().cloned().unwrap_or_default();
+        let existing_list: Vec<r3v3rs3_api::proxy::ProxyEntry> = self.get_json("/api/proxies").await?;
         for item in proxies {
             self.apply_single_proxy(item, &existing_list).await?;
         }
         Ok(())
     }
 
-    async fn apply_single_proxy(&self, item: &Value, existing: &[Value]) -> anyhow::Result<()> {
+    async fn apply_single_proxy(&self, item: &Value, existing: &[r3v3rs3_api::proxy::ProxyEntry]) -> anyhow::Result<()> {
         let target_id = item.get("id").and_then(|v| v.as_str());
         let target_name = item.get("name").and_then(|v| v.as_str());
 
         let matched = existing.iter().find(|e| {
-            let e_id = e.get("id").and_then(|v| v.as_str());
-            let e_name = e.get("name").and_then(|v| v.as_str());
-            (target_id.is_some() && e_id == target_id)
-                || (target_name.is_some() && e_name == target_name)
+            (target_id.is_some() && e.id.to_string() == target_id.unwrap_or_default())
+                || (target_name.is_some() && e.proxy.name.as_str() == target_name.unwrap_or_default())
         });
 
         if let Some(matched_entry) = matched {
-            let id = matched_entry
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let id = matched_entry.id.to_string();
             self.request(Method::PUT, &format!("/api/proxies/{id}"), Some(item))
                 .await?;
             println!("proxy/{id} configured");
@@ -2924,15 +2838,14 @@ impl ApiClient {
         if apps.is_empty() {
             return Ok(());
         }
-        let existing = self.request(Method::GET, "/api/apps", None).await?;
-        let existing_list = existing.as_array().cloned().unwrap_or_default();
+        let existing_list: Vec<r3v3rs3_api::platform::AppEntry> = self.get_json("/api/apps").await?;
         for item in apps {
             self.apply_single_app(item, &existing_list).await?;
         }
         Ok(())
     }
 
-    async fn apply_single_app(&self, item: &Value, existing: &[Value]) -> anyhow::Result<()> {
+    async fn apply_single_app(&self, item: &Value, existing: &[r3v3rs3_api::platform::AppEntry]) -> anyhow::Result<()> {
         let target_id = item.get("id").and_then(|v| v.as_str());
         let target_name = item
             .get("name")
@@ -2940,20 +2853,12 @@ impl ApiClient {
             .and_then(|v| v.as_str());
 
         let matched = existing.iter().find(|e| {
-            let e_id = e.get("id").and_then(|v| v.as_str());
-            let e_name = e
-                .get("spec")
-                .and_then(|s| s.get("name"))
-                .and_then(|v| v.as_str());
-            (target_id.is_some() && e_id == target_id)
-                || (target_name.is_some() && e_name == target_name)
+            (target_id.is_some() && e.id.to_string() == target_id.unwrap_or_default())
+                || (target_name.is_some() && e.name.as_str() == target_name.unwrap_or_default())
         });
 
         if let Some(matched_entry) = matched {
-            let id = matched_entry
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let id = matched_entry.id.to_string();
             self.request(Method::PUT, &format!("/api/apps/{id}"), Some(item))
                 .await?;
             println!("app/{id} configured");
@@ -3003,54 +2908,40 @@ impl ApiClient {
     }
 
     pub async fn list_security_profiles(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/security/headers/profiles", None)
+        let list: Vec<r3v3rs3_api::security_headers::SecurityProfileInfo> = self
+            .get_json("/api/security/headers/profiles")
             .await?;
         println!("{:<16} {:<24} DESCRIPTION", "ID", "TITLE");
         println!("{}", "-".repeat(80));
-        if let Some(list) = res.as_array() {
-            for item in list {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                let desc = item
-                    .get("description")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                println!("{:<16} {:<24} {}", id, title, desc);
-            }
+        for item in &list {
+            println!("{:<16} {:<24} {}", item.id.title(), item.title, item.description);
         }
         Ok(())
     }
 
     pub async fn audit_proxy_security_headers(&self, id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(
-                Method::GET,
-                &format!("/api/proxies/{id}/security-headers"),
-                None,
-            )
+        let audit: r3v3rs3_api::security_headers::SecurityHeadersAudit = self
+            .get_json(&format!("/api/proxies/{id}/security-headers"))
             .await?;
-        let score = res.get("score").and_then(|v| v.as_u64()).unwrap_or(0);
-        let grade = res.get("grade").and_then(|v| v.as_str()).unwrap_or("F");
-        let detected = res
-            .get("detected_profile")
-            .and_then(|v| v.as_str())
-            .unwrap_or("custom");
 
-        let grade_colored = match grade {
-            "a_plus" | "a" => format!(
-                "\x1b[32m{}\x1b[0m",
-                grade.to_ascii_uppercase().replace('_', "+")
-            ),
-            "b" => "\x1b[33mB\x1b[0m".to_string(),
-            "c" | "d" => format!("\x1b[33m{}\x1b[0m", grade.to_ascii_uppercase()),
+        let grade_colored = match audit.grade {
+            r3v3rs3_api::security_headers::SecurityGrade::APlus
+            | r3v3rs3_api::security_headers::SecurityGrade::A => {
+                format!("\x1b[32m{}\x1b[0m", audit.grade.as_str())
+            }
+            r3v3rs3_api::security_headers::SecurityGrade::B => "\x1b[33mB\x1b[0m".to_string(),
+            r3v3rs3_api::security_headers::SecurityGrade::C
+            | r3v3rs3_api::security_headers::SecurityGrade::D => {
+                format!("\x1b[33m{}\x1b[0m", audit.grade.as_str())
+            }
             _ => "\x1b[31mF\x1b[0m".to_string(),
         };
 
+        let detected = audit.detected_profile.map(|p| p.title()).unwrap_or("Custom");
         println!("Proxy Security Audit: {}", id);
         println!(
             "Score: {}/100 | Grade: {} | Matching Profile: {}",
-            score, grade_colored, detected
+            audit.score, grade_colored, detected
         );
         println!("{}", "-".repeat(85));
         println!(
@@ -3059,10 +2950,8 @@ impl ApiClient {
         );
         println!("{}", "-".repeat(85));
 
-        if let Some(items) = res.get("items").and_then(|v| v.as_array()) {
-            for item in items {
-                print_security_audit_item(item);
-            }
+        for item in &audit.items {
+            print_security_audit_item(item);
         }
         Ok(())
     }
@@ -3072,42 +2961,44 @@ impl ApiClient {
         id: &str,
         profile_raw: &str,
     ) -> anyhow::Result<()> {
-        let normalized_profile = match profile_raw.to_ascii_lowercase().as_str() {
-            "strict" => "strict",
-            "balanced" => "balanced",
-            "api-only" | "api_only" | "api" => "api_only",
-            "spa" | "spa-frontend" | "spa_frontend" => "spa_frontend",
+        let profile = match profile_raw.to_ascii_lowercase().as_str() {
+            "strict" => r3v3rs3_api::security_headers::SecurityProfile::Strict,
+            "balanced" => r3v3rs3_api::security_headers::SecurityProfile::Balanced,
+            "api-only" | "api_only" | "api" => {
+                r3v3rs3_api::security_headers::SecurityProfile::ApiOnly
+            }
+            "spa" | "spa-frontend" | "spa_frontend" => {
+                r3v3rs3_api::security_headers::SecurityProfile::SpaFrontend
+            }
             other => anyhow::bail!(
                 "unknown profile: {other}. Expected strict, balanced, api-only, or spa"
             ),
         };
 
-        let body = serde_json::json!({ "profile": normalized_profile });
-        let res = self
-            .request(
-                Method::POST,
+        let req = r3v3rs3_api::security_headers::ApplySecurityProfileRequest { profile };
+        let res: r3v3rs3_api::security_headers::SecurityHeadersAudit = self
+            .post_json(
                 &format!("/api/proxies/{id}/security-headers/apply-profile"),
-                Some(&body),
+                &req,
             )
             .await?;
 
-        let score = res.get("score").and_then(|v| v.as_u64()).unwrap_or(0);
-        let grade = res.get("grade").and_then(|v| v.as_str()).unwrap_or("F");
         println!(
             "\x1b[32mSuccessfully applied security profile '{}' to proxy {}.\x1b[0m",
-            normalized_profile, id
+            profile.title(),
+            id
         );
         println!(
             "New Score: {}/100 (Grade: {})",
-            score,
-            grade.to_ascii_uppercase().replace('_', "+")
+            res.score,
+            res.grade.as_str()
         );
         Ok(())
     }
 
     pub async fn get_stream_priority(&self, id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, &format!("/api/proxies/{id}/priority"), None)
+        let res: r3v3rs3_api::priority::StreamPriorityConfig = self
+            .get_json(&format!("/api/proxies/{id}/priority"))
             .await?;
         println!("{}", serde_json::to_string_pretty(&res)?);
         Ok(())
@@ -3120,26 +3011,24 @@ impl ApiClient {
         inject_header: Option<bool>,
         adaptive_concurrency: Option<bool>,
     ) -> anyhow::Result<()> {
-        let mut cur = self
-            .request(Method::GET, &format!("/api/proxies/{id}/priority"), None)
+        let current: Option<r3v3rs3_api::priority::StreamPriorityConfig> = self
+            .get_json(&format!("/api/proxies/{id}/priority"))
             .await
-            .unwrap_or(serde_json::json!({}));
+            .ok();
 
-        cur["enabled"] = serde_json::json!(enable);
+        let mut config = current.unwrap_or_default();
+        config.enabled = enable;
         if let Some(inject) = inject_header {
-            cur["inject_header"] = serde_json::json!(inject);
+            config.inject_header = inject;
         }
         if let Some(adaptive) = adaptive_concurrency {
-            cur["adaptive_concurrency"] = serde_json::json!(adaptive);
+            config.adaptive_concurrency = adaptive;
         }
 
-        let body = serde_json::json!({ "config": cur });
-        self.request(
-            Method::PUT,
-            &format!("/api/proxies/{id}/priority"),
-            Some(&body),
-        )
-        .await?;
+        let body = r3v3rs3_api::priority::SetStreamPriorityRequest { config };
+        let _res: r3v3rs3_api::priority::StreamPriorityConfig = self
+            .put_json(&format!("/api/proxies/{id}/priority"), &body)
+            .await?;
         println!("proxy/{id} stream_priority enabled set to {enable}");
         Ok(())
     }
@@ -3153,108 +3042,106 @@ impl ApiClient {
     }
 
     pub async fn traffic_geo(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/traffic/geo", None).await?;
-        if let Some(top) = res.get("top_countries").and_then(|v| v.as_array()) {
+        let res: r3v3rs3_api::traffic::TrafficGeoDistribution = self
+            .get_json("/api/traffic/geo")
+            .await?;
+        println!("{:<10} {:<12} PERCENTAGE", "COUNTRY", "REQUESTS");
+        println!("{:-<10} {:-<12} {:-<10}", "", "", "");
+        for item in &res.top_countries {
             println!(
-                "{:<6} {:<24} {:<12} PERCENTAGE",
-                "CODE", "COUNTRY", "REQUESTS"
+                "{:<10} {:<12} {:.1}%",
+                item.country, item.count, item.percentage
             );
-            println!("{:-<6} {:-<24} {:-<12} {:-<10}", "", "", "", "");
-            for item in top {
-                let code = item.get("code").and_then(|v| v.as_str()).unwrap_or("-");
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("-");
-                let count = item.get("requests").and_then(|v| v.as_u64()).unwrap_or(0);
-                let pct = item
-                    .get("percentage")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
-                println!("{:<6} {:<24} {:<12} {:.1}%", code, name, count, pct);
-            }
-        } else {
-            print_json(&res)?;
         }
         Ok(())
     }
 
     pub async fn traffic_replay(&self, id: u64) -> anyhow::Result<()> {
-        let entry = self
-            .request(Method::GET, &format!("/api/traffic/{id}"), None)
+        let entry: r3v3rs3_api::traffic::AccessLogEntry = self
+            .get_json(&format!("/api/traffic/{id}"))
             .await?;
-        let method = entry
-            .get("method")
-            .and_then(|v| v.as_str())
-            .unwrap_or("GET");
-        let url = entry.get("url").and_then(|v| v.as_str()).unwrap_or("/");
-        let body = serde_json::json!({
-            "method": method,
-            "url": url,
-            "headers": [],
-            "timeout_ms": 10000,
-        });
-        let res = self
-            .request(Method::POST, "/api/traffic/replay", Some(&body))
+        let url = if entry.uri.starts_with("http://") || entry.uri.starts_with("https://") {
+            entry.uri
+        } else {
+            format!("http://{}{}", entry.host, entry.uri)
+        };
+        let body = r3v3rs3_api::traffic::RequestReplayRequest {
+            method: entry.method,
+            url,
+            headers: entry.request_headers,
+            body: None,
+            timeout_ms: Some(10000),
+            allow_internal: false,
+            insecure_skip_verify: false,
+        };
+        let res: r3v3rs3_api::traffic::RequestReplayResponse = self
+            .post_json("/api/traffic/replay", &body)
             .await?;
-        println!("traffic log entry {id} replayed ({method} {url})");
-        print_json(&res)
+        println!(
+            "traffic log entry {id} replayed (status: {}, latency: {:.2}ms)",
+            res.status, res.latency_ms
+        );
+        if let Some(err) = res.error {
+            println!("replay error: {err}");
+        }
+        Ok(())
     }
 
     pub async fn get_ct_status(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/certs/ct/status", None)
+        let res: r3v3rs3_api::ct::CtMonitorStatus = self
+            .get_json("/api/certs/ct/status")
             .await?;
         println!("{}", serde_json::to_string_pretty(&res)?);
         Ok(())
     }
 
     pub async fn get_ct_config(&self) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, "/api/certs/ct/config", None)
+        let res: r3v3rs3_api::ct::CtMonitorConfig = self
+            .get_json("/api/certs/ct/config")
             .await?;
         println!("{}", serde_json::to_string_pretty(&res)?);
         Ok(())
     }
 
     pub async fn set_ct_config(&self, args: SetCtConfigArgs<'_>) -> anyhow::Result<()> {
-        let mut cur = self
-            .request(Method::GET, "/api/certs/ct/config", None)
+        let mut cur: r3v3rs3_api::ct::CtMonitorConfig = self
+            .get_json("/api/certs/ct/config")
             .await
-            .unwrap_or(serde_json::json!({}));
+            .unwrap_or_default();
 
         if let Some(en) = args.enable {
-            cur["enabled"] = serde_json::json!(en);
+            cur.enabled = en;
         }
         if let Some(doms) = args.domains {
-            let list: Vec<&str> = doms
+            cur.monitored_domains = doms
                 .split(',')
-                .map(|s| s.trim())
+                .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-            cur["monitored_domains"] = serde_json::json!(list);
         }
         if let Some(auto) = args.auto_discover {
-            cur["auto_discover_domains"] = serde_json::json!(auto);
+            cur.auto_discover_domains = auto;
         }
         if let Some(issuers) = args.allowed_issuers {
-            let list: Vec<&str> = issuers
+            cur.allowed_issuers = issuers
                 .split(',')
-                .map(|s| s.trim())
+                .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-            cur["allowed_issuers"] = serde_json::json!(list);
         }
         if let Some(alert) = args.alert_unknown {
-            cur["alert_on_unknown_issuer"] = serde_json::json!(alert);
+            cur.alert_on_unknown_issuer = alert;
         }
         if let Some(int) = args.interval {
-            cur["check_interval_secs"] = serde_json::json!(int);
+            cur.check_interval_secs = int;
         }
         if let Some(url) = args.api_url {
-            cur["ct_api_url"] = serde_json::json!(url);
+            cur.ct_api_url = Some(url.to_string());
         }
 
-        let body = serde_json::json!({ "config": cur });
-        let res = self
-            .request(Method::PUT, "/api/certs/ct/config", Some(&body))
+        let body = r3v3rs3_api::ct::UpdateCtConfigRequest { config: cur };
+        let res: r3v3rs3_api::ct::CtMonitorConfig = self
+            .put_json("/api/certs/ct/config", &body)
             .await?;
         println!("{}", serde_json::to_string_pretty(&res)?);
         Ok(())
@@ -3291,19 +3178,31 @@ impl ApiClient {
         } else {
             format!("?{}", params.join("&"))
         };
-        let res = self
-            .request(Method::GET, &format!("/api/certs/ct/entries{query}"), None)
+        let res: Vec<r3v3rs3_api::ct::CtLogEntry> = self
+            .get_json(&format!("/api/certs/ct/entries{query}"))
             .await?;
         println!("{}", serde_json::to_string_pretty(&res)?);
         Ok(())
     }
 
     pub async fn dismiss_ct_alert(&self, id: &str, status: Option<&str>) -> anyhow::Result<()> {
-        let body = serde_json::json!({
-            "id": id,
-            "status": status,
-        });
-        self.request(Method::POST, "/api/certs/ct/dismiss", Some(&body))
+        let status = match status {
+            Some(s) => match s.to_ascii_lowercase().as_str() {
+                "investigating" => Some(r3v3rs3_api::ct::CtAlertStatus::Investigating),
+                "dismissed" => Some(r3v3rs3_api::ct::CtAlertStatus::Dismissed),
+                "confirmed_rogue" | "confirmed-rogue" | "rogue" => {
+                    Some(r3v3rs3_api::ct::CtAlertStatus::ConfirmedRogue)
+                }
+                other => anyhow::bail!("unknown status: {other}"),
+            },
+            None => None,
+        };
+        let body = r3v3rs3_api::ct::DismissCtAlertRequest {
+            id: id.to_string(),
+            status,
+        };
+        let _res: bool = self
+            .post_json("/api/certs/ct/dismiss", &body)
             .await?;
         println!("Certificate Transparency alert {id} dismissed.");
         Ok(())
@@ -3367,25 +3266,17 @@ fn print_json(val: &Value) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn print_security_audit_item(item: &Value) {
-    let header = item
-        .get("header_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("");
-    let earned = item
-        .get("earned_score")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let risk = item.get("risk").and_then(|v| v.as_str()).unwrap_or("");
-
-    let status_tag = match status {
-        "present" => "\x1b[32m[SECURED]\x1b[0m",
-        "weak" => "\x1b[33m[ WEAK  ]\x1b[0m",
-        _ => "\x1b[31m[MISSING]\x1b[0m",
+fn print_security_audit_item(item: &r3v3rs3_api::security_headers::HeaderAuditItem) {
+    let status_tag = match item.status {
+        r3v3rs3_api::security_headers::HeaderAuditStatus::Present => "\x1b[32m[SECURED]\x1b[0m",
+        r3v3rs3_api::security_headers::HeaderAuditStatus::Weak => "\x1b[33m[ WEAK  ]\x1b[0m",
+        r3v3rs3_api::security_headers::HeaderAuditStatus::Missing => "\x1b[31m[MISSING]\x1b[0m",
     };
 
-    println!("{:<28} {:<21} {:<6} {}", header, status_tag, earned, risk);
+    println!(
+        "{:<28} {:<21} {:<6} {}",
+        item.header_name, status_tag, item.earned_score, item.risk
+    );
 }
 
 fn format_cli_bytes(bytes: u64) -> String {
@@ -3413,49 +3304,38 @@ fn format_duration_secs(secs: u64) -> String {
 }
 
 pub fn build_cron_update_payload(
-    existing: Option<&Value>,
+    existing: Option<&r3v3rs3_api::platform::AppScheduledCommand>,
     cron: Option<&str>,
     command: Option<&str>,
     name: Option<&str>,
     payload: Option<&str>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<r3v3rs3_api::platform::ScheduledCommandRequest> {
     if let Some(p) = payload {
-        return load_payload(p);
+        return load_typed_payload(p);
     }
     let cur = existing.context("scheduled command not found on application")?;
-    let current_name = cur.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let current_schedule = cur
-        .get("schedule")
-        .or_else(|| cur.get("cron"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let current_command = cur.get("command").and_then(|v| v.as_str()).unwrap_or("");
-    let current_enabled = cur.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-
-    Ok(serde_json::json!({
-        "name": name.unwrap_or(current_name),
-        "schedule": cron.unwrap_or(current_schedule),
-        "cron": cron.unwrap_or(current_schedule),
-        "command": command.unwrap_or(current_command),
-        "enabled": current_enabled,
-    }))
+    Ok(r3v3rs3_api::platform::ScheduledCommandRequest {
+        name: name.unwrap_or(&cur.name).to_string(),
+        schedule: cron.unwrap_or(&cur.schedule).to_string(),
+        command: command.unwrap_or(&cur.command).to_string(),
+        enabled: cur.enabled,
+    })
 }
 
 pub fn build_pitr_restore_payload(
     target_time: u64,
     new_name: Option<String>,
     host_port: Option<u16>,
-) -> Value {
-    let mut obj = serde_json::json!({
-        "target_time": target_time,
-    });
-    if let Some(name) = new_name {
-        obj["new_name"] = serde_json::Value::String(name);
-    }
-    if let Some(port) = host_port {
-        obj["host_port"] = serde_json::Value::Number(port.into());
-    }
-    obj
+) -> anyhow::Result<r3v3rs3_api::platform::PitrRestoreRequest> {
+    let new_name = match new_name {
+        Some(n) => Some(n.parse().map_err(|e| anyhow::anyhow!("invalid database name: {e}"))?),
+        None => None,
+    };
+    Ok(r3v3rs3_api::platform::PitrRestoreRequest {
+        target_time,
+        new_name,
+        host_port,
+    })
 }
 
 #[cfg(test)]
@@ -3532,9 +3412,9 @@ protocol: http
             None,
         )
         .unwrap();
-        assert_eq!(val["server"], "ghcr.io");
-        assert_eq!(val["username"], "octocat");
-        assert_eq!(val["password"], "token123");
+        assert_eq!(val.server, "ghcr.io");
+        assert_eq!(val.username, "octocat");
+        assert_eq!(val.password.as_deref(), Some("token123"));
 
         let custom = build_registry_payload(
             None,
@@ -3543,8 +3423,8 @@ protocol: http
             Some(r#"{"server": "docker.io", "username": "user"}"#.to_string()),
         )
         .unwrap();
-        assert_eq!(custom["server"], "docker.io");
-        assert_eq!(custom["username"], "user");
+        assert_eq!(custom.server, "docker.io");
+        assert_eq!(custom.username, "user");
 
         assert!(build_registry_payload(None, Some("u".to_string()), None, None).is_err());
         assert!(build_registry_payload(Some("s".to_string()), None, None, None).is_err());
@@ -3561,10 +3441,10 @@ protocol: http
             None,
         )
         .unwrap();
-        assert_eq!(val["name"], "my-gitlab");
-        assert_eq!(val["provider"], "gitlab");
-        assert_eq!(val["client_id"], "client123");
-        assert_eq!(val["client_secret"], "secret456");
+        assert_eq!(val.name.as_str(), "my-gitlab");
+        assert_eq!(val.provider, r3v3rs3_api::git_connection::GitProvider::Gitlab);
+        assert_eq!(val.client_id, "client123");
+        assert_eq!(val.client_secret.as_deref(), Some("secret456"));
 
         assert!(build_git_connection_payload(None, None, None, None, None, None).is_err());
     }
@@ -3578,9 +3458,9 @@ protocol: http
             None,
         )
         .unwrap();
-        assert_eq!(acc["username"], "alice");
-        assert_eq!(acc["password"], "pw123");
-        assert_eq!(acc["role"], "admin");
+        assert_eq!(acc.username, "alice");
+        assert_eq!(acc.password, "pw123");
+        assert_eq!(acc.role, r3v3rs3_api::auth::Role::Admin);
 
         let update = build_account_update_payload(
             Some("newpw".to_string()),
@@ -3588,12 +3468,12 @@ protocol: http
             None,
         )
         .unwrap();
-        assert_eq!(update["password"], "newpw");
-        assert_eq!(update["role"], "viewer");
+        assert_eq!(update.password.as_deref(), Some("newpw"));
+        assert_eq!(update.role, r3v3rs3_api::auth::Role::Viewer);
 
         let tok = build_token_create_payload(Some("my-token".to_string()), "edit", None).unwrap();
-        assert_eq!(tok["name"], "my-token");
-        assert_eq!(tok["scope"], "edit");
+        assert_eq!(tok.name, "my-token");
+        assert_eq!(tok.scope, r3v3rs3_api::auth::TokenScope::Edit);
 
         assert!(build_account_create_payload(None, None, "editor", None).is_err());
         assert!(build_token_create_payload(None, "read", None).is_err());
@@ -3601,13 +3481,19 @@ protocol: http
 
     #[test]
     fn build_cron_update_payload_merges_existing() {
-        let existing = serde_json::json!({
-            "id": "cmd-1",
-            "name": "backup",
-            "schedule": "0 0 * * *",
-            "command": "run-backup.sh",
-            "enabled": true
-        });
+        let existing = r3v3rs3_api::platform::AppScheduledCommand {
+            id: "cmd-1".parse().unwrap(),
+            app_id: "app-1".parse().unwrap(),
+            name: "backup".to_string(),
+            schedule: "0 0 * * *".to_string(),
+            command: "run-backup.sh".to_string(),
+            enabled: true,
+            last_run_at: None,
+            last_status: None,
+            last_output: None,
+            created_at: 0,
+            updated_at: 0,
+        };
 
         let updated = build_cron_update_payload(
             Some(&existing),
@@ -3618,10 +3504,10 @@ protocol: http
         )
         .unwrap();
 
-        assert_eq!(updated["name"], "quick backup");
-        assert_eq!(updated["schedule"], "*/15 * * * *");
-        assert_eq!(updated["command"], "run-backup.sh");
-        assert_eq!(updated["enabled"], true);
+        assert_eq!(updated.name, "quick backup");
+        assert_eq!(updated.schedule, "*/15 * * * *");
+        assert_eq!(updated.command, "run-backup.sh");
+        assert!(updated.enabled);
 
         assert!(build_cron_update_payload(None, None, None, None, None).is_err());
     }
@@ -3629,13 +3515,14 @@ protocol: http
     #[test]
     fn build_pitr_restore_payload_constructs_valid_json() {
         let val =
-            build_pitr_restore_payload(1700000000000, Some("db-restored".to_string()), Some(5433));
-        assert_eq!(val["target_time"], 1700000000000u64);
-        assert_eq!(val["new_name"], "db-restored");
-        assert_eq!(val["host_port"], 5433);
+            build_pitr_restore_payload(1700000000000, Some("db-restored".to_string()), Some(5433))
+                .unwrap();
+        assert_eq!(val.target_time, 1700000000000u64);
+        assert_eq!(val.new_name.unwrap().as_str(), "db-restored");
+        assert_eq!(val.host_port, Some(5433));
 
-        let val_minimal = build_pitr_restore_payload(1700000000000, None, None);
-        assert_eq!(val_minimal["target_time"], 1700000000000u64);
-        assert!(val_minimal.get("new_name").is_none());
+        let val_minimal = build_pitr_restore_payload(1700000000000, None, None).unwrap();
+        assert_eq!(val_minimal.target_time, 1700000000000u64);
+        assert!(val_minimal.new_name.is_none());
     }
 }

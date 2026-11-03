@@ -642,9 +642,7 @@ pub enum TargetCommand {
         #[arg(long)]
         name: String,
         #[arg(long)]
-        host: String,
-        #[arg(long)]
-        port: u16,
+        region: Option<String>,
     },
     /// Deletes a target node.
     #[command(alias = "rm")]
@@ -1625,7 +1623,7 @@ async fn run_target(api: &api_client::ApiClient, cmd: TargetCommand) -> anyhow::
     match cmd {
         TargetCommand::List => api.list_targets().await,
         TargetCommand::Get { id } => api.get_target(&id).await,
-        TargetCommand::Add { name, host, port } => api.add_target(&name, &host, port).await,
+        TargetCommand::Add { name, region } => api.add_target(&name, region.as_deref()).await,
         TargetCommand::Delete { id } => api.delete_target(&id).await,
         TargetCommand::Drain { id } => api.drain_target(&id).await,
         TargetCommand::Undrain { id } => api.undrain_target(&id).await,

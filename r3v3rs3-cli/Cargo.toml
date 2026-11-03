@@ -13,6 +13,7 @@ name = "r3"
 path = "src/main.rs"
 
 [dependencies]
+r3v3rs3-api = { path = "../r3v3rs3-api" }
 anyhow = "1.0.71"
 base64 = "0.23.1"
 clap = { version = "4.3.11", features = ["derive", "env"] }
