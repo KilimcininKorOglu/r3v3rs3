@@ -598,18 +598,35 @@ async fn access_token(addr: &SocketAddr) -> anyhow::Result<String> {
     access_token_for(addr, "admin", "password").await
 }
 
+async fn access_token_with_scope(
+    addr: &SocketAddr,
+    scope: &str,
+) -> anyhow::Result<String> {
+    access_token_for_scope(addr, "admin", "password", scope).await
+}
+
 async fn access_token_for(
     addr: &SocketAddr,
     username: &str,
     password: &str,
 ) -> anyhow::Result<String> {
+    access_token_for_scope(addr, username, password, "read edit").await
+}
+
+async fn access_token_for_scope(
+    addr: &SocketAddr,
+    username: &str,
+    password: &str,
+    scope: &str,
+) -> anyhow::Result<String> {
     let client = Client::new();
     let cookie = session_as(addr, username, password).await?;
     let (verifier, challenge) = pkce();
+    let encoded_scope = scope.replace(' ', "%20");
     let url = format!(
         "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
          &redirect_uri={REDIRECT_URI}&state=st&code_challenge={challenge}\
-         &code_challenge_method=S256&scope=read%20edit"
+         &code_challenge_method=S256&scope={encoded_scope}"
     );
     let page = client
         .get(&url)
@@ -629,7 +646,7 @@ async fn access_token_for(
             ("redirect_uri", REDIRECT_URI),
             ("state", "st"),
             ("code_challenge", challenge.as_str()),
-            ("scope", "read edit"),
+            ("scope", scope),
             ("decision", "approve"),
             ("csrf_token", &csrf_token),
         ])
@@ -719,7 +736,6 @@ async fn assert_mcp_anonymous_and_raw(addr: SocketAddr, token: &str) -> anyhow::
 }
 
 async fn assert_mcp_client_tools(addr: SocketAddr, token: &str) -> anyhow::Result<()> {
-    use rmcp::model::CallToolRequestParams;
     use rmcp::service::serve_client;
     use rmcp::transport::streamable_http_client::{
         StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
@@ -731,6 +747,20 @@ async fn assert_mcp_client_tools(addr: SocketAddr, token: &str) -> anyhow::Resul
     );
     let client = serve_client(TestClient, transport).await?;
 
+    assert_mcp_tool_names(&client).await?;
+    assert_mcp_read_tools(&client).await?;
+
+    let port_id = assert_mcp_port_mutations(&client).await?;
+    assert_mcp_proxy_mutations(&client, &port_id).await?;
+    assert_mcp_admin_mutations(&client).await?;
+
+    client.cancel().await?;
+    Ok(())
+}
+
+async fn assert_mcp_tool_names(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
     let tools = client.list_tools(Default::default()).await?;
     let names: Vec<&str> = tools.tools.iter().map(|tool| tool.name.as_ref()).collect();
     assert!(names.contains(&"list_proxies"), "{names:?}");
@@ -756,55 +786,254 @@ async fn assert_mcp_client_tools(addr: SocketAddr, token: &str) -> anyhow::Resul
     assert!(names.contains(&"upgrade_all_targets"), "{names:?}");
     assert!(names.contains(&"get_server_upgrade_status"), "{names:?}");
     assert!(names.contains(&"run_server_upgrade"), "{names:?}");
+    Ok(())
+}
 
-    let result = client
-        .call_tool(CallToolRequestParams::new("server_status"))
-        .await?;
+async fn assert_mcp_read_tools(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let text = mcp_call(client, "server_status", json!({})).await?;
+    assert!(text.contains("workers"), "{text}");
+
+    let metrics_text = mcp_call(client, "get_system_metrics", json!({})).await?;
+    assert!(metrics_text.contains("event_loop_lag_seconds"), "{metrics_text}");
+
+    let store_text = mcp_call(client, "get_store", json!({})).await?;
+    assert!(store_text.contains("catalog"), "{store_text}");
+
+    let ports_text = mcp_call(client, "list_ports", json!({})).await?;
+    assert!(ports_text.starts_with('['), "{ports_text}");
+    Ok(())
+}
+
+async fn mcp_call(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+    name: &'static str,
+    args: Value,
+) -> anyhow::Result<String> {
+    use rmcp::model::CallToolRequestParams;
+    let mut params = CallToolRequestParams::new(name);
+    if let Some(map) = args.as_object() {
+        params = params.with_arguments(map.clone());
+    }
+    let result = client.call_tool(params).await?;
     let text = result
         .content
         .first()
-        .and_then(|content| content.as_text())
-        .map(|text| text.text.clone())
+        .and_then(|c| c.as_text())
+        .map(|t| t.text.clone())
         .unwrap_or_default();
-    assert!(text.contains("workers"), "{text}");
+    Ok(text)
+}
 
-    let metrics_result = client
-        .call_tool(CallToolRequestParams::new("get_system_metrics"))
-        .await?;
-    let metrics_text = metrics_result
-        .content
-        .first()
-        .and_then(|content| content.as_text())
-        .map(|text| text.text.clone())
-        .unwrap_or_default();
+async fn assert_mcp_port_mutations(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<String> {
+    let add_res = mcp_call(
+        client,
+        "add_port",
+        json!({
+            "port": {
+                "name": "p-mcp",
+                "listen": "/ip4/127.0.0.1/tcp/0"
+            }
+        }),
+    )
+    .await?;
+    assert!(add_res.contains("p-mcp"), "{add_res}");
+
+    let list_res = mcp_call(client, "list_ports", json!({})).await?;
+    let ports: Value = serde_json::from_str(&list_res)?;
+    let port_id = ports
+        .as_array()
+        .and_then(|arr| arr.iter().find(|p| p["name"] == "p-mcp"))
+        .and_then(|p| p["id"].as_str())
+        .context("port id not found")?
+        .to_string();
+
+    let get_res = mcp_call(client, "get_port", json!({ "id": &port_id })).await?;
+    assert!(get_res.contains("p-mcp"), "{get_res}");
+
+    let update_res = mcp_call(
+        client,
+        "update_port",
+        json!({
+            "entry": {
+                "id": &port_id,
+                "name": "p-mcp-upd",
+                "listen": "/ip4/127.0.0.1/tcp/0"
+            }
+        }),
+    )
+    .await?;
+    assert!(update_res.contains("true"), "{update_res}");
+
+    let reset_res = mcp_call(client, "reset_port", json!({ "id": &port_id })).await?;
+    assert!(reset_res.contains(&port_id), "{reset_res}");
+
+    Ok(port_id)
+}
+
+async fn assert_mcp_proxy_mutations(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+    port_id: &str,
+) -> anyhow::Result<()> {
+    let add_res = mcp_call(
+        client,
+        "add_proxy",
+        json!({
+            "proxy": {
+                "name": "px-mcp",
+                "protocol": "http",
+                "routes": [],
+                "ports": [port_id]
+            }
+        }),
+    )
+    .await?;
+    assert!(add_res.contains("created"), "{add_res}");
+
+    let list_res = mcp_call(client, "list_proxies", json!({})).await?;
+    let proxies: Value = serde_json::from_str(&list_res)?;
+    let proxy_id = proxies
+        .as_array()
+        .and_then(|arr| arr.iter().find(|p| p["name"] == "px-mcp"))
+        .and_then(|p| p["id"].as_str())
+        .context("proxy id not found")?
+        .to_string();
+
+    let get_res = mcp_call(client, "get_proxy", json!({ "id": &proxy_id })).await?;
+    assert!(get_res.contains("px-mcp"), "{get_res}");
+
+    let update_res = mcp_call(
+        client,
+        "update_proxy",
+        json!({
+            "entry": {
+                "id": &proxy_id,
+                "name": "px-mcp-upd",
+                "protocol": "http",
+                "routes": [],
+                "ports": [port_id]
+            }
+        }),
+    )
+    .await?;
+    assert!(update_res.contains("true"), "{update_res}");
+
+    let purge_res = mcp_call(client, "purge_proxy_cache", json!({ "id": &proxy_id })).await?;
+    assert!(purge_res.contains("true"), "{purge_res}");
+
+    let del_proxy = mcp_call(client, "delete_proxy", json!({ "id": &proxy_id })).await?;
+    assert!(del_proxy.contains(&proxy_id), "{del_proxy}");
+
+    let del_port = mcp_call(client, "delete_port", json!({ "id": port_id })).await?;
+    assert!(del_port.contains(port_id), "{del_port}");
+
+    Ok(())
+}
+
+async fn assert_mcp_admin_mutations(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let unban = mcp_call(client, "unban_ip", json!({ "ip": "10.0.0.1" })).await?;
+    assert!(unban.contains("10.0.0.1"), "{unban}");
+    Ok(())
+}
+
+async fn run_client(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    args: &[&str],
+) -> anyhow::Result<std::process::Output> {
+    let mut command = std::process::Command::new(binary);
+    command
+        .arg(format!("http://{addr}"))
+        .arg("--token")
+        .arg(token);
+    command.args(args);
+    tokio::task::spawn_blocking(move || {
+        command.output().context("failed to run the client binary")
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("the client task failed: {err}"))?
+}
+
+async fn assert_cli_port_mutations(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+) -> anyhow::Result<String> {
+    let payload = json!({
+        "name": "cli-port",
+        "listen": "/ip4/127.0.0.1/tcp/0"
+    })
+    .to_string();
+    let add_out = run_client(binary, addr, token, &["port", "add", &payload]).await?;
     assert!(
-        metrics_text.contains("event_loop_lag_seconds"),
-        "{metrics_text}"
+        add_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add_out.stderr)
     );
 
-    let store_result = client
-        .call_tool(CallToolRequestParams::new("get_store"))
-        .await?;
-    let store_text = store_result
-        .content
-        .first()
-        .and_then(|content| content.as_text())
-        .map(|text| text.text.clone())
-        .unwrap_or_default();
-    assert!(store_text.contains("catalog"), "{store_text}");
+    let list_out = run_client(binary, addr, token, &["port", "list"]).await?;
+    let stdout = String::from_utf8_lossy(&list_out.stdout).to_string();
+    assert!(list_out.status.success());
+    assert!(stdout.contains("/ip4/127.0.0.1/tcp/0"), "{stdout}");
 
-    let ports_result = client
-        .call_tool(CallToolRequestParams::new("list_ports"))
-        .await?;
-    let ports_text = ports_result
-        .content
-        .first()
-        .and_then(|content| content.as_text())
-        .map(|text| text.text.clone())
-        .unwrap_or_default();
-    assert!(ports_text.starts_with('['), "{ports_text}");
+    let port_id = stdout
+        .lines()
+        .find(|line| line.contains("/ip4/127.0.0.1/tcp/0"))
+        .and_then(|line| line.split_whitespace().next())
+        .context("port id not found in cli output")?
+        .to_string();
 
-    client.cancel().await?;
+    let get_out = run_client(binary, addr, token, &["port", "get", &port_id]).await?;
+    assert!(get_out.status.success());
+    Ok(port_id)
+}
+
+async fn assert_cli_proxy_mutations(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    port_id: &str,
+) -> anyhow::Result<()> {
+    let payload = json!({
+        "name": "cli-proxy",
+        "protocol": "http",
+        "routes": [],
+        "ports": [port_id]
+    })
+    .to_string();
+    let add_out = run_client(binary, addr, token, &["proxy", "add", &payload]).await?;
+    assert!(
+        add_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add_out.stderr)
+    );
+
+    let list_out = run_client(binary, addr, token, &["proxy", "list"]).await?;
+    let stdout = String::from_utf8_lossy(&list_out.stdout).to_string();
+    assert!(list_out.status.success());
+    assert!(stdout.contains("cli-proxy"), "{stdout}");
+
+    let proxy_id = stdout
+        .lines()
+        .find(|line| line.contains("cli-proxy"))
+        .and_then(|line| line.split_whitespace().next())
+        .context("proxy id not found in cli output")?
+        .to_string();
+
+    let get_out = run_client(binary, addr, token, &["proxy", "get", &proxy_id]).await?;
+    assert!(get_out.status.success());
+
+    let rm_proxy = run_client(binary, addr, token, &["proxy", "rm", &proxy_id]).await?;
+    assert!(rm_proxy.status.success());
+
+    let rm_port = run_client(binary, addr, token, &["port", "rm", port_id]).await?;
+    assert!(rm_port.status.success());
     Ok(())
 }
 
@@ -825,26 +1054,7 @@ async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
             .status()
             .context("failed to run cargo")?;
         assert!(status.success());
-        // The child waits for the server of this test process, so the blocking wait runs on a
-        // separate thread and the runtime keeps serving.
-        async fn run_client(
-            binary: &std::path::Path,
-            addr: &SocketAddr,
-            token: &str,
-            args: &[&str],
-        ) -> anyhow::Result<std::process::Output> {
-            let mut command = std::process::Command::new(binary);
-            command
-                .arg(format!("http://{addr}"))
-                .arg("--token")
-                .arg(token);
-            command.args(args);
-            tokio::task::spawn_blocking(move || {
-                command.output().context("failed to run the client binary")
-            })
-            .await
-            .map_err(|err| anyhow::anyhow!("the client task failed: {err}"))?
-        }
+
         let output = run_client(&binary, &addr, &token, &["config", "get"]).await?;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         assert!(
@@ -854,13 +1064,8 @@ async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
             String::from_utf8_lossy(&output.stderr)
         );
 
-        let output = run_client(&binary, &addr, &token, &["proxy", "list"]).await?;
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        assert!(
-            output.status.success(),
-            "{stdout} {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let port_id = assert_cli_port_mutations(&binary, &addr, &token).await?;
+        assert_cli_proxy_mutations(&binary, &addr, &token, &port_id).await?;
         Ok(())
     })
     .await
@@ -1210,6 +1415,44 @@ async fn run_server_upgrade_rejects_non_admin() -> anyhow::Result<()> {
                 .contains("the role of the account does not allow this action")
                 || err.to_string().contains("-32603"),
             "{err}"
+        );
+        client.cancel().await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn mcp_mutation_tools_enforce_edit_scope() -> anyhow::Result<()> {
+    use rmcp::service::serve_client;
+    use rmcp::transport::streamable_http_client::{
+        StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+    };
+
+    let dir = TempDir::new("mcp-scope-enforce")?;
+    with_admin(&dir.0, |addr| async move {
+        let token = access_token_with_scope(&addr, "read").await?;
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(format!("http://{addr}/api/mcp"))
+                .auth_header(&token),
+        );
+        let client = serve_client(TestClient, transport).await?;
+        let err = mcp_call(
+            &client,
+            "add_port",
+            json!({
+                "port": {
+                    "name": "p-fail",
+                    "listen": "/ip4/127.0.0.1/tcp/0"
+                }
+            }),
+        )
+        .await
+        .unwrap_err();
+        let err_str = err.to_string();
+        assert!(
+            err_str.contains("edit scope") || err_str.contains("-32602"),
+            "{err_str}"
         );
         client.cancel().await?;
         Ok(())
