@@ -68,6 +68,7 @@ impl CtMonitorState {
     }
 
     pub fn save_config(&self, new_config: CtMonitorConfig) -> Result<(), Error> {
+        new_config.validate()?;
         let mut cfg = self.config.lock().unwrap();
         *cfg = new_config.clone();
         drop(cfg);
@@ -372,6 +373,7 @@ async fn fetch_entries_for_domain(
         .ct_api_url
         .as_deref()
         .unwrap_or("https://crt.sh/?q={domain}&output=json");
+    r3v3rs3_api::ct::validate_ct_api_url(template).map_err(|e| e.to_string())?;
     let url = template.replace("{domain}", domain);
 
     let res = client

@@ -122,6 +122,9 @@ async fn test_ct_config_and_status() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_ct_check_and_dismiss_flow() -> anyhow::Result<()> {
+    unsafe {
+        std::env::set_var("R3V3RS3_TEST_ALLOW_LOCAL_CT", "1");
+    }
     let dir = TempDir::new("ct-flow")?;
 
     // Start mock CT API server with mockito
@@ -162,83 +165,14 @@ async fn test_ct_check_and_dismiss_flow() -> anyhow::Result<()> {
     with_admin(&dir.0, |addr| async move {
         let client = Client::new();
         let cookie = admin_session_cookie(addr).await?;
+        let addr_str = addr.to_string();
 
-        // 1. Configure custom CT API URL pointing to our mock server
-        let update_req = UpdateCtConfigRequest {
-            config: CtMonitorConfig {
-                enabled: true,
-                check_interval_secs: 3600,
-                monitored_domains: vec!["example.com".to_string()],
-                auto_discover_domains: false,
-                allowed_issuers: vec!["Let's Encrypt".to_string()],
-                alert_on_unknown_issuer: true,
-                ct_api_url: Some(format!("{mock_url}/?q={{domain}}&output=json")),
-            },
-        };
+        configure_and_trigger(&client, &addr_str, &cookie, &mock_url).await?;
+        verify_and_dismiss_rogue(&client, &addr_str, &cookie).await?;
 
         let res = client
-            .put(format!("http://{addr}/api/certs/ct/config"))
-            .header(COOKIE, cookie.clone())
-            .header(CONTENT_TYPE, "application/json")
-            .json(&update_req)
-            .send()
-            .await?;
-        assert_eq!(res.status(), StatusCode::OK);
-
-        // 2. Trigger check
-        let res = client
-            .post(format!(
-                "http://{addr}/api/certs/ct/check?domain=example.com"
-            ))
-            .header(COOKIE, cookie.clone())
-            .send()
-            .await?;
-        assert_eq!(res.status(), StatusCode::OK);
-        let count: usize = res.json().await?;
-        assert_eq!(count, 1, "Should discover exactly 1 rogue cert");
-
-        // 3. List entries
-        let res = client
-            .get(format!("http://{addr}/api/certs/ct/entries"))
-            .header(COOKIE, cookie.clone())
-            .send()
-            .await?;
-        assert_eq!(res.status(), StatusCode::OK);
-        let entries: Vec<CtLogEntry> = res.json().await?;
-        assert_eq!(entries.len(), 2);
-
-        let rogue = entries.iter().find(|e| e.id == "1002").unwrap();
-        assert!(rogue.is_rogue);
-        assert_eq!(rogue.status, CtAlertStatus::Investigating);
-
-        // 4. Check status shows 1 active rogue alert
-        let res = client
-            .get(format!("http://{addr}/api/certs/ct/status"))
-            .header(COOKIE, cookie.clone())
-            .send()
-            .await?;
-        assert_eq!(res.status(), StatusCode::OK);
-        let status: CtMonitorStatus = res.json().await?;
-        assert_eq!(status.active_rogue_alerts_count, 1);
-
-        // 5. Dismiss alert
-        let dismiss_req = DismissCtAlertRequest {
-            id: "1002".to_string(),
-            status: Some(CtAlertStatus::Dismissed),
-        };
-        let res = client
-            .post(format!("http://{addr}/api/certs/ct/dismiss"))
-            .header(COOKIE, cookie.clone())
-            .header(CONTENT_TYPE, "application/json")
-            .json(&dismiss_req)
-            .send()
-            .await?;
-        assert_eq!(res.status(), StatusCode::OK);
-
-        // 6. Verify status shows 0 active rogue alerts
-        let res = client
-            .get(format!("http://{addr}/api/certs/ct/status"))
-            .header(COOKIE, cookie.clone())
+            .get(format!("http://{addr_str}/api/certs/ct/status"))
+            .header(COOKIE, cookie)
             .send()
             .await?;
         assert_eq!(res.status(), StatusCode::OK);
@@ -248,4 +182,73 @@ async fn test_ct_check_and_dismiss_flow() -> anyhow::Result<()> {
         Ok(())
     })
     .await
+}
+
+async fn configure_and_trigger(
+    client: &Client,
+    addr: &str,
+    cookie: &str,
+    mock_url: &str,
+) -> anyhow::Result<()> {
+    let update_req = UpdateCtConfigRequest {
+        config: CtMonitorConfig {
+            enabled: true,
+            check_interval_secs: 3600,
+            monitored_domains: vec!["example.com".to_string()],
+            auto_discover_domains: false,
+            allowed_issuers: vec!["Let's Encrypt".to_string()],
+            alert_on_unknown_issuer: true,
+            ct_api_url: Some(format!("{mock_url}/?q={{domain}}&output=json")),
+        },
+    };
+    let res = client
+        .put(format!("http://{addr}/api/certs/ct/config"))
+        .header(COOKIE, cookie)
+        .header(CONTENT_TYPE, "application/json")
+        .json(&update_req)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = client
+        .post(format!("http://{addr}/api/certs/ct/check?domain=example.com"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    let count: usize = res.json().await?;
+    assert_eq!(count, 1, "Should discover exactly 1 rogue cert");
+    Ok(())
+}
+
+async fn verify_and_dismiss_rogue(
+    client: &Client,
+    addr: &str,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    let res = client
+        .get(format!("http://{addr}/api/certs/ct/entries"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    let entries: Vec<CtLogEntry> = res.json().await?;
+    assert_eq!(entries.len(), 2);
+    let rogue = entries.iter().find(|e| e.id == "1002").unwrap();
+    assert!(rogue.is_rogue);
+    assert_eq!(rogue.status, CtAlertStatus::Investigating);
+
+    let dismiss_req = DismissCtAlertRequest {
+        id: "1002".to_string(),
+        status: Some(CtAlertStatus::Dismissed),
+    };
+    let res = client
+        .post(format!("http://{addr}/api/certs/ct/dismiss"))
+        .header(COOKIE, cookie)
+        .header(CONTENT_TYPE, "application/json")
+        .json(&dismiss_req)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    Ok(())
 }

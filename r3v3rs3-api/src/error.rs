@@ -553,6 +553,9 @@ pub enum Error {
     #[error("invalid scheduled command: {reason}")]
     InvalidScheduledCommand { reason: String },
 
+    #[error("invalid certificate transparency configuration: {reason}")]
+    InvalidCtConfig { reason: String },
+
     #[error("compression dictionary not found: {id}")]
     CompressionDictionaryNotFound {
         #[schema(value_type = String)]

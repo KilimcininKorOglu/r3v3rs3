@@ -573,6 +573,7 @@
   "error.error_page_theme_in_use": "A proxy uses the error page theme: {id}",
   "error.invalid_compression_dictionary": "Invalid compression dictionary: {reason}",
   "error.invalid_scheduled_command": "Invalid scheduled command: {reason}",
+  "error.invalid_ct_config": "Invalid Certificate Transparency configuration: {reason}",
   "error.compression_dictionary_not_found": "Compression dictionary not found: {id}",
   "error.connection_not_found": "Active connection not found: {id}",
   "error.ct_check_failed": "Certificate Transparency check failed: {reason}",

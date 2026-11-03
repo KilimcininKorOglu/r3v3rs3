@@ -436,7 +436,7 @@ fn matches_blocked_suffix(host: &str) -> bool {
     SUFFIXES.iter().any(|suffix| host.ends_with(suffix))
 }
 
-fn is_restricted_host(host: &url::Host<&str>) -> bool {
+pub fn is_restricted_host(host: &url::Host<&str>) -> bool {
     match host {
         url::Host::Ipv4(ip) => is_private_or_restricted_ipv4(*ip),
         url::Host::Ipv6(ip) => is_private_or_restricted_ipv6(*ip),

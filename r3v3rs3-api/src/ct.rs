@@ -1,5 +1,6 @@
 //! Certificate Transparency (CT) log monitor and rogue certificate detection models.
 
+use crate::error::Error;
 use serde_derive::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -107,6 +108,60 @@ impl Default for CtMonitorConfig {
             ct_api_url: None,
         }
     }
+}
+
+impl CtMonitorConfig {
+    pub fn validate(&self) -> Result<(), Error> {
+        if let Some(ref template) = self.ct_api_url {
+            validate_ct_api_url(template)?;
+        }
+        Ok(())
+    }
+}
+
+/// Validates a custom Certificate Transparency API URL template.
+///
+/// Ensures the template contains `{domain}`, uses the HTTPS scheme, and does not target
+/// loopback, RFC 1918 private subnets, link-local addresses, or cloud metadata endpoints.
+pub fn validate_ct_api_url(template: &str) -> Result<(), Error> {
+    let trimmed = template.trim();
+    if !trimmed.contains("{domain}") {
+        return Err(Error::InvalidCtConfig {
+            reason: "CT API URL template must contain '{domain}' placeholder".to_string(),
+        });
+    }
+    let sample = trimmed.replace("{domain}", "example.com");
+    let parsed = url::Url::parse(&sample).map_err(|err| Error::InvalidCtConfig {
+        reason: format!("invalid CT API URL template: {err}"),
+    })?;
+
+    if is_local_ct_allowed() {
+        return Ok(());
+    }
+    validate_public_https_target(&parsed)
+}
+
+fn is_local_ct_allowed() -> bool {
+    std::env::var("R3V3RS3_TEST_ALLOW_LOCAL_CT")
+        .map(|v| v == "1" || v == "true")
+        .unwrap_or(false)
+}
+
+fn validate_public_https_target(parsed: &url::Url) -> Result<(), Error> {
+    if parsed.scheme() != "https" {
+        return Err(Error::InvalidCtConfig {
+            reason: "CT API URL must use https scheme".to_string(),
+        });
+    }
+    let host = parsed.host().ok_or_else(|| Error::InvalidCtConfig {
+        reason: "CT API URL must have a host".to_string(),
+    })?;
+    if crate::webhook::is_restricted_host(&host) {
+        return Err(Error::InvalidCtConfig {
+            reason: "CT API URL cannot target private, loopback, or restricted addresses".to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// Overall runtime status of the Certificate Transparency monitor.
@@ -363,5 +418,34 @@ mod tests {
                 .unwrap()
                 .contains("Untrusted or unauthorized CA")
         );
+    }
+
+    #[test]
+    fn test_validate_ct_api_url_blocks_ssrf() {
+        // Valid HTTPS template with {domain}
+        assert!(validate_ct_api_url("https://crt.sh/?q={domain}&output=json").is_ok());
+
+        // Missing {domain}
+        assert!(validate_ct_api_url("https://crt.sh/?q=all").is_err());
+
+        // Plain HTTP
+        assert!(validate_ct_api_url("http://crt.sh/?q={domain}").is_err());
+
+        // Loopback addresses
+        assert!(validate_ct_api_url("https://127.0.0.1:8443/?q={domain}").is_err());
+        assert!(validate_ct_api_url("https://localhost:8443/?q={domain}").is_err());
+        assert!(validate_ct_api_url("https://[::1]:8443/?q={domain}").is_err());
+
+        // Private RFC 1918 subnets
+        assert!(validate_ct_api_url("https://10.0.0.1/?q={domain}").is_err());
+        assert!(validate_ct_api_url("https://192.168.1.5/?q={domain}").is_err());
+        assert!(validate_ct_api_url("https://172.16.0.1/?q={domain}").is_err());
+
+        // Cloud metadata & link-local
+        assert!(validate_ct_api_url("https://169.254.169.254/latest/{domain}").is_err());
+
+        // Blocked internal suffixes
+        assert!(validate_ct_api_url("https://internal.corp/?q={domain}").is_err());
+        assert!(validate_ct_api_url("https://host.local/?q={domain}").is_err());
     }
 }

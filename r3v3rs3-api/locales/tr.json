@@ -573,6 +573,7 @@
   "error.error_page_theme_in_use": "Bir proxy bu hata sayfası temasını kullanıyor: {id}",
   "error.invalid_compression_dictionary": "Geçersiz sıkıştırma sözlüğü: {reason}",
   "error.invalid_scheduled_command": "Geçersiz zamanlanmış komut: {reason}",
+  "error.invalid_ct_config": "Geçersiz Sertifika Şeffaflığı yapılandırması: {reason}",
   "error.compression_dictionary_not_found": "Sıkıştırma sözlüğü bulunamadı: {id}",
   "error.connection_not_found": "Aktif bağlantı bulunamadı: {id}",
   "error.ct_check_failed": "Sertifika Şeffaflığı denetimi başarısız: {reason}",
