@@ -7,7 +7,7 @@ use std::fmt;
 use utoipa::ToSchema;
 
 /// Redirects the requests whose `host/path?query` matches the regex.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct RedirectRule {
     /// Matches the host without the port, the path and the query, e.g.
     /// `example.com/old/page?id=1`.
@@ -74,8 +74,9 @@ impl fmt::Display for RedirectRule {
 }
 
 /// The status code of a redirect.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(try_from = "u16", into = "u16")]
+#[schemars(with = "u16")]
 pub enum RedirectStatus {
     MovedPermanently,
     #[default]

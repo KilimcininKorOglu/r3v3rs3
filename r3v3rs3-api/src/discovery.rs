@@ -4,7 +4,7 @@ use utoipa::ToSchema;
 
 /// A service discovery provider.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum DiscoveryProvider {
@@ -36,7 +36,7 @@ impl fmt::Display for DiscoveryProvider {
 }
 
 /// The origin of a discovered proxy.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct DiscoverySource {
     pub provider: DiscoveryProvider,
     /// The resource that defines the proxy, e.g. a container name, `ingress default/app`, a Consul

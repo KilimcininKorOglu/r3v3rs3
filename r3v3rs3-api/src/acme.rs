@@ -14,7 +14,7 @@ pub const MIN_RENEWAL_DAYS: u64 = 1;
 /// The maximum renewal interval in days (under the standard 90-day validity window).
 pub const MAX_RENEWAL_DAYS: u64 = 89;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 pub struct Acme {
     #[schema(inline)]
     #[serde(flatten)]
@@ -160,7 +160,7 @@ impl Acme {
 }
 
 /// Instructions for setting up and verifying a CNAME delegation record for DNS-01 ACME.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 pub struct AcmeCnameInstruction {
     /// The subject domain name from the ACME order (e.g. `shop.client.com`).
     pub domain: String,
@@ -178,7 +178,7 @@ pub struct AcmeCnameInstruction {
 ///
 /// The providers are grouped by the shape of their credentials. Every group is an object with
 /// a `provider` name, so the groups do not change the serialized form.
-#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum DnsProvider {
     Token(TokenProvider),
@@ -190,7 +190,7 @@ pub enum DnsProvider {
 /// A provider API that takes one API token.
 ///
 /// `api_url` replaces the address of the provider API, for example with a test server.
-#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 pub struct TokenProvider {
     pub provider: TokenApi,
     pub api_token: String,
@@ -210,7 +210,7 @@ impl TokenProvider {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TokenApi {
     Cloudflare,
@@ -238,7 +238,7 @@ impl TokenApi {
 }
 
 /// A provider API that takes a key pair or several keys.
-#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 #[serde(tag = "provider", rename_all = "snake_case")]
 pub enum KeyedProvider {
     Route53 {
@@ -264,7 +264,7 @@ pub enum KeyedProvider {
 }
 
 /// The API endpoint of an OVHcloud account, by its name in the OVH API clients.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum OvhEndpoint {
     OvhEu,
@@ -390,7 +390,7 @@ impl KeyedProvider {
 /// A cloud platform API that authenticates with a service account of the platform.
 ///
 /// `auth_url` replaces the address of the token endpoint, for example with a test server.
-#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 #[serde(tag = "provider", rename_all = "snake_case")]
 pub enum CloudProvider {
     Azure {
@@ -471,10 +471,8 @@ impl CloudProvider {
                     service_account_key: old,
                     ..
                 },
-            ) => {
-                if service_account_key.is_empty() {
-                    service_account_key.clone_from(old);
-                }
+            ) if service_account_key.is_empty() => {
+                service_account_key.clone_from(old);
             }
             _ => {}
         }
@@ -482,7 +480,7 @@ impl CloudProvider {
 }
 
 /// A provider that the operator runs, instead of the API of a DNS hosting service.
-#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 #[serde(tag = "provider", rename_all = "snake_case")]
 pub enum LocalProvider {
     /// An HTTP service that receives the TXT records in a JSON `POST` request.
@@ -515,7 +513,7 @@ pub enum LocalProvider {
 }
 
 /// The HMAC algorithm of a TSIG key.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TsigKeyAlgorithm {
     #[default]
@@ -589,10 +587,8 @@ impl LocalProvider {
                 Self::Rfc2136 {
                     key_secret: old, ..
                 },
-            ) => {
-                if key_secret.is_empty() {
-                    key_secret.clone_from(old);
-                }
+            ) if key_secret.is_empty() => {
+                key_secret.clone_from(old);
             }
             _ => {}
         }
@@ -680,7 +676,7 @@ impl fmt::Debug for DnsProvider {
     }
 }
 
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct AcmeConfig {
     #[serde(default = "default_active", skip_serializing_if = "is_true")]
     pub active: bool,
@@ -718,7 +714,7 @@ fn default_renewal_days() -> u64 {
     60
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct AcmeInfo {
     pub id: ShortId,
     #[schema(inline)]
@@ -742,7 +738,7 @@ pub struct AcmeInfo {
 }
 
 /// One named DNS credential of the store, without its secrets.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct DnsCredentialInfo {
     pub id: ShortId,
     #[schema(example = "Cloudflare - hermestech")]
@@ -754,7 +750,7 @@ pub struct DnsCredentialInfo {
 
 /// The body of a create or an update of a named DNS credential. An update without
 /// `dns_provider` keeps the stored credentials.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct DnsCredentialRequest {
     #[schema(example = "Cloudflare - hermestech")]
     pub name: String,
@@ -762,7 +758,7 @@ pub struct DnsCredentialRequest {
     pub dns_provider: Option<DnsProvider>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 pub struct AcmeRequest {
     #[schema(example = "https://acme-staging-v02.api.letsencrypt.org/directory")]
     pub server_url: String,
@@ -775,7 +771,7 @@ pub struct AcmeRequest {
     pub acme: Acme,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
 pub struct ExternalAccountBinding {
     #[schema(example = "f9cf7e3faa1aca7e6086")]
     pub key_id: String,
@@ -784,6 +780,7 @@ pub struct ExternalAccountBinding {
         serialize_with = "serialize_hmac_key",
         deserialize_with = "deserialize_hmac_key"
     )]
+    #[schemars(with = "String")]
     pub hmac_key: Vec<u8>,
 }
 

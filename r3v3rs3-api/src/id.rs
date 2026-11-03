@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 use utoipa::ToSchema;
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ToSchema)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ToSchema, schemars::JsonSchema)]
+#[schemars(with = "String")]
 pub struct ShortId([u8; 8]);
 
 impl ShortId {

@@ -129,7 +129,7 @@ fn write_engines() -> std::sync::RwLockWriteGuard<'static, InstalledEngines> {
 }
 
 /// The backup settings of the managed databases, stored in the platform database.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(default)]
 pub struct BackupConfig {
     /// The time of day that the scheduler takes the backups at, as `HH:MM`. Empty turns the
@@ -165,7 +165,7 @@ impl Default for BackupConfig {
 }
 
 /// An S3 compatible bucket that the backups upload to.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct S3Config {
     /// The base URL of the bucket, for example `https://s3.example.com/bucket`.
     pub endpoint: String,
@@ -180,7 +180,7 @@ pub struct S3Config {
 }
 
 /// An SFTP server target that the backups upload to.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct SftpConfig {
     /// Hostname or IP address of the SFTP server.
     pub host: String,
@@ -204,7 +204,7 @@ fn default_ssh_port() -> u16 {
 }
 
 /// An rsync remote destination that the backups sync to.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct RsyncConfig {
     /// Destination path (e.g. `user@host:/path` or `rsync://host/module`).
     pub destination: String,
@@ -680,7 +680,7 @@ pub struct PruneResult {
     pub space_reclaimed_bytes: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetKind {
     /// The Docker Engine of the server that runs r3v3rs3.
@@ -765,7 +765,7 @@ pub struct TargetEntry {
 }
 
 /// A new agent target.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct TargetRequest {
     #[schema(value_type = String, example = "edge-1")]
     pub name: AppName,
@@ -796,7 +796,7 @@ pub struct TargetToken {
 }
 
 /// Where the image of an app comes from.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AppSource {
     /// A ready image from a registry.
@@ -880,7 +880,7 @@ impl AppSource {
 }
 
 /// Alert thresholds for CPU and memory usage, triggering webhook notifications when exceeded.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct AlertRules {
     /// The CPU percentage threshold (e.g. 80 for 80%). When CPU usage meets or exceeds this, an alert is sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -912,7 +912,7 @@ impl AlertRules {
 }
 
 /// Alert thresholds for host nodes, triggering webhook notifications when free disk space is low, bandwidth spikes, or file descriptors and sockets are exhausted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct NodeAlertRules {
     /// Whether node-level threshold alerts are enabled.
     #[serde(default = "default_true")]
@@ -991,7 +991,7 @@ fn is_false(b: &bool) -> bool {
 }
 
 /// What a deployment of an app runs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct AppSpec {
     pub source: AppSource,
 
@@ -1132,7 +1132,7 @@ pub struct AppSpec {
 }
 
 /// Commands executed before or after a deployment lifecycle stage.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct DeploymentLifecycleHooks {
     /// Command executed in an ephemeral container using the new image before routing traffic.
     /// If non-zero, deployment fails and previous container remains active.
@@ -1147,7 +1147,7 @@ pub struct DeploymentLifecycleHooks {
 }
 
 /// Configuration for BuildKit remote builders and cache mounts.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct BuildKitConfig {
     /// Whether BuildKit is enabled for building this app's image.
     #[serde(default)]
@@ -1179,7 +1179,7 @@ pub struct BuildKitConfig {
 }
 
 /// Popular language ecosystem cache mount presets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheMountPreset {
     Cargo,
@@ -1221,7 +1221,7 @@ impl CacheMountPreset {
 }
 
 /// Configuration for ephemeral preview deployments for pull/merge requests.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct PreviewConfig {
     /// Whether ephemeral preview deployments are enabled for this app.
     #[serde(default)]
@@ -1235,7 +1235,7 @@ pub struct PreviewConfig {
 }
 
 /// Metadata identifying an ephemeral preview environment created from a parent app.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct PreviewParent {
     #[schema(value_type = String)]
     pub parent_id: ShortId,
@@ -1243,7 +1243,7 @@ pub struct PreviewParent {
 }
 
 /// A Git-based environment configuration file loaded during deployment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct GitConfigFile {
     /// Optional repository URL (if omitted for a Git/Compose app, uses the app's git repository).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1666,7 +1666,7 @@ pub fn is_valid_cache_path(path: &str) -> bool {
 
 /// The body that creates a database. The version is one image tag of the catalog entry of
 /// the engine.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct DatabaseRequest {
     #[schema(value_type = String, example = "main-postgres")]
     pub name: AppName,
@@ -1745,7 +1745,7 @@ pub struct DatabaseCreated {
 }
 
 /// The body that creates or replaces an app.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct AppRequest {
     #[schema(value_type = String, example = "shop")]
     pub name: AppName,
@@ -1947,7 +1947,7 @@ pub struct FilePathQuery {
 
 /// One environment variable of an app. The admin API does not return the value of a secret
 /// variable. An update without a value keeps the current value of a secret variable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct EnvEntry {
     #[schema(value_type = String, example = "DATABASE_URL")]
     pub key: EnvKey,
@@ -1983,7 +1983,7 @@ pub struct EnvGroupSummary {
 }
 
 /// Request to create or update an environment variable group.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct EnvGroupSpec {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2039,7 +2039,7 @@ pub struct ProjectSummary {
 }
 
 /// Request to create or update a project.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct ProjectSpec {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2117,7 +2117,7 @@ impl EnvironmentSpec {
 }
 
 /// Request to replace the environment variables of a project environment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct EnvironmentEnvSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variables: Vec<EnvEntry>,

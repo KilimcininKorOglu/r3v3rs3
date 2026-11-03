@@ -12,7 +12,7 @@ pub const FIXED_STATUSES: [u16; 10] = [200, 400, 403, 404, 410, 429, 451, 500, 5
 /// The longest body of a fixed status response in bytes.
 pub const MAX_FIXED_BODY_SIZE: usize = 4096;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", try_from = "RawFixedResponse")]
 pub enum FixedResponse {
     /// Redirects every request of the route.
@@ -32,7 +32,7 @@ impl FixedResponse {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 enum FixedKind {
     Redirect,
@@ -41,7 +41,7 @@ enum FixedKind {
 
 /// The fields of every fixed response type with their types. A tagged enum reads its fields
 /// without a type hint, and service discovery labels then give every value as text.
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawFixedResponse {
     #[serde(rename = "type")]
@@ -91,7 +91,7 @@ impl RawFixedResponse {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct FixedRedirect {
     /// The `Location` of the redirect.
     #[schema(example = "https://example.com")]
@@ -112,7 +112,7 @@ fn is_true(value: &bool) -> bool {
     *value
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct FixedStatus {
     #[schema(example = 404)]
     pub status: u16,

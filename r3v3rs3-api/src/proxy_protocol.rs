@@ -12,7 +12,7 @@ use utoipa::ToSchema;
 pub const DEFAULT_PROXY_PROTOCOL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The PROXY protocol versions that a port accepts.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProxyProtocolAccept {
     V1,
@@ -22,7 +22,7 @@ pub enum ProxyProtocolAccept {
 }
 
 /// The PROXY protocol version that a TCP proxy sends to its upstream servers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProxyProtocolVersion {
     V1,
@@ -30,7 +30,7 @@ pub enum ProxyProtocolVersion {
 }
 
 /// Reads the PROXY protocol header on a TCP, TLS, HTTP or HTTPS port.
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct ProxyProtocolReceive {
     #[serde(default, skip_serializing_if = "is_any")]
     pub accept: ProxyProtocolAccept,
@@ -38,6 +38,7 @@ pub struct ProxyProtocolReceive {
     /// another peer.
     #[serde(default)]
     #[schema(value_type = [String], example = json!(["10.0.0.0/8"]))]
+    #[schemars(with = "Vec<String>")]
     pub trusted: Vec<IpNet>,
     /// A trusted peer that does not send the complete header in this time is disconnected.
     #[serde(
@@ -46,6 +47,7 @@ pub struct ProxyProtocolReceive {
         skip_serializing_if = "is_default_timeout"
     )]
     #[schema(value_type = String, example = "5s")]
+    #[schemars(with = "String")]
     pub timeout: Duration,
 }
 

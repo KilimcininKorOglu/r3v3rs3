@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
 /// A pre-shared compression dictionary (RFC 9651 / RFC 9652) served and used by a reverse proxy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct CompressionDictionary {
     /// Unique identifier of the dictionary.
     pub id: ShortId,

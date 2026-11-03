@@ -18,7 +18,7 @@ pub fn canonical_client_ip(ip: IpAddr) -> IpAddr {
 }
 
 /// Controls how the real client IP is resolved for an HTTP proxy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct ClientIpConfig {
     /// Trust client IP headers from the edge servers of known CDNs.
     #[serde(default = "default_trust_cdn", skip_serializing_if = "is_true")]
@@ -27,6 +27,7 @@ pub struct ClientIpConfig {
     /// Additional trusted proxies, such as a local load balancer.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schema(value_type = [String], example = json!(["10.0.0.0/8"]))]
+    #[schemars(with = "Vec<String>")]
     pub trusted_proxies: Vec<IpNet>,
 }
 

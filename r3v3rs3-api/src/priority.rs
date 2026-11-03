@@ -13,7 +13,7 @@ pub static GLOBAL_STREAM_CONTROLLER: LazyLock<Arc<AdaptiveStreamController>> =
     LazyLock::new(|| Arc::new(AdaptiveStreamController::new()));
 
 /// RFC 9218 Stream Priority parameters (`Priority: u=urgency, i=?incremental`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct StreamPriority {
     /// Urgency level from 0 (highest/critical) to 7 (lowest/background). Default is 3.
     pub urgency: u8,
@@ -75,7 +75,7 @@ impl StreamPriority {
 }
 
 /// Custom rule overriding stream priority based on MIME or path pattern.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct MimePriorityRule {
     /// Path or MIME pattern (e.g. `*.css`, `image/*`, `/api/critical/*`).
     pub pattern: String,
@@ -133,7 +133,7 @@ fn is_false(v: &bool) -> bool {
 }
 
 /// Configuration for HTTP/2 & HTTP/3 adaptive stream prioritization.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct StreamPriorityConfig {
     /// When true, enables adaptive stream priority optimization.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -344,7 +344,7 @@ fn is_archive_ext(p: &str) -> bool {
 }
 
 /// Statistics on prioritized HTTP streams.
-#[derive(Debug, Default, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct StreamPriorityStats {
     pub total_requests: u64,
     pub critical_requests: u64,
@@ -440,7 +440,7 @@ impl Drop for StreamPermit {
 }
 
 /// REST API request payload for updating stream priority configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct SetStreamPriorityRequest {
     pub config: StreamPriorityConfig,
 }

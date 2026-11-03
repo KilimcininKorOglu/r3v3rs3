@@ -87,14 +87,14 @@ pub struct ListActiveConnectionsParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddPortParams {
     /// The port configuration, in the same form as the body of POST /api/ports.
-    pub port: serde_json::Value,
+    pub port: r3v3rs3_api::port::Port,
 }
 
 /// The `{ "entry": {...} }` argument of `update_port`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdatePortParams {
     /// The port entry with its id and new configuration.
-    pub entry: serde_json::Value,
+    pub entry: r3v3rs3_api::port::PortEntry,
 }
 
 /// The argument of `set_port_early_data`.
@@ -156,7 +156,7 @@ pub struct DismissCtAlertParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddProxyParams {
     /// The proxy configuration, in the same form as the body of POST /api/proxies.
-    pub proxy: serde_json::Value,
+    pub proxy: r3v3rs3_api::proxy::Proxy,
 }
 
 /// The `{ "entry": {...} }` argument of `update_proxy`, in the form of the admin API.
@@ -164,7 +164,7 @@ pub struct AddProxyParams {
 pub struct UpdateProxyParams {
     /// The id and the new configuration of the proxy, in the same form as the body of
     /// PUT /api/proxies/{id}.
-    pub entry: serde_json::Value,
+    pub entry: r3v3rs3_api::proxy::ProxyEntry,
 }
 
 /// The argument of `purge_proxy_cache`.
@@ -200,28 +200,28 @@ pub struct CertCoverageParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddAcmeParams {
     /// The ACME certificate request configuration.
-    pub request: serde_json::Value,
+    pub request: r3v3rs3_api::acme::AcmeRequest,
 }
 
 /// The `{ "list": {...} }` argument of `add_access_list`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddAccessListParams {
     /// The access control list configuration.
-    pub list: serde_json::Value,
+    pub list: r3v3rs3_api::access_list::AccessList,
 }
 
 /// The `{ "entry": {...} }` argument of `update_access_list`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateAccessListParams {
     /// The access list entry with its id and configuration.
-    pub entry: serde_json::Value,
+    pub entry: r3v3rs3_api::access_list::AccessListEntry,
 }
 
 /// The `{ "app": {...} }` argument of `add_app`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddAppParams {
     /// The application specification, in the same form as the body of POST /api/apps.
-    pub app: serde_json::Value,
+    pub app: r3v3rs3_api::platform::AppRequest,
 }
 
 /// The `{ "id": "...", "app": {...} }` argument of `update_app`.
@@ -230,7 +230,7 @@ pub struct UpdateAppParams {
     /// The id of the application.
     pub id: String,
     /// The updated application specification.
-    pub app: serde_json::Value,
+    pub app: r3v3rs3_api::platform::AppRequest,
 }
 
 /// The arguments of `get_app_logs`.
@@ -250,7 +250,7 @@ pub struct UpdateAppEnvParams {
     /// The id of the application.
     pub id: String,
     /// The list of environment variables (`[{"key": "FOO", "value": "bar", "secret": false}]`).
-    pub entries: Vec<serde_json::Value>,
+    pub entries: Vec<r3v3rs3_api::platform::EnvEntry>,
 }
 
 /// The arguments of `generate_app_env_secrets`.
@@ -270,7 +270,7 @@ pub struct ResolveComposeEnvParams {
     /// Optional raw .env template string.
     pub template: Option<String>,
     /// Optional list of environment entries (`[{"key": "FOO", "value": "bar", "secret": true}]`).
-    pub entries: Option<Vec<serde_json::Value>>,
+    pub entries: Option<Vec<r3v3rs3_api::platform::EnvEntry>>,
     /// Whether to overwrite existing non-empty values (default: false).
     pub overwrite: Option<bool>,
 }
@@ -490,7 +490,7 @@ pub struct InstallStoreAppParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateDatabaseParams {
     /// Database creation request (`{"name": "mydb", "engine": "postgres", "version": "17-alpine", "host_port": 5432}`).
-    pub request: serde_json::Value,
+    pub request: r3v3rs3_api::platform::DatabaseRequest,
 }
 
 /// The arguments of `delete_database_backup`.
@@ -528,14 +528,14 @@ pub struct RestoreDatabasePitrParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateBackupConfigParams {
     /// Backup storage configuration (`{"cron": "0 2 * * *", "s3": {...}, ...}`).
-    pub config: serde_json::Value,
+    pub config: r3v3rs3_api::platform::BackupConfig,
 }
 
 /// The `{ "request": {...} }` argument of `add_target`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddTargetParams {
     /// Target node request (`{"name": "node-1"}`).
-    pub request: serde_json::Value,
+    pub request: r3v3rs3_api::platform::TargetRequest,
 }
 
 /// The arguments of `set_target_region`.
@@ -551,14 +551,14 @@ pub struct SetTargetRegionParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateProjectParams {
     /// Project specification (`{"name": "my-project", "description": "..."}`).
-    pub spec: serde_json::Value,
+    pub spec: r3v3rs3_api::platform::ProjectSpec,
 }
 
 /// The `{ "group": {...} }` argument of `create_env_group`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateEnvGroupParams {
     /// Environment group specification (`{"name": "shared-env", "entries": [...]}`).
-    pub group: serde_json::Value,
+    pub group: r3v3rs3_api::platform::EnvGroupSpec,
 }
 
 /// The arguments of `create_project_environment`.
@@ -578,7 +578,7 @@ pub struct UpdateProjectEnvParams {
     /// Environment ID to update variables for.
     pub environment_id: String,
     /// Environment variables as an array of objects (`[{"key": "FOO", "value": "bar", "secret": false}]`).
-    pub variables: Vec<serde_json::Value>,
+    pub variables: Vec<r3v3rs3_api::platform::EnvEntry>,
 }
 
 /// The arguments of `sync_project_env`.
@@ -694,7 +694,7 @@ pub struct AddErrorPageThemeParams {
     /// Optional description of the theme design or purpose.
     pub description: Option<String>,
     /// List of custom error pages mapped by HTTP status code (JSON array of {status, body}).
-    pub pages: Option<serde_json::Value>,
+    pub pages: Option<Vec<r3v3rs3_api::proxy::CustomErrorPage>>,
 }
 
 /// The arguments of `update_error_page_theme`.
@@ -707,7 +707,7 @@ pub struct UpdateErrorPageThemeParams {
     /// Optional description of the theme design or purpose.
     pub description: Option<String>,
     /// List of custom error pages mapped by HTTP status code (JSON array of {status, body}).
-    pub pages: Option<serde_json::Value>,
+    pub pages: Option<Vec<r3v3rs3_api::proxy::CustomErrorPage>>,
 }
 
 /// The arguments of `list_compression_dictionaries`.
@@ -1441,8 +1441,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let entry: r3v3rs3_api::port::Port = serde_json::from_value(params.port)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let entry: r3v3rs3_api::port::Port = params.port;
         let name = entry.name.clone();
         self.state
             .call(&caller, AddPort { entry })
@@ -1460,8 +1459,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let entry: r3v3rs3_api::port::PortEntry = serde_json::from_value(params.entry)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let entry: r3v3rs3_api::port::PortEntry = params.entry;
         self.state
             .call(&caller, UpdatePort { entry })
             .await
@@ -1796,8 +1794,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let proxy: Proxy = serde_json::from_value(params.proxy)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let proxy: Proxy = params.proxy;
         let name = proxy.name.clone();
         let owner = caller.proxies.is_some().then(|| caller.username.clone());
         self.state
@@ -1824,8 +1821,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let entry: ProxyEntry = serde_json::from_value(params.entry)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let entry: ProxyEntry = params.entry;
         self.state
             .call(&caller, UpdateProxy { entry })
             .await
@@ -2137,8 +2133,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let request: r3v3rs3_api::acme::AcmeRequest = serde_json::from_value(params.request)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let request: r3v3rs3_api::acme::AcmeRequest = params.request;
         self.state
             .call(&caller, AddAcme { request })
             .await
@@ -2246,8 +2241,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let list: r3v3rs3_api::access_list::AccessList = serde_json::from_value(params.list)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let list: r3v3rs3_api::access_list::AccessList = params.list;
         self.state
             .call(&caller, AddAccessList { list })
             .await
@@ -2264,8 +2258,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let entry: r3v3rs3_api::access_list::AccessListEntry = serde_json::from_value(params.entry)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let entry: r3v3rs3_api::access_list::AccessListEntry = params.entry;
         self.state
             .call(&caller, UpdateAccessList { entry })
             .await
@@ -2345,7 +2338,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let pages = parse_theme_pages(params.pages)?;
+        let pages = params.pages.unwrap_or_default();
         let theme = r3v3rs3_api::error_page_theme::ErrorPageTheme {
             id: ShortId::new(),
             name: params.name,
@@ -2389,7 +2382,7 @@ impl McpServer {
             theme.description = desc;
         }
         if let Some(pages_val) = params.pages {
-            theme.pages = parse_theme_pages(Some(pages_val))?;
+            theme.pages = pages_val;
         }
         self.state
             .call(
@@ -2501,8 +2494,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let mut request: r3v3rs3_api::platform::AppRequest = serde_json::from_value(params.app)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let mut request: r3v3rs3_api::platform::AppRequest = params.app;
         request.spec.preview_of = None;
         request.spec.replica_of = None;
         let platform = self
@@ -2527,8 +2519,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let mut request: r3v3rs3_api::platform::AppRequest = serde_json::from_value(params.app)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let mut request: r3v3rs3_api::platform::AppRequest = params.app;
         let platform = self
             .state
             .platform(&caller, Permission::Edit)
@@ -2732,9 +2723,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let entries: Vec<r3v3rs3_api::platform::EnvEntry> =
-            serde_json::from_value(serde_json::Value::Array(params.entries))
-                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let entries: Vec<r3v3rs3_api::platform::EnvEntry> = params.entries;
         let platform = self
             .state
             .platform(&caller, Permission::Edit)
@@ -2814,11 +2803,7 @@ impl McpServer {
                 entries,
             });
         }
-        let mut entries: Vec<r3v3rs3_api::platform::EnvEntry> = match params.entries {
-            Some(list) => serde_json::from_value(serde_json::Value::Array(list))
-                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?,
-            None => Vec::new(),
-        };
+        let mut entries: Vec<r3v3rs3_api::platform::EnvEntry> = params.entries.unwrap_or_default();
         let generated_keys = r3v3rs3_api::compose_env::resolve_env_entries(
             &mut entries,
             overwrite,
@@ -3204,9 +3189,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let request: r3v3rs3_api::platform::DatabaseRequest =
-            serde_json::from_value(params.request)
-                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let request = params.request;
         let created = super::databases::create(
             axum::extract::State(self.state.clone()),
             axum::Extension(caller),
@@ -3313,8 +3296,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let config: r3v3rs3_api::platform::BackupConfig = serde_json::from_value(params.config)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let config = params.config;
         let platform = self
             .state
             .platform(&caller, Permission::Edit)
@@ -3498,8 +3480,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let request: r3v3rs3_api::platform::TargetRequest = serde_json::from_value(params.request)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let request = params.request;
         let platform = self
             .state
             .platform(&caller, Permission::Admin)
@@ -3703,8 +3684,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let spec: r3v3rs3_api::platform::ProjectSpec = serde_json::from_value(params.spec)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let spec = params.spec;
         let platform = self
             .state
             .platform(&caller, Permission::Edit)
@@ -3761,8 +3741,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let group: r3v3rs3_api::platform::EnvGroupSpec = serde_json::from_value(params.group)
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let group = params.group;
         let platform = self
             .state
             .platform(&caller, Permission::Edit)
@@ -5123,16 +5102,6 @@ fn build_geoip_update_request(
     }
 }
 
-fn parse_theme_pages(
-    pages_val: Option<serde_json::Value>,
-) -> Result<Vec<r3v3rs3_api::proxy::CustomErrorPage>, ErrorData> {
-    match pages_val {
-        Some(val) => serde_json::from_value(val)
-            .map_err(|e| ErrorData::invalid_params(format!("invalid pages array: {e}"), None)),
-        None => Ok(Vec::new()),
-    }
-}
-
 fn apply_ct_config_overrides(
     config: &mut r3v3rs3_api::ct::CtMonitorConfig,
     params: UpdateCtConfigParams,
@@ -5164,10 +5133,9 @@ fn parse_project_env_params(
     params: UpdateProjectEnvParams,
 ) -> Result<(ShortId, r3v3rs3_api::platform::EnvironmentEnvSpec), ErrorData> {
     let env_id: ShortId = parse_id(&params.environment_id)?;
-    let variables: Vec<r3v3rs3_api::platform::EnvEntry> =
-        serde_json::from_value(serde_json::Value::Array(params.variables))
-            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
-    let spec = r3v3rs3_api::platform::EnvironmentEnvSpec { variables };
+    let spec = r3v3rs3_api::platform::EnvironmentEnvSpec {
+        variables: params.variables,
+    };
     spec.validate().map_err(any_error)?;
     Ok((env_id, spec))
 }

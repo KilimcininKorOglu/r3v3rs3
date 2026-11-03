@@ -6,16 +6,18 @@ use std::{net::IpAddr, time::Duration};
 use utoipa::ToSchema;
 
 /// Allows or denies requests by the resolved client IP address and country.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct IpFilter {
     /// When not empty, only clients in these blocks are allowed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schema(value_type = [String], example = json!(["192.168.0.0/16"]))]
+    #[schemars(with = "Vec<String>")]
     pub allow: Vec<IpNet>,
 
     /// Clients in these blocks are always rejected, even when they are in `allow`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schema(value_type = [String], example = json!(["203.0.113.0/24"]))]
+    #[schemars(with = "Vec<String>")]
     pub deny: Vec<IpNet>,
 
     /// When not empty, only clients from these ISO country codes (e.g. ["TR", "US"]) are allowed.
@@ -79,7 +81,7 @@ impl IpFilter {
 }
 
 /// Limits the request rate of each client IP address.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct RateLimit {
     /// Requests allowed in each period. Zero disables the limit.
     #[serde(default)]
@@ -112,7 +114,7 @@ impl RateLimit {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RatePeriod {
     #[default]
@@ -146,7 +148,7 @@ fn is_zero(value: &u32) -> bool {
 }
 
 /// Limits concurrent in-flight requests per client IP address or request header (e.g. API key).
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct ConcurrencyLimit {
     /// Maximum concurrent in-flight requests allowed. Zero disables the limit.
     #[serde(default)]
@@ -176,7 +178,7 @@ impl ConcurrencyLimit {
 }
 
 /// Requires clients to authenticate before a request reaches the upstream server.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthPolicy {
     #[default]
@@ -198,7 +200,7 @@ impl AuthPolicy {
 }
 
 /// HTTP Basic authentication (RFC 7617).
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct BasicAuth {
     /// Protection space shown by the browser. Empty uses `r3v3rs3`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -212,7 +214,7 @@ pub struct BasicAuth {
     pub user_file: Option<String>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct BasicAuthUser {
     pub username: String,
 
@@ -246,13 +248,13 @@ impl BasicAuthUser {
 }
 
 /// Bearer token authentication (RFC 6750).
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct BearerAuth {
     #[serde(default)]
     pub tokens: Vec<BearerToken>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct BearerToken {
     /// Label that identifies the token.
     pub name: String,
@@ -277,7 +279,7 @@ impl BearerToken {
 }
 
 /// Delegates authentication to an external HTTP service, like nginx `auth_request`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct ForwardAuth {
     /// The service that receives a GET request for each client request.
     #[schema(value_type = String, example = "http://127.0.0.1:4180/oauth2/auth")]
@@ -289,6 +291,7 @@ pub struct ForwardAuth {
 
     #[serde(default = "default_forward_auth_timeout", with = "humantime_serde")]
     #[schema(value_type = String, example = "10s")]
+    #[schemars(with = "String")]
     pub timeout: Duration,
 }
 
@@ -299,7 +302,7 @@ fn default_forward_auth_timeout() -> Duration {
 }
 
 /// OpenID Connect / OAuth 2.0 authentication.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct OidcAuth {
     /// OIDC Issuer URL (e.g. `https://accounts.google.com` or `https://auth.example.com/realms/main`).
     #[serde(default, skip_serializing_if = "String::is_empty")]

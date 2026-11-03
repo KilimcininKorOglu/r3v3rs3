@@ -5,7 +5,8 @@ use std::{
     str::FromStr,
 };
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, schemars::JsonSchema)]
+#[schemars(with = "String")]
 pub struct Multiaddr {
     protocols: Vec<Protocol>,
 }

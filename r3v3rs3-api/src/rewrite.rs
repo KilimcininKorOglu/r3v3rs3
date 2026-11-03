@@ -9,7 +9,7 @@ use std::str::FromStr;
 use utoipa::ToSchema;
 
 /// Changes the path of the requests of a route. r3v3rs3 applies the steps in field order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct PathRewrite {
     /// Removes the route path from the request path.
     #[serde(default = "default_strip_prefix", skip_serializing_if = "is_true")]
@@ -69,7 +69,8 @@ fn is_true(value: &bool) -> bool {
 }
 
 /// A regular expression over a request path.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, schemars::JsonSchema)]
+#[schemars(with = "String")]
 pub struct PathRegex(Regex);
 
 impl PathRegex {

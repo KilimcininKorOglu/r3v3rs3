@@ -3,7 +3,7 @@ use serde_derive::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Predefined OWASP security header hardening profiles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityProfile {
     /// Highest security level: Preloaded HSTS, strict CSP, no-referrer, deny framing.
@@ -197,7 +197,7 @@ fn generate_spa_rules() -> Vec<HeaderRule> {
 }
 
 /// Information descriptor for a security profile.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct SecurityProfileInfo {
     pub id: SecurityProfile,
     pub title: String,
@@ -206,19 +206,19 @@ pub struct SecurityProfileInfo {
 }
 
 /// Request payload to apply a predefined security profile.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct ApplySecurityProfileRequest {
     pub profile: SecurityProfile,
 }
 
 /// Request payload to analyze an arbitrary list of response header rules.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct AnalyzeHeadersRequest {
     pub rules: Vec<HeaderRule>,
 }
 
 /// Calculated security grade.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityGrade {
     APlus,
@@ -243,7 +243,7 @@ impl SecurityGrade {
 }
 
 /// Status of an individual security header audit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HeaderAuditStatus {
     Present,
@@ -252,7 +252,7 @@ pub enum HeaderAuditStatus {
 }
 
 /// Audit details for a single security header.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct HeaderAuditItem {
     pub header_name: String,
     pub status: HeaderAuditStatus,
@@ -264,7 +264,7 @@ pub struct HeaderAuditItem {
 }
 
 /// Comprehensive audit report of security response headers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct SecurityHeadersAudit {
     pub score: u8,
     pub grade: SecurityGrade,

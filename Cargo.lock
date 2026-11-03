@@ -3330,6 +3330,7 @@ dependencies = [
  "ipnet",
  "regex",
  "rustls-pki-types",
+ "schemars",
  "serde",
  "serde_default",
  "serde_derive",
@@ -3948,10 +3949,12 @@ checksum = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a"
 dependencies = [
  "chrono",
  "dyn-clone",
+ "indexmap",
  "ref-cast",
  "schemars_derive",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]

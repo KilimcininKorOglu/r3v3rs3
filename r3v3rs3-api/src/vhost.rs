@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, schemars::JsonSchema)]
+#[schemars(with = "String")]
 pub enum VirtualHost {
     SubjectName(SubjectName),
     Regex(Regex),

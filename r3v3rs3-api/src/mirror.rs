@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 pub const DEFAULT_MIRROR_BODY_SIZE: u64 = 64 * 1024;
 
 /// Copies the requests of a route to other servers. r3v3rs3 drops the responses of these servers.
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct Mirror {
     /// Every server receives a copy of each mirrored request. The weight has no effect.
     #[serde(default)]

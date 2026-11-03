@@ -5,7 +5,7 @@ use std::time::Duration;
 use utoipa::ToSchema;
 
 /// Stores upstream responses in memory and sends them without contacting the upstream server.
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct CacheConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -22,6 +22,7 @@ pub struct CacheConfig {
     /// Zero stores such a response only when it has an `ETag` or `Last-Modified` validator.
     #[serde(default, with = "humantime_serde")]
     #[schema(value_type = String, example = "5m")]
+    #[schemars(with = "String")]
     pub default_ttl: Duration,
 
     /// Stale-while-revalidate window duration. When non-zero, stale responses within this window
@@ -29,11 +30,12 @@ pub struct CacheConfig {
     /// Used as fallback when upstream does not supply `stale-while-revalidate` in Cache-Control.
     #[serde(default, with = "humantime_serde")]
     #[schema(value_type = String, example = "1m")]
+    #[schemars(with = "String")]
     pub stale_while_revalidate: Duration,
 }
 
 /// Request payload to purge specific or all cache entries.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct CachePurge {
     /// Optional URI path or prefix to purge. When empty or omitted, purges the entire cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]

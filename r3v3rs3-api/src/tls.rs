@@ -3,7 +3,7 @@ use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TlsState {
     Active,
@@ -12,7 +12,7 @@ pub enum TlsState {
 }
 
 /// Whether the port asks the client for a certificate.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ClientAuthMode {
     /// The port does not ask for a client certificate.
@@ -31,7 +31,7 @@ impl ClientAuthMode {
     }
 }
 
-#[derive(Debug, Clone, DefaultFromSerde, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, DefaultFromSerde, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct TlsTermination {
     #[serde(default)]
     #[schema(example = json!(["*.example.com"]))]

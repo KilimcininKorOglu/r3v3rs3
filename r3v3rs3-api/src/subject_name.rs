@@ -3,7 +3,8 @@ use rustls_pki_types::ServerName;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, net::IpAddr, str::FromStr};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, schemars::JsonSchema)]
+#[schemars(with = "String")]
 pub enum SubjectName {
     DnsName(String),
     WildcardDnsName(String),

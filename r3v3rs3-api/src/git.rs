@@ -18,8 +18,9 @@ fn invalid(reason: String) -> Error {
 macro_rules! checked_string {
     ($(#[$doc:meta])* $name:ident, $check:ident) => {
         $(#[$doc])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
         #[serde(try_from = "String", into = "String")]
+        #[schemars(with = "String")]
         pub struct $name(String);
 
         impl $name {

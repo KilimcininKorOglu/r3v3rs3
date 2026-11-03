@@ -168,7 +168,7 @@ fn default_upgrade_check_interval() -> Duration {
 }
 
 /// The HTTP/2 flood limits of a server-side connection.
-#[derive(Debug, DefaultFromSerde, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, DefaultFromSerde, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct Http2Limits {
     /// The largest HEADERS plus CONTINUATION size of one request, in bytes.
     #[serde(default = "default_max_header_list_size")]
@@ -214,7 +214,7 @@ fn default_max_pending_accept_reset_streams() -> usize {
 }
 
 /// The HTTP/3 stream limits of a QUIC endpoint.
-#[derive(Debug, DefaultFromSerde, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, DefaultFromSerde, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct Http3Limits {
     /// The request streams that one QUIC connection can open.
     #[serde(default = "default_max_concurrent_bidi_streams")]

@@ -12,7 +12,7 @@ use std::{
 };
 use utoipa::ToSchema;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SocketState {
     Listening,
@@ -25,7 +25,7 @@ pub enum SocketState {
     Unknown,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct PortStatus {
     pub state: PortState,
     #[serde(
@@ -33,10 +33,11 @@ pub struct PortStatus {
         deserialize_with = "deserialize_started_at"
     )]
     #[schema(value_type = Option<u64>)]
+    #[schemars(with = "Option<u64>")]
     pub started_at: Option<SystemTime>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct PortState {
     pub socket: SocketState,
     pub tls: Option<TlsState>,
@@ -76,7 +77,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct UpstreamServer {
     #[schema(value_type = String, example = "/dns/example.com/tcp/8080")]
     pub addr: Multiaddr,
@@ -104,7 +105,7 @@ impl UpstreamServer {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct PortEntry {
     pub id: ShortId,
     #[schema(inline)]
@@ -118,7 +119,7 @@ impl From<(ShortId, Port)> for PortEntry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct Port {
     #[serde(default = "default_active", skip_serializing_if = "is_true")]
     pub active: bool,
@@ -144,7 +145,7 @@ impl From<PortEntry> for (ShortId, Port) {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct PortOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls_termination: Option<TlsTermination>,
@@ -161,14 +162,14 @@ pub struct PortOptions {
     pub stream_priority: Option<crate::priority::StreamPriorityConfig>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct NetworkInterface {
     pub name: String,
     pub addrs: Vec<NetworkAddr>,
     pub mac: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct NetworkAddr {
     #[schema(value_type = String, example = "127.0.0.1")]
     pub ip: IpAddr,

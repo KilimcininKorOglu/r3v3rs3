@@ -7,7 +7,7 @@ use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use serde_derive::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct AccessList {
     #[schema(example = "Office")]
     pub name: String,
@@ -17,7 +17,7 @@ pub struct AccessList {
     pub auth: AuthPolicy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct AccessListEntry {
     pub id: ShortId,
     #[schema(inline)]

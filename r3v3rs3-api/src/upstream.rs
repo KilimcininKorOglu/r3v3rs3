@@ -22,12 +22,13 @@ pub const MAX_RETRY_ATTEMPTS: u8 = 10;
 pub const DEFAULT_STICKY_COOKIE_NAME: &str = "r3v3rs3_affinity";
 
 /// Timeouts of the requests that an HTTP proxy sends to its upstream servers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct UpstreamTimeouts {
     /// Time limit for the DNS lookup, the TCP connection and the TLS handshake of a new upstream
     /// connection.
     #[serde(default = "default_connect_timeout", with = "humantime_serde")]
     #[schema(value_type = String, example = "10s")]
+    #[schemars(with = "String")]
     pub connect: Duration,
 
     /// Time limit from the start of the request until the response headers arrive, including a
@@ -35,6 +36,7 @@ pub struct UpstreamTimeouts {
     /// no limit.
     #[serde(default = "default_request_timeout", with = "humantime_serde")]
     #[schema(value_type = String, example = "60s")]
+    #[schemars(with = "String")]
     pub request: Duration,
 }
 
@@ -58,7 +60,7 @@ impl UpstreamTimeouts {
 }
 
 /// Sends a failed HTTP request again to the next upstream server.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct RetryPolicy {
     /// Tries of one request, including the first try, from 1 to 10. `1` disables retries.
     #[serde(default = "default_retry_attempts")]
@@ -101,7 +103,7 @@ impl RetryPolicy {
 }
 
 /// A failure of one try that a [`RetryPolicy`] can retry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub enum RetryOn {
     /// The connection fails or the connect timeout expires. The server received nothing.
     #[serde(rename = "connect")]
@@ -139,7 +141,7 @@ impl RetryOn {
 
 /// Selects the upstream server of each new request, connection or UDP session. A server with weight
 /// 0 gets no new traffic.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LoadBalancing {
     /// Uses the servers in turn, each server as often as its weight.
@@ -190,7 +192,7 @@ impl LoadBalancing {
 }
 
 /// Health check of the upstream servers of a proxy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct HealthCheck {
     /// Consecutive failures that mark a server unhealthy. A failure is a failed connection or a
     /// request without a response. `0` disables the passive health check.
@@ -200,6 +202,7 @@ pub struct HealthCheck {
     /// Time that an unhealthy server stays behind the healthy servers.
     #[serde(default = "default_fail_timeout", with = "humantime_serde")]
     #[schema(value_type = String, example = "30s")]
+    #[schemars(with = "String")]
     pub fail_timeout: Duration,
 
     /// Time between two active checks of the servers. `0s` disables the active health check.
@@ -209,6 +212,7 @@ pub struct HealthCheck {
         skip_serializing_if = "Duration::is_zero"
     )]
     #[schema(value_type = String, example = "10s")]
+    #[schemars(with = "String")]
     pub interval: Duration,
 
     /// Time limit of one active check.
@@ -218,6 +222,7 @@ pub struct HealthCheck {
         skip_serializing_if = "is_default_health_check_timeout"
     )]
     #[schema(value_type = String, example = "5s")]
+    #[schemars(with = "String")]
     pub timeout: Duration,
 
     /// Path that the active check of an HTTP proxy requests with `GET`, from the root of the
@@ -280,7 +285,7 @@ impl HealthCheck {
 
 /// Stops the traffic to a failing server of an HTTP or TCP proxy for a time. Each server of each
 /// route has its own circuit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct CircuitBreaker {
     #[serde(default)]
     pub enabled: bool,
@@ -298,12 +303,14 @@ pub struct CircuitBreaker {
     /// Time that one window counts the requests of a server.
     #[serde(default = "default_breaker_window", with = "humantime_serde")]
     #[schema(value_type = String, example = "10s")]
+    #[schemars(with = "String")]
     pub window: Duration,
 
     /// Time that an open circuit sends no traffic to the server. Then one trial request tests the
     /// server.
     #[serde(default = "default_open_duration", with = "humantime_serde")]
     #[schema(value_type = String, example = "30s")]
+    #[schemars(with = "String")]
     pub open_duration: Duration,
 }
 
@@ -340,7 +347,7 @@ impl CircuitBreaker {
 }
 
 /// Keeps each client of an HTTP proxy on one upstream server with a signed cookie.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct StickyCookie {
     #[serde(default)]
     pub enabled: bool,
@@ -356,6 +363,7 @@ pub struct StickyCookie {
         skip_serializing_if = "Option::is_none"
     )]
     #[schema(value_type = Option<String>, example = "1h")]
+    #[schemars(with = "Option<String>")]
     pub max_age: Option<Duration>,
 }
 
@@ -394,7 +402,7 @@ fn is_cookie_token(name: &str) -> bool {
 }
 
 /// The circuit of an upstream server.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CircuitState {
     /// The server gets traffic.
@@ -413,7 +421,7 @@ impl CircuitState {
 }
 
 /// The health and live metrics of one upstream server of a proxy.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct UpstreamHealth {
     /// The URL or the address of the server.
     pub addr: String,
@@ -463,7 +471,7 @@ impl Default for UpstreamHealth {
 }
 
 /// The DNS SRV lookup of one server name of a proxy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct SrvStatus {
     /// The SRV name of the `http+srv` or `https+srv` server URL.
     pub name: String,

@@ -102,6 +102,7 @@ rcgen = { version = "0.14.10", default-features = false, features = [
 reqwest = { version = "0.13.5", default-features = false, features = [
     "rustls-no-provider",
     "http2",
+    "json",
 ] }
 aws-lc-rs = "1.14.1"
 rpassword = "7.2.0"
