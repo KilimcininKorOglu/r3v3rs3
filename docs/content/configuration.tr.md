@@ -975,7 +975,7 @@ oauth2-proxy veya Authelia gibi harici bir proxy aracına ihtiyaç duymadan, uyg
 - Korumalı bir adrese gelen doğrulanmamış bir istek, `/.r3v3rs3/auth/oidc/login` aracılığıyla sağlayıcının giriş sayfasına otomatik olarak yönlendirilir.
 - Giriş yapıldıktan sonra sağlayıcı istemciyi `/.r3v3rs3/auth/oidc/callback` adresine geri yönlendirir. r3v3rs3 yetkilendirme kodunu token ile takas eder, kimliği doğrular, izin verilen e-posta listesini kontrol eder, güvenli bir oturum cookie'si (`r3v3rs3_oidc`) oluşturur ve kullanıcıyı asıl gitmek istediği URL'ye yönlendirir.
 - Yetkilendirilen istekler upstream sunucuya iletilirken oturum cookie'si kaldırılır ve doğrulanmış kimliği içeren `X-Forwarded-User` ile `X-Forwarded-Email` header'ları eklenir.
-- Kullanıcılar `/.r3v3rs3/auth/oidc/logout` adresine giderek diledikleri zaman oturumlarını kapatabilir.
+- Kullanıcılar `/.r3v3rs3/auth/oidc/logout` adresine `POST` isteği göndererek diledikleri zaman oturumlarını kapatabilir (cross-site isteklere karşı korunur).
 
 | Alan                | Açıklama                                                                                                                                                                                                                 |
 |---------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

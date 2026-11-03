@@ -163,34 +163,55 @@ async fn oidc_auth_flow_success_and_logout() -> anyhow::Result<()> {
         let client = reqwest::Client::builder()
             .redirect(Policy::none())
             .build()?;
-
-        let resp = client.get(port.http_url("/protected")).send().await?;
-        assert_eq!(resp.status(), StatusCode::FOUND);
-
-        let (state_val, state_token) =
-            do_oidc_login(&client, port.http_url("").as_str()).await?;
-        let session_cookie =
-            do_oidc_callback(&client, port.http_url("").as_str(), &state_val, &state_token)
-                .await?;
-
-        let resp = client
-            .get(port.http_url("/protected"))
-            .header(COOKIE, &session_cookie)
-            .send()
-            .await?;
-        assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(resp.text().await?, "upstream response ok");
-        mock_upstream.assert_async().await;
-
-        let resp = client
-            .get(port.http_url("/.r3v3rs3/auth/oidc/logout"))
-            .header(COOKIE, &session_cookie)
-            .send()
-            .await?;
-        assert_eq!(resp.status(), StatusCode::FOUND);
-        Ok(())
+        verify_oidc_flow_and_logout(&client, &port, mock_upstream).await
     })
     .await
+}
+
+async fn verify_oidc_flow_and_logout(
+    client: &reqwest::Client,
+    port: &common::TestPort,
+    mock_upstream: mockito::Mock,
+) -> anyhow::Result<()> {
+    let resp = client.get(port.http_url("/protected")).send().await?;
+    assert_eq!(resp.status(), StatusCode::FOUND);
+
+    let (state_val, state_token) =
+        do_oidc_login(client, port.http_url("").as_str()).await?;
+    let session_cookie =
+        do_oidc_callback(client, port.http_url("").as_str(), &state_val, &state_token).await?;
+
+    let resp = client
+        .get(port.http_url("/protected"))
+        .header(COOKIE, &session_cookie)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.text().await?, "upstream response ok");
+    mock_upstream.assert_async().await;
+
+    let resp = client
+        .get(port.http_url("/.r3v3rs3/auth/oidc/logout"))
+        .header(COOKIE, &session_cookie)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    let resp_cross = client
+        .post(port.http_url("/.r3v3rs3/auth/oidc/logout"))
+        .header(COOKIE, &session_cookie)
+        .header("sec-fetch-site", "cross-site")
+        .send()
+        .await?;
+    assert_eq!(resp_cross.status(), StatusCode::FORBIDDEN);
+
+    let resp_ok = client
+        .post(port.http_url("/.r3v3rs3/auth/oidc/logout"))
+        .header(COOKIE, &session_cookie)
+        .send()
+        .await?;
+    assert_eq!(resp_ok.status(), StatusCode::FOUND);
+    Ok(())
 }
 
 #[tokio::test]

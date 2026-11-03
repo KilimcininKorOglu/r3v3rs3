@@ -9,7 +9,9 @@ use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
     HeaderMap, Method, Request, Response, StatusCode,
     body::Body,
-    header::{CACHE_CONTROL, CONTENT_TYPE, HeaderName, HeaderValue, LOCATION, PRAGMA, SET_COOKIE},
+    header::{
+        ALLOW, CACHE_CONTROL, CONTENT_TYPE, HeaderName, HeaderValue, LOCATION, PRAGMA, SET_COOKIE,
+    },
 };
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use aws_lc_rs::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
@@ -40,10 +42,12 @@ pub struct OidcAuthenticator {
     sessions: Arc<SessionService>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum OidcAction {
     Login,
     Callback,
     Logout,
+    MethodNotAllowed(&'static str),
 }
 
 impl OidcAuthenticator {
@@ -70,13 +74,14 @@ impl OidcAuthenticator {
         B: Body<Data = Bytes>,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        let Some(action) = oidc_action(ctx.path_segments) else {
+        let Some(action) = oidc_action(ctx.path_segments, req.method()) else {
             return std::ops::ControlFlow::Continue(req);
         };
         let response = match action {
             OidcAction::Login => self.handle_login(&req, ctx),
             OidcAction::Callback => self.handle_callback(req, ctx).await,
             OidcAction::Logout => self.handle_logout(req.headers(), ctx).await,
+            OidcAction::MethodNotAllowed(allow) => method_not_allowed(allow),
         };
         std::ops::ControlFlow::Break(response)
     }
@@ -158,6 +163,9 @@ impl OidcAuthenticator {
         headers: &HeaderMap,
         ctx: &AuthContext<'_>,
     ) -> Response<Full<Bytes>> {
+        if !verify_origin(headers, ctx) {
+            return text_response(StatusCode::FORBIDDEN, "Cross-origin request rejected\n");
+        }
         if let Some(token) = oidc_token(headers) {
             self.sessions.remove_proxy_session(&token).await;
         }
@@ -390,7 +398,7 @@ impl OidcAuthenticator {
     }
 }
 
-fn oidc_action(segments: &[String]) -> Option<OidcAction> {
+fn oidc_action(segments: &[String], method: &Method) -> Option<OidcAction> {
     if segments.len() < 3 || segments[0] != ENDPOINT_PREFIX[0] || segments[1] != ENDPOINT_PREFIX[1]
     {
         return None;
@@ -400,10 +408,13 @@ fn oidc_action(segments: &[String]) -> Option<OidcAction> {
     } else {
         segments[2].as_str()
     };
-    match target {
-        "login" => Some(OidcAction::Login),
-        "callback" => Some(OidcAction::Callback),
-        "logout" => Some(OidcAction::Logout),
+    match (target, method) {
+        ("login", &Method::GET | &Method::HEAD) => Some(OidcAction::Login),
+        ("login", _) => Some(OidcAction::MethodNotAllowed("GET, HEAD")),
+        ("callback", &Method::GET | &Method::HEAD) => Some(OidcAction::Callback),
+        ("callback", _) => Some(OidcAction::MethodNotAllowed("GET, HEAD")),
+        ("logout", &Method::POST) => Some(OidcAction::Logout),
+        ("logout", _) => Some(OidcAction::MethodNotAllowed("POST")),
         _ => None,
     }
 }
@@ -760,10 +771,10 @@ fn forbidden_page(user: &str) -> Response<Full<Bytes>> {
          <style>body{{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#09090b;color:#f4f4f5;}}\
          .card{{background:#18181b;padding:2rem;border-radius:0.5rem;max-width:28rem;text-align:center;box-shadow:0 10px 15px -3px rgba(0,0,0,0.5);}}\
          h1{{font-size:1.5rem;margin-bottom:0.75rem;color:#ef4444;}}p{{color:#a1a1aa;margin-bottom:1.5rem;}}\
-         a{{display:inline-block;padding:0.5rem 1rem;background:#27272a;color:#f4f4f5;text-decoration:none;border-radius:0.375rem;}}\
+         button{{display:inline-block;padding:0.5rem 1rem;background:#27272a;color:#f4f4f5;border:none;border-radius:0.375rem;cursor:pointer;}}\
          </style></head><body><div class=\"card\"><h1>Access Denied</h1>\
          <p>Account <strong>{}</strong> is not authorized to access this service.</p>\
-         <a href=\"/{}/{}/oidc/logout\">Sign out</a></div></body></html>",
+         <form method=\"POST\" action=\"/{}/{}/oidc/logout\"><button type=\"submit\">Sign out</button></form></div></body></html>",
         escaped_user, ENDPOINT_PREFIX[0], ENDPOINT_PREFIX[1]
     );
     let mut res = Response::new(Full::new(Bytes::from(body)));
@@ -773,6 +784,59 @@ fn forbidden_page(user: &str) -> Response<Full<Bytes>> {
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
     res
+}
+
+fn method_not_allowed(allow: &'static str) -> Response<Full<Bytes>> {
+    let mut res = text_response(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed\n");
+    res.headers_mut()
+        .insert(ALLOW, HeaderValue::from_static(allow));
+    res
+}
+
+fn matches_origin_host(origin: &url::Url, req_host: &str) -> bool {
+    let Some(origin_host) = origin.host_str() else {
+        return false;
+    };
+    let (req_hostname, req_port) = match req_host.split_once(':') {
+        Some((h, p)) => (h, p.parse::<u16>().ok()),
+        None => (req_host, None),
+    };
+    if !origin_host.eq_ignore_ascii_case(req_hostname) {
+        return false;
+    }
+    let origin_port = origin.port_or_known_default();
+    let expected_port = req_port.or_else(|| match origin.scheme() {
+        "https" => Some(443),
+        "http" => Some(80),
+        _ => None,
+    });
+    origin_port == expected_port
+}
+
+fn verify_origin(headers: &HeaderMap, ctx: &AuthContext<'_>) -> bool {
+    if let Some(site) = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
+        if site.eq_ignore_ascii_case("cross-site") || site.eq_ignore_ascii_case("same-site") {
+            return false;
+        }
+        if site.eq_ignore_ascii_case("same-origin") || site.eq_ignore_ascii_case("none") {
+            return true;
+        }
+    }
+    let Some(origin_val) = headers
+        .get(hyper::header::ORIGIN)
+        .or_else(|| headers.get(hyper::header::REFERER))
+        .and_then(|v| v.to_str().ok())
+    else {
+        return true;
+    };
+    let Ok(origin_url) = url::Url::parse(origin_val) else {
+        return false;
+    };
+    let expected_host = ctx
+        .host
+        .or_else(|| headers.get(hyper::header::HOST).and_then(|v| v.to_str().ok()))
+        .unwrap_or_default();
+    matches_origin_host(&origin_url, expected_host)
 }
 
 fn text_response(status: StatusCode, text: &str) -> Response<Full<Bytes>> {
@@ -957,5 +1021,62 @@ mod tests {
             callback_uri(&no_vhosts_poisoned),
             "https://localhost/.r3v3rs3/auth/oidc/callback"
         );
+    }
+
+    #[test]
+    fn oidc_action_enforces_correct_methods() {
+        let seg_logout = vec![".r3v3rs3".into(), "auth".into(), "oidc".into(), "logout".into()];
+        assert_eq!(
+            oidc_action(&seg_logout, &Method::POST),
+            Some(OidcAction::Logout)
+        );
+        assert_eq!(
+            oidc_action(&seg_logout, &Method::GET),
+            Some(OidcAction::MethodNotAllowed("POST"))
+        );
+
+        let seg_login = vec![".r3v3rs3".into(), "auth".into(), "oidc".into(), "login".into()];
+        assert_eq!(
+            oidc_action(&seg_login, &Method::GET),
+            Some(OidcAction::Login)
+        );
+        assert_eq!(
+            oidc_action(&seg_login, &Method::POST),
+            Some(OidcAction::MethodNotAllowed("GET, HEAD"))
+        );
+    }
+
+    #[test]
+    fn verify_origin_enforces_same_origin_and_rejects_cross_site() {
+        let ctx = AuthContext {
+            client: "127.0.0.1".parse().unwrap(),
+            peer: "127.0.0.1".parse().unwrap(),
+            host: Some("example.com:443"),
+            proto: "https",
+            base_path: "",
+            path_segments: &[],
+            preferences: Default::default(),
+            vhosts: &[],
+        };
+
+        // Sec-Fetch-Site cross-site -> rejected
+        let mut headers = HeaderMap::new();
+        headers.insert("sec-fetch-site", "cross-site".parse().unwrap());
+        assert!(!verify_origin(&headers, &ctx));
+
+        // Sec-Fetch-Site same-origin -> allowed
+        let mut headers = HeaderMap::new();
+        headers.insert("sec-fetch-site", "same-origin".parse().unwrap());
+        assert!(verify_origin(&headers, &ctx));
+
+        // Origin host mismatch -> rejected
+        let mut headers = HeaderMap::new();
+        headers.insert(hyper::header::ORIGIN, "https://evil.com".parse().unwrap());
+        assert!(!verify_origin(&headers, &ctx));
+
+        // Origin host and port match -> allowed
+        let mut headers = HeaderMap::new();
+        headers.insert(hyper::header::ORIGIN, "https://example.com".parse().unwrap());
+        assert!(verify_origin(&headers, &ctx));
     }
 }

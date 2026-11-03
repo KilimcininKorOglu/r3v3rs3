@@ -975,7 +975,7 @@ Protect applications directly using OpenID Connect and OAuth 2.0 identity provid
 - An unauthenticated client accessing a protected path is automatically redirected to the provider's sign-in page via `/.r3v3rs3/auth/oidc/login`.
 - After signing in, the provider redirects back to `/.r3v3rs3/auth/oidc/callback`. r3v3rs3 exchanges the authorization code for tokens, verifies identity, validates the email allowlist, sets an encrypted session cookie (`r3v3rs3_oidc`), and redirects the user back to the original request URL.
 - On authorized upstream requests, r3v3rs3 removes the session cookie and injects `X-Forwarded-User` and `X-Forwarded-Email` headers containing the verified identity.
-- Users can sign out at any time by navigating to `/.r3v3rs3/auth/oidc/logout`.
+- Users can sign out at any time by sending a `POST` request to `/.r3v3rs3/auth/oidc/logout` (protected against cross-site requests).
 
 | Field               | Description                                                                                                                                                                                                        |
 |---------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
