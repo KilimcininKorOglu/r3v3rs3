@@ -1,6 +1,8 @@
 //! Certificate Transparency (CT) log monitor and rogue certificate detection models.
 
 use serde_derive::{Deserialize, Serialize};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
 
 /// The alert/investigation status of a Certificate Transparency log entry.
@@ -150,73 +152,72 @@ pub struct CtEntriesQuery {
     pub limit: Option<usize>,
 }
 
-/// Checks whether an issuer matches any of the allowed CA issuer substrings.
+fn dn_attribute_matches(val: &str, pattern: &str) -> bool {
+    let val_trimmed = val.trim();
+    let pat_trimmed = pattern.trim();
+    if val_trimmed.eq_ignore_ascii_case(pat_trimmed) {
+        return true;
+    }
+    let val_lower = val_trimmed.to_lowercase();
+    let pat_lower = pat_trimmed.to_lowercase();
+    if let Some(rest) = val_lower.strip_prefix(&pat_lower) {
+        if rest.starts_with(|c: char| c.is_whitespace() || c == ',' || c == '.' || c == '-') {
+            return true;
+        }
+    }
+    false
+}
+
+fn issuer_matches_pattern(issuer: &str, pattern: &str) -> bool {
+    let pat_parts: Vec<&str> = pattern.splitn(2, '=').collect();
+    for part in issuer.split([',', '/']) {
+        let attr: Vec<&str> = part.splitn(2, '=').collect();
+        if attr.len() == 2 {
+            let attr_key = attr[0].trim();
+            let attr_val = attr[1].trim();
+            if pat_parts.len() == 2 {
+                if attr_key.eq_ignore_ascii_case(pat_parts[0].trim())
+                    && dn_attribute_matches(attr_val, pat_parts[1].trim())
+                {
+                    return true;
+                }
+            } else if dn_attribute_matches(attr_val, pattern) {
+                return true;
+            }
+        }
+    }
+    dn_attribute_matches(issuer, pattern)
+}
+
+/// Checks whether an issuer matches any of the allowed CA issuer patterns using structured DN attributes.
 pub fn is_issuer_allowed(issuer: &str, allowed_issuers: &[String]) -> bool {
-    let issuer_lower = issuer.to_lowercase();
     allowed_issuers.iter().any(|allowed| {
-        let pattern = allowed.trim().to_lowercase();
-        !pattern.is_empty() && issuer_lower.contains(&pattern)
+        let pattern = allowed.trim();
+        !pattern.is_empty() && issuer_matches_pattern(issuer, pattern)
     })
 }
 
-/// Parses an ISO 8601 or similar UTC timestamp string into Unix timestamp seconds.
+/// Parses an ISO 8601 or RFC 3339 UTC timestamp string into Unix timestamp seconds.
 pub fn parse_ct_timestamp(s: &str) -> Option<i64> {
     let clean = s.trim();
     if clean.is_empty() {
         return None;
     }
-    // Formats like "2024-05-10T12:00:00" or "2024-05-10 12:00:00"
-    let parts: Vec<&str> = clean.split(['T', ' ']).collect();
-    if parts.is_empty() {
-        return None;
+    if let Ok(odt) = OffsetDateTime::parse(clean, &Rfc3339) {
+        return Some(odt.unix_timestamp());
     }
-    let date_parts: Vec<i64> = parts[0].split('-').filter_map(|p| p.parse().ok()).collect();
-    if date_parts.len() != 3 {
-        return None;
+    let mut normalized = clean.replace(' ', "T");
+    let after_date = if normalized.len() > 10 {
+        &normalized[10..]
+    } else {
+        ""
+    };
+    if !after_date.ends_with('Z') && !after_date.contains('+') && !after_date.contains('-') {
+        normalized.push('Z');
     }
-    let year = date_parts[0];
-    let month = date_parts[1];
-    let day = date_parts[2];
-
-    let mut hour = 0i64;
-    let mut min = 0i64;
-    let mut sec = 0i64;
-    if parts.len() > 1 {
-        let time_parts: Vec<i64> = parts[1].split(':').filter_map(|p| p.parse().ok()).collect();
-        if !time_parts.is_empty() {
-            hour = time_parts[0];
-        }
-        if time_parts.len() > 1 {
-            min = time_parts[1];
-        }
-        if time_parts.len() > 2 {
-            sec = time_parts[2];
-        }
-    }
-    calculate_unix_time(year, month, day, hour, min, sec)
-}
-
-fn calculate_unix_time(
-    year: i64,
-    month: i64,
-    day: i64,
-    hour: i64,
-    min: i64,
-    sec: i64,
-) -> Option<i64> {
-    if !(1970..=2100).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    // Days since unix epoch (1970-01-01)
-    let days_before_month = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-    let mut total_days = (year - 1970) * 365 + (year - 1969) / 4;
-    total_days += days_before_month[(month - 1) as usize];
-    if month > 2 && ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) {
-        total_days += 1;
-    }
-    total_days += day - 1;
-    let total_secs = total_days * 86400 + hour * 3600 + min * 60 + sec;
-    Some(total_secs)
+    OffsetDateTime::parse(&normalized, &Rfc3339)
+        .ok()
+        .map(|odt| odt.unix_timestamp())
 }
 
 /// Parses a crt.sh JSON item into a `CtLogEntry`.
@@ -310,12 +311,22 @@ mod tests {
         assert!(is_issuer_allowed("C=US, O=Let's Encrypt, CN=R3", &allowed));
         assert!(is_issuer_allowed("O=google trust services", &allowed));
         assert!(!is_issuer_allowed("C=CN, O=Suspicious Authority", &allowed));
+        assert!(!is_issuer_allowed(
+            "C=US, O=Untrusted Authority - Fake Let's Encrypt, CN=R3",
+            &allowed
+        ));
     }
 
     #[test]
     fn test_parse_ct_timestamp() {
         let ts = parse_ct_timestamp("2024-01-01T00:00:00").unwrap();
         assert_eq!(ts, 1704067200);
+
+        let ts_fract = parse_ct_timestamp("2024-01-01T00:00:00.123Z").unwrap();
+        assert_eq!(ts_fract, 1704067200);
+
+        let ts_space = parse_ct_timestamp("2024-01-01 00:00:00").unwrap();
+        assert_eq!(ts_space, 1704067200);
     }
 
     #[test]

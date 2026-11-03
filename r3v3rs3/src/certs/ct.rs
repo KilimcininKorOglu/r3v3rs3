@@ -231,10 +231,30 @@ impl CtMonitorState {
     }
 }
 
+fn wildcard_base_matches(wildcard_name: &str, other: &str) -> bool {
+    if let Some(base) = wildcard_name.strip_prefix("*.") {
+        other == base || other.ends_with(&format!(".{base}"))
+    } else {
+        false
+    }
+}
+
+fn domain_matches(candidate: &str, target: &str) -> bool {
+    let cand = candidate.trim().to_lowercase();
+    let tgt = target.trim().to_lowercase();
+    if cand.is_empty() || tgt.is_empty() {
+        return false;
+    }
+    cand == tgt
+        || cand.ends_with(&format!(".{tgt}"))
+        || wildcard_base_matches(&cand, &tgt)
+        || wildcard_base_matches(&tgt, &cand)
+}
+
 fn entry_matches_domain(entry: &CtLogEntry, domain: &str) -> bool {
-    entry.domain.to_lowercase().contains(domain)
-        || entry.common_name.to_lowercase().contains(domain)
-        || entry.san.iter().any(|s| s.to_lowercase().contains(domain))
+    domain_matches(&entry.domain, domain)
+        || domain_matches(&entry.common_name, domain)
+        || entry.san.iter().any(|s| domain_matches(s, domain))
 }
 
 fn filter_entry(entry: &CtLogEntry, domain_filter: Option<&str>, rogue_only: bool) -> bool {
@@ -500,5 +520,18 @@ mod tests {
         assert!(!monitor.is_check_in_progress());
 
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_domain_matches() {
+        assert!(domain_matches("example.com", "example.com"));
+        assert!(domain_matches("api.example.com", "example.com"));
+        assert!(domain_matches("*.example.com", "example.com"));
+        assert!(domain_matches("*.example.com", "api.example.com"));
+
+        assert!(!domain_matches("attacker-example.com", "example.com"));
+        assert!(!domain_matches("myexample.com", "example.com"));
+        assert!(!domain_matches("notexample.com", "example.com"));
+        assert!(!domain_matches("example.com.attacker.com", "example.com"));
     }
 }
