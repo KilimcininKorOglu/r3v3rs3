@@ -1401,15 +1401,24 @@ fn db_tool_name(engine: &str) -> &'static str {
     }
 }
 
+struct TerminalIoListeners {
+    _on_message: Closure<dyn FnMut(web_sys::MessageEvent)>,
+    _on_close: Closure<dyn FnMut(web_sys::CloseEvent)>,
+    _on_data: Closure<dyn FnMut(String)>,
+}
+
 struct TerminalSession {
     socket: web_sys::WebSocket,
     term: JsValue,
     fit: JsValue,
     resize_cb: Closure<dyn FnMut()>,
+    _io: TerminalIoListeners,
 }
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
+        self.socket.set_onmessage(None);
+        self.socket.set_onclose(None);
         let _ = self.socket.close();
         if let Some(window) = web_sys::window() {
             let _ = window.remove_event_listener_with_callback(
@@ -1489,7 +1498,10 @@ fn build_socket_address(window: &web_sys::Window, id: ShortId, shell: &str) -> O
     ))
 }
 
-fn attach_terminal_io(socket: &web_sys::WebSocket, term: &JsValue) {
+fn attach_terminal_io(
+    socket: &web_sys::WebSocket,
+    term: &JsValue,
+) -> TerminalIoListeners {
     let writer = term.clone();
     let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::wrap(Box::new(
         move |event: web_sys::MessageEvent| {
@@ -1499,7 +1511,6 @@ fn attach_terminal_io(socket: &web_sys::WebSocket, term: &JsValue) {
         },
     ));
     socket.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-    on_message.forget();
 
     let writer_close = term.clone();
     let on_close = Closure::<dyn FnMut(web_sys::CloseEvent)>::wrap(Box::new(move |_| {
@@ -1512,7 +1523,6 @@ fn attach_terminal_io(socket: &web_sys::WebSocket, term: &JsValue) {
         );
     }));
     socket.set_onclose(Some(on_close.as_ref().unchecked_ref()));
-    on_close.forget();
 
     let socket_input = socket.clone();
     let writer_fallback = term.clone();
@@ -1531,7 +1541,12 @@ fn attach_terminal_io(socket: &web_sys::WebSocket, term: &JsValue) {
         "onData",
         &[on_data.as_ref().unchecked_ref::<js_sys::Function>().into()],
     );
-    on_data.forget();
+
+    TerminalIoListeners {
+        _on_message: on_message,
+        _on_close: on_close,
+        _on_data: on_data,
+    }
 }
 
 fn attach_resize_listener(
@@ -1571,7 +1586,7 @@ fn start_terminal_for_tab(id: ShortId, tab_id: usize, shell: &str) -> Option<Ter
     let socket = web_sys::WebSocket::new(&address).ok()?;
     socket.set_binary_type(web_sys::BinaryType::Arraybuffer);
 
-    attach_terminal_io(&socket, &term);
+    let io = attach_terminal_io(&socket, &term);
     let resize_cb = attach_resize_listener(&window, &socket, &term, &fit);
 
     Some(TerminalSession {
@@ -1579,6 +1594,7 @@ fn start_terminal_for_tab(id: ShortId, tab_id: usize, shell: &str) -> Option<Ter
         term,
         fit,
         resize_cb,
+        _io: io,
     })
 }
 
