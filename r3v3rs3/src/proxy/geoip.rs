@@ -258,9 +258,8 @@ async fn download_and_verify_archive(
     );
 
     let tar_bytes = fetch_url_bytes(client, &tar_url).await?;
-    if let Ok(sha_text) = fetch_url_text(client, &sha_url).await {
-        verify_sha256(&sha_text, &tar_bytes)?;
-    }
+    let sha_text = fetch_url_text(client, &sha_url).await?;
+    verify_sha256(&sha_text, &tar_bytes)?;
     Ok(tar_bytes)
 }
 
@@ -285,7 +284,10 @@ fn verify_sha256(expected_text: &str, data: &[u8]) -> Result<(), anyhow::Error> 
     hasher.update(data);
     let calculated = hex::encode(hasher.finalize());
     let expected = expected_text.split_whitespace().next().unwrap_or("").trim();
-    if !expected.is_empty() && !calculated.eq_ignore_ascii_case(expected) {
+    if expected.is_empty() {
+        anyhow::bail!("expected SHA256 checksum is empty");
+    }
+    if !calculated.eq_ignore_ascii_case(expected) {
         anyhow::bail!("SHA256 checksum mismatch: expected {expected}, got {calculated}");
     }
     Ok(())
@@ -378,6 +380,8 @@ mod tests {
 
         assert!(verify_sha256(&expected_hash, &tar_bytes).is_ok());
         assert!(verify_sha256("0000000000000000", &tar_bytes).is_err());
+        assert!(verify_sha256("", &tar_bytes).is_err());
+        assert!(verify_sha256("   ", &tar_bytes).is_err());
 
         let extracted = extract_mmdb_bytes(&tar_bytes).unwrap();
         assert_eq!(extracted.len(), raw_bytes.len());
