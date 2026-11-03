@@ -555,6 +555,31 @@ async fn migrate_one_cert(
     Ok(())
 }
 
+async fn write_cert_files(cert_dir: &Path, cert: &Cert) -> Result<(), Error> {
+    fs::write(cert_dir.join("cert.pem"), &cert.pem_chain)
+        .await
+        .map_err(|_| Error::FailedToSaveConfig)?;
+    if let Some(key) = &cert.pem_key {
+        let key_str = String::from_utf8_lossy(key).into_owned();
+        super::file::write_private(&cert_dir.join("key.pem"), key_str)
+            .await
+            .map_err(|_| Error::FailedToSaveConfig)?;
+    }
+    Ok(())
+}
+
+async fn persist_cert_data(
+    dir: &Path,
+    pool: &SqlitePool,
+    cert_dir: &Path,
+    cert: &Cert,
+) -> Result<(), Error> {
+    write_cert_files(cert_dir, cert).await?;
+    insert_cert_row(dir, pool, cert)
+        .await
+        .map_err(|_| Error::FailedToSaveConfig)
+}
+
 async fn insert_cert_row(dir: &Path, pool: &SqlitePool, cert: &Cert) -> anyhow::Result<()> {
     let rel_cert = format!("certs/{}/{}/cert.pem", cert.kind, cert.id());
     let rel_key = if cert.pem_key.is_some() {
@@ -702,18 +727,10 @@ impl Storage for SqliteStorage {
         fs::create_dir_all(&cert_dir)
             .await
             .map_err(|_| Error::FailedToSaveConfig)?;
-        fs::write(cert_dir.join("cert.pem"), &cert.pem_chain)
-            .await
-            .map_err(|_| Error::FailedToSaveConfig)?;
-        if let Some(key) = &cert.pem_key {
-            let key_str = String::from_utf8_lossy(key).into_owned();
-            super::file::write_private(&cert_dir.join("key.pem"), key_str)
-                .await
-                .map_err(|_| Error::FailedToSaveConfig)?;
+        if let Err(err) = persist_cert_data(&self.dir, &self.pool, &cert_dir, cert).await {
+            let _ = fs::remove_dir_all(&cert_dir).await;
+            return Err(err);
         }
-        insert_cert_row(&self.dir, &self.pool, cert)
-            .await
-            .map_err(|_| Error::FailedToSaveConfig)?;
         Ok(())
     }
 
@@ -723,16 +740,16 @@ impl Storage for SqliteStorage {
             .fetch_optional(&self.pool)
             .await
             .map_err(|_| Error::FailedToSaveConfig)?;
-        if let Some(r) = row {
-            let kind: String = r.get(0);
-            let cert_dir = self.dir.join("certs").join(kind).join(id.to_string());
-            let _ = fs::remove_dir_all(&cert_dir).await;
-        }
         sqlx::query("DELETE FROM certificates WHERE id = ?")
             .bind(id.to_string())
             .execute(&self.pool)
             .await
             .map_err(|_| Error::FailedToSaveConfig)?;
+        if let Some(r) = row {
+            let kind: String = r.get(0);
+            let cert_dir = self.dir.join("certs").join(kind).join(id.to_string());
+            let _ = fs::remove_dir_all(&cert_dir).await;
+        }
         Ok(())
     }
 
