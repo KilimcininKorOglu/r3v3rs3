@@ -5,6 +5,7 @@
 //! platform secrets key, and cluster sealing keys into an AES-256-GCM encrypted `.r3bundle`.
 
 use anyhow::{Context as _, anyhow};
+use argon2::Argon2;
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
 use aws_lc_rs::rand::{SecureRandom, SystemRandom};
 use flate2::Compression;
@@ -19,7 +20,7 @@ use std::time::SystemTime;
 use tar::Header;
 
 const DR_MAGIC: &[u8; 4] = b"R3DR";
-const DR_VERSION: u8 = 1;
+const DR_VERSION: u8 = 2;
 pub const SALT_LEN: usize = 16;
 const AAD_BYTES: &[u8] = b"r3v3rs3-disaster-recovery";
 pub const DISASTER_RECOVERY_DIR: &str = "disaster-recovery";
@@ -43,8 +44,17 @@ const ROOT_CONFIG_FILES: &[&str] = &[
 
 const SUBDIRS: &[&str] = &["certs", "keys"];
 
-/// Derives a 32-byte AES-256 key from a passphrase and salt using iterated SHA-256.
-pub fn derive_dr_key(passphrase: &str, salt: &[u8; SALT_LEN]) -> [u8; 32] {
+/// Derives a 32-byte AES-256 key from a passphrase and salt using Argon2id.
+pub fn derive_dr_key(passphrase: &str, salt: &[u8; SALT_LEN]) -> anyhow::Result<[u8; 32]> {
+    let mut key = [0u8; 32];
+    Argon2::default()
+        .hash_password_into(passphrase.as_bytes(), salt, &mut key)
+        .map_err(|e| anyhow!("failed to derive key with Argon2id: {e}"))?;
+    Ok(key)
+}
+
+/// Legacy V1 key derivation using iterated SHA-256 (supported for backwards compatibility when decrypting).
+fn derive_dr_key_v1(passphrase: &str, salt: &[u8; SALT_LEN]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(b"R3DR-KDF-V1");
     hasher.update(salt);
@@ -74,7 +84,7 @@ pub fn encrypt_dr_bundle(payload: &[u8], passphrase: &str) -> anyhow::Result<Vec
     random
         .fill(&mut salt)
         .map_err(|_| anyhow!("failed to generate random salt"))?;
-    let key_bytes = derive_dr_key(pass, &salt);
+    let key_bytes = derive_dr_key(pass, &salt)?;
     let key =
         UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|_| anyhow!("invalid encryption key"))?;
     let safe_key = LessSafeKey::new(key);
@@ -106,10 +116,10 @@ pub fn decrypt_dr_bundle(bundle: &[u8], passphrase: &str) -> anyhow::Result<Vec<
     if &bundle[0..4] != DR_MAGIC {
         anyhow::bail!("invalid disaster recovery bundle magic bytes");
     }
-    if bundle[4] != DR_VERSION {
+    let version = bundle[4];
+    if version != 1 && version != DR_VERSION {
         anyhow::bail!(
-            "unsupported disaster recovery bundle version: {}",
-            bundle[4]
+            "unsupported disaster recovery bundle version: {version}"
         );
     }
     let mut salt = [0u8; SALT_LEN];
@@ -118,7 +128,11 @@ pub fn decrypt_dr_bundle(bundle: &[u8], passphrase: &str) -> anyhow::Result<Vec<
     nonce.copy_from_slice(&bundle[5 + SALT_LEN..5 + SALT_LEN + NONCE_LEN]);
     let body_start = 5 + SALT_LEN + NONCE_LEN;
     let mut body = bundle[body_start..].to_vec();
-    let key_bytes = derive_dr_key(pass, &salt);
+    let key_bytes = if version == 1 {
+        derive_dr_key_v1(pass, &salt)
+    } else {
+        derive_dr_key(pass, &salt)?
+    };
     let key =
         UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|_| anyhow!("invalid decryption key"))?;
     let safe_key = LessSafeKey::new(key);
@@ -649,6 +663,28 @@ mod tests {
         assert!(encrypt_dr_bundle(plaintext, "   ").is_err());
         assert!(decrypt_dr_bundle(&encrypted, "").is_err());
         assert!(decrypt_dr_bundle(&encrypted, "   ").is_err());
+    }
+
+    #[test]
+    fn test_dr_bundle_decrypt_v1_backward_compatibility() {
+        let plaintext = b"V1 backward compatibility payload!";
+        let passphrase = "v1-legacy-passphrase";
+        let salt = [42u8; SALT_LEN];
+        let nonce = [7u8; NONCE_LEN];
+        let key_bytes = derive_dr_key_v1(passphrase, &salt);
+        let key = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
+        let safe_key = LessSafeKey::new(key);
+        let mut body = plaintext.to_vec();
+        safe_key
+            .seal_in_place_append_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(AAD_BYTES),
+                &mut body,
+            )
+            .unwrap();
+        let v1_bundle = [DR_MAGIC.as_slice(), &[1u8], &salt, &nonce, &body].concat();
+        let decrypted = decrypt_dr_bundle(&v1_bundle, passphrase).unwrap();
+        assert_eq!(&decrypted, plaintext);
     }
 
     #[test]
