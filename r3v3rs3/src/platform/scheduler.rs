@@ -172,6 +172,7 @@ impl Platform {
         app_id: ShortId,
         req: ScheduledCommandRequest,
     ) -> anyhow::Result<AppScheduledCommand> {
+        req.validate()?;
         self.app(app_id).await?;
         let now = unix_ms() as i64;
         let cmd = AppScheduledCommand {
@@ -197,6 +198,7 @@ impl Platform {
         cmd_id: ShortId,
         req: ScheduledCommandRequest,
     ) -> anyhow::Result<AppScheduledCommand> {
+        req.validate()?;
         let Some(mut cmd) = self.store.scheduled_command(cmd_id).await? else {
             return Err(r3v3rs3_api::error::Error::ScheduledCommandNotFound { id: cmd_id }.into());
         };
@@ -293,6 +295,10 @@ fn parse_interval_ms(expr: &str) -> Option<i64> {
         let s: i64 = num.parse().ok()?;
         return Some(s * 1_000);
     }
+    if let Some(num) = clean.strip_suffix('d') {
+        let d: i64 = num.parse().ok()?;
+        return Some(d * 86_400_000);
+    }
     None
 }
 
@@ -326,7 +332,13 @@ fn match_cron_field(expr: &str, val: u32) -> bool {
         return step > 0 && val.is_multiple_of(step);
     }
     for part in expr.split(',') {
-        if let Ok(n) = part.parse::<u32>()
+        if let Some((start, end)) = part.split_once('-')
+            && let (Ok(s), Ok(e)) = (start.parse::<u32>(), end.parse::<u32>())
+        {
+            if (s..=e).contains(&val) {
+                return true;
+            }
+        } else if let Ok(n) = part.parse::<u32>()
             && n == val
         {
             return true;
@@ -355,6 +367,7 @@ mod tests {
         assert!(is_schedule_due("15m", Some(now - 15 * 60_000), now));
         assert!(!is_schedule_due("15m", Some(now - 10 * 60_000), now));
         assert!(is_schedule_due("@hourly", Some(now - 3_600_000), now));
+        assert!(is_schedule_due("1d", Some(now - 86_400_000), now));
     }
 
     #[test]
@@ -365,6 +378,8 @@ mod tests {
         assert!(!match_cron_field("*/5", 16));
         assert!(match_cron_field("1,2,5", 5));
         assert!(!match_cron_field("1,2,5", 3));
+        assert!(match_cron_field("1-5", 3));
+        assert!(!match_cron_field("1-5", 6));
         assert!(match_cron_5("* * * * *", &dt));
     }
 

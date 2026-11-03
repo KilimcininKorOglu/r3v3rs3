@@ -401,6 +401,7 @@ mod tests {
                 id: "theme".parse().unwrap(),
             },
             Error::InvalidCompressionDictionary { reason: text() },
+            Error::InvalidScheduledCommand { reason: text() },
             Error::CompressionDictionaryNotFound {
                 id: "dict".parse().unwrap(),
             },

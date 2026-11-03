@@ -1597,7 +1597,7 @@ pub fn validate_tag_pattern(pattern: &str) -> Result<(), Error> {
 }
 
 fn is_valid_tag_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '*' | '?' | '/' | '+' | '@')
+    c.is_ascii_alphanumeric() || ".-_*?/+@".contains(c)
 }
 
 fn char_matches(p: u8, t: u8) -> bool {
@@ -2362,6 +2362,114 @@ pub struct ScheduledCommandRequest {
     pub enabled: bool,
 }
 
+impl ScheduledCommandRequest {
+    pub fn validate(&self) -> Result<(), Error> {
+        let name = self.name.trim();
+        if name.is_empty() {
+            return Err(Error::InvalidScheduledCommand {
+                reason: "name cannot be empty".to_string(),
+            });
+        }
+        if name.len() > 100 {
+            return Err(Error::InvalidScheduledCommand {
+                reason: "name cannot exceed 100 characters".to_string(),
+            });
+        }
+        let command = self.command.trim();
+        if command.is_empty() {
+            return Err(Error::InvalidScheduledCommand {
+                reason: "command cannot be empty".to_string(),
+            });
+        }
+        if command.len() > 8192 {
+            return Err(Error::InvalidScheduledCommand {
+                reason: "command cannot exceed 8192 characters".to_string(),
+            });
+        }
+        validate_schedule_expression(self.schedule.trim())
+    }
+}
+
+pub fn validate_schedule_expression(schedule: &str) -> Result<(), Error> {
+    if schedule.is_empty() {
+        return Err(Error::InvalidScheduledCommand {
+            reason: "schedule cannot be empty".to_string(),
+        });
+    }
+    if validate_daily_time(schedule) || validate_interval(schedule) || validate_cron_5(schedule) {
+        Ok(())
+    } else {
+        Err(Error::InvalidScheduledCommand {
+            reason: format!(
+                "invalid schedule expression '{schedule}': expected HH:MM, interval (e.g. 15m, 1h, 1d), or 5-field cron"
+            ),
+        })
+    }
+}
+
+fn validate_daily_time(schedule: &str) -> bool {
+    let Some((hour_str, min_str)) = schedule.split_once(':') else {
+        return false;
+    };
+    let (Ok(hour), Ok(min)) = (hour_str.parse::<u32>(), min_str.parse::<u32>()) else {
+        return false;
+    };
+    hour < 24 && min < 60
+}
+
+fn validate_interval(schedule: &str) -> bool {
+    let clean = schedule.strip_prefix("@every ").unwrap_or(schedule).trim();
+    if matches!(clean, "@hourly" | "hourly" | "@daily" | "daily") {
+        return true;
+    }
+    for unit in ['s', 'm', 'h', 'd'] {
+        if let Some(num_str) = clean.strip_suffix(unit)
+            && let Ok(num) = num_str.parse::<u64>()
+        {
+            return num > 0;
+        }
+    }
+    false
+}
+
+fn validate_cron_part(part: &str, min: u32, max: u32) -> bool {
+    if let Some((start_str, end_str)) = part.split_once('-') {
+        let (Ok(s), Ok(e)) = (start_str.parse::<u32>(), end_str.parse::<u32>()) else {
+            return false;
+        };
+        s >= min && e <= max && s <= e
+    } else {
+        let Ok(val) = part.parse::<u32>() else {
+            return false;
+        };
+        val >= min && val <= max
+    }
+}
+
+fn validate_cron_field(field: &str, min: u32, max: u32) -> bool {
+    if field == "*" {
+        return true;
+    }
+    if let Some(step_str) = field.strip_prefix("*/") {
+        return step_str
+            .parse::<u32>()
+            .is_ok_and(|step| step > 0 && step <= max);
+    }
+    field.split(',').all(|part| validate_cron_part(part, min, max))
+}
+
+fn validate_cron_5(schedule: &str) -> bool {
+    let fields: Vec<&str> = schedule.split_whitespace().collect();
+    if fields.len() != 5 {
+        return false;
+    }
+    validate_cron_field(fields[0], 0, 59)
+        && validate_cron_field(fields[1], 0, 23)
+        && validate_cron_field(fields[2], 1, 31)
+        && validate_cron_field(fields[3], 1, 12)
+        && validate_cron_field(fields[4], 0, 7)
+}
+
 /// The result of running a scheduled command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ScheduledCommandRunResult {
@@ -3099,5 +3207,53 @@ EMPTY_VAL=
                 .unwrap_err()
                 .contains("an environment cannot be specified without a project")
         );
+    }
+
+    #[test]
+    fn test_scheduled_command_request_validation() {
+        let valid = ScheduledCommandRequest {
+            name: "Backup Database".to_string(),
+            schedule: "04:30".to_string(),
+            command: "pg_dump -Fc mydb > backup.dump".to_string(),
+            enabled: true,
+        };
+        assert!(valid.validate().is_ok());
+
+        // Empty name
+        let mut empty_name = valid.clone();
+        empty_name.name = "   ".to_string();
+        assert!(empty_name.validate().is_err());
+
+        // Empty command
+        let mut empty_cmd = valid.clone();
+        empty_cmd.command = "".to_string();
+        assert!(empty_cmd.validate().is_err());
+
+        // Valid intervals
+        let mut interval_cmd = valid.clone();
+        interval_cmd.schedule = "15m".to_string();
+        assert!(interval_cmd.validate().is_ok());
+        interval_cmd.schedule = "@every 2h".to_string();
+        assert!(interval_cmd.validate().is_ok());
+        interval_cmd.schedule = "1d".to_string();
+        assert!(interval_cmd.validate().is_ok());
+
+        // Valid cron
+        let mut cron_cmd = valid.clone();
+        cron_cmd.schedule = "*/5 * * * *".to_string();
+        assert!(cron_cmd.validate().is_ok());
+        cron_cmd.schedule = "0 2 * * 1-5".to_string();
+        assert!(cron_cmd.validate().is_ok());
+
+        // Invalid schedules
+        let mut invalid_sched = valid.clone();
+        invalid_sched.schedule = "invalid-schedule".to_string();
+        assert!(invalid_sched.validate().is_err());
+        invalid_sched.schedule = "25:00".to_string();
+        assert!(invalid_sched.validate().is_err());
+        invalid_sched.schedule = "* * * *".to_string(); // only 4 fields
+        assert!(invalid_sched.validate().is_err());
+        invalid_sched.schedule = "60 * * * *".to_string(); // minute > 59
+        assert!(invalid_sched.validate().is_err());
     }
 }

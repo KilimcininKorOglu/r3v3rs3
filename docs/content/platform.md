@@ -926,6 +926,8 @@ Each command configuration specifies:
 - **Command**: The command to execute inside the container, passed to `sh -c`.
 - **Enabled**: Whether the background scheduler runs the task when due.
 
+On creation and update, the server validates that the name and command are not empty, and that the schedule adheres to one of the valid formats.
+
 The server checks and triggers due commands in a background loop every 30 seconds. A command can also be updated via the **Edit** action modal (`PUT /api/apps/{id}/commands/{cmd_id}`) or run immediately on demand with **Run now**. The last execution status, exit code, and run time are recorded on each row, and **Output** opens a modal displaying stdout and stderr of the latest run.
 
 ### Targets

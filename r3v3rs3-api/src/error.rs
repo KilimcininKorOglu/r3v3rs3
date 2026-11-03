@@ -550,6 +550,9 @@ pub enum Error {
     #[error("invalid compression dictionary: {reason}")]
     InvalidCompressionDictionary { reason: String },
 
+    #[error("invalid scheduled command: {reason}")]
+    InvalidScheduledCommand { reason: String },
+
     #[error("compression dictionary not found: {id}")]
     CompressionDictionaryNotFound {
         #[schema(value_type = String)]
