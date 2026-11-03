@@ -15,7 +15,8 @@ use super::affinity::CookieSlot;
 use super::client_ip::{CLIENT_IP_HEADERS, ClientAddr};
 use super::compression::ResponseCompression;
 use super::error::{ErrorTemplate, error_headers, map_error, status_text};
-use super::header_rules::{CompiledHeaderRules, HeaderVariables};
+use super::header_rules::{self, CompiledHeaderRules, HeaderVariables};
+use hyper::header::HeaderName;
 use super::page::PagePreferences;
 
 #[derive(Default, Debug)]
@@ -452,17 +453,17 @@ fn render_error_body(
     preferences: PagePreferences,
     error_pages: &[CustomErrorPage],
     variables: Option<&HeaderVariables>,
+    req_id: &str,
 ) -> Result<(Vec<u8>, HeaderValue), anyhow::Error> {
     if let Some(custom) = error_pages.iter().find(|p| p.status == code.as_u16()) {
         let status = custom.status;
         let message = code.canonical_reason().unwrap_or("Error");
-        let (req_id, host, client_ip) = match variables {
+        let (host, client_ip) = match variables {
             Some(v) => (
-                v.request_id.as_str(),
                 v.host.as_str(),
                 v.client_ip.to_string(),
             ),
-            None => ("-", "-", "-".to_string()),
+            None => ("-", "-".to_string()),
         };
         let rendered = r3v3rs3_api::error_page_theme::substitute_error_page_variables(
             &custom.body,
@@ -484,6 +485,7 @@ fn render_error_body(
             code: code.as_u16(),
             text: status_text(code, preferences.locale),
             preferences,
+            request_id: Some(req_id),
         }
         .render_once()?;
         Ok((
@@ -501,7 +503,16 @@ fn error_response(
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let headers = error_headers(&err);
     let code = map_error(err);
-    let (body, content_type) = render_error_body(code, preferences, error_pages, variables)?;
+    let generated_id;
+    let req_id = match variables {
+        Some(v) if !v.request_id.is_empty() => v.request_id.as_str(),
+        _ => {
+            generated_id = header_rules::new_request_id();
+            generated_id.as_str()
+        }
+    };
+    let (body, content_type) =
+        render_error_body(code, preferences, error_pages, variables, req_id)?;
     let mut res = Response::new(BoxBody::new(
         Full::new(Bytes::from(body)).map_err(Into::into),
     ));
@@ -510,6 +521,10 @@ fn error_response(
     res.headers_mut().insert(CONTENT_TYPE, content_type);
     res.headers_mut()
         .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    if let Ok(val) = HeaderValue::from_str(req_id) {
+        res.headers_mut()
+            .insert(HeaderName::from_static("x-request-id"), val);
+    }
     Ok(res)
 }
 
@@ -840,5 +855,33 @@ mod test {
         assert_eq!(forwarded_host_directive(""), None);
         assert_eq!(forwarded_host_directive("evil.com\r\ninjected"), None);
         assert_eq!(forwarded_host_directive("evil.com\0"), None);
+    }
+
+    #[tokio::test]
+    async fn error_response_attaches_request_id_and_renders_it() {
+        let vars = HeaderVariables {
+            client_ip: "127.0.0.1".parse().unwrap(),
+            host: "example.com".to_string(),
+            scheme: "http",
+            request_id: "req-test-trace-id-12345".to_string(),
+            route: "/".to_string(),
+            client_cert_subject: String::new(),
+            client_cert_fingerprint: String::new(),
+        };
+        let err = anyhow::anyhow!(crate::proxy::http::error::ProxyError::NoUpstreamServers);
+        let resp = error_response(err, PagePreferences::default(), &[], Some(&vars))
+            .expect("must generate error response");
+        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            resp.headers().get("x-request-id").unwrap(),
+            "req-test-trace-id-12345"
+        );
+        let body_bytes = http_body_util::BodyExt::collect(resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+        assert!(body_str.contains("req-test-trace-id-12345"));
+        assert!(body_str.contains("Request ID"));
     }
 }

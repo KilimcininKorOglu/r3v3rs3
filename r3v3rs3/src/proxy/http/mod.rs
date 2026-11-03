@@ -3,7 +3,7 @@ use self::{
     cache::CacheRequest,
     compression::ResponseCompression,
     error::ProxyError,
-    header_rules::{HeaderVariables, new_request_id},
+    header_rules::HeaderVariables,
     page::PagePreferences,
     pool::{Upstream, UpstreamClients, UpstreamH2c},
     route::{FilteredRoute, Router},
@@ -87,6 +87,7 @@ pub(crate) mod redirect;
 pub(crate) mod rewrite;
 mod rewriter;
 mod route;
+pub(crate) mod trace;
 
 pub use auth::SessionService;
 
@@ -1136,6 +1137,7 @@ fn no_route_fallback<B>(
     info: &RequestInfo<'_>,
     request_host: Option<String>,
     response_rewriter: ResponseRewriterBuilder,
+    headers: &hyper::HeaderMap,
 ) -> (
     ProxiedRequest<Request<B>>,
     ResponseRewriterBuilder,
@@ -1145,6 +1147,7 @@ fn no_route_fallback<B>(
 ) {
     let error_pages = shared.router.find_error_pages(request_host.as_deref());
     let client_cert = info.client_cert.cloned().unwrap_or_default();
+    let request_id = trace::resolve_request_id(headers);
     let fallback_vars = header_rules::HeaderVariables {
         client_ip: info.remote.ip(),
         host: request_host.unwrap_or_default(),
@@ -1153,7 +1156,7 @@ fn no_route_fallback<B>(
         } else {
             "https"
         },
-        request_id: header_rules::new_request_id(),
+        request_id,
         route: String::new(),
         client_cert_subject: client_cert.subject,
         client_cert_fingerprint: client_cert.fingerprint,
@@ -1230,7 +1233,7 @@ where
     let header_host = header_host(&req).map(str::to_string);
     let request_host = request_host(&req, header_host.clone(), info.sni);
     let Some((res, route)) = shared.router.get_route(&req, request_host.as_deref()) else {
-        return no_route_fallback(shared, info, request_host, response_rewriter);
+        return no_route_fallback(shared, info, request_host, response_rewriter, req.headers());
     };
     let response_rewriter = configure_response_rewriter(response_rewriter, route, &req);
 
@@ -1647,6 +1650,7 @@ fn apply_header_rules(
     info: &RequestInfo<'_>,
     response_rewriter: ResponseRewriterBuilder,
 ) -> ResponseRewriterBuilder {
+    let request_id = trace::extract_and_propagate_trace_context(headers);
     let client_cert = info.client_cert.cloned().unwrap_or_default();
     let variables = HeaderVariables {
         client_ip: client,
@@ -1656,7 +1660,7 @@ fn apply_header_rules(
         } else {
             "https"
         },
-        request_id: new_request_id(),
+        request_id,
         route: if route.base_path.is_empty() {
             "/".to_string()
         } else {

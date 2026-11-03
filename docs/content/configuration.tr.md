@@ -1082,6 +1082,16 @@ headers = { request = [{ action = "set", name = "X-Request-Id", value = "{reques
 routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
 ```
 
+### W3C Trace Context ve İstek İlişkilendirme Kimlikleri
+
+r3v3rs3, W3C Trace Context standardına uygun olarak dağıtık izleme (distributed tracing) yayılımını destekler:
+
+- **W3C Traceparent Çıkarımı ve İletimi**: Gelen istek geçerli bir `traceparent` başlığı taşıdığında (biçim: `00-{trace_id}-{parent_id}-{flags}`), r3v3rs3 trace ID'sini çıkarır ve upstream servise iletmeden önce yeni bir child span ID üretir.
+- **Otomatik Üretim**: `traceparent` bulunmadığında veya geçersiz olduğunda r3v3rs3 otomatik olarak yeni ve geçerli bir W3C traceparent başlığı (`00-{trace_id}-{span_id}-01`) üretir.
+- **Tracestate İletimi**: Gelen `tracestate` başlıkları değiştirilmeden korunur ve upstream servise iletilir.
+- **İstek ID Senkronizasyonu**: İlişkilendirme kimliği (`{request_id}`), gelen `X-Request-Id` değeriyle veya 32 karakterlik hex trace ID ile eşleşir. Gelen istekte `X-Request-Id` yoksa r3v3rs3 upstream isteğine trace ID değerini içeren `X-Request-Id` başlığını ekler.
+- **Hata Yanıtlarında İlişkilendirme**: r3v3rs3 tarafından üretilen tüm hata yanıtları (örneğin 502 Bad Gateway, 504 Gateway Timeout veya 404 Not Found) `X-Request-Id` HTTP yanıt başlığını ekler ve hata ayıklama için varsayılan ve özel hata sayfalarında istek kimliğini gösterir.
+
 ### Güvenlik Üstbilgisi Sertleştirme Profilleri
 
 r3v3rs3, WebUI, MCP ve CLI üzerinden tek tıkla uygulanabilen yerleşik OWASP güvenlik üstbilgisi profilleri ve otomatik bir karne denetim motoru (A+'dan F'ye) sunar:

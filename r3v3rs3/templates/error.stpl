@@ -57,6 +57,19 @@
             font-size: 24px;
         }
 
+        .request-id {
+            margin-top: 16px;
+            font-size: 13px;
+            color: var(--link-color);
+        }
+
+        .request-id code {
+            font-family: monospace;
+            background-color: rgba(128, 128, 128, 0.15);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
         .powered-by {
             margin-top: 20px;
         }
@@ -71,6 +84,9 @@
     <div class="error-container">
         <div class="error-code"><%= self.code %></div>
         <div class="error-text"><%= self.text %></div>
+        <% if let Some(req_id) = self.request_id { %>
+        <div class="request-id"><%= self.preferences.locale.t("common.request_id") %>: <code><%= req_id %></code></div>
+        <% } %>
         <div class="powered-by">
             <a href="https://github.com/KilimcininKorOglu/r3v3rs3" target="_blank" rel="noopener noreferrer"><%= self.preferences.locale.t("common.powered_by") %></a>
         </div>

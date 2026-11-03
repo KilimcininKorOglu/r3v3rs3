@@ -415,6 +415,7 @@
   "common.domains": "Domainler",
   "common.powered_by": "r3v3rs3 ile çalışır",
   "common.protocol": "Protokol",
+  "common.request_id": "İstek ID",
   "common.status": "Durum",
   "common.update": "Güncelle",
   "common.update_available": "r3v3rs3 {version} yayında.",

@@ -153,10 +153,11 @@ pub fn status_text(code: StatusCode, locale: Locale) -> &'static str {
 
 #[derive(TemplateOnce)]
 #[template(path = "error.stpl")]
-pub struct ErrorTemplate {
+pub struct ErrorTemplate<'a> {
     pub code: u16,
     pub text: &'static str,
     pub preferences: PagePreferences,
+    pub request_id: Option<&'a str>,
 }
 
 #[cfg(test)]

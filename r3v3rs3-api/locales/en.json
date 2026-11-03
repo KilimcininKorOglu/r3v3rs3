@@ -415,6 +415,7 @@
   "common.domains": "Domains",
   "common.powered_by": "Powered by r3v3rs3",
   "common.protocol": "Protocol",
+  "common.request_id": "Request ID",
   "common.status": "Status",
   "common.update": "Update",
   "common.update_available": "r3v3rs3 {version} is available.",
