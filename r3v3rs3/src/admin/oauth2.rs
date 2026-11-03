@@ -33,6 +33,7 @@ use sqlx::{Row as _, SqlitePool};
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
+use subtle::ConstantTimeEq;
 use tracing::info;
 
 /// The lifetime of an authorization code. RFC 6749 recommends 10 minutes.
@@ -550,7 +551,8 @@ impl McpAuthorizations {
         let Some(grant) = grant else {
             return Err(StatusCode::BAD_REQUEST);
         };
-        if challenge_of(code_verifier) != grant.code_challenge {
+        let actual = challenge_of(code_verifier);
+        if !bool::from(actual.as_bytes().ct_eq(grant.code_challenge.as_bytes())) {
             return Err(StatusCode::BAD_REQUEST);
         }
         let username = grant.username.clone();
