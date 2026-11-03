@@ -91,8 +91,35 @@ impl Platform {
         let manifest = serde_json::to_vec(&entry)?;
         tokio::fs::write(dir.join(format!("{backup_id}.json")), manifest).await?;
 
-        self.upload_volume_to_s3(app.name.as_str(), volume, &entry, &compressed)
+        if let Err(err) = self
+            .upload_volume_to_s3(app.name.as_str(), volume, &entry, &compressed)
+            .await
+        {
+            tracing::error!(
+                err = format!("{err:#}"),
+                app = app.name.as_str(),
+                volume = volume,
+                "failed to upload volume backup to S3"
+            );
+            let summary = format!(
+                "Remote S3 volume backup upload failed for app '{}' volume '{}'",
+                app.name, volume
+            );
+            let data = serde_json::json!({
+                "backup_id": entry.id,
+                "app_id": id.to_string(),
+                "app_name": app.name.as_str(),
+                "volume": volume,
+                "target": "s3",
+                "error": err.to_string(),
+            });
+            self.dispatch_webhook_event(
+                r3v3rs3_api::webhook::WebhookEvent::BackupUploadFailed,
+                summary,
+                data,
+            )
             .await;
+        }
         Ok(entry)
     }
 
@@ -201,25 +228,21 @@ impl Platform {
         volume: &str,
         entry: &VolumeBackupEntry,
         compressed: &[u8],
-    ) {
-        let Ok(config) = self.backup_config().await else {
-            return;
-        };
+    ) -> anyhow::Result<()> {
+        let config = self.backup_config().await?;
         let Some(s3) = config.s3 else {
-            return;
+            return Ok(());
         };
-        let Ok(Some(secret)) = self.s3_secret().await else {
-            return;
+        let Some(secret) = self.s3_secret().await? else {
+            bail!("the S3 target has no secret key stored");
         };
         let s3 = r3v3rs3_api::platform::S3Config {
             secret_key: secret,
             ..s3
         };
-        let Ok(http_client) = self.http().await else {
-            return;
-        };
+        let http_client = self.http().await?;
         let key = format!("volumes/{app_name}/{volume}/{}.tar.gz", entry.id);
-        let _ = super::s3::upload_key(http_client, &s3, &key, compressed.to_vec()).await;
+        super::s3::upload_key(http_client, &s3, &key, compressed.to_vec()).await
     }
 }
 
