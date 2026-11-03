@@ -234,11 +234,21 @@ pub(crate) fn app_matches(app: &StoreApp, tr: bool, query: &str, category: Optio
     matches_category(app, tr, category) && matches_query(app, tr, query)
 }
 
+fn safe_website_url(url: Option<&str>) -> Option<String> {
+    let trimmed = url?.trim();
+    let parsed = url::Url::parse(trimmed).ok()?;
+    if parsed.scheme() == "http" || parsed.scheme() == "https" {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
 fn store_card(locale: Locale, app: &StoreApp) -> Html {
     let route = Route::NewStoreApp {
         store: app.id.clone(),
     };
-    let website = app.website.clone();
+    let website = safe_website_url(app.website.as_deref());
     let tr = locale == Locale::Tr;
     let category = app.category_in(tr);
     let screenshot = app.screenshot.clone();
@@ -321,5 +331,26 @@ mod tests {
 
         assert!(app_matches(&app1, true, "", Some("İzleme")));
         assert!(!app_matches(&app1, true, "", Some("Güvenlik")));
+    }
+
+    #[test]
+    fn test_safe_website_url_blocks_unsafe_schemes() {
+        assert_eq!(
+            safe_website_url(Some("https://example.com")),
+            Some("https://example.com".to_string())
+        );
+        assert_eq!(
+            safe_website_url(Some("http://example.com/docs")),
+            Some("http://example.com/docs".to_string())
+        );
+        assert_eq!(safe_website_url(Some("javascript:alert(1)")), None);
+        assert_eq!(
+            safe_website_url(Some("data:text/html,<script>alert(1)</script>")),
+            None
+        );
+        assert_eq!(safe_website_url(Some("vbscript:msgbox(1)")), None);
+        assert_eq!(safe_website_url(Some("file:///etc/passwd")), None);
+        assert_eq!(safe_website_url(Some("not-a-url")), None);
+        assert_eq!(safe_website_url(None), None);
     }
 }
