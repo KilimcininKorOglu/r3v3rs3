@@ -312,18 +312,28 @@ async fn verify_login_session(
 
 /// Ends the session and removes the `token` cookie.
 #[utoipa::path(
-    get,
+    post,
     path = "/logout",
     tag = "auth",
     operation_id = "logout",
     security(()),
-    responses((status = 200, description = "The session is ended."))
+    responses(
+        (status = 200, description = "The session is ended."),
+        (status = 403, description = "Cross-origin request rejected.")
+    )
 )]
 pub async fn logout(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
     jar: CookieJar,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, AppError> {
+    let public_url = {
+        let data = state.data.lock().await;
+        data.config.public_url.as_ref().map(|u| u.to_string())
+    };
+    verify_origin(&headers, public_url.as_deref())?;
+
     if let Some(token) = jar.get(ADMIN_SESSION_COOKIE) {
         let (backend, _) = session_backend(&state).await;
         record_logout(&state, backend.as_ref(), token.value(), peer).await;
@@ -334,7 +344,7 @@ pub async fn logout(
         }
     }
     // The removal cookie carries the path of the sign-in cookie, so the browser deletes it.
-    jar.add(Cookie::build((ADMIN_SESSION_COOKIE, "")).path("/").build())
+    Ok(jar.add(Cookie::build((ADMIN_SESSION_COOKIE, "")).path("/").build()))
 }
 
 /// Records the sign-out of the account of an admin session.

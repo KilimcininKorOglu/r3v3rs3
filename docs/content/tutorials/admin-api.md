@@ -57,7 +57,7 @@ A wrong password answers 400:
 
 Repeated failed sign-in attempts from an IP address trigger a temporary brute-force ban across all usernames (answering 429 with `ip_banned`). Administrators can inspect and lift active bans via `GET /api/banned-ips` and `DELETE /api/banned-ips/{ip}`, or from the Banned IP Addresses card in the Settings panel.
 
-`GET /api/session` tells you who you are, and `GET /api/logout` ends the session. After a logout the cookie is worthless:
+`GET /api/session` tells you who you are, and `POST /api/logout` ends the session. After a logout the cookie is worthless:
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/session
@@ -156,7 +156,7 @@ curl -sf -c "$PWD/j.txt" -H 'Content-Type: application/json' \
   -d "{\"username\":\"$R3_USER\",\"method\":\"password\",\"password\":\"$R3_PASS\"}" \
   "$R3_URL/api/login" > /dev/null
 curl -sf -b "$PWD/j.txt" -X DELETE "$R3_URL/api/proxies/$R3_PROXY/cache" > /dev/null
-curl -sf -b "$PWD/j.txt" "$R3_URL/api/logout" > /dev/null
+curl -sf -b "$PWD/j.txt" -X POST "$R3_URL/api/logout" > /dev/null
 ```
 
 Keep the password in the secret store of your CI, never in the repository. `-f` makes `curl` fail the job on a 4xx or 5xx status.

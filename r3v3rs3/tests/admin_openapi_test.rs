@@ -16,7 +16,7 @@ const OPERATIONS: [(&str, &str); 268] = [
     ("get", "/healthz"),
     ("get", "/readyz"),
     ("post", "/api/login"),
-    ("get", "/api/logout"),
+    ("post", "/api/logout"),
     ("get", "/api/events"),
     ("get", "/api/session"),
     ("get", "/api/auth/passkey/challenge"),

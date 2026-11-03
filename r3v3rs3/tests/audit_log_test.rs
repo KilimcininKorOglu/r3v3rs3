@@ -84,7 +84,7 @@ async fn the_audit_log_records_the_changes_and_the_sign_ins_of_an_account() -> a
         .await?;
     assert_eq!(failed.status(), 400);
     client
-        .get(format!("http://{addr}/api/logout"))
+        .post(format!("http://{addr}/api/logout"))
         .header(COOKIE, &cookie)
         .send()
         .await?

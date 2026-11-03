@@ -57,7 +57,7 @@ Yanlış parola 400 döner:
 
 Aynı IP adresinden yapılan ardışık hatalı giriş denemeleri, kullanıcı adından bağımsız olarak geçici brute-force engellemesini (fail2ban benzeri katman) tetikler (429 `ip_banned` döner). Yöneticiler aktif engelleri `GET /api/banned-ips` ve `DELETE /api/banned-ips/{ip}` uç noktalarından veya Ayarlar sayfasındaki "Engellenen IP Adresleri" kartından inceleyip kaldırabilir.
 
-`GET /api/session` kim olduğunuzu söyler, `GET /api/logout` oturumu bitirir. Çıkıştan sonra cookie işe yaramaz:
+`GET /api/session` kim olduğunuzu söyler, `POST /api/logout` oturumu bitirir. Çıkıştan sonra cookie işe yaramaz:
 
 ```bash
 $ curl -s -b cookies.txt http://localhost:46492/api/session
@@ -156,7 +156,7 @@ curl -sf -c "$PWD/j.txt" -H 'Content-Type: application/json' \
   -d "{\"username\":\"$R3_USER\",\"method\":\"password\",\"password\":\"$R3_PASS\"}" \
   "$R3_URL/api/login" > /dev/null
 curl -sf -b "$PWD/j.txt" -X DELETE "$R3_URL/api/proxies/$R3_PROXY/cache" > /dev/null
-curl -sf -b "$PWD/j.txt" "$R3_URL/api/logout" > /dev/null
+curl -sf -b "$PWD/j.txt" -X POST "$R3_URL/api/logout" > /dev/null
 ```
 
 Parolayı CI'ın secret deposunda tutun, repository'de değil. `-f` seçeneği, 4xx veya 5xx durum kodunda `curl`'ün işi başarısız yapmasını sağlar.
