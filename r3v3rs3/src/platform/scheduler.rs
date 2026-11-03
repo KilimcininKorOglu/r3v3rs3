@@ -110,8 +110,16 @@ impl Platform {
     /// Executes a single scheduled command inside the container of its app.
     pub async fn execute_scheduled_command(
         self: &Arc<Self>,
+        app_id: ShortId,
         cmd_id: ShortId,
     ) -> anyhow::Result<ScheduledCommandRunResult> {
+        self.app(app_id).await?;
+        let Some(cmd) = self.store.scheduled_command(cmd_id).await? else {
+            return Err(r3v3rs3_api::error::Error::ScheduledCommandNotFound { id: cmd_id }.into());
+        };
+        if cmd.app_id != app_id {
+            return Err(r3v3rs3_api::error::Error::ScheduledCommandNotFound { id: cmd_id }.into());
+        }
         let Some(_lock) = self.lock_scheduled_command(cmd_id) else {
             anyhow::bail!("scheduled command {cmd_id} is already running");
         };
@@ -192,16 +200,21 @@ impl Platform {
         Ok(cmd)
     }
 
-    /// Updates an existing scheduled command.
+    /// Updates an existing scheduled command of an app.
     pub async fn update_scheduled_command(
         &self,
+        app_id: ShortId,
         cmd_id: ShortId,
         req: ScheduledCommandRequest,
     ) -> anyhow::Result<AppScheduledCommand> {
         req.validate()?;
+        self.app(app_id).await?;
         let Some(mut cmd) = self.store.scheduled_command(cmd_id).await? else {
             return Err(r3v3rs3_api::error::Error::ScheduledCommandNotFound { id: cmd_id }.into());
         };
+        if cmd.app_id != app_id {
+            return Err(r3v3rs3_api::error::Error::ScheduledCommandNotFound { id: cmd_id }.into());
+        }
         cmd.name = req.name.trim().to_string();
         cmd.schedule = req.schedule.trim().to_string();
         cmd.command = req.command.trim().to_string();
@@ -211,11 +224,19 @@ impl Platform {
         Ok(cmd)
     }
 
-    /// Deletes a scheduled command.
-    pub async fn delete_scheduled_command(&self, cmd_id: ShortId) -> anyhow::Result<()> {
-        let Some(_) = self.store.scheduled_command(cmd_id).await? else {
+    /// Deletes a scheduled command of an app.
+    pub async fn delete_scheduled_command(
+        &self,
+        app_id: ShortId,
+        cmd_id: ShortId,
+    ) -> anyhow::Result<()> {
+        self.app(app_id).await?;
+        let Some(cmd) = self.store.scheduled_command(cmd_id).await? else {
             return Err(r3v3rs3_api::error::Error::ScheduledCommandNotFound { id: cmd_id }.into());
         };
+        if cmd.app_id != app_id {
+            return Err(r3v3rs3_api::error::Error::ScheduledCommandNotFound { id: cmd_id }.into());
+        }
         self.store.delete_scheduled_command(cmd_id).await
     }
 }

@@ -1517,7 +1517,7 @@ pub async fn update_app_scheduled_command(
 ) -> Result<Json<AppScheduledCommand>, AppError> {
     let platform = state.platform(&caller, Permission::Admin).await?;
     let cmd = platform
-        .update_scheduled_command(cmd_id, request)
+        .update_scheduled_command(id, cmd_id, request)
         .await
         .map_err(platform_error)?;
     let record = AuditRecord::new(AuditAction::UpdateScheduledCommand)
@@ -1548,7 +1548,7 @@ pub async fn delete_app_scheduled_command(
 ) -> Result<(), AppError> {
     let platform = state.platform(&caller, Permission::Admin).await?;
     platform
-        .delete_scheduled_command(cmd_id)
+        .delete_scheduled_command(id, cmd_id)
         .await
         .map_err(platform_error)?;
     let record = AuditRecord::new(AuditAction::DeleteScheduledCommand)
@@ -1579,7 +1579,7 @@ pub async fn run_app_scheduled_command(
 ) -> Result<Json<ScheduledCommandRunResult>, AppError> {
     let platform = state.platform(&caller, Permission::Admin).await?;
     let result = platform
-        .execute_scheduled_command(cmd_id)
+        .execute_scheduled_command(id, cmd_id)
         .await
         .map_err(platform_error)?;
     let record = AuditRecord::new(AuditAction::RunScheduledCommand)

@@ -2979,7 +2979,7 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         let cmd = platform
-            .update_scheduled_command(cmd_id, request)
+            .update_scheduled_command(id, cmd_id, request)
             .await
             .map_err(any_error)?;
         let record = AuditRecord::new(AuditAction::UpdateScheduledCommand)
@@ -3010,7 +3010,7 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         platform
-            .delete_scheduled_command(cmd_id)
+            .delete_scheduled_command(id, cmd_id)
             .await
             .map_err(any_error)?;
         let record = AuditRecord::new(AuditAction::DeleteScheduledCommand)
@@ -3041,7 +3041,7 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         let result = platform
-            .execute_scheduled_command(cmd_id)
+            .execute_scheduled_command(id, cmd_id)
             .await
             .map_err(any_error)?;
         let record = AuditRecord::new(AuditAction::RunScheduledCommand)
