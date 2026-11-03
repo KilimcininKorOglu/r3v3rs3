@@ -1706,6 +1706,9 @@ pub struct DatabaseCloneRequest {
     pub limits: Option<ResourceLimits>,
 }
 
+/// The maximum number of autonomous read replicas allowed per primary database.
+pub const MAX_REPLICAS_PER_PRIMARY: usize = 5;
+
 /// The body that creates a read replica of an existing primary database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct DatabaseReplicaRequest {

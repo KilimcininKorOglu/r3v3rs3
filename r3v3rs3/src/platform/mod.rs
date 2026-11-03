@@ -64,7 +64,8 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppDashboardSummary, AppEntry, AppLog, AppRequest, AppSpec, ComposeServiceStatus,
     ComposeTopology, DeploymentEntry, EnvEntry, EnvGroup, EnvGroupSpec, EnvGroupSummary, FileEntry,
-    ImageUpdateStatus, LOCAL_TARGET, PlatformConfig, PreviewParent, parse_compose_topology,
+    ImageUpdateStatus, LOCAL_TARGET, MAX_REPLICAS_PER_PRIMARY, PlatformConfig, PreviewParent,
+    parse_compose_topology,
 };
 use rand::seq::IndexedRandom;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -1314,17 +1315,21 @@ impl Platform {
             return Err(not_found(request.target));
         }
         Self::check_env_groups(&self.store, &request.spec.env_groups).await?;
-        Self::check_boundaries(&self.store, &request.spec).await?;
+        Self::check_boundaries(&self.store, &request.spec, app_id).await?;
         if let Some(preview) = &request.spec.preview_of {
             Self::check_preview_parent(&self.store, preview).await?;
         }
         self.hook_target(&request.spec).await
     }
 
-    async fn check_boundaries(store: &PlatformStore, spec: &AppSpec) -> anyhow::Result<()> {
+    async fn check_boundaries(
+        store: &PlatformStore,
+        spec: &AppSpec,
+        app_id: Option<ShortId>,
+    ) -> anyhow::Result<()> {
         Self::check_project_and_env(store, spec).await?;
         Self::check_uses_database(store, spec).await?;
-        Self::check_replica_of(store, spec).await
+        Self::check_replica_of(store, spec, app_id).await
     }
 
     async fn check_project_and_env(store: &PlatformStore, spec: &AppSpec) -> anyhow::Result<()> {
@@ -1367,13 +1372,20 @@ impl Platform {
         Ok(())
     }
 
-    async fn check_replica_of(store: &PlatformStore, spec: &AppSpec) -> anyhow::Result<()> {
+    async fn check_replica_of(
+        store: &PlatformStore,
+        spec: &AppSpec,
+        app_id: Option<ShortId>,
+    ) -> anyhow::Result<()> {
         let Some(primary_id) = spec.replica_of else {
             return Ok(());
         };
         let Some(primary) = store.app(primary_id).await? else {
             return Err(not_found(primary_id));
         };
+        if primary.spec.replica_of.is_some() {
+            return Err(anyhow!("replicas can only be created from primary databases"));
+        }
         if primary.spec.database.is_none() {
             return Err(anyhow!("referenced primary {primary_id} is not a database"));
         }
@@ -1385,6 +1397,24 @@ impl Platform {
         if primary.spec.environment_id != spec.environment_id {
             return Err(anyhow!(
                 "referenced primary database belongs to a different environment"
+            ));
+        }
+        Self::check_replica_count(store, primary_id, app_id).await
+    }
+
+    async fn check_replica_count(
+        store: &PlatformStore,
+        primary_id: ShortId,
+        app_id: Option<ShortId>,
+    ) -> anyhow::Result<()> {
+        let apps = store.apps().await?;
+        let count = apps
+            .iter()
+            .filter(|a| a.spec.replica_of == Some(primary_id) && Some(a.id) != app_id)
+            .count();
+        if count >= MAX_REPLICAS_PER_PRIMARY {
+            return Err(anyhow!(
+                "maximum number of read replicas ({MAX_REPLICAS_PER_PRIMARY}) exceeded for primary database"
             ));
         }
         Ok(())
@@ -2160,6 +2190,32 @@ mod tests {
 
         let updated = platform.update_app(shop.id, malicious_request, 2).await?;
         assert!(updated.spec.replica_of.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn add_app_enforces_maximum_replicas_limit() -> anyhow::Result<()> {
+        let catalog: r3v3rs3_api::platform::EnginesCatalog =
+            serde_json::from_str(include_str!("../../data/engines.json")).unwrap();
+        r3v3rs3_api::platform::install_engines(catalog);
+
+        let (platform, _dir) = platform().await?;
+        let mut db_req = request("primary-db");
+        db_req.spec.database = Some("postgres".to_string());
+        db_req.spec.host_port = Some(15432);
+        let primary = platform.add_app(db_req, 1).await?;
+
+        for i in 0..MAX_REPLICAS_PER_PRIMARY {
+            let mut rep_req = request(&format!("rep-{i}"));
+            rep_req.spec.replica_of = Some(primary.id);
+            platform.add_app(rep_req, 10 + i as u64).await?;
+        }
+
+        let mut excess = request("excess-rep");
+        excess.spec.replica_of = Some(primary.id);
+        let res = platform.add_app(excess, 99).await;
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("maximum number of read replicas"));
         Ok(())
     }
 

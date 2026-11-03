@@ -21,6 +21,7 @@ use r3v3rs3_api::{
     platform::{
         AppEntry, AppRequest, AppSource, AppSpec, DatabaseCloneRequest, DatabaseCreated,
         DatabaseReplicaRequest, DatabaseRequest, DeploymentTrigger, EngineInfo, LOCAL_TARGET,
+        MAX_REPLICAS_PER_PRIMARY,
     },
 };
 use std::sync::Arc;
@@ -248,8 +249,7 @@ pub async fn create_replica(
     Json(request): Json<DatabaseReplicaRequest>,
 ) -> Result<Json<DatabaseCreated>, AppError> {
     let platform = state.platform(&caller, Permission::Edit).await?;
-    let primary = platform.app(id).await.map_err(platform_error)?;
-    let info = validate_primary_for_replica(&primary)?;
+    let (primary, info) = validate_primary_replica_request(&platform, id).await?;
     let host_port = resolve_host_port(&platform, request.host_port).await?;
     let app_req =
         replica_app_request(&primary, &request, &info, host_port).map_err(into_app_error)?;
@@ -270,6 +270,17 @@ pub async fn create_replica(
         user: info.user,
         database: info.default_db,
     }))
+}
+
+async fn validate_primary_replica_request(
+    platform: &Platform,
+    primary_id: ShortId,
+) -> Result<(AppEntry, EngineInfo), AppError> {
+    let primary = platform.app(primary_id).await.map_err(platform_error)?;
+    let count = count_replicas(platform, primary_id).await?;
+    validate_replica_limit(count).map_err(into_app_error)?;
+    let info = validate_primary_for_replica(&primary)?;
+    Ok((primary, info))
 }
 
 async fn sync_replica_password(
@@ -547,6 +558,25 @@ fn into_app_error(err: Error) -> AppError {
     AppError::R3v3rs3(err)
 }
 
+pub fn validate_replica_limit(replica_count: usize) -> Result<(), Error> {
+    if replica_count >= MAX_REPLICAS_PER_PRIMARY {
+        return Err(Error::InvalidContainerSpec {
+            reason: format!(
+                "maximum number of read replicas ({MAX_REPLICAS_PER_PRIMARY}) exceeded for primary database"
+            ),
+        });
+    }
+    Ok(())
+}
+
+async fn count_replicas(platform: &Platform, primary_id: ShortId) -> Result<usize, AppError> {
+    let apps = platform.apps().await.map_err(platform_error)?;
+    Ok(apps
+        .iter()
+        .filter(|app| app.spec.replica_of == Some(primary_id))
+        .count())
+}
+
 /// Validates that the primary database is eligible for replica creation and its engine supports replication.
 fn validate_primary_for_replica(primary: &AppEntry) -> Result<EngineInfo, AppError> {
     if primary.spec.replica_of.is_some() {
@@ -572,6 +602,14 @@ fn validate_replica_support(engine: &str) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_replica_limit() {
+        assert!(validate_replica_limit(0).is_ok());
+        assert!(validate_replica_limit(MAX_REPLICAS_PER_PRIMARY - 1).is_ok());
+        assert!(validate_replica_limit(MAX_REPLICAS_PER_PRIMARY).is_err());
+        assert!(validate_replica_limit(MAX_REPLICAS_PER_PRIMARY + 1).is_err());
+    }
 
     #[test]
     fn test_validate_replica_support_disallows_unsupported_engines() {
