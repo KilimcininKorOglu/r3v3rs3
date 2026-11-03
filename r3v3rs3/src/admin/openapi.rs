@@ -1,6 +1,7 @@
 //! OpenAPI document of the admin API. Every handler has a `#[utoipa::path]` attribute, and the
 //! `routes!` macro adds each handler to the router and to the document together.
 
+use super::health::ProbeResponse;
 use r3v3rs3_api::error::ErrorMessage;
 use std::collections::BTreeMap;
 use utoipa::openapi::response::{Response, ResponseBuilder};
@@ -29,9 +30,10 @@ const SESSION_COOKIE: &str = super::auth::ADMIN_SESSION_COOKIE;
     ),
     modifiers(&SessionCookie),
     security(("session" = [])),
-    components(schemas(ErrorMessage)),
+    components(schemas(ErrorMessage, ProbeResponse)),
     tags(
         (name = "auth", description = "Sign in, sign out and the account of the session."),
+        (name = "health", description = "Liveness and readiness probes for orchestrators."),
         (name = "accounts", description = "Panel accounts with their roles and proxy lists."),
         (name = "audit", description = "The changes and the sign-ins of the accounts."),
         (name = "events", description = "Server events."),

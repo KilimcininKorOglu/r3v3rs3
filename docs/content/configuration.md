@@ -1706,6 +1706,13 @@ scrape_configs:
       credentials: 'YOUR_API_TOKEN'
 ```
 
+### Liveness & Readiness Probes
+
+r3v3rs3 provides unauthenticated health probe endpoints designed for container orchestrators (Kubernetes, Docker Swarm, Nomad), load balancers, and systemd watchdogs:
+
+- `GET /healthz`: Liveness probe. Returns HTTP `200 OK` with `{"status":"ok"}` whenever the admin HTTP server is running. Used by orchestrators to know when to restart a stalled container.
+- `GET /readyz`: Readiness probe. Verifies that the internal server event loop is responsive and that database storage is connected and operational. Returns HTTP `200 OK` with `{"status":"ready"}` when ready to receive traffic, or HTTP `503 Service Unavailable` with `{"status":"not_ready","message":"..."}` during startup, database failure, or internal deadlock.
+
 ### Prometheus Anomaly Alerts & Notification Center
 
 r3v3rs3 includes an autonomous real-time anomaly detection engine that monitors live Prometheus traffic and runtime metrics, triggers alerts, dispatches webhooks, and surfaces critical issues in the built-in **Notification Center**:

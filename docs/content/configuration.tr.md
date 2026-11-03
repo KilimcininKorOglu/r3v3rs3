@@ -1706,6 +1706,13 @@ scrape_configs:
       credentials: 'YOUR_API_TOKEN'
 ```
 
+### Liveness ve Readiness Probları
+
+r3v3rs3, container orkestratörleri (Kubernetes, Docker Swarm, Nomad), yük dengeleyiciler ve systemd servisleri için kimlik doğrulama gerektirmeyen standart sağlık probu endpoint'leri sunar:
+
+- `GET /healthz`: Liveness probu. Admin HTTP sunucusu çalıştığı sürece HTTP `200 OK` ve `{"status":"ok"}` döner. Orkestratörlerin kilitlenen bir container sürecini yeniden başlatması için kullanılır.
+- `GET /readyz`: Readiness probu. Dahili sunucu event loop döngüsünün yanıt verdiğini ve veritabanı depolama bağlantısının sağlıklı çalıştığını doğrular. Trafik kabul etmeye hazır olduğunda HTTP `200 OK` ve `{"status":"ready"}`, başlatma aşamasında, veritabanı kesintisinde veya dahili kilitlenmede HTTP `503 Service Unavailable` ve `{"status":"not_ready","message":"..."}` döner.
+
 ### Prometheus Anomali Alarmları ve Bildirim Merkezi
 
 r3v3rs3, canlı Prometheus trafik ve çalışma zamanı metriklerini izleyen, anomalileri tespit edip alarmlar üreten, webhook bildirimleri gönderen ve WebUI üst çubuğundaki **Bildirim Merkezi** üzerinde durumları anlık gösteren yerleşik bir anomali tespit motoru içerir:

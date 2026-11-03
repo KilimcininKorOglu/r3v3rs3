@@ -72,6 +72,7 @@ mod error_page_themes;
 mod geoip;
 mod git;
 mod grpc;
+pub(crate) mod health;
 mod hooks;
 mod logs;
 mod mcp;
@@ -308,6 +309,7 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
                 .nest("/oauth", mcp_oauth),
         )
         .merge(metrics_routes(&app_state))
+        .merge(health_routes())
         .split_for_parts();
     let docs: Router<AppState> = Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi))
         .route_layer(verify);
@@ -547,6 +549,13 @@ fn metrics_routes(state: &AppState) -> OpenApiRouter<AppState> {
             .routes(routes!(metrics::metrics).layer(verify.clone()))
             .routes(routes!(metrics::grafana_dashboard).layer(verify)),
     )
+}
+
+/// Unauthenticated orchestrator liveness and readiness probe routes.
+fn health_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(health::healthz))
+        .routes(routes!(health::readyz))
 }
 
 fn resource_routes() -> OpenApiRouter<AppState> {

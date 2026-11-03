@@ -10,9 +10,11 @@ mod common;
 use common::{TestStorage, admin_session_cookie, alloc_tcp_port, wait_for_listener, with_server};
 
 /// Every route of the admin API. The OpenAPI document must list exactly these operations.
-const OPERATIONS: [(&str, &str); 266] = [
+const OPERATIONS: [(&str, &str); 268] = [
     ("get", "/.well-known/oauth-authorization-server"),
     ("get", "/.well-known/oauth-protected-resource"),
+    ("get", "/healthz"),
+    ("get", "/readyz"),
     ("post", "/api/login"),
     ("get", "/api/logout"),
     ("get", "/api/events"),
@@ -346,6 +348,16 @@ async fn openapi_document_and_swagger_ui_require_a_session() -> anyhow::Result<(
             docs.headers().get("content-security-policy").and_then(|v| v.to_str().ok()),
             Some("frame-ancestors 'none'")
         );
+
+        let healthz = client.get(format!("http://{addr}/healthz")).send().await?;
+        assert_eq!(healthz.status(), StatusCode::OK);
+        let healthz_body: Value = healthz.json().await?;
+        assert_eq!(healthz_body["status"], "ok");
+
+        let readyz = client.get(format!("http://{addr}/readyz")).send().await?;
+        assert_eq!(readyz.status(), StatusCode::OK);
+        let readyz_body: Value = readyz.json().await?;
+        assert_eq!(readyz_body["status"], "ready");
 
         // The routes still answer after the router records them in the document.
         assert_eq!(
