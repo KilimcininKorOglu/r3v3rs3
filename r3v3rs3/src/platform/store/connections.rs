@@ -314,6 +314,26 @@ impl PlatformStore {
         query.execute(&self.pool).await?;
         Ok(())
     }
+
+    /// Stores a setting within an active transaction, or deletes it without a value.
+    pub async fn set_setting_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        key: &str,
+        value: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let query = match value {
+            Some(value) => sqlx::query(
+                "INSERT INTO platform_settings (key, value) VALUES (?, ?)
+                ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            )
+            .bind(key)
+            .bind(value),
+            None => sqlx::query("DELETE FROM platform_settings WHERE key = ?").bind(key),
+        };
+        query.execute(&mut **tx).await?;
+        Ok(())
+    }
 }
 
 fn stored_connection_of(row: &SqliteRow) -> anyhow::Result<StoredConnection> {

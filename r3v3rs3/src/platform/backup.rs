@@ -288,6 +288,16 @@ fn is_postgres_signature(text: &str) -> bool {
     text.contains("PostgreSQL database dump") || text.contains("pg_dump")
 }
 
+fn validate_backup_targets(config: &BackupConfig) -> anyhow::Result<()> {
+    if let Some(ref rsync) = config.rsync {
+        validate_rsync_ssh_options(&rsync.ssh_options)?;
+    }
+    if let Some(ref sftp) = config.sftp {
+        validate_sftp_config(sftp)?;
+    }
+    Ok(())
+}
+
 impl Platform {
     /// The backup settings stored in the platform database, or the defaults.
     pub async fn backup_config(&self) -> anyhow::Result<BackupConfig> {
@@ -301,21 +311,22 @@ impl Platform {
     /// empty ones keep them, and removing a target clears its secret. The settings are stored
     /// without secrets; they live sealed in their own rows.
     pub async fn set_backup_config(&self, mut config: BackupConfig) -> anyhow::Result<()> {
-        if let Some(ref rsync) = config.rsync {
-            validate_rsync_ssh_options(&rsync.ssh_options)?;
-        }
-        if let Some(ref sftp) = config.sftp {
-            validate_sftp_config(sftp)?;
-        }
-        self.save_s3_secret(&mut config.s3).await?;
-        self.save_sftp_secret(&mut config.sftp).await?;
-        self.save_rsync_secret(&mut config.rsync).await?;
+        validate_backup_targets(&config)?;
+        let mut tx = self.store.pool().begin().await?;
+        self.save_s3_secret(&mut tx, &mut config.s3).await?;
+        self.save_sftp_secret(&mut tx, &mut config.sftp).await?;
+        self.save_rsync_secret(&mut tx, &mut config.rsync).await?;
         let json = serde_json::to_string(&config)?;
-        self.store.set_setting(BACKUP_CONFIG, Some(&json)).await
+        self.store
+            .set_setting_tx(&mut tx, BACKUP_CONFIG, Some(&json))
+            .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     async fn save_s3_secret(
         &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         s3: &mut Option<r3v3rs3_api::platform::S3Config>,
     ) -> anyhow::Result<()> {
         let secret = s3
@@ -325,15 +336,16 @@ impl Platform {
         match (s3.is_some(), secret.is_empty()) {
             (true, false) => {
                 let sealed = hex::encode(self.keys().seal(S3_SECRET_AAD, secret.as_bytes())?);
-                self.store.set_setting(S3_SECRET, Some(&sealed)).await
+                self.store.set_setting_tx(tx, S3_SECRET, Some(&sealed)).await
             }
             (true, true) => Ok(()),
-            (false, _) => self.store.set_setting(S3_SECRET, None).await,
+            (false, _) => self.store.set_setting_tx(tx, S3_SECRET, None).await,
         }
     }
 
     async fn save_sftp_secret(
         &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         sftp: &mut Option<r3v3rs3_api::platform::SftpConfig>,
     ) -> anyhow::Result<()> {
         let secret = sftp
@@ -349,15 +361,18 @@ impl Platform {
         match (sftp.is_some(), secret.is_empty()) {
             (true, false) => {
                 let sealed = hex::encode(self.keys().seal(SFTP_SECRET_AAD, secret.as_bytes())?);
-                self.store.set_setting(SFTP_SECRET, Some(&sealed)).await
+                self.store
+                    .set_setting_tx(tx, SFTP_SECRET, Some(&sealed))
+                    .await
             }
             (true, true) => Ok(()),
-            (false, _) => self.store.set_setting(SFTP_SECRET, None).await,
+            (false, _) => self.store.set_setting_tx(tx, SFTP_SECRET, None).await,
         }
     }
 
     async fn save_rsync_secret(
         &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         rsync: &mut Option<r3v3rs3_api::platform::RsyncConfig>,
     ) -> anyhow::Result<()> {
         let secret = rsync
@@ -367,10 +382,12 @@ impl Platform {
         match (rsync.is_some(), secret.is_empty()) {
             (true, false) => {
                 let sealed = hex::encode(self.keys().seal(RSYNC_SECRET_AAD, secret.as_bytes())?);
-                self.store.set_setting(RSYNC_SECRET, Some(&sealed)).await
+                self.store
+                    .set_setting_tx(tx, RSYNC_SECRET, Some(&sealed))
+                    .await
             }
             (true, true) => Ok(()),
-            (false, _) => self.store.set_setting(RSYNC_SECRET, None).await,
+            (false, _) => self.store.set_setting_tx(tx, RSYNC_SECRET, None).await,
         }
     }
 
@@ -2877,6 +2894,35 @@ mod tests {
             err.to_string().contains("exceeds maximum allowed size"),
             "{err}"
         );
+    }
+
+    #[tokio::test]
+    async fn set_backup_config_atomic_updates_succeed() -> anyhow::Result<()> {
+        let (platform, _dir) = crate::platform::tests::platform().await?;
+
+        let s3 = Some(r3v3rs3_api::platform::S3Config {
+            endpoint: "https://s3.example.com/b".into(),
+            region: "us-east-1".into(),
+            prefix: "db".into(),
+            access_key: "AKIA".into(),
+            secret_key: "secret_s3_key".into(),
+        });
+        let config = BackupConfig {
+            s3,
+            ..Default::default()
+        };
+
+        platform.set_backup_config(config).await?;
+
+        let loaded = platform.backup_config().await?;
+        assert!(loaded.s3.is_some());
+        assert_eq!(loaded.s3.as_ref().unwrap().access_key, "AKIA");
+        assert_eq!(
+            platform.s3_secret().await?.as_deref(),
+            Some("secret_s3_key")
+        );
+
+        Ok(())
     }
 
     #[test]
