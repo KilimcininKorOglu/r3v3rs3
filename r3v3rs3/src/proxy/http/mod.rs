@@ -63,6 +63,8 @@ use tracing::{Instrument, Level, Span, debug, error, info, span};
 pub(crate) mod affinity;
 pub(crate) mod auth;
 mod body_limit;
+mod byte_count;
+use byte_count::ByteCountBody;
 pub(crate) mod bot;
 pub(crate) mod cache;
 pub mod cache_share;
@@ -616,14 +618,6 @@ async fn proxied_response(
     fronting: bool,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let start = std::time::Instant::now();
-    if let Some(cl) = req
-        .headers()
-        .get(hyper::header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-    {
-        crate::proxy::stats::record_rx_bytes(cl);
-    }
     let method = req.method().to_string();
     let uri = req.uri().to_string();
     let host = req
@@ -693,7 +687,7 @@ async fn proxied_response(
         &mapped,
     );
 
-    mapped
+    mapped.map(|res| res.map(|body| BoxBody::new(ByteCountBody::tx(body))))
 }
 
 const SENSITIVE_KEYWORDS: &[&str] = &[
@@ -806,8 +800,9 @@ async fn buffer_request_body(
         .and_then(|v| v.parse::<usize>().ok());
     let should_buffer = !is_websocket && matches!(cl, Some(len) if len > 0 && len <= 16384);
     let (parts, incoming) = req.into_parts();
+    let tracked = ByteCountBody::rx(incoming);
     if should_buffer {
-        if let Ok(collected) = incoming.collect().await {
+        if let Ok(collected) = tracked.collect().await {
             let bytes = collected.to_bytes();
             let preview = sanitize_body_preview(String::from_utf8(bytes.to_vec()).ok());
             let full = Full::new(bytes)
@@ -818,7 +813,7 @@ async fn buffer_request_body(
             .map_err(|e: std::convert::Infallible| -> BodyStreamError { match e {} });
         return (Request::from_parts(parts, BoxBody::new(empty)), None);
     }
-    let boxed = BoxBody::new(incoming.map_err(|e| BodyStreamError(e.to_string())));
+    let boxed = BoxBody::new(tracked.map_err(|e| BodyStreamError(e.to_string())));
     (Request::from_parts(parts, boxed), None)
 }
 
@@ -885,9 +880,6 @@ fn record_access_log<B>(
                 .get(hyper::header::CONTENT_LENGTH)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok());
-            if let Some(cl) = bytes {
-                crate::proxy::stats::record_tx_bytes(cl);
-            }
             (
                 res.status().as_u16(),
                 None,
@@ -1805,14 +1797,6 @@ where
     let start = std::time::Instant::now();
     let method = req.method().to_string();
     let uri = req.uri().to_string();
-    if let Some(cl) = req
-        .headers()
-        .get(hyper::header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-    {
-        crate::proxy::stats::record_rx_bytes(cl);
-    }
     let host = req
         .headers()
         .get(hyper::header::HOST)
@@ -1827,7 +1811,9 @@ where
         .map(ToString::to_string);
     // The body is attached before routing, so an authenticator can read a form submission.
     let (mut send, recv) = stream.split();
-    let body = BoxBody::new(StreamBody::new(StreamWrapper::<T> { stream: recv }));
+    let body = BoxBody::new(ByteCountBody::rx(StreamBody::new(StreamWrapper::<T> {
+        stream: recv,
+    })));
     let (req, response_rewriter, resource_id, route_path, client_ip) =
         route_request(shared, req.map(|()| body), &info).await;
     let proxy_id = resource_id.map(|id| id.to_string());
@@ -1841,6 +1827,7 @@ where
 
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
+    let mapped = mapped.map(|res| res.map(|b| BoxBody::new(ByteCountBody::tx(b))));
     let duration = start.elapsed();
     crate::proxy::stats::record_request_duration(
         duration,

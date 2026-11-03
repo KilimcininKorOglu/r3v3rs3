@@ -1662,7 +1662,7 @@ Stream prioritization can be managed directly from the WebUI:
 `GET /api/metrics` returns the counters of the running process in the Prometheus text format (`text/plain; version=0.0.4`):
 
 - `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: the proxied requests across TCP/TLS and QUIC, labeled by proxy ID (`proxy="..."`) and route (`route="..."`).
-- `r3v3rs3_rx_bytes_total`, `r3v3rs3_tx_bytes_total`: total network throughput in bytes received and transmitted to clients.
+- `r3v3rs3_rx_bytes_total`, `r3v3rs3_tx_bytes_total`: total network throughput in payload stream bytes received and transmitted to clients across all transfer encodings.
 - `r3v3rs3_http_responses_by_status_total`: HTTP responses partitioned by status class (`2xx`, `3xx`, `4xx`, `5xx`).
 - `r3v3rs3_upstream_errors_total`: the requests that were answered without a successful upstream response, labeled by proxy ID (`proxy="..."`) and route (`route="..."`).
 - `r3v3rs3_upstream_errors_by_kind_total`: upstream errors partitioned by failure kind (`timeout`, `connect`, `circuit_open`, `no_route`, `other`).

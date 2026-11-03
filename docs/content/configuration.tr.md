@@ -1662,7 +1662,7 @@ Akış önceliklendirmesi doğrudan WebUI üzerinden yönetilebilir:
 `GET /api/metrics` çalışan sürecin sayaçlarını Prometheus text formatında (`text/plain; version=0.0.4`) döndürür:
 
 - `r3v3rs3_http_requests_total`, `r3v3rs3_h3_requests_total`: TCP/TLS ve QUIC üzerinde proxy'lenen istekler, proxy ID (`proxy="..."`) ve route (`route="..."`) etiketleriyle.
-- `r3v3rs3_rx_bytes_total`, `r3v3rs3_tx_bytes_total`: istemcilerden alınan ve istemcilere iletilen toplam ağ bant genişliği (bayt).
+- `r3v3rs3_rx_bytes_total`, `r3v3rs3_tx_bytes_total`: tüm aktarım kodlamalarında istemcilerden alınan ve istemcilere iletilen toplam payload akış baytları.
 - `r3v3rs3_http_responses_by_status_total`: durum sınıfına göre ayrılmış HTTP yanıtları (`2xx`, `3xx`, `4xx`, `5xx`).
 - `r3v3rs3_upstream_errors_total`: başarılı bir upstream yanıtı olmadan yanıtlanan istekler, proxy ID (`proxy="..."`) ve route (`route="..."`) etiketleriyle.
 - `r3v3rs3_upstream_errors_by_kind_total`: hata türüne göre ayrılmış upstream hataları (`timeout`, `connect`, `circuit_open`, `no_route`, `other`).
