@@ -1174,6 +1174,7 @@ impl Drop for StreamWrapper {
 
 pub enum AppError {
     NotFound,
+    BadRequest(String),
     Anyhow(anyhow::Error),
     R3v3rs3(r3v3rs3_api::error::Error),
 }
@@ -1194,6 +1195,7 @@ impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotFound => write!(f, "not found"),
+            Self::BadRequest(err) => write!(f, "{err}"),
             Self::Anyhow(err) => write!(f, "{err}"),
             Self::R3v3rs3(err) => write!(f, "{err}"),
         }
@@ -1209,6 +1211,10 @@ impl IntoResponse for AppError {
             AppError::NotFound => {
                 message = "NOT_FOUND".to_string();
                 code = StatusCode::NOT_FOUND;
+            }
+            AppError::BadRequest(err) => {
+                message = err;
+                code = StatusCode::BAD_REQUEST;
             }
             AppError::Anyhow(err) => {
                 message = err.to_string();

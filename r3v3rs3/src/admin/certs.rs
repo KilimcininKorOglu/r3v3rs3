@@ -153,6 +153,55 @@ fn sign(request: &SelfSignedCertRequest, ca: &Cert) -> Result<Cert, Error> {
     }
 }
 
+const MAX_CERT_FIELD_SIZE: usize = 1024 * 1024;
+
+async fn read_field_with_limit(
+    mut field: axum::extract::multipart::Field<'_>,
+    limit: usize,
+) -> Result<Vec<u8>, AppError> {
+    let mut buf = Vec::new();
+    while let Some(chunk) = field
+        .chunk()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("error reading multipart field: {e}")))?
+    {
+        if buf.len() + chunk.len() > limit {
+            return Err(AppError::BadRequest(format!(
+                "field exceeds maximum size limit of {limit} bytes"
+            )));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
+}
+
+async fn parse_upload_fields(
+    mut multipart: Multipart,
+) -> Result<(Vec<u8>, Option<Vec<u8>>), AppError> {
+    let mut chain = Vec::new();
+    let mut key = Vec::new();
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("multipart read error: {e}")))?
+    {
+        match field.name() {
+            Some("chain") => chain = read_field_with_limit(field, MAX_CERT_FIELD_SIZE).await?,
+            Some("key") => key = read_field_with_limit(field, MAX_CERT_FIELD_SIZE).await?,
+            _ => (),
+        }
+    }
+
+    if chain.is_empty() {
+        return Err(AppError::BadRequest(
+            "missing or empty certificate chain".to_string(),
+        ));
+    }
+
+    let key = if key.is_empty() { None } else { Some(key) };
+    Ok((chain, key))
+}
+
 /// Uploads a PEM certificate chain and an optional PEM private key.
 #[utoipa::path(
     post,
@@ -167,23 +216,9 @@ pub async fn upload(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<UploadQuery>,
-    mut multipart: Multipart,
+    multipart: Multipart,
 ) -> Result<Json<Box<()>>, AppError> {
-    let mut chain = Vec::new();
-    let mut key = Vec::new();
-    while let Ok(Some(field)) = multipart.next_field().await {
-        if field.name() == Some("chain") {
-            if let Ok(buf) = field.bytes().await {
-                chain = buf.to_vec();
-            }
-        } else if field.name() == Some("key")
-            && let Ok(buf) = field.bytes().await
-        {
-            key = buf.to_vec();
-        }
-    }
-
-    let key = if key.is_empty() { None } else { Some(key) };
+    let (chain, key) = parse_upload_fields(multipart).await?;
     let cert = Arc::new(Cert::new(query.kind, chain, key)?);
     Ok(Json(state.call(&caller, AddCert { cert }).await?))
 }
