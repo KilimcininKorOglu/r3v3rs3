@@ -111,6 +111,7 @@ fn validate_http_features(http: &HttpProxy) -> Result<(), Error> {
 
 /// The upstream part of an HTTP proxy: its own settings and the settings of every route.
 fn validate_http_upstream(http: &HttpProxy) -> Result<(), Error> {
+    http.auth.validate()?;
     validate_access_lists(http)?;
     http.health_check.validate(true)?;
     http.circuit_breaker.validate()?;
@@ -126,6 +127,9 @@ fn validate_http_upstream(http: &HttpProxy) -> Result<(), Error> {
 
 /// The target, the weights, the mirrors and the rewrite of one route.
 fn validate_route(route: &Route) -> Result<(), Error> {
+    if let Some(ref auth) = route.auth {
+        auth.validate()?;
+    }
     validate_route_target(route)?;
     validate_weights(route.servers.iter().map(|server| server.weight))?;
     route.mirror.iter().try_for_each(Mirror::validate)?;
@@ -323,6 +327,12 @@ pub struct HttpProxy {
         skip_serializing_if = "crate::priority::StreamPriorityConfig::is_disabled"
     )]
     pub stream_priority: crate::priority::StreamPriorityConfig,
+}
+
+impl HttpProxy {
+    pub fn validate_upstream(&self) -> Result<(), Error> {
+        validate_http_upstream(self)
+    }
 }
 
 /// The default status code of a maintenance response (503 Service Unavailable).

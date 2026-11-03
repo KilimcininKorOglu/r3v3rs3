@@ -197,6 +197,13 @@ impl AuthPolicy {
     pub fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
+
+    pub fn validate(&self) -> Result<(), Error> {
+        match self {
+            Self::Basic(basic) => basic.validate(),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// HTTP Basic authentication (RFC 7617).
@@ -212,6 +219,51 @@ pub struct BasicAuth {
     /// Path to a file on disk containing username:password or username:hash pairs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_file: Option<String>,
+}
+
+impl BasicAuth {
+    pub fn validate(&self) -> Result<(), Error> {
+        if let Some(ref path) = self.user_file {
+            validate_user_file_path(path)?;
+        }
+        Ok(())
+    }
+}
+
+/// Validates that a basic auth user_file path is a safe relative path within the config directory,
+/// rejecting absolute paths and directory traversal (`..`) sequences.
+pub fn validate_user_file_path(path_str: &str) -> Result<(), Error> {
+    let trimmed = path_str.trim();
+    if is_unsafe_path_str(trimmed) {
+        return Err(Error::InvalidFilePath {
+            path: path_str.to_string(),
+        });
+    }
+    check_path_components(std::path::Path::new(trimmed), path_str)
+}
+
+fn is_unsafe_path_str(trimmed: &str) -> bool {
+    trimmed.is_empty()
+        || trimmed.starts_with('/')
+        || trimmed.starts_with('\\')
+        || trimmed.starts_with('~')
+        || std::path::Path::new(trimmed).is_absolute()
+}
+
+fn check_path_components(path: &std::path::Path, original: &str) -> Result<(), Error> {
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(Error::InvalidFilePath {
+                    path: original.to_string(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
@@ -607,5 +659,21 @@ mod tests {
             header: Some("invalid header".into()),
         };
         assert!(invalid_header.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_user_file_path_blocks_traversal() {
+        assert!(validate_user_file_path("users.txt").is_ok());
+        assert!(validate_user_file_path("auth/users.txt").is_ok());
+        assert!(validate_user_file_path(".htpasswd").is_ok());
+
+        assert!(validate_user_file_path("/etc/passwd").is_err());
+        assert!(validate_user_file_path("/var/log/syslog").is_err());
+        assert!(validate_user_file_path("../secret.txt").is_err());
+        assert!(validate_user_file_path("foo/../../etc/passwd").is_err());
+        assert!(validate_user_file_path("~/users.txt").is_err());
+        assert!(validate_user_file_path("\\windows\\win.ini").is_err());
+        assert!(validate_user_file_path("").is_err());
+        assert!(validate_user_file_path("   ").is_err());
     }
 }

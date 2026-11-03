@@ -114,7 +114,7 @@ impl BasicAuthenticator {
             .map(|user| (user.username, StoredPassword::Argon2(user.password_hash)))
             .collect();
         let (user_file, file_users) = match config.user_file {
-            Some(path) => {
+            Some(path) if r3v3rs3_api::policy::validate_user_file_path(&path).is_ok() => {
                 let path = PathBuf::from(path);
                 let mut users = FileUsers::default();
                 if let Ok(meta) = std::fs::metadata(&path) {
@@ -124,6 +124,10 @@ impl BasicAuthenticator {
                     }
                 }
                 (Some(path), Mutex::new(users))
+            }
+            Some(path) => {
+                error!(path = %path, "rejecting basic auth user_file with invalid or unsafe path");
+                (None, Mutex::new(FileUsers::default()))
             }
             None => (None, Mutex::new(FileUsers::default())),
         };
