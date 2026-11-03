@@ -129,7 +129,13 @@ impl CtMonitorState {
         }
 
         self.update_status_checking(&domains);
-        let client = build_http_client().map_err(|e| Error::CtCheckFailed { reason: e })?;
+        let client = match build_http_client() {
+            Ok(c) => c,
+            Err(e) => {
+                *self.last_runtime_check.lock().unwrap() = None;
+                return Err(Error::CtCheckFailed { reason: e });
+            }
+        };
 
         let mut newly_discovered_rogues = Vec::new();
         let mut fetch_errors = Vec::new();
@@ -189,6 +195,15 @@ impl CtMonitorState {
         *self.last_runtime_check.lock().unwrap() = Some(Instant::now());
     }
 
+    pub fn is_check_in_progress(&self) -> bool {
+        if let Some(started_at) = *self.last_runtime_check.lock().unwrap() {
+            if started_at.elapsed() < Duration::from_secs(600) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn finalize_status(&self, now: i64, errors: &[String], config: &CtMonitorConfig) {
         let mut st = self.status.lock().unwrap();
         st.last_check_at = Some(now);
@@ -200,6 +215,7 @@ impl CtMonitorState {
             st.last_check_status = "partial_error".to_string();
             st.last_error = Some(errors.join("; "));
         }
+        *self.last_runtime_check.lock().unwrap() = None;
     }
 
     fn persist_to_disk(&self) {
@@ -450,6 +466,10 @@ async fn check_scheduled_tick(state: &AppState, config_dir: &Path) {
         return;
     }
 
+    if monitor.is_check_in_progress() {
+        return;
+    }
+
     let status = monitor.get_status();
     let now = current_unix_timestamp();
     let should_run = match status.next_check_at {
@@ -459,5 +479,26 @@ async fn check_scheduled_tick(state: &AppState, config_dir: &Path) {
 
     if should_run {
         let _ = monitor.run_check(state, None).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_check_in_progress() {
+        let unique = hex::encode(rand::random::<[u8; 8]>());
+        let temp_dir = std::env::temp_dir().join(format!("ct-test-{unique}"));
+        let monitor = CtMonitorState::new(temp_dir.clone());
+        assert!(!monitor.is_check_in_progress());
+
+        *monitor.last_runtime_check.lock().unwrap() = Some(Instant::now());
+        assert!(monitor.is_check_in_progress());
+
+        *monitor.last_runtime_check.lock().unwrap() = None;
+        assert!(!monitor.is_check_in_progress());
+
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
