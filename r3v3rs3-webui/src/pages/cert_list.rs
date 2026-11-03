@@ -668,13 +668,9 @@ fn acme_row(
     }
 }
 
-async fn show_cname_instructions_dialog(
-    locale: Locale,
+fn format_cname_instructions_html(
     instructions: &[r3v3rs3_api::acme::AcmeCnameInstruction],
-) {
-    if instructions.is_empty() {
-        return;
-    }
+) -> String {
     let mut html_content =
         String::from("<div style=\"text-align:left;font-size:12px;font-family:monospace;\">");
     for item in instructions {
@@ -688,12 +684,26 @@ async fn show_cname_instructions_dialog(
         } else {
             "⏳ Pending Verification"
         };
+        let domain = r3v3rs3_api::error_page_theme::escape_html(&item.domain);
+        let source_fqdn = r3v3rs3_api::error_page_theme::escape_html(&item.source_fqdn);
+        let target_fqdn = r3v3rs3_api::error_page_theme::escape_html(&item.target_fqdn);
         html_content.push_str(&format!(
             "<div style=\"margin-bottom:12px;padding:8px;background:rgba(15,23,42,0.6);border-radius:6px;border:1px solid rgba(255,255,255,0.1);\"><div><strong style=\"color:#94a3b8;\">Domain:</strong> {}</div><div><strong>Host:</strong> <code style=\"color:#fcd34d;\">{}</code></div><div><strong>Type:</strong> <code>CNAME</code></div><div><strong>Target:</strong> <code style=\"color:#34d399;\">{}</code></div><div style=\"margin-top:4px;color:{status_color};font-weight:600;\">{status_text}</div></div>",
-            item.domain, item.source_fqdn, item.target_fqdn
+            domain, source_fqdn, target_fqdn
         ));
     }
     html_content.push_str("</div>");
+    html_content
+}
+
+async fn show_cname_instructions_dialog(
+    locale: Locale,
+    instructions: &[r3v3rs3_api::acme::AcmeCnameInstruction],
+) {
+    if instructions.is_empty() {
+        return;
+    }
+    let html_content = format_cname_instructions_html(instructions);
     let title = locale.t("certs.cname_instructions_title");
     crate::dialog::html(locale, title, &html_content).await;
 }
@@ -908,5 +918,23 @@ mod tests {
             acme_provider_text(&entry, &[]),
             "Let's Encrypt (DNS-01, cred12)"
         );
+    }
+
+    #[test]
+    fn test_format_cname_instructions_html_escapes_xss() {
+        let instructions = vec![r3v3rs3_api::acme::AcmeCnameInstruction {
+            domain: "<script>alert(1)</script>".to_string(),
+            source_fqdn: "_acme-challenge.example.com\"><img src=x onerror=alert(1)>".to_string(),
+            target_fqdn: "alias.example.net' onmouseover='alert(1)".to_string(),
+            cname_verified: false,
+            message: String::new(),
+        }];
+        let html = format_cname_instructions_html(&instructions);
+        assert!(!html.contains("<script>"));
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!html.contains("<img"));
+        assert!(html.contains("&lt;img src=x onerror=alert(1)&gt;"));
+        assert!(!html.contains("' onmouseover='"));
+        assert!(html.contains("&#x27; onmouseover=&#x27;alert(1)"));
     }
 }
