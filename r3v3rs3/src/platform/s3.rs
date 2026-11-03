@@ -284,7 +284,7 @@ pub(crate) fn parse_s3_contents(xml: &str) -> Vec<S3ObjectItem> {
                 .unwrap_or_default()
                 .to_string();
             items.push(S3ObjectItem {
-                key: key.to_string(),
+                key: xml_unescape(key),
                 size,
                 last_modified,
             });
@@ -292,6 +292,56 @@ pub(crate) fn parse_s3_contents(xml: &str) -> Vec<S3ObjectItem> {
         rest = &after_start[end + 11..];
     }
     items
+}
+
+pub(crate) fn xml_unescape(text: &str) -> String {
+    if !text.contains('&') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(amp_pos) = rest.find('&') {
+        out.push_str(&rest[..amp_pos]);
+        let after_amp = &rest[amp_pos + 1..];
+        if let Some(semi_pos) = after_amp.find(';') {
+            let entity = &after_amp[..semi_pos];
+            if decode_xml_entity(entity, &mut out) {
+                rest = &after_amp[semi_pos + 1..];
+                continue;
+            }
+        }
+        out.push('&');
+        rest = after_amp;
+    }
+    out.push_str(rest);
+    out
+}
+
+fn decode_xml_entity(entity: &str, out: &mut String) -> bool {
+    match entity {
+        "amp" => out.push('&'),
+        "lt" => out.push('<'),
+        "gt" => out.push('>'),
+        "quot" => out.push('"'),
+        "apos" => out.push('\''),
+        _ if entity.starts_with('#') => return decode_numeric_entity(&entity[1..], out),
+        _ => return false,
+    }
+    true
+}
+
+fn decode_numeric_entity(num_str: &str, out: &mut String) -> bool {
+    let code_point = if let Some(hex) = num_str.strip_prefix('x').or_else(|| num_str.strip_prefix('X')) {
+        u32::from_str_radix(hex, 16).ok()
+    } else {
+        num_str.parse::<u32>().ok()
+    };
+    if let Some(ch) = code_point.and_then(char::from_u32) {
+        out.push(ch);
+        true
+    } else {
+        false
+    }
 }
 
 fn parse_xml_tag<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
@@ -406,6 +456,31 @@ mod tests {
         assert_eq!(items[0].last_modified, "2026-10-21T18:00:00.000Z");
         assert_eq!(items[1].key, "databases/shop/3c4d.dump.gz");
         assert_eq!(items[1].size, 2097152);
+    }
+
+    #[test]
+    fn parses_s3_contents_with_xml_entities() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+    <Name>my-bucket</Name>
+    <Contents>
+        <Key>databases/a&amp;b/snapshot_&lt;1&gt;_&quot;test&quot;_&apos;full&apos;.dump.gz</Key>
+        <LastModified>2026-10-21T18:00:00.000Z</LastModified>
+        <Size>1024</Size>
+    </Contents>
+    <Contents>
+        <Key>databases/hex/item_&#x26;_&#38;.dump.gz</Key>
+        <LastModified>2026-10-21T18:00:00.000Z</LastModified>
+        <Size>2048</Size>
+    </Contents>
+</ListBucketResult>"#;
+        let items = parse_s3_contents(xml);
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0].key,
+            "databases/a&b/snapshot_<1>_\"test\"_'full'.dump.gz"
+        );
+        assert_eq!(items[1].key, "databases/hex/item_&_&.dump.gz");
     }
 
     #[test]

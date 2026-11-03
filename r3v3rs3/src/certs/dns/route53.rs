@@ -86,7 +86,8 @@ impl Route53 {
                 xml_value(&xml, "NextMarker"),
             ) {
                 (Some("true"), Some(marker)) => {
-                    query = format!("marker={}", utf8_percent_encode(marker, QUERY_VALUE));
+                    let marker = xml_unescape(marker);
+                    query = format!("marker={}", utf8_percent_encode(&marker, QUERY_VALUE));
                 }
                 _ => return Ok(zones),
             }
@@ -134,9 +135,9 @@ fn parse_hosted_zones(xml: &str) -> Vec<(String, String)> {
             if xml_value(block, "PrivateZone") == Some("true") {
                 return None;
             }
-            let id = xml_value(block, "Id")?.trim_start_matches("/hostedzone/");
-            let name = xml_value(block, "Name")?;
-            Some((name.to_string(), id.to_string()))
+            let id = xml_unescape(xml_value(block, "Id")?.trim_start_matches("/hostedzone/"));
+            let name = xml_unescape(xml_value(block, "Name")?);
+            Some((name, id))
         })
         .collect()
 }
@@ -157,6 +158,56 @@ fn xml_escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+fn xml_unescape(text: &str) -> String {
+    if !text.contains('&') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(amp_pos) = rest.find('&') {
+        out.push_str(&rest[..amp_pos]);
+        let after_amp = &rest[amp_pos + 1..];
+        if let Some(semi_pos) = after_amp.find(';') {
+            let entity = &after_amp[..semi_pos];
+            if decode_xml_entity(entity, &mut out) {
+                rest = &after_amp[semi_pos + 1..];
+                continue;
+            }
+        }
+        out.push('&');
+        rest = after_amp;
+    }
+    out.push_str(rest);
+    out
+}
+
+fn decode_xml_entity(entity: &str, out: &mut String) -> bool {
+    match entity {
+        "amp" => out.push('&'),
+        "lt" => out.push('<'),
+        "gt" => out.push('>'),
+        "quot" => out.push('"'),
+        "apos" => out.push('\''),
+        _ if entity.starts_with('#') => return decode_numeric_entity(&entity[1..], out),
+        _ => return false,
+    }
+    true
+}
+
+fn decode_numeric_entity(num_str: &str, out: &mut String) -> bool {
+    let code_point = if let Some(hex) = num_str.strip_prefix('x').or_else(|| num_str.strip_prefix('X')) {
+        u32::from_str_radix(hex, 16).ok()
+    } else {
+        num_str.parse::<u32>().ok()
+    };
+    if let Some(ch) = code_point.and_then(char::from_u32) {
+        out.push(ch);
+        true
+    } else {
+        false
+    }
 }
 
 fn change_batch(action: &str, fqdn: &str, values: &[String]) -> String {
@@ -203,6 +254,20 @@ mod test {
         assert_eq!(
             parse_hosted_zones(xml),
             vec![("example.com.".to_string(), "ZPUBLIC".to_string())]
+        );
+    }
+
+    #[test]
+    fn parse_hosted_zones_unescapes_xml_entities() {
+        let xml = concat!(
+            "<ListHostedZonesResponse><HostedZones>",
+            "<HostedZone><Id>/hostedzone/Z&amp;123</Id><Name>foo&amp;bar.com.</Name>",
+            "<Config><PrivateZone>false</PrivateZone></Config></HostedZone>",
+            "</HostedZones><IsTruncated>false</IsTruncated></ListHostedZonesResponse>"
+        );
+        assert_eq!(
+            parse_hosted_zones(xml),
+            vec![("foo&bar.com.".to_string(), "Z&123".to_string())]
         );
     }
 
