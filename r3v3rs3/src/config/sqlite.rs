@@ -650,25 +650,7 @@ impl Storage for SqliteStorage {
             .begin()
             .await
             .map_err(|_| Error::FailedToSaveConfig)?;
-        sqlx::query("DELETE FROM ports")
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| Error::FailedToSaveConfig)?;
-        let now = crate::clock::unix_ms() as i64;
-        for entry in entries {
-            let json = serde_json::to_string(entry).map_err(|_| Error::FailedToSaveConfig)?;
-            sqlx::query(
-                "INSERT INTO ports (id, listen_addr, name, data, updated_at) VALUES (?, ?, ?, ?, ?)",
-            )
-            .bind(entry.id.to_string())
-            .bind(entry.port.listen.to_string())
-            .bind(&entry.port.name)
-            .bind(json)
-            .bind(now)
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| Error::FailedToSaveConfig)?;
-        }
+        sync_ports(&mut tx, entries).await?;
         tx.commit().await.map_err(|_| Error::FailedToSaveConfig)?;
         Ok(())
     }
@@ -683,22 +665,7 @@ impl Storage for SqliteStorage {
             .begin()
             .await
             .map_err(|_| Error::FailedToSaveConfig)?;
-        sqlx::query("DELETE FROM proxies")
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| Error::FailedToSaveConfig)?;
-        let now = crate::clock::unix_ms() as i64;
-        for entry in proxies {
-            let json = serde_json::to_string(entry).map_err(|_| Error::FailedToSaveConfig)?;
-            sqlx::query("INSERT INTO proxies (id, name, data, updated_at) VALUES (?, ?, ?, ?)")
-                .bind(entry.id.to_string())
-                .bind(&entry.proxy.name)
-                .bind(json)
-                .bind(now)
-                .execute(&mut *tx)
-                .await
-                .map_err(|_| Error::FailedToSaveConfig)?;
-        }
+        sync_proxies(&mut tx, proxies).await?;
         tx.commit().await.map_err(|_| Error::FailedToSaveConfig)?;
         Ok(())
     }
@@ -713,24 +680,7 @@ impl Storage for SqliteStorage {
             .begin()
             .await
             .map_err(|_| Error::FailedToSaveConfig)?;
-        sqlx::query("DELETE FROM access_lists")
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| Error::FailedToSaveConfig)?;
-        let now = crate::clock::unix_ms() as i64;
-        for entry in lists {
-            let json = serde_json::to_string(entry).map_err(|_| Error::FailedToSaveConfig)?;
-            sqlx::query(
-                "INSERT INTO access_lists (id, name, data, updated_at) VALUES (?, ?, ?, ?)",
-            )
-            .bind(entry.id.to_string())
-            .bind(&entry.list.name)
-            .bind(json)
-            .bind(now)
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| Error::FailedToSaveConfig)?;
-        }
+        sync_access_lists(&mut tx, lists).await?;
         tx.commit().await.map_err(|_| Error::FailedToSaveConfig)?;
         Ok(())
     }
@@ -1113,6 +1063,187 @@ async fn load_json_list<T: DeserializeOwned>(pool: &SqlitePool, query: &'static 
         .collect()
 }
 
+async fn fetch_existing_ports(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> Result<HashMap<String, String>, Error> {
+    let rows = sqlx::query("SELECT id, data FROM ports")
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|_| Error::FailedToSaveConfig)?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.get::<String, _>(0), r.get::<String, _>(1)))
+        .collect())
+}
+
+async fn delete_removed_ports(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    existing: &HashMap<String, String>,
+    new_ids: &HashSet<String>,
+) -> Result<(), Error> {
+    for id in existing.keys() {
+        if !new_ids.contains(id) {
+            sqlx::query("DELETE FROM ports WHERE id = ?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|_| Error::FailedToSaveConfig)?;
+        }
+    }
+    Ok(())
+}
+
+async fn sync_ports(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    entries: &[PortEntry],
+) -> Result<(), Error> {
+    let existing = fetch_existing_ports(tx).await?;
+    let new_ids: HashSet<String> = entries.iter().map(|e| e.id.to_string()).collect();
+    delete_removed_ports(tx, &existing, &new_ids).await?;
+
+    let now = crate::clock::unix_ms() as i64;
+    for entry in entries {
+        let id = entry.id.to_string();
+        let json = serde_json::to_string(entry).map_err(|_| Error::FailedToSaveConfig)?;
+        if existing.get(&id).map(String::as_str) == Some(&json) {
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO ports (id, listen_addr, name, data, updated_at) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET listen_addr = excluded.listen_addr, name = excluded.name, data = excluded.data, updated_at = excluded.updated_at",
+        )
+        .bind(id)
+        .bind(entry.port.listen.to_string())
+        .bind(&entry.port.name)
+        .bind(json)
+        .bind(now)
+        .execute(&mut **tx)
+        .await
+        .map_err(|_| Error::FailedToSaveConfig)?;
+    }
+    Ok(())
+}
+
+async fn fetch_existing_proxies(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> Result<HashMap<String, String>, Error> {
+    let rows = sqlx::query("SELECT id, data FROM proxies")
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|_| Error::FailedToSaveConfig)?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.get::<String, _>(0), r.get::<String, _>(1)))
+        .collect())
+}
+
+async fn delete_removed_proxies(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    existing: &HashMap<String, String>,
+    new_ids: &HashSet<String>,
+) -> Result<(), Error> {
+    for id in existing.keys() {
+        if !new_ids.contains(id) {
+            sqlx::query("DELETE FROM proxies WHERE id = ?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|_| Error::FailedToSaveConfig)?;
+        }
+    }
+    Ok(())
+}
+
+async fn sync_proxies(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    proxies: &[ProxyEntry],
+) -> Result<(), Error> {
+    let existing = fetch_existing_proxies(tx).await?;
+    let new_ids: HashSet<String> = proxies.iter().map(|e| e.id.to_string()).collect();
+    delete_removed_proxies(tx, &existing, &new_ids).await?;
+
+    let now = crate::clock::unix_ms() as i64;
+    for entry in proxies {
+        let id = entry.id.to_string();
+        let json = serde_json::to_string(entry).map_err(|_| Error::FailedToSaveConfig)?;
+        if existing.get(&id).map(String::as_str) == Some(&json) {
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO proxies (id, name, data, updated_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, data = excluded.data, updated_at = excluded.updated_at",
+        )
+        .bind(id)
+        .bind(&entry.proxy.name)
+        .bind(json)
+        .bind(now)
+        .execute(&mut **tx)
+        .await
+        .map_err(|_| Error::FailedToSaveConfig)?;
+    }
+    Ok(())
+}
+
+async fn fetch_existing_access_lists(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> Result<HashMap<String, String>, Error> {
+    let rows = sqlx::query("SELECT id, data FROM access_lists")
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|_| Error::FailedToSaveConfig)?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.get::<String, _>(0), r.get::<String, _>(1)))
+        .collect())
+}
+
+async fn delete_removed_access_lists(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    existing: &HashMap<String, String>,
+    new_ids: &HashSet<String>,
+) -> Result<(), Error> {
+    for id in existing.keys() {
+        if !new_ids.contains(id) {
+            sqlx::query("DELETE FROM access_lists WHERE id = ?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|_| Error::FailedToSaveConfig)?;
+        }
+    }
+    Ok(())
+}
+
+async fn sync_access_lists(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    lists: &[AccessListEntry],
+) -> Result<(), Error> {
+    let existing = fetch_existing_access_lists(tx).await?;
+    let new_ids: HashSet<String> = lists.iter().map(|e| e.id.to_string()).collect();
+    delete_removed_access_lists(tx, &existing, &new_ids).await?;
+
+    let now = crate::clock::unix_ms() as i64;
+    for entry in lists {
+        let id = entry.id.to_string();
+        let json = serde_json::to_string(entry).map_err(|_| Error::FailedToSaveConfig)?;
+        if existing.get(&id).map(String::as_str) == Some(&json) {
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO access_lists (id, name, data, updated_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, data = excluded.data, updated_at = excluded.updated_at",
+        )
+        .bind(id)
+        .bind(&entry.list.name)
+        .bind(json)
+        .bind(now)
+        .execute(&mut **tx)
+        .await
+        .map_err(|_| Error::FailedToSaveConfig)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1323,6 +1454,60 @@ mod tests {
         .await;
         assert!(res.is_err());
         assert!(res.unwrap_err().is_panic());
+
+        let _ = fs::remove_dir_all(&dir).await;
+        Ok(())
+    }
+
+    fn make_test_port(id: &str, port_num: u16, name: &str) -> PortEntry {
+        PortEntry::from((
+            id.parse().unwrap(),
+            Port {
+                active: true,
+                name: name.into(),
+                listen: format!("/ip4/0.0.0.0/tcp/{port_num}").parse().unwrap(),
+                opts: Default::default(),
+            },
+        ))
+    }
+
+    async fn assert_port_updated_at(storage: &SqliteStorage, id: &str, expected: i64) {
+        let r = sqlx::query("SELECT updated_at FROM ports WHERE id = ?")
+            .bind(id)
+            .fetch_one(&storage.pool)
+            .await
+            .unwrap();
+        assert_eq!(r.get::<i64, _>(0), expected);
+    }
+
+    #[tokio::test]
+    async fn test_granular_save_preserves_updated_at_and_deletes_removed() -> anyhow::Result<()> {
+        let dir = temp_test_dir("granular");
+        let storage = SqliteStorage::open(&dir).await?;
+
+        let p1 = make_test_port("p1", 80, "http");
+        let p2 = make_test_port("p2", 443, "https");
+
+        let initial_ts: i64 = 1_000_000;
+        let p1_json = serde_json::to_string(&p1)?;
+        sqlx::query("INSERT INTO ports (id, listen_addr, name, data, updated_at) VALUES ('p1', '/ip4/0.0.0.0/tcp/80', 'http', ?, ?)")
+            .bind(&p1_json)
+            .bind(initial_ts)
+            .execute(&storage.pool)
+            .await?;
+
+        storage.save_ports(&[p1.clone(), p2.clone()]).await?;
+        assert_port_updated_at(&storage, "p1", initial_ts).await;
+
+        let r2 = sqlx::query("SELECT updated_at FROM ports WHERE id = 'p2'")
+            .fetch_one(&storage.pool)
+            .await?;
+        assert!(r2.get::<i64, _>(0) > initial_ts);
+
+        storage.save_ports(&[p2.clone()]).await?;
+        let remaining = storage.load_ports().await;
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, p2.id);
 
         let _ = fs::remove_dir_all(&dir).await;
         Ok(())

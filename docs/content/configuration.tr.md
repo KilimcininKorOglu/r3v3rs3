@@ -8,7 +8,7 @@ weight = 0
 
 r3v3rs3; sunucu yapılandırmasını, ters proxy kurallarını, portları, erişim listelerini, ACME ayarlarını, kullanıcı hesaplarını ve deployment platformu verilerini yapılandırma dizininde (varsayılan `/etc/r3v3rs3`) yer alan birleşik bir SQLite veritabanında (`r3v3rs3.db`) saklar.
 
-- **Birleşik SQLite Veritabanı (`r3v3rs3.db`)**: Atomik transaction'lar ve WAL modu sayesinde yüksek eşzamanlılık, kesintisiz veri bütünlüğü ve restart sonrasında sıfır kayıp güvencesi sunar.
+- **Birleşik SQLite Veritabanı (`r3v3rs3.db`)**: Atomik transaction'lar ve WAL modu sayesinde yüksek eşzamanlılık, kesintisiz veri bütünlüğü ve restart sonrasında sıfır kayıp güvencesi sunar. Portlar, ters proxyler ve erişim listelerindeki yapılandırma değişiklikleri parçalı upsert ve hedefli silme işlemleriyle yürütülür; tüm tabloyu silip yeniden oluşturma yükünü önler ve değişmeyen kayıtların güncellenme zaman damgalarını korur.
 - **Ana Şifreleme Anahtarı (`r3v3rs3.key`)**: Hassas kimlik bilgileri (DNS API anahtarları, Git token'ları, ortam değişkeni gizli değerleri), `0600` dosya izinlerine sahip `r3v3rs3.key` anahtarı ile AES-256-GCM kullanılarak mühürlenir.
 - **Diskte Saklanan Dosyalar**: TLS PEM sertifika ve private key dosyaları `certs/<tür>/<id>/*.pem` altında diskte dosya olarak tutulur (göreli yolları `r3v3rs3.db` içinde saklanır). Harici JSON veri setleri (`cdn-ranges.json`, `app-store.json`, `engines.json`) katalog senkronizasyonu için diskte dosya olarak kalır.
 - **Log Ayrıştırma (`log.db`)**: Yüksek frekanslı tracing ve istek kayıtları, `r3v3rs3.db` üzerinde kilitlenmeyi ve şişmeyi önlemek için ayrı bir `log.db` veritabanında tutulur.

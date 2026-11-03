@@ -8,7 +8,7 @@ weight = 0
 
 r3v3rs3 stores all server configuration, reverse proxy rules, ports, access lists, ACME settings, user accounts, and deployment platform data in a unified SQLite database, `r3v3rs3.db`, located in the configuration directory (default `/etc/r3v3rs3`).
 
-- **Unified SQLite Database (`r3v3rs3.db`)**: Atomic transactions and WAL mode ensure high concurrency, immediate durability, and rock-solid reliability across restarts.
+- **Unified SQLite Database (`r3v3rs3.db`)**: Atomic transactions and WAL mode ensure high concurrency, immediate durability, and rock-solid reliability across restarts. Configuration mutations for ports, reverse proxies, and access lists perform granular upserts and targeted deletions, eliminating full-table deletion churn and preserving modification timestamps on unchanged items.
 - **Master Encryption Key (`r3v3rs3.key`)**: Sensitive credentials (DNS API keys, Git tokens, environment secrets) are sealed with AES-256-GCM using `r3v3rs3.key` stored with strict `0600` file permissions.
 - **Disk File Persistence**: Certificate PEM files remain on disk under `certs/<kind>/<id>/*.pem` (with relative paths tracked in `r3v3rs3.db`). External JSON datasets (`cdn-ranges.json`, `app-store.json`, `engines.json`) remain plain files on disk for easy catalog sync.
 - **Log Isolation (`log.db`)**: High-throughput tracing and request logs live in a dedicated `log.db` database to prevent write contention and bloat in `r3v3rs3.db`.
