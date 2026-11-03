@@ -20,7 +20,7 @@ pub fn respond<B>(fixed: &FixedResponse, req: &Request<B>) -> Response<Full<Byte
 fn redirect_response<B>(redirect: &FixedRedirect, req: &Request<B>) -> Response<Full<Bytes>> {
     let location = if redirect.preserve_path {
         let path = req.uri().path_and_query().map_or("/", |path| path.as_str());
-        format!("{}{path}", redirect.target.trim_end_matches('/'))
+        build_preserved_location(&redirect.target, path)
     } else {
         redirect.target.clone()
     };
@@ -34,6 +34,26 @@ fn redirect_response<B>(redirect: &FixedRedirect, req: &Request<B>) -> Response<
     let mut res = response(status_code(redirect.status.code()), Bytes::new());
     res.headers_mut().insert(LOCATION, value);
     res
+}
+
+fn sanitize_preserve_path(path: &str) -> &str {
+    path.trim_start_matches(|c| c == '/' || c == '\\')
+}
+
+fn build_preserved_location(target: &str, raw_path: &str) -> String {
+    let suffix = sanitize_preserve_path(raw_path);
+    let target = target.trim_end_matches('/');
+    if suffix.is_empty() {
+        if target.is_empty() {
+            "/".to_string()
+        } else {
+            format!("{target}/")
+        }
+    } else if target.is_empty() {
+        format!("/{suffix}")
+    } else {
+        format!("{target}/{suffix}")
+    }
 }
 
 fn status_response(fixed: &FixedStatus) -> Response<Full<Bytes>> {
@@ -85,6 +105,27 @@ mod tests {
         assert_eq!(
             location("https://new.test/landing", false, "/a"),
             (308, "https://new.test/landing".to_string())
+        );
+    }
+
+    #[test]
+    fn fixed_redirect_sanitizes_protocol_relative_and_backslash_paths() {
+        assert_eq!(
+            location("/", true, "//evil.com/phish"),
+            (308, "/evil.com/phish".to_string())
+        );
+        assert_eq!(
+            location("/", true, "/\\evil.com/phish"),
+            (308, "/evil.com/phish".to_string())
+        );
+        assert_eq!(
+            location("https://new.test/", true, "//evil.com/phish"),
+            (308, "https://new.test/evil.com/phish".to_string())
+        );
+        assert_eq!(location("/", true, "/"), (308, "/".to_string()));
+        assert_eq!(
+            location("/", true, "/?query=1"),
+            (308, "/?query=1".to_string())
         );
     }
 

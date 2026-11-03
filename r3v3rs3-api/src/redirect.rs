@@ -57,9 +57,13 @@ impl RedirectRule {
     }
 }
 
-/// Rejects an empty redirect target and a target with a control character.
+/// Rejects an empty redirect target, a protocol-relative target, and a target with a control character.
 pub fn validate_target(target: &str) -> Result<(), Error> {
-    if target.is_empty() || target.chars().any(char::is_control) {
+    if target.is_empty()
+        || target.starts_with("//")
+        || target.starts_with("/\\")
+        || target.chars().any(char::is_control)
+    {
         return Err(Error::InvalidRedirectTarget {
             target: target.to_string(),
         });
@@ -175,6 +179,24 @@ mod tests {
         };
         assert!(matches!(
             control.validate(),
+            Err(Error::InvalidRedirectTarget { .. })
+        ));
+        let proto_rel = RedirectRule {
+            regex: "^a$".parse().unwrap(),
+            target: "//evil.com".into(),
+            status: RedirectStatus::Found,
+        };
+        assert!(matches!(
+            proto_rel.validate(),
+            Err(Error::InvalidRedirectTarget { .. })
+        ));
+        let backslash_rel = RedirectRule {
+            regex: "^a$".parse().unwrap(),
+            target: "/\\evil.com".into(),
+            status: RedirectStatus::Found,
+        };
+        assert!(matches!(
+            backslash_rel.validate(),
             Err(Error::InvalidRedirectTarget { .. })
         ));
     }
