@@ -17,7 +17,7 @@ WebUI'da, WebUI'ın kendisinin kullanmadığı hiçbir düğme yoktur. Yaptığ�
 ```bash
 $ curl -s -c cookies.txt \
     -H 'Content-Type: application/json' \
-    -d '{"username":"admin","method":"password","password":"passw0rd","insecure":true}' \
+    -d '{"username":"admin","method":"password","password":"passw0rd"}' \
     http://localhost:46492/api/login
 "success"
 ```
@@ -28,14 +28,14 @@ Yanıt cookie'yi taşır:
 set-cookie: token=QWZ1uBQz5A9gAnmK2b18EZ7tD7CpkJ9I; HttpOnly; SameSite=Strict
 ```
 
-`"insecure": true`, cookie'den `Secure` özelliğini kaldırır, böylece cookie düz HTTP'de de çalışır. Yönetim paneli HTTPS arkasındaysa bu alanı yazmayın.
+Sunucu `Secure` özelliğini HTTPS bağlantılarında ve güvenilen ters proxy'lerde otomatik olarak ekler, yerel loopback HTTP bağlantılarında ise kapalı tutar.
 
 TOTP'si olan bir hesapta ilk yanıt `"totp_required"` olur. Kodu, ilk isteğin cookie'si ile ikinci bir istekte gönderin:
 
 ```bash
 $ curl -s -b cookies.txt -c cookies.txt \
     -H 'Content-Type: application/json' \
-    -d '{"username":"admin","method":"totp","token":"123456","insecure":true}' \
+    -d '{"username":"admin","method":"totp","token":"123456"}' \
     http://localhost:46492/api/login
 "success"
 ```

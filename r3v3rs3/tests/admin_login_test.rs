@@ -86,22 +86,25 @@ async fn login_is_blocked_after_max_attempts() -> anyhow::Result<()> {
             channels.accounts.clone(),
         ));
         wait_for_listener(addr).await?;
-
-        assert_eq!(login(addr, "admin", "wrong").await?, 400);
-        assert_eq!(login(addr, "admin", "wrong").await?, 400);
-
-        // The correct password is rejected while the client IP and username are blocked.
-        tokio::time::sleep(GOVERNOR_REPLENISH).await;
-        assert_eq!(login(addr, "admin", "secret").await?, 429);
-
-        // Another username from the same client IP is not blocked.
-        tokio::time::sleep(GOVERNOR_REPLENISH).await;
-        assert_eq!(login(addr, "other", "secret").await?, 200);
-        Ok(())
+        verify_login_rate_limiting(addr).await
     })
     .await?;
 
     std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+async fn verify_login_rate_limiting(addr: SocketAddr) -> anyhow::Result<()> {
+    assert_eq!(login(addr, "admin", "wrong").await?, 400);
+    assert_eq!(login(addr, "admin", "wrong").await?, 400);
+
+    // The correct password is rejected while the client IP and username are blocked.
+    tokio::time::sleep(GOVERNOR_REPLENISH).await;
+    assert_eq!(login(addr, "admin", "secret").await?, 429);
+
+    // Another username from the same client IP is not blocked.
+    tokio::time::sleep(GOVERNOR_REPLENISH).await;
+    assert_eq!(login(addr, "other", "secret").await?, 200);
     Ok(())
 }
 
@@ -140,5 +143,89 @@ async fn the_session_cookie_covers_the_whole_panel() -> anyhow::Result<()> {
     .await?;
 
     std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn secure_cookie_derived_from_headers_regardless_of_payload() -> anyhow::Result<()> {
+    let dir = std::env::temp_dir().join(format!("r3v3rs3-admin-sec-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
+
+    let admin_port = alloc_tcp_port().await?;
+    let addr = admin_port.socket_addr();
+    let mut config = AppConfig::default();
+    config.admin.trusted_proxies = vec!["127.0.0.1/32".parse().unwrap()];
+
+    let storage = TestStorage::builder()
+        .config(config)
+        .accounts(HashMap::from([("admin".to_string(), "secret".to_string())]))
+        .build();
+    let app_info = new_appinfo(&dir, &dir);
+    with_server(storage, |channels| async move {
+        tokio::spawn(start_admin(
+            app_info,
+            addr,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+            channels.accounts.clone(),
+        ));
+        wait_for_listener(addr).await?;
+        assert_loopback_cookie_not_secure(addr).await?;
+        assert_trusted_proxy_cookie_secure(addr).await
+    })
+    .await?;
+
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+async fn assert_loopback_cookie_not_secure(addr: SocketAddr) -> anyhow::Result<()> {
+    let res = reqwest::Client::new()
+        .post(format!("http://{addr}/api/login"))
+        .json(&LoginRequest {
+            username: "admin".to_string(),
+            method: LoginMethod::Password {
+                password: "secret".to_string(),
+            },
+            insecure: false,
+        })
+        .send()
+        .await?;
+    let cookie = res
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .unwrap()
+        .to_str()?;
+    assert!(
+        !cookie.contains("Secure"),
+        "plain loopback connection should not have Secure: {cookie}"
+    );
+    Ok(())
+}
+
+async fn assert_trusted_proxy_cookie_secure(addr: SocketAddr) -> anyhow::Result<()> {
+    let res = reqwest::Client::new()
+        .post(format!("http://{addr}/api/login"))
+        .header("x-forwarded-proto", "https")
+        .json(&LoginRequest {
+            username: "admin".to_string(),
+            method: LoginMethod::Password {
+                password: "secret".to_string(),
+            },
+            insecure: true,
+        })
+        .send()
+        .await?;
+    let cookie = res
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .unwrap()
+        .to_str()?;
+    assert!(
+        cookie.contains("Secure"),
+        "trusted HTTPS proxy must have Secure flag even with insecure=true: {cookie}"
+    );
     Ok(())
 }

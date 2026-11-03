@@ -2173,18 +2173,18 @@ A script signs in with `POST /api/login` and sends the `token` cookie of the res
 
 ```bash
 $ curl -c cookies.txt -H 'Content-Type: application/json' \
-    -d '{"username":"admin","method":"password","password":"passw0rd","insecure":true}' \
+    -d '{"username":"admin","method":"password","password":"passw0rd"}' \
     http://localhost:46492/api/login
 $ curl -b cookies.txt http://localhost:46492/api/ports
 ```
 
-`"insecure": true` removes the `Secure` attribute from the cookie. Use it when the admin panel uses plain HTTP.
+The server automatically sets the `Secure` attribute on HTTPS connections and trusted reverse proxies, and leaves it off on local loopback HTTP connections.
 
 For an account with TOTP, the first response is `"totp_required"`. Send the code in a second request with the cookie of the first one:
 
 ```bash
 $ curl -b cookies.txt -c cookies.txt -H 'Content-Type: application/json' \
-    -d '{"username":"admin","method":"totp","token":"123456","insecure":true}' \
+    -d '{"username":"admin","method":"totp","token":"123456"}' \
     http://localhost:46492/api/login
 ```
 

@@ -2173,18 +2173,18 @@ Bir script, `POST /api/login` ile giriş yapar ve yanıttaki `token` cookie'sini
 
 ```bash
 $ curl -c cookies.txt -H 'Content-Type: application/json' \
-    -d '{"username":"admin","method":"password","password":"passw0rd","insecure":true}' \
+    -d '{"username":"admin","method":"password","password":"passw0rd"}' \
     http://localhost:46492/api/login
 $ curl -b cookies.txt http://localhost:46492/api/ports
 ```
 
-`"insecure": true` değeri cookie'den `Secure` özelliğini kaldırır. Yönetim paneli düz HTTP kullanıyorsa bu değeri gönderin.
+Sunucu `Secure` özelliğini HTTPS bağlantılarında ve güvenilen ters proxy'lerde otomatik olarak ekler, yerel loopback HTTP bağlantılarında ise kapalı tutar.
 
 TOTP'si açık hesapta ilk yanıt `"totp_required"` olur. Kodu, ilk isteğin cookie'siyle birlikte ikinci bir istekte gönderin:
 
 ```bash
 $ curl -b cookies.txt -c cookies.txt -H 'Content-Type: application/json' \
-    -d '{"username":"admin","method":"totp","token":"123456","insecure":true}' \
+    -d '{"username":"admin","method":"totp","token":"123456"}' \
     http://localhost:46492/api/login
 ```
 

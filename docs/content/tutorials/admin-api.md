@@ -17,7 +17,7 @@ The examples use `curl` against `http://localhost:46492`, the default address of
 ```bash
 $ curl -s -c cookies.txt \
     -H 'Content-Type: application/json' \
-    -d '{"username":"admin","method":"password","password":"passw0rd","insecure":true}' \
+    -d '{"username":"admin","method":"password","password":"passw0rd"}' \
     http://localhost:46492/api/login
 "success"
 ```
@@ -28,14 +28,14 @@ The response carries the cookie:
 set-cookie: token=QWZ1uBQz5A9gAnmK2b18EZ7tD7CpkJ9I; HttpOnly; SameSite=Strict
 ```
 
-`"insecure": true` removes the `Secure` attribute, so the cookie also works over plain HTTP. Drop it when the admin panel runs behind HTTPS.
+The server automatically adds the `Secure` attribute on HTTPS connections and trusted reverse proxies, and leaves it off on local loopback HTTP connections.
 
 For an account with TOTP, the first response is `"totp_required"`. Send the code in a second request with the cookie of the first one:
 
 ```bash
 $ curl -s -b cookies.txt -c cookies.txt \
     -H 'Content-Type: application/json' \
-    -d '{"username":"admin","method":"totp","token":"123456","insecure":true}' \
+    -d '{"username":"admin","method":"totp","token":"123456"}' \
     http://localhost:46492/api/login
 "success"
 ```

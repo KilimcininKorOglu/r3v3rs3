@@ -153,6 +153,39 @@ async fn resolve_client_ip(
         .unwrap_or_else(|| peer.ip())
 }
 
+async fn is_secure_connection(
+    state: &AppState,
+    peer: &SocketAddr,
+    headers: &axum::http::HeaderMap,
+) -> bool {
+    let trusted = {
+        let data = state.data.lock().await;
+        data.config.admin.trusted_proxies.clone()
+    };
+    is_secure_request(&trusted, peer, headers)
+}
+
+fn is_secure_request(
+    trusted_proxies: &[ipnet::IpNet],
+    peer: &SocketAddr,
+    headers: &axum::http::HeaderMap,
+) -> bool {
+    if trusted_proxies.iter().any(|net| net.contains(&peer.ip())) {
+        if let Some(proto) = headers
+            .get("x-forwarded-proto")
+            .or_else(|| headers.get("x-forwarded-scheme"))
+            .and_then(|v| v.to_str().ok())
+        {
+            return proto
+                .split(',')
+                .next()
+                .map(|s| s.trim().eq_ignore_ascii_case("https"))
+                .unwrap_or(false);
+        }
+    }
+    !peer.ip().is_loopback()
+}
+
 /// Signs in and sets the `token` session cookie. An account with TOTP returns `totp_required`
 /// first, and a second request with the TOTP code completes the sign-in.
 #[utoipa::path(
@@ -195,7 +228,7 @@ pub async fn login(
     };
 
     let start_record = SessionRecord::new(&username);
-    let insecure = request.insecure;
+    let is_secure = is_secure_connection(&state, &peer, &headers).await;
     let result = match state.call_system(VerifyAccount { request }).await {
         Ok(result) => result,
         Err(err) => {
@@ -234,7 +267,7 @@ pub async fn login(
         .http_only(true)
         .same_site(SameSite::Lax)
         .path("/")
-        .secure(!insecure)
+        .secure(is_secure)
         .build();
 
     Ok((jar.add(cookie), Json(result)))
@@ -1331,5 +1364,33 @@ mod tests {
         // Clear resets both
         totp.clear("token_2", "admin");
         assert!(!totp.is_account_blocked("admin", reset, now));
+    }
+
+    #[test]
+    fn is_secure_request_derives_security_from_network_and_headers() {
+        let trusted_proxies = vec!["127.0.0.1/32".parse().unwrap()];
+        let loopback: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let remote: SocketAddr = "198.51.100.1:12345".parse().unwrap();
+
+        // 1. Loopback without forwarded header -> false
+        let headers = axum::http::HeaderMap::new();
+        assert!(!is_secure_request(&trusted_proxies, &loopback, &headers));
+
+        // 2. Loopback with trusted proto http -> false
+        let mut headers_http = axum::http::HeaderMap::new();
+        headers_http.insert("x-forwarded-proto", "http".parse().unwrap());
+        assert!(!is_secure_request(&trusted_proxies, &loopback, &headers_http));
+
+        // 3. Loopback with trusted proto https -> true
+        let mut headers_https = axum::http::HeaderMap::new();
+        headers_https.insert("x-forwarded-proto", "https".parse().unwrap());
+        assert!(is_secure_request(&trusted_proxies, &loopback, &headers_https));
+
+        // 4. Remote connection -> always true
+        assert!(is_secure_request(&trusted_proxies, &remote, &headers));
+
+        // 5. Untrusted client sending x-forwarded-proto is ignored
+        let empty_trusted: Vec<ipnet::IpNet> = Vec::new();
+        assert!(!is_secure_request(&empty_trusted, &loopback, &headers_https));
     }
 }
