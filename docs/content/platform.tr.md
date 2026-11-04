@@ -929,7 +929,7 @@ Her uygulama konsolunun üst gezinme çubuğunda, çalışan deployment containe
 
 Her komut tanımı şunları içerir:
 - **İsim**: Görevi tanımlayan açıklayıcı bir isim.
-- **Zamanlama**: Zaman ifadesi. Günlük UTC saati `HH:MM` (ör. `03:00`), standart 5 alanlı cron sözdizimi (ör. `*/15 * * * *`, `0 2 * * *`), kısaltma makroları (`@hourly`, `@daily`) veya aralık ifadeleri (`@every 15m`, `@every 1h`, `@every 30s`) desteklenir.
+- **Zamanlama**: Zaman ifadesi. Günlük UTC saati `HH:MM` (ör. `03:00`), standart 5 alanlı cron sözdizimi (ör. `*/15 * * * *`, `0 2 * * *`), kısaltma makroları (`@hourly`, `@daily`) veya aralık ifadeleri (`@every 15m`, `@every 1h`, `@every 30s`; asgari aralık 10s'dir) desteklenir.
 - **Komut**: Container içinde `sh -c` ile çalıştırılacak komut.
 - **Etkin**: Arka plan zamanlayıcısının süresi gelen görevi otomatik olarak çalıştırıp çalıştırmayacağı.
 

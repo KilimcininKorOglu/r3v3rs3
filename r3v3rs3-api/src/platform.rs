@@ -2425,11 +2425,11 @@ fn validate_interval(schedule: &str) -> bool {
     if matches!(clean, "@hourly" | "hourly" | "@daily" | "daily") {
         return true;
     }
-    for unit in ['s', 'm', 'h', 'd'] {
+    for (unit, min_val) in [('s', 10), ('m', 1), ('h', 1), ('d', 1)] {
         if let Some(num_str) = clean.strip_suffix(unit)
             && let Ok(num) = num_str.parse::<u64>()
         {
-            return num > 0;
+            return num >= min_val;
         }
     }
     false
@@ -3250,6 +3250,12 @@ EMPTY_VAL=
 
         // Invalid schedules
         let mut invalid_sched = valid.clone();
+        invalid_sched.schedule = "0s".to_string();
+        assert!(invalid_sched.validate().is_err());
+        invalid_sched.schedule = "5s".to_string();
+        assert!(invalid_sched.validate().is_err());
+        invalid_sched.schedule = "-1s".to_string();
+        assert!(invalid_sched.validate().is_err());
         invalid_sched.schedule = "invalid-schedule".to_string();
         assert!(invalid_sched.validate().is_err());
         invalid_sched.schedule = "25:00".to_string();

@@ -929,7 +929,7 @@ Each application console provides a dedicated **Commands** (`/apps/{id}/commands
 
 Each command configuration specifies:
 - **Name**: A descriptive name for the task.
-- **Schedule**: A timing expression. Supports daily time `HH:MM` (UTC), standard 5-field cron syntax (e.g. `*/15 * * * *`, `0 2 * * *`), shorthand macros (`@hourly`, `@daily`), or interval expressions (`@every 15m`, `@every 1h`, `@every 30s`).
+- **Schedule**: A timing expression. Supports daily time `HH:MM` (UTC), standard 5-field cron syntax (e.g. `*/15 * * * *`, `0 2 * * *`), shorthand macros (`@hourly`, `@daily`), or interval expressions (`@every 15m`, `@every 1h`, `@every 30s`; minimum interval is 10s).
 - **Command**: The command to execute inside the container, passed to `sh -c`.
 - **Enabled**: Whether the background scheduler runs the task when due.
 

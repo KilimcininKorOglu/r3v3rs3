@@ -296,7 +296,11 @@ fn daily_slot_ms(schedule: &str, now_ms: i64) -> Option<i64> {
     Some(day * 86_400_000 + hour * 3_600_000 + minute * 60_000)
 }
 
+/// Minimum interval allowed for scheduled command execution (10 seconds).
+const MIN_INTERVAL_MS: i64 = 10_000;
+
 /// Parses intervals such as `@hourly`, `@daily`, `30m`, `1h`, `@every 15m`.
+/// Rejects non-positive intervals and durations shorter than 10 seconds.
 fn parse_interval_ms(expr: &str) -> Option<i64> {
     let clean = expr.trim().strip_prefix("@every ").unwrap_or(expr).trim();
     match clean {
@@ -304,23 +308,20 @@ fn parse_interval_ms(expr: &str) -> Option<i64> {
         "@daily" | "daily" => return Some(86_400_000),
         _ => {}
     }
-    if let Some(num) = clean.strip_suffix('m') {
-        let m: i64 = num.parse().ok()?;
-        return Some(m * 60_000);
-    }
-    if let Some(num) = clean.strip_suffix('h') {
-        let h: i64 = num.parse().ok()?;
-        return Some(h * 3_600_000);
-    }
-    if let Some(num) = clean.strip_suffix('s') {
-        let s: i64 = num.parse().ok()?;
-        return Some(s * 1_000);
-    }
-    if let Some(num) = clean.strip_suffix('d') {
-        let d: i64 = num.parse().ok()?;
-        return Some(d * 86_400_000);
-    }
-    None
+    let (num, multiplier) = if let Some(num) = clean.strip_suffix('m') {
+        (num, 60_000)
+    } else if let Some(num) = clean.strip_suffix('h') {
+        (num, 3_600_000)
+    } else if let Some(num) = clean.strip_suffix('s') {
+        (num, 1_000)
+    } else if let Some(num) = clean.strip_suffix('d') {
+        (num, 86_400_000)
+    } else {
+        return None;
+    };
+    let val: i64 = num.parse().ok()?;
+    let ms = val.checked_mul(multiplier)?;
+    (ms >= MIN_INTERVAL_MS).then_some(ms)
 }
 
 /// Evaluates a 5-field cron expression: `minute hour dom month dow`.
@@ -389,6 +390,18 @@ mod tests {
         assert!(!is_schedule_due("15m", Some(now - 10 * 60_000), now));
         assert!(is_schedule_due("@hourly", Some(now - 3_600_000), now));
         assert!(is_schedule_due("1d", Some(now - 86_400_000), now));
+    }
+
+    #[test]
+    fn non_positive_and_sub_minimum_intervals_are_rejected() {
+        let now = 1_000_000_000;
+        assert!(!is_schedule_due("0s", None, now));
+        assert!(!is_schedule_due("0s", Some(now), now));
+        assert!(!is_schedule_due("-1s", Some(now), now));
+        assert!(!is_schedule_due("-10m", Some(now), now));
+        assert!(!is_schedule_due("5s", Some(now), now));
+        assert!(is_schedule_due("10s", None, now));
+        assert!(is_schedule_due("10s", Some(now - 10_000), now));
     }
 
     #[test]
