@@ -693,7 +693,7 @@ fn push_target(signature: &Signature, app: &AppEntry, body: &[u8]) -> Result<Pus
 }
 
 fn is_empty_commit(after: Option<&str>) -> bool {
-    after == Some("0000000000000000000000000000000000000000")
+    after.is_some_and(|a| a.len() >= 40 && a.chars().all(|c| c == '0'))
 }
 
 fn check_push_ref(
@@ -1335,6 +1335,35 @@ mod tests {
         ]);
         let result = platform.hook(shop.id, &headers, &body).await?;
         assert_eq!(outcome(&result), (Provider::GitLab, HookOutcome::Deployed));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn gitlab_push_deleting_branch_or_tag_is_ignored() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let shop = platform.add_app(git_request("shop"), 1).await?;
+        let (_, secret) = platform.new_webhook_secret(shop.id).await?;
+        let gitlab_deleted =
+            br#"{"ref":"refs/heads/main","after":"0000000000000000000000000000000000000000"}"#;
+        let gitlab_headers = headers(&[
+            ("x-gitlab-event", "Push Hook".to_string()),
+            ("x-gitlab-token", secret.secret.clone()),
+        ]);
+        let result = platform
+            .hook(shop.id, &gitlab_headers, gitlab_deleted)
+            .await?;
+        assert_eq!(result.2.outcome, HookOutcome::Ignored);
+
+        let gitlab_deleted_tag =
+            br#"{"ref":"refs/tags/v1.0.0","after":"0000000000000000000000000000000000000000"}"#;
+        let gitlab_tag_headers = headers(&[
+            ("x-gitlab-event", "Tag Push Hook".to_string()),
+            ("x-gitlab-token", secret.secret.clone()),
+        ]);
+        let result = platform
+            .hook(shop.id, &gitlab_tag_headers, gitlab_deleted_tag)
+            .await?;
+        assert_eq!(result.2.outcome, HookOutcome::Ignored);
         Ok(())
     }
 
