@@ -3,6 +3,7 @@ use crate::accounts::{Caller, Permission};
 use crate::audit::AuditRecord;
 use crate::proxy::tls::upstream_client_config;
 use crate::server::credentials::{mask_proxy, restore_secrets, seal};
+use crate::server::proxy_list::ProxyContext;
 use crate::server::state::ServerState;
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
@@ -230,11 +231,9 @@ impl RpcMethod for UpdateProxy {
         state: &mut ServerState,
         caller: &Caller,
     ) -> Result<Self::Output, Error> {
-        ensure_manual(state, self.entry.id)?;
+        let ctx = ensure_manual(state, self.entry.id)?;
         let mut proxy = self.entry.proxy;
-        if let Some(ctx) = state.proxies.get(self.entry.id) {
-            restore_secrets(&mut proxy, &ctx.entry.proxy);
-        }
+        restore_secrets(&mut proxy, &ctx.entry.proxy);
         validate_proxy_rules(&proxy, Some(self.entry.id), caller, state)?;
         let proxy = seal(proxy).await?;
         let previous = proxy_entries(state);
@@ -306,13 +305,7 @@ impl RpcMethod for UpdateProxyStreamPriority {
         state: &mut ServerState,
         caller: &Caller,
     ) -> Result<Self::Output, Error> {
-        ensure_manual(state, self.id)?;
-        let ctx = state
-            .proxies
-            .get(self.id)
-            .ok_or(Error::IdNotFound {
-                id: self.id.to_string(),
-            })?;
+        let ctx = ensure_manual(state, self.id)?;
         let mut proxy = ctx.entry.proxy.clone();
         match &mut proxy.kind {
             ProxyKind::Http(http) => self.mutation.apply(&mut http.stream_priority),
@@ -357,13 +350,7 @@ impl RpcMethod for ApplyProxySecurityHeadersProfile {
         state: &mut ServerState,
         caller: &Caller,
     ) -> Result<Self::Output, Error> {
-        ensure_manual(state, self.id)?;
-        let ctx = state
-            .proxies
-            .get(self.id)
-            .ok_or(Error::IdNotFound {
-                id: self.id.to_string(),
-            })?;
+        let ctx = ensure_manual(state, self.id)?;
         let mut proxy = ctx.entry.proxy.clone();
         let audit = match &mut proxy.kind {
             ProxyKind::Http(http) => {
@@ -403,10 +390,13 @@ fn proxy_entries(state: &ServerState) -> Vec<ProxyEntry> {
 }
 
 /// Service discovery owns a discovered proxy, so the API cannot change or delete it.
-fn ensure_manual(state: &ServerState, id: ShortId) -> Result<(), Error> {
+fn ensure_manual(state: &ServerState, id: ShortId) -> Result<&ProxyContext, Error> {
     match state.proxies.get(id) {
         Some(ctx) if ctx.entry.is_discovered() => Err(Error::ProxyReadOnly { id }),
-        _ => Ok(()),
+        Some(ctx) => Ok(ctx),
+        None => Err(Error::IdNotFound {
+            id: id.to_string(),
+        }),
     }
 }
 

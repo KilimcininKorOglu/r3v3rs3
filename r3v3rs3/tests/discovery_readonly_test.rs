@@ -147,6 +147,14 @@ async fn discovered_proxies_serve_traffic_but_are_read_only_and_not_saved() -> a
             Err(Error::ProxyReadOnly { .. })
         ));
 
+        let unknown_update = UpdateProxy {
+            entry: ProxyEntry::from(("xyz-123".parse().unwrap(), entry.proxy.clone())),
+        };
+        assert!(matches!(
+            call(&mut channels, unknown_update).await?,
+            Err(Error::IdNotFound { .. })
+        ));
+
         // Changing the manual proxy writes the proxy list to the storage.
         let update = UpdateProxy {
             entry: ProxyEntry::from((renamed.id, renamed.proxy.clone())),
