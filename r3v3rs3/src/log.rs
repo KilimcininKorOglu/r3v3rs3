@@ -3,6 +3,7 @@ use dashmap::DashMap;
 use sqlx::{ConnectOptions, SqlitePool, sqlite::SqliteConnectOptions};
 use std::fs;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::{
     collections::HashMap,
@@ -167,6 +168,69 @@ impl DatabaseLayer {
     }
 }
 
+static LAST_LOG_FAILURE_REPORT: AtomicU64 = AtomicU64::new(0);
+
+fn should_report_failure(now: u64) -> bool {
+    let last = LAST_LOG_FAILURE_REPORT.load(Ordering::Relaxed);
+    now > last.saturating_add(5)
+        && LAST_LOG_FAILURE_REPORT
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+}
+
+fn report_log_failure(err: &dyn std::fmt::Display) {
+    let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_secs(),
+        Err(_) => 0,
+    };
+    if should_report_failure(now) {
+        tracing::error!(target: "r3v3rs3::system_log", "failed to write system log entry: {err:#}");
+        eprintln!("r3v3rs3: failed to write system log entry: {err}");
+    }
+}
+
+fn level_to_number(level: &tracing::Level) -> i32 {
+    match *level {
+        tracing::Level::ERROR => 1,
+        tracing::Level::WARN => 2,
+        tracing::Level::INFO => 3,
+        tracing::Level::DEBUG => 4,
+        tracing::Level::TRACE => 5,
+    }
+}
+
+fn serialize_fields(values: &HashMap<String, String>) -> String {
+    match serde_json::to_string(values) {
+        Ok(json) => json,
+        Err(err) => {
+            report_log_failure(&err);
+            "{}".to_string()
+        }
+    }
+}
+
+async fn insert_system_log(
+    pool: &SqlitePool,
+    timestamp: OffsetDateTime,
+    level: i32,
+    resource_id: String,
+    message: String,
+    fields: String,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO system_log (timestamp, level, resource_id, message, fields)
+        VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(timestamp)
+    .bind(level)
+    .bind(resource_id)
+    .bind(message)
+    .bind(fields)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 impl<S> Layer<S> for DatabaseLayer
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
@@ -188,7 +252,9 @@ where
         if metadata.level() > &self.level_filter {
             return;
         }
-        if metadata.target().starts_with("r3v3rs3::access_log") {
+        if metadata.target().starts_with("r3v3rs3::access_log")
+            || metadata.target().starts_with("r3v3rs3::system_log")
+        {
             return;
         }
 
@@ -197,30 +263,19 @@ where
         {
             let resource_id = entry.value().to_string();
             let timestamp = OffsetDateTime::now_utc();
-            let level = match *metadata.level() {
-                tracing::Level::ERROR => 1,
-                tracing::Level::WARN => 2,
-                tracing::Level::INFO => 3,
-                tracing::Level::DEBUG => 4,
-                tracing::Level::TRACE => 5,
-            };
+            let level = level_to_number(metadata.level());
             let mut visitor = KeyValueVisitor::default();
             event.record(&mut visitor);
             let message = visitor.values.remove("message").unwrap_or_default();
+            let fields = serialize_fields(&visitor.values);
 
             let pool = self.pool.clone();
             self.handle.spawn(async move {
-                sqlx::query(
-                    "INSERT INTO system_log (timestamp, level, resource_id, message, fields)
-                    VALUES (?, ?, ?, ?, ?)",
-                )
-                .bind(timestamp)
-                .bind(level)
-                .bind(resource_id)
-                .bind(message)
-                .bind(serde_json::to_string(&visitor.values).unwrap_or_default())
-                .execute(&pool)
-                .await
+                if let Err(err) =
+                    insert_system_log(&pool, timestamp, level, resource_id, message, fields).await
+                {
+                    report_log_failure(&err);
+                }
             });
         }
     }
@@ -325,5 +380,23 @@ mod tests {
         assert!(names.contains(&"system_log_resource_timestamp_idx".to_string()));
         assert!(names.contains(&"system_log_timestamp_idx".to_string()));
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn should_report_failure_rate_limiting() {
+        use super::should_report_failure;
+        assert!(should_report_failure(100));
+        assert!(!should_report_failure(102));
+        assert!(should_report_failure(106));
+    }
+
+    #[test]
+    fn serialize_fields_encodes_json() {
+        use super::serialize_fields;
+        use std::collections::HashMap;
+        let mut map = HashMap::new();
+        map.insert("key".to_string(), "val".to_string());
+        let json = serialize_fields(&map);
+        assert!(json.contains("\"key\":\"val\""));
     }
 }
