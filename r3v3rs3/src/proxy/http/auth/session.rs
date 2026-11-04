@@ -11,8 +11,8 @@ use hyper::{
     Method, Request, Response, StatusCode,
     body::Body,
     header::{
-        ALLOW, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderMap, HeaderValue,
-        LOCATION, PRAGMA, REFERRER_POLICY, SET_COOKIE,
+        ALLOW, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderMap, HeaderName,
+        HeaderValue, LOCATION, PRAGMA, REFERRER_POLICY, SET_COOKIE,
     },
 };
 use r3v3rs3_api::{
@@ -714,6 +714,10 @@ fn login_page(template: LoginTemplate<'_>, status: StatusCode) -> Response<Full<
         CONTENT_SECURITY_POLICY,
         HeaderValue::from_static(CONTENT_SECURITY),
     );
+    headers.insert(
+        HeaderName::from_static("x-frame-options"),
+        HeaderValue::from_static("DENY"),
+    );
     headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     res
 }
@@ -822,5 +826,24 @@ mod tests {
             Action::NotAllowed("POST")
         ));
         assert!(matches!(action("other", &Method::GET), Action::NotFound));
+    }
+
+    #[test]
+    fn login_page_emits_anti_framing_headers() {
+        let template = LoginTemplate {
+            username: "",
+            redirect: "/",
+            error: None,
+            totp: false,
+            preferences: PagePreferences::default(),
+        };
+        let res = login_page(template, StatusCode::OK);
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers().get(hyper::header::CONTENT_SECURITY_POLICY).unwrap(),
+            CONTENT_SECURITY
+        );
+        assert_eq!(res.headers().get("x-frame-options").unwrap(), "DENY");
+        assert_eq!(res.headers().get(hyper::header::REFERRER_POLICY).unwrap(), "no-referrer");
     }
 }
