@@ -16,6 +16,7 @@ use r3v3rs3_api::webhook::{
     UpdateWebhookRequest, WebhookEvent, WebhookPayload,
 };
 use sha2::Sha256;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use time::OffsetDateTime;
 use tracing::{error, info, warn};
@@ -136,6 +137,105 @@ pub async fn test_webhook_url(
     }
 }
 
+pub(crate) fn is_retryable_status(status: u16) -> bool {
+    status == 429 || status >= 500
+}
+
+pub(crate) fn retry_delay(attempt: u32) -> Duration {
+    match attempt {
+        1 => Duration::from_secs(1),
+        _ => Duration::from_secs(2),
+    }
+}
+
+async fn execute_delivery_attempt(
+    client: &HttpClient,
+    name: &str,
+    url: &str,
+    secret: Option<&[u8]>,
+    payload: &WebhookPayload,
+    attempt: u32,
+) -> Result<bool, ()> {
+    match deliver_webhook(client, url, secret, payload).await {
+        Ok((status, elapsed)) if (200..300).contains(&status) => {
+            info!(
+                webhook = %name,
+                url = %url,
+                status,
+                elapsed_ms = elapsed,
+                event = %payload.event,
+                attempt,
+                "webhook delivered"
+            );
+            Ok(true)
+        }
+        Ok((status, elapsed)) => {
+            warn!(
+                webhook = %name,
+                url = %url,
+                status,
+                elapsed_ms = elapsed,
+                event = %payload.event,
+                attempt,
+                "webhook endpoint returned non-success status"
+            );
+            if is_retryable_status(status) {
+                Err(())
+            } else {
+                Ok(false)
+            }
+        }
+        Err(err) => {
+            warn!(
+                webhook = %name,
+                url = %url,
+                %err,
+                event = %payload.event,
+                attempt,
+                "webhook delivery attempt failed"
+            );
+            Err(())
+        }
+    }
+}
+
+async fn deliver_target_with_retries(
+    client: &HttpClient,
+    name: &str,
+    url: &str,
+    secret: Option<&[u8]>,
+    payload: &WebhookPayload,
+) {
+    if r3v3rs3_api::webhook::validate_webhook_url(url).is_err() {
+        warn!(
+            webhook = %name,
+            url = %url,
+            "skipping delivery to restricted webhook URL"
+        );
+        return;
+    }
+
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut attempt = 0;
+    while attempt < MAX_ATTEMPTS {
+        attempt += 1;
+        let result = execute_delivery_attempt(client, name, url, secret, payload, attempt).await;
+        if result.is_ok() {
+            return;
+        }
+        if attempt < MAX_ATTEMPTS {
+            tokio::time::sleep(retry_delay(attempt)).await;
+        }
+    }
+
+    warn!(
+        webhook = %name,
+        url = %url,
+        event = %payload.event,
+        "webhook delivery failed after maximum retry attempts"
+    );
+}
+
 async fn deliver_to_all(targets: Vec<(String, String, Option<Vec<u8>>)>, payload: WebhookPayload) {
     let client = match build_client().await {
         Ok(c) => c,
@@ -145,37 +245,20 @@ async fn deliver_to_all(targets: Vec<(String, String, Option<Vec<u8>>)>, payload
         }
     };
 
-    for (name, url, secret) in targets {
-        if r3v3rs3_api::webhook::validate_webhook_url(&url).is_err() {
-            warn!(
-                webhook = %name,
-                url = %url,
-                "skipping delivery to restricted webhook URL"
-            );
-            continue;
-        }
-        match deliver_webhook(&client, &url, secret.as_deref(), &payload).await {
-            Ok((status, elapsed)) => {
-                info!(
-                    webhook = %name,
-                    url = %url,
-                    status,
-                    elapsed_ms = elapsed,
-                    event = %payload.event,
-                    "webhook delivered"
-                );
+    let payload = Arc::new(payload);
+    let tasks: Vec<_> = targets
+        .into_iter()
+        .map(|(name, url, secret)| {
+            let client = client.clone();
+            let payload = Arc::clone(&payload);
+            async move {
+                deliver_target_with_retries(&client, &name, &url, secret.as_deref(), &payload)
+                    .await;
             }
-            Err(err) => {
-                warn!(
-                    webhook = %name,
-                    url = %url,
-                    %err,
-                    event = %payload.event,
-                    "webhook delivery failed"
-                );
-            }
-        }
-    }
+        })
+        .collect();
+
+    futures::future::join_all(tasks).await;
 }
 
 fn apply_field_updates(stored: &mut StoredWebhook, request: &UpdateWebhookRequest) {
@@ -438,5 +521,26 @@ mod tests {
         assert!(payload.id.starts_with("evt_"));
         assert_eq!(payload.summary, "Deploy succeeded for web-app");
         assert_eq!(payload.data["app_id"], "123");
+    }
+
+    #[test]
+    fn retry_delay_schedule() {
+        assert_eq!(retry_delay(1), Duration::from_secs(1));
+        assert_eq!(retry_delay(2), Duration::from_secs(2));
+        assert_eq!(retry_delay(3), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn retryable_status_filtering() {
+        assert!(!is_retryable_status(200));
+        assert!(!is_retryable_status(204));
+        assert!(!is_retryable_status(400));
+        assert!(!is_retryable_status(401));
+        assert!(!is_retryable_status(404));
+        assert!(is_retryable_status(429));
+        assert!(is_retryable_status(500));
+        assert!(is_retryable_status(502));
+        assert!(is_retryable_status(503));
+        assert!(is_retryable_status(504));
     }
 }

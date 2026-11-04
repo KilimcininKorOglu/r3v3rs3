@@ -680,6 +680,13 @@ Receivers can verify authenticity by computing the HMAC-SHA256 of the raw reques
 
 Webhook secrets are encrypted at rest with `r3v3rs3.key` (AES-256-GCM) using the platform's envelope encryption. The plaintext secret is never returned by the API or stored in audit logs. Rotating the platform master key automatically re-encrypts all configured webhook secrets.
 
+### Delivery, Retries & Concurrency
+
+Outbound webhooks are dispatched concurrently across endpoints to eliminate head-of-line blocking from slow receivers. Deliveries are protected by automatic retries with backoff:
+- A 2xx HTTP response status is treated as successful delivery.
+- If an endpoint returns a retryable status code (429 Too Many Requests or 5xx server errors) or encounters network/timeout failures, r3v3rs3 retries the delivery up to 3 times (attempt 1 immediate, attempt 2 after 1 second, attempt 3 after 2 seconds).
+- Permanent client errors (HTTP 4xx except 429) and invalid or restricted destination URLs are not retried.
+
 ## Routing
 
 The platform adds one proxy for each running app that has at least one domain. The proxies come from the `Platform` provider, so they are read-only like the proxies of [service discovery](@/discovery.md), and the proxy list shows the provider status. Each proxy:

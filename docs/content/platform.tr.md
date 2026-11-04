@@ -680,6 +680,13 @@ Alıcılar, istek gövdesinin HMAC-SHA256 özetini yapılandırılan gizli anaht
 
 Webhook imzalama anahtarları, platformun zarf şifrelemesi kullanılarak `r3v3rs3.key` ile disk üzerinde AES-256-GCM ile şifrelenir. Düz metin anahtar asla API'den döndürülmez veya denetim günlüklerine yazılmaz. Platform ana anahtarı döndürüldüğünde (key rotation), yapılandırılmış tüm webhook anahtarları otomatik olarak yeni anahtarla yeniden mühürlenir.
 
+### Gönderim, Yeniden Deneme ve Eşzamanlılık
+
+Giden webhook'lar, yavaş uç noktaların neden olabileceği sıra başı engellemelerini (head-of-line blocking) önlemek için tüm hedeflere eşzamanlı olarak iletilir. Gönderimler otomatik yeniden deneme mantığıyla korunur:
+- 2xx HTTP durum kodları başarılı gönderim sayılır.
+- Uç nokta yeniden denenebilir bir durum kodu (429 Too Many Requests veya 5xx sunucu hataları) döndürürse ya da ağ veya zaman aşımı hatası oluşursa, r3v3rs3 isteği en fazla 3 kez yeniden dener (1. deneme hemen, 2. deneme 1 saniye sonra, 3. deneme 2 saniye sonra).
+- Kalıcı istemci hataları (429 hariç HTTP 4xx) ve kısıtlanmış veya geçersiz hedef adresleri yeniden denenmez.
+
 ## Yönlendirme
 
 Platform, en az bir alan adı olan her çalışan uygulama için bir proxy ekler. Bu proxy'ler `Platform` sağlayıcısından gelir. Bu yüzden [servis keşfi](@/discovery.tr.md) proxy'leri gibi salt okunurdur ve proxy listesi sağlayıcının durumunu gösterir. Her proxy:
