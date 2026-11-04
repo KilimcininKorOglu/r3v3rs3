@@ -7,6 +7,7 @@ pub mod git;
 mod process;
 
 use anyhow::{Context as _, bail};
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use r3v3rs3_api::git::{CommitSha, GitRef, RelPath, RepoUrl};
 use std::path::Path;
 
@@ -89,7 +90,8 @@ impl SourceFetcher for GitFetcher {
 }
 
 /// Packs the directory `context` of the checkout into a tar archive without the `.git`
-/// directory. Symbolic links stay links, so the archive holds no file from outside the checkout.
+/// directory and excluding patterns matching `.dockerignore`. Symbolic links stay links,
+/// so the archive holds no file from outside the checkout.
 pub fn context_archive(checkout: &Path, context: &RelPath) -> anyhow::Result<Vec<u8>> {
     let root = checkout.canonicalize()?;
     let dir = context_dir(&root, context)?;
@@ -97,13 +99,38 @@ pub fn context_archive(checkout: &Path, context: &RelPath) -> anyhow::Result<Vec
     if git_dir.exists() {
         std::fs::remove_dir_all(&git_dir)?;
     }
-    directory_archive(&dir)
+    let ignore = load_dockerignore(&dir, Some(&root));
+    directory_archive_filtered(&dir, ignore.as_ref())
 }
 
-/// Packs a directory into a tar archive of at most [`MAX_CONTEXT_BYTES`] of files. Symbolic
-/// links stay links.
+/// Packs a directory into a tar archive of at most [`MAX_CONTEXT_BYTES`] of files,
+/// respecting any `.dockerignore` file in `dir`. Symbolic links stay links.
 pub fn directory_archive(dir: &Path) -> anyhow::Result<Vec<u8>> {
-    let size = tree_size(dir, MAX_CONTEXT_BYTES)?;
+    let ignore = load_dockerignore(dir, None);
+    directory_archive_filtered(dir, ignore.as_ref())
+}
+
+/// Loads `.dockerignore` patterns from the directory or optionally from the checkout root.
+pub fn load_dockerignore(dir: &Path, root: Option<&Path>) -> Option<Gitignore> {
+    let dir_ignore = dir.join(".dockerignore");
+    if dir_ignore.is_file() {
+        let mut builder = GitignoreBuilder::new(dir);
+        let _ = builder.add(dir_ignore);
+        return builder.build().ok();
+    }
+    if let Some(root) = root {
+        let root_ignore = root.join(".dockerignore");
+        if root_ignore.is_file() {
+            let mut builder = GitignoreBuilder::new(dir);
+            let _ = builder.add(root_ignore);
+            return builder.build().ok();
+        }
+    }
+    None
+}
+
+fn directory_archive_filtered(dir: &Path, ignore: Option<&Gitignore>) -> anyhow::Result<Vec<u8>> {
+    let size = tree_size(dir, MAX_CONTEXT_BYTES, ignore)?;
     if size > MAX_CONTEXT_BYTES {
         bail!(
             "the directory is larger than {} MiB",
@@ -112,7 +139,7 @@ pub fn directory_archive(dir: &Path) -> anyhow::Result<Vec<u8>> {
     }
     let mut builder = tar::Builder::new(Vec::new());
     builder.follow_symlinks(false);
-    builder.append_dir_all(".", dir)?;
+    append_filtered_dir_all(&mut builder, dir, dir, ignore)?;
     Ok(builder.into_inner()?)
 }
 
@@ -147,16 +174,62 @@ pub async fn remove_other_dirs(dir: &Path, keep: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn is_ignored(ignore: Option<&Gitignore>, base_dir: &Path, path: &Path, is_dir: bool) -> bool {
+    let Some(ignore) = ignore else { return false };
+    let Ok(rel) = path.strip_prefix(base_dir) else { return false };
+    ignore.matched_path_or_any_parents(rel, is_dir).is_ignore()
+}
+
+fn append_entry(
+    builder: &mut tar::Builder<Vec<u8>>,
+    base_dir: &Path,
+    path: &Path,
+    is_dir: bool,
+    ignore: Option<&Gitignore>,
+) -> anyhow::Result<()> {
+    if is_ignored(ignore, base_dir, path, is_dir) {
+        return Ok(());
+    }
+    let rel_path = path.strip_prefix(base_dir)?;
+    if is_dir {
+        builder.append_dir(rel_path, path)?;
+        append_filtered_dir_all(builder, base_dir, path, ignore)?;
+    } else {
+        builder.append_path_with_name(path, rel_path)?;
+    }
+    Ok(())
+}
+
+fn append_filtered_dir_all(
+    builder: &mut tar::Builder<Vec<u8>>,
+    base_dir: &Path,
+    current_dir: &Path,
+    ignore: Option<&Gitignore>,
+) -> anyhow::Result<()> {
+    for entry in std::fs::read_dir(current_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let is_dir = path.symlink_metadata()?.is_dir();
+        append_entry(builder, base_dir, &path, is_dir, ignore)?;
+    }
+    Ok(())
+}
+
 /// The size of the files under `dir`, counted until it passes `limit`.
-fn tree_size(dir: &Path, limit: u64) -> anyhow::Result<u64> {
+fn tree_size(dir: &Path, limit: u64, ignore: Option<&Gitignore>) -> anyhow::Result<u64> {
     let mut total = 0;
     let mut pending = vec![dir.to_path_buf()];
-    while let Some(dir) = pending.pop() {
-        for entry in std::fs::read_dir(&dir)? {
+    while let Some(current_dir) = pending.pop() {
+        for entry in std::fs::read_dir(&current_dir)? {
             let entry = entry?;
-            let metadata = entry.path().symlink_metadata()?;
-            if metadata.is_dir() {
-                pending.push(entry.path());
+            let path = entry.path();
+            let metadata = path.symlink_metadata()?;
+            let is_dir = metadata.is_dir();
+            if is_ignored(ignore, dir, &path, is_dir) {
+                continue;
+            }
+            if is_dir {
+                pending.push(path);
             } else {
                 total += metadata.len();
             }
@@ -234,6 +307,31 @@ mod tests {
             let result = context_archive(&dir.0, &context.parse()?);
             assert!(result.is_err(), "{context}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn context_archive_respects_dockerignore() -> anyhow::Result<()> {
+        let dir = checkout()?;
+        std::fs::create_dir_all(dir.0.join("app/ignore_dir"))?;
+        std::fs::write(dir.0.join("app/ignore_dir/file.txt"), "should be ignored")?;
+        std::fs::write(dir.0.join("app/src/app.secret"), "supersecret")?;
+        std::fs::write(dir.0.join("app/.env"), "KEY=VALUE")?;
+        std::fs::write(
+            dir.0.join("app/.dockerignore"),
+            "*.secret\nignore_dir/\n.env\n",
+        )?;
+
+        let archive = context_archive(&dir.0, &"app".parse()?)?;
+        let names = entries(&archive)?;
+        assert!(names.contains(&"Dockerfile:file".to_string()), "{names:?}");
+        assert!(
+            names.contains(&"src/main.txt:file".to_string()),
+            "{names:?}"
+        );
+        assert!(!names.iter().any(|n| n.contains("secret")), "{names:?}");
+        assert!(!names.iter().any(|n| n.contains("ignore_dir")), "{names:?}");
+        assert!(!names.iter().any(|n| n.contains(".env")), "{names:?}");
         Ok(())
     }
 }

@@ -68,6 +68,7 @@ hyper-util = { version = "0.1.10", features = [
     "http2",
     "server",
 ] }
+ignore = "0.4"
 include_dir = "0.7.3"
 indexmap = { version = "2.0.0", features = ["serde"] }
 ipnet = { version = "2.11.0", features = ["serde"] }
