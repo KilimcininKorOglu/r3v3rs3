@@ -11,7 +11,7 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, OnceCell};
-use tracing::error;
+use tracing::{error, warn};
 
 /// One day in milliseconds.
 pub const DAY_MS: u64 = 24 * 60 * 60 * 1000;
@@ -265,6 +265,23 @@ fn sql_int(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
+fn parse_audit_row(row: &sqlx::sqlite::SqliteRow) -> Option<AuditEntry> {
+    let json: &str = match row.try_get(0) {
+        Ok(s) => s,
+        Err(err) => {
+            warn!("failed to read audit log column: {err:#}");
+            return None;
+        }
+    };
+    match serde_json::from_str::<AuditEntry>(json) {
+        Ok(entry) => Some(entry),
+        Err(err) => {
+            warn!("skipping unreadable audit log row: {err:#}");
+            None
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl AuditStore for SqliteAuditStore {
     async fn append(&self, entry: &AuditEntry) -> anyhow::Result<()> {
@@ -301,11 +318,8 @@ impl AuditStore for SqliteAuditStore {
         .bind(search_pattern.as_deref())
         .fetch_all(self.pool().await?)
         .await?;
-        rows.iter()
-            .map(|row| -> anyhow::Result<AuditEntry> {
-                Ok(serde_json::from_str(row.try_get::<&str, _>(0)?)?)
-            })
-            .collect()
+        let entries = rows.iter().filter_map(parse_audit_row).collect();
+        Ok(entries)
     }
 
     async fn remove_before(&self, time: u64) -> anyhow::Result<()> {
@@ -451,6 +465,23 @@ mod tests {
         let (store, path) = filled_store().await?;
         store.remove_before(5_000).await?;
         assert_eq!(times(store.query(&all_entries()).await?), [9_000, 5_000]);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_log_database_skips_unreadable_rows() -> anyhow::Result<()> {
+        let (store, path) = filled_store().await?;
+        sqlx::query("INSERT INTO audit_log (time, username, entry) VALUES (?, ?, ?)")
+            .bind(6_000)
+            .bind("admin")
+            .bind("{\"action\":\"unknown_future_action\"}")
+            .execute(store.pool().await?)
+            .await?;
+        assert_eq!(
+            times(store.query(&all_entries()).await?),
+            [9_000, 5_000, 1_000]
+        );
         std::fs::remove_file(path)?;
         Ok(())
     }
