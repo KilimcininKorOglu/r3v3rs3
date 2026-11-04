@@ -87,9 +87,11 @@
         <% if let Some(req_id) = self.request_id { %>
         <div class="request-id"><%= self.preferences.locale.t("common.request_id") %>: <code><%= req_id %></code></div>
         <% } %>
+        <% if !self.hide_branding { %>
         <div class="powered-by">
             <a href="https://github.com/KilimcininKorOglu/r3v3rs3" target="_blank" rel="noopener noreferrer"><%= self.preferences.locale.t("common.powered_by") %></a>
         </div>
+        <% } %>
     </div>
 </body>
 </html>

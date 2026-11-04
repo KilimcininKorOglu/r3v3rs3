@@ -89,6 +89,7 @@ struct ProxyForm {
     maintenance: MaintenanceForm,
     error_page_theme: Option<ShortId>,
     error_pages: Vec<ErrorPageForm>,
+    hide_branding: bool,
     bot_blocker: bool,
     pub grpc_web: bool,
     pub stream_priority: r3v3rs3_api::priority::StreamPriorityConfig,
@@ -168,6 +169,7 @@ impl ProxyForm {
                     body: p.body.clone(),
                 })
                 .collect(),
+            hide_branding: proxy.hide_branding,
             bot_blocker: proxy.bot_blocker,
             grpc_web: proxy.grpc_web,
             stream_priority: proxy.stream_priority.clone(),
@@ -2255,6 +2257,8 @@ fn error_pages_view(
         <div class="mt-6">
             { theme_select }
             { dynamic_variables_banner(locale) }
+            { toggle(state_input(form, checked, |form, value| form.hide_branding = value), form.hide_branding, locale.t("http_form.hide_branding"), "mt-4") }
+            <p class={HINT_CLASS}>{locale.t("http_form.hide_branding_hint")}</p>
             <div class="mt-4">
                 <ErrorPagesEditor
                     error_pages={form.error_pages.clone()}
@@ -2794,6 +2798,7 @@ fn get_proxy(
         maintenance,
         error_page_theme: form.error_page_theme,
         error_pages,
+        hide_branding: form.hide_branding,
         bot_blocker: form.bot_blocker,
         grpc_web: form.grpc_web,
         stream_priority: form.stream_priority.clone(),

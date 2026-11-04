@@ -151,6 +151,7 @@ async fn http_proxy() -> anyhow::Result<()> {
                     bot_blocker: false,
                     grpc_web: false,
                     stream_priority: Default::default(),
+                    hide_branding: false,
                 })),
                 ..Default::default()
             },
@@ -331,6 +332,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     bot_blocker: false,
                     grpc_web: false,
                     stream_priority: Default::default(),
+                    hide_branding: false,
                 })),
                 ..Default::default()
             },
@@ -428,6 +430,7 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                     bot_blocker: false,
                     grpc_web: false,
                     stream_priority: Default::default(),
+                    hide_branding: false,
                 })),
                 ..Default::default()
             },

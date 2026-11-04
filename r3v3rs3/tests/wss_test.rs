@@ -99,6 +99,7 @@ async fn wss_proxy() -> anyhow::Result<()> {
                     bot_blocker: false,
                     grpc_web: false,
                     stream_priority: Default::default(),
+                    hide_branding: false,
                 })),
                 ..Default::default()
             },

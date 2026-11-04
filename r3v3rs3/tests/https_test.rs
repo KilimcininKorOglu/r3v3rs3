@@ -95,6 +95,7 @@ async fn https_proxy() -> anyhow::Result<()> {
                     bot_blocker: false,
                     grpc_web: false,
                     stream_priority: Default::default(),
+                    hide_branding: false,
                 })),
                 ..Default::default()
             },
@@ -231,6 +232,7 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
                     bot_blocker: false,
                     grpc_web: false,
                     stream_priority: Default::default(),
+                    hide_branding: false,
                 })),
                 ..Default::default()
             },
@@ -348,6 +350,7 @@ async fn https_proxy_automatic_upgrade() -> anyhow::Result<()> {
                     bot_blocker: false,
                     grpc_web: false,
                     stream_priority: Default::default(),
+                    hide_branding: false,
                 })),
                 ..Default::default()
             },
@@ -480,6 +483,7 @@ async fn https_proxy_domain_fronting() -> anyhow::Result<()> {
                     bot_blocker: false,
                     grpc_web: false,
                     stream_priority: Default::default(),
+                    hide_branding: false,
                 })),
                 ..Default::default()
             },

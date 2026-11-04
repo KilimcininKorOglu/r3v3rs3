@@ -322,6 +322,7 @@ pub struct ResponseRewriter {
     /// the cache does not store a response with `Set-Cookie`.
     sticky_cookie: Option<CookieSlot>,
     error_pages: Arc<[CustomErrorPage]>,
+    hide_branding: bool,
     grpc_web: Option<Option<String>>,
     variables: Option<HeaderVariables>,
 }
@@ -372,6 +373,7 @@ impl ResponseRewriter {
                     self.preferences,
                     &self.error_pages,
                     self.variables.as_ref(),
+                    self.hide_branding,
                 )?;
                 self.apply_post_headers(res.headers_mut());
                 Ok(res)
@@ -469,6 +471,7 @@ fn render_error_body(
     error_pages: &[CustomErrorPage],
     variables: Option<&HeaderVariables>,
     req_id: &str,
+    hide_branding: bool,
 ) -> Result<(Vec<u8>, HeaderValue), anyhow::Error> {
     if let Some(custom) = error_pages.iter().find(|p| p.status == code.as_u16()) {
         let status = custom.status;
@@ -501,6 +504,7 @@ fn render_error_body(
             text: status_text(code, preferences.locale),
             preferences,
             request_id: Some(req_id),
+            hide_branding,
         }
         .render_once()?;
         Ok((
@@ -515,6 +519,7 @@ fn error_response(
     preferences: PagePreferences,
     error_pages: &[CustomErrorPage],
     variables: Option<&HeaderVariables>,
+    hide_branding: bool,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let headers = error_headers(&err);
     let code = map_error(err);
@@ -527,7 +532,7 @@ fn error_response(
         }
     };
     let (body, content_type) =
-        render_error_body(code, preferences, error_pages, variables, req_id)?;
+        render_error_body(code, preferences, error_pages, variables, req_id, hide_branding)?;
     let mut res = Response::new(BoxBody::new(
         Full::new(Bytes::from(body)).map_err(Into::into),
     ));
@@ -600,6 +605,11 @@ impl ResponseRewriterBuilder {
         self
     }
 
+    pub fn hide_branding(mut self, hide: bool) -> Self {
+        self.inner.hide_branding = hide;
+        self
+    }
+
     pub fn grpc_web(mut self, origin: Option<String>) -> Self {
         self.inner.grpc_web = Some(origin);
         self
@@ -626,7 +636,7 @@ mod test {
     #[test]
     fn the_error_page_is_never_stored() {
         let err = anyhow::Error::new(super::super::error::ProxyError::NoUpstreamServers);
-        let res = error_response(err, PagePreferences::default(), &[], None).unwrap();
+        let res = error_response(err, PagePreferences::default(), &[], None, false).unwrap();
         assert_eq!(res.status(), 502);
         assert_eq!(res.headers()[CACHE_CONTROL], "no-store");
         assert_eq!(res.headers()[CONTENT_TYPE], "text/html; charset=utf-8");
@@ -679,7 +689,7 @@ mod test {
             status: 502,
             body: "<h1>Custom 502 Bad Gateway</h1>".to_string(),
         }];
-        let res = error_response(err, PagePreferences::default(), &pages, None).unwrap();
+        let res = error_response(err, PagePreferences::default(), &pages, None, false).unwrap();
         assert_eq!(res.status(), 502);
         assert_eq!(res.headers()[CACHE_CONTROL], "no-store");
         assert_eq!(res.headers()[CONTENT_TYPE], "text/html; charset=utf-8");
@@ -702,7 +712,7 @@ mod test {
             client_cert_subject: String::new(),
             client_cert_fingerprint: String::new(),
         };
-        let res = error_response(err, PagePreferences::default(), &pages, Some(&vars)).unwrap();
+        let res = error_response(err, PagePreferences::default(), &pages, Some(&vars), false).unwrap();
         assert_eq!(res.status(), 502);
         let body_bytes = res.into_body().collect().await.unwrap().to_bytes();
         let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
@@ -930,7 +940,7 @@ mod test {
             client_cert_fingerprint: String::new(),
         };
         let err = anyhow::anyhow!(crate::proxy::http::error::ProxyError::NoUpstreamServers);
-        let resp = error_response(err, PagePreferences::default(), &[], Some(&vars))
+        let resp = error_response(err, PagePreferences::default(), &[], Some(&vars), false)
             .expect("must generate error response");
         assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
         assert_eq!(
@@ -944,5 +954,16 @@ mod test {
         let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
         assert!(body_str.contains("req-test-trace-id-12345"));
         assert!(body_str.contains("Request ID"));
+    }
+
+    #[tokio::test]
+    async fn error_response_respects_hide_branding() {
+        use http_body_util::BodyExt;
+        let err = anyhow::Error::new(super::super::error::ProxyError::NoUpstreamServers);
+        let res_hidden = error_response(err, PagePreferences::default(), &[], None, true).unwrap();
+        let bytes = res_hidden.into_body().collect().await.unwrap().to_bytes();
+        let body_str = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(!body_str.contains("Powered by r3v3rs3"));
+        assert!(!body_str.contains("https://github.com/KilimcininKorOglu/r3v3rs3"));
     }
 }

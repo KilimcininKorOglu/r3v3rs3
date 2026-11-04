@@ -414,6 +414,7 @@ In the WebUI, the **Custom Error Pages** section on the HTTP proxy configuration
 protocol = "http"
 vhosts = ["app.example.com"]
 error_page_theme = "a1b2c3d4"
+hide_branding = true
 error_pages = [
   { status = 404, body = "<h1>Page Not Found</h1><p>Sorry, the requested page does not exist on {{host}}.</p>" },
   { status = 502, body = "<h1>Service Unavailable</h1><p>Our backend service is currently down. (Trace: {{request_id}})</p>" },
@@ -430,6 +431,7 @@ Instead of defining custom HTML pages repeatedly per proxy, r3v3rs3 provides a c
 - **Custom Theme Management**: Add new custom themes with unique IDs and custom designs, or edit existing templates (`+ New Theme` in WebUI, or `r3 error-page-theme add` / `r3 error-page-theme update`).
 - **Proxy Theme Association**: Assign an error page theme to any proxy with `error_page_theme = "short_id"` via WebUI, CLI (`r3 proxy update <id> ...`), or REST API.
 - **Granular Per-Proxy Overrides**: Any proxy-specific `error_pages` entry takes precedence over the assigned theme for that specific status code.
+- **Suppress Software Branding**: Set `hide_branding = true` on the HTTP proxy to suppress the "Powered by r3v3rs3" link on default error pages.
 - **Reset to Defaults**: Built-in themes can be restored to default templates anytime via WebUI, CLI (`r3 error-page-theme reset-defaults`), or MCP (`reset_error_page_themes`).
 
 ### Dynamic Template Variables

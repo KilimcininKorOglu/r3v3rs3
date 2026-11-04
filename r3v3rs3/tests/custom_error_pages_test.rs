@@ -165,3 +165,44 @@ async fn test_upstream_error_page_uses_request_preferences() -> anyhow::Result<(
     })
     .await
 }
+
+#[tokio::test]
+async fn test_error_page_hides_software_branding_when_enabled() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let broken_upstream: Url = "http://127.0.0.1:1".parse()?;
+    let proxy_with_branding = HttpProxy {
+        routes: vec![http_route("/branded", broken_upstream.as_str(), None)],
+        hide_branding: false,
+        ..Default::default()
+    };
+    let proxy_without_branding = HttpProxy {
+        routes: vec![http_route("/unbranded", broken_upstream.as_str(), None)],
+        hide_branding: true,
+        ..Default::default()
+    };
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &port)])
+        .proxies(vec![
+            http_proxy_entry("test1", "http", proxy_with_branding),
+            http_proxy_entry("test2", "http", proxy_without_branding),
+        ])
+        .build();
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::new();
+
+        let resp_branded = client.get(port.http_url("/branded")).send().await?;
+        assert_eq!(resp_branded.status(), 523);
+        let body_branded = resp_branded.text().await?;
+        assert!(body_branded.contains("Powered by r3v3rs3"));
+        assert!(body_branded.contains("https://github.com/KilimcininKorOglu/r3v3rs3"));
+
+        let resp_unbranded = client.get(port.http_url("/unbranded")).send().await?;
+        assert_eq!(resp_unbranded.status(), 523);
+        let body_unbranded = resp_unbranded.text().await?;
+        assert!(!body_unbranded.contains("Powered by r3v3rs3"));
+        assert!(!body_unbranded.contains("https://github.com/KilimcininKorOglu/r3v3rs3"));
+        Ok(())
+    })
+    .await
+}

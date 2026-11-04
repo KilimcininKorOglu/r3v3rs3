@@ -414,6 +414,7 @@ WebUI üzerinde, HTTP proxy yapılandırma sayfasındaki **Özel Hata Sayfaları
 protocol = "http"
 vhosts = ["app.example.com"]
 error_page_theme = "a1b2c3d4"
+hide_branding = true
 error_pages = [
   { status = 404, body = "<h1>{{host}} üzerinde Sayfa Bulunamadı</h1><p>Aradığınız sayfa mevcut değil.</p>" },
   { status = 502, body = "<h1>Hizmet Kullanılamıyor</h1><p>Sunucularımız şu anda yanıt vermiyor. (İzleme: {{request_id}})</p>" },
@@ -430,6 +431,7 @@ Proxy düzeyinde her seferinde ayrı ayrı HTML sayfaları girmek yerine r3v3rs3
 - **Özel Tema Yönetimi**: WebUI üzerinden `+ Yeni Tema` modal'ı veya CLI (`r3 error-page-theme add` / `r3 error-page-theme update`) ile benzersiz kimlikli özel temalar oluşturma ve düzenleme.
 - **Proxy Tema Ataması**: `error_page_theme = "short_id"` ile herhangi bir proxy'ye WebUI, CLI (`r3 proxy update <id> ...`) veya REST API üzerinden tek tıkla hata sayfası teması bağlanabilir.
 - **Proxy Bazlı İnce Ayar / Geçersiz Kılma**: Proxy yapılandırmasında tanımlanan özel `error_pages` girdileri, o durum kodu için atanan temayı geçersiz kılarak öncelik alır.
+- **Yazılım İmzasını Gizleme**: HTTP proxy üzerinde `hide_branding = true` ayarlanarak varsayılan hata sayfalarındaki "Powered by r3v3rs3" bağlantısı gizlenebilir.
 - **Varsayılanlara Sıfırlama**: WebUI, CLI (`r3 error-page-theme reset-defaults`) veya MCP (`reset_error_page_themes`) üzerinden yerleşik temalar her zaman varsayılan şablonlara geri döndürülebilir.
 
 ### Dinamik Şablon Değişkenleri

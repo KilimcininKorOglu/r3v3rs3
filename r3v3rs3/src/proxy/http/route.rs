@@ -141,11 +141,22 @@ impl Router {
                     geoip: registries.geoip.clone(),
                     bot_blocker: route.bot_blocker.unwrap_or(http.bot_blocker),
                     grpc_web: route.grpc_web.unwrap_or(http.grpc_web),
+                    hide_branding: http.hide_branding,
                     stream_priority,
                 });
             }
         }
         Self { routes }
+    }
+
+    /// Returns true if the first route matching the host disables software branding.
+    pub fn is_branding_hidden(&self, host: Option<&str>) -> bool {
+        for route in &self.routes {
+            if route.filter.matches_host(host) {
+                return route.hide_branding;
+            }
+        }
+        false
     }
 
     /// Returns the custom error pages of the first route matching the host, or empty if none.
@@ -400,6 +411,7 @@ pub struct FilteredRoute {
     pub geoip: Arc<crate::proxy::geoip::GeoIpResolver>,
     pub bot_blocker: bool,
     pub grpc_web: bool,
+    pub hide_branding: bool,
     pub stream_priority: Arc<r3v3rs3_api::priority::StreamPriorityConfig>,
 }
 

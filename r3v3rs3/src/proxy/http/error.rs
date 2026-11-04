@@ -210,6 +210,7 @@ pub struct ErrorTemplate<'a> {
     pub text: &'static str,
     pub preferences: PagePreferences,
     pub request_id: Option<&'a str>,
+    pub hide_branding: bool,
 }
 
 #[cfg(test)]

@@ -1205,6 +1205,7 @@ fn no_route_fallback<B>(
     std::net::IpAddr,
 ) {
     let error_pages = shared.router.find_error_pages(request_host.as_deref());
+    let hide_branding = shared.router.is_branding_hidden(request_host.as_deref());
     let client_cert = info.client_cert.cloned().unwrap_or_default();
     let request_id = trace::resolve_request_id(headers);
     let fallback_vars = header_rules::HeaderVariables {
@@ -1224,6 +1225,7 @@ fn no_route_fallback<B>(
         ProxiedRequest::Err(ProxyError::NoRouteFound),
         response_rewriter
             .error_pages(error_pages)
+            .hide_branding(hide_branding)
             .variables(fallback_vars),
         None,
         None,
@@ -2086,6 +2088,7 @@ fn configure_response_rewriter<B>(
         .https_port(route.https_port)
         .quic_port(route.quic_port)
         .error_pages(route.error_pages.clone())
+        .hide_branding(route.hide_branding)
         .compression(route.compression.clone().map(|config| {
             ResponseCompression::new(config, req.method(), req.uri().path(), req.headers())
         }))

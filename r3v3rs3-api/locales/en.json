@@ -733,6 +733,8 @@
   "http_form.fixed_status": "Status",
   "http_form.h2c": "Use HTTP/2 for Plain HTTP Servers (h2c)",
   "http_form.h2c_hint": "HTTPS servers negotiate HTTP/2 or HTTP/1.1 automatically. Plain HTTP servers receive HTTP/1.1, unless this option is on. Turn it on only when every plain HTTP server of this proxy accepts HTTP/2 with prior knowledge. WebSocket and other upgrade requests always use HTTP/1.1.",
+  "http_form.hide_branding": "Hide software branding on error pages",
+  "http_form.hide_branding_hint": "When enabled, hides the 'Powered by r3v3rs3' link on default error pages.",
   "http_form.header_rules": "Header Rules",
   "http_form.header_rules_hint": "One rule per line: set Name: value, append Name: value or remove Name. Values can use {client_ip}, {host}, {scheme}, {request_id}, {route}, {client_cert_subject} and {client_cert_fingerprint}. Write {{ and }} for a literal brace. Request rules change the request to the upstream server. Response rules change the upstream response.",
   "http_form.error_pages": "Custom Error Pages",

@@ -733,6 +733,8 @@
   "http_form.fixed_status": "Durum Kodu",
   "http_form.h2c": "Düz HTTP Sunucuları için HTTP/2 Kullan (h2c)",
   "http_form.h2c_hint": "HTTPS sunucularında HTTP/2 veya HTTP/1.1 otomatik olarak seçilir. Bu seçenek kapalıyken düz HTTP sunucularına HTTP/1.1 ile bağlanılır. Bu seçeneği yalnız proxy'nin bütün düz HTTP sunucuları prior knowledge ile HTTP/2 kabul ediyorsa açın. WebSocket ve diğer upgrade istekleri her zaman HTTP/1.1 kullanır.",
+  "http_form.hide_branding": "Hata sayfalarında yazılım imzasını gizle",
+  "http_form.hide_branding_hint": "Etkinleştirildiğinde, varsayılan hata sayfalarında 'Powered by r3v3rs3' bağlantısını gizler.",
   "http_form.header_rules": "Header Kuralları",
   "http_form.header_rules_hint": "Her satıra bir kural yazın: set Name: value, append Name: value veya remove Name. Değerlerde {client_ip}, {host}, {scheme}, {request_id}, {route}, {client_cert_subject} ve {client_cert_fingerprint} kullanılabilir. Süslü parantez yazmak için {{ ve }} kullanın. İstek kuralları upstream sunucuya giden isteğe, yanıt kuralları upstream sunucunun yanıtına uygulanır.",
   "http_form.error_pages": "Özel Hata Sayfaları",

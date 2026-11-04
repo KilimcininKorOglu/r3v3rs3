@@ -315,6 +315,9 @@ pub struct HttpProxy {
     /// Custom error pages for HTTP status codes (e.g. 404, 502) replacing default error responses.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub error_pages: Vec<CustomErrorPage>,
+    /// When true, hides the software branding footer link on default error pages.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hide_branding: bool,
     /// When true, blocks automated AI crawlers, scrapers and aggressive bots.
     #[serde(default, skip_serializing_if = "is_false")]
     pub bot_blocker: bool,
