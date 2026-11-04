@@ -927,7 +927,13 @@ impl Storage for SqliteStorage {
 
     async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error> {
         let mut accounts = self.load_accounts().await?;
-        let (response, updated) = account::verify_and_update(&mut accounts, request)?;
+        let (result, accounts) = tokio::task::spawn_blocking(move || {
+            let res = account::verify_and_update(&mut accounts, request);
+            (res, accounts)
+        })
+        .await
+        .map_err(|_| Error::InvalidLoginCredentials)?;
+        let (response, updated) = result?;
         if updated {
             self.save_accounts(&accounts).await?;
         }

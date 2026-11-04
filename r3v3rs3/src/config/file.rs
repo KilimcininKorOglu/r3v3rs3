@@ -915,7 +915,13 @@ impl Storage for FileStorage {
             error!(%err, "failed to load accounts: {err}");
             Error::InvalidLoginCredentials
         })?;
-        let (response, updated) = account::verify_and_update(&mut accounts, request)?;
+        let (result, accounts) = tokio::task::spawn_blocking(move || {
+            let res = account::verify_and_update(&mut accounts, request);
+            (res, accounts)
+        })
+        .await
+        .map_err(|_| Error::InvalidLoginCredentials)?;
+        let (response, updated) = result?;
         if updated {
             let _ = self.save_accounts_impl(&accounts).await;
         }
