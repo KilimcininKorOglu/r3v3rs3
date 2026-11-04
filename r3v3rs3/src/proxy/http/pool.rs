@@ -35,7 +35,6 @@ use super::affinity::{Affinity, CookieSlot};
 use super::body_limit::BodyLimit;
 use super::mirror::Mirror;
 use super::rewrite::Rewrite;
-use super::rewriter::ResponseRewriter;
 
 type ProxyBody = BoxBody<Bytes, anyhow::Error>;
 type ProxyClient = Client<HttpsConnector<HttpConnector<DnsResolver>>, ProxyBody>;
@@ -663,7 +662,7 @@ fn is_dot_segment(segment: &str) -> bool {
     )
 }
 
-/// Logs a failed request, and turns the error into the error response for the client.
+/// Logs a failed request, and returns the result.
 fn finish(
     result: Result<Response<ProxyBody>, SendError>,
     proxy: Option<&str>,
@@ -678,7 +677,7 @@ fn finish(
             classify_upstream_error(err.as_ref()),
         );
     }
-    ResponseRewriter::default().map_response(result)
+    result
 }
 
 fn classify_upstream_error(

@@ -124,3 +124,38 @@ async fn test_custom_error_page_escapes_host_xss() -> anyhow::Result<()> {
     })
     .await
 }
+
+#[tokio::test]
+async fn test_upstream_error_page_uses_request_preferences() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let broken_upstream: Url = "http://127.0.0.1:1".parse()?;
+    let proxy = HttpProxy {
+        routes: vec![http_route("/broken", broken_upstream.as_str(), None)],
+        ..Default::default()
+    };
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &port)])
+        .proxies(vec![http_proxy_entry("test", "http", proxy)])
+        .build();
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(port.http_url("/broken"))
+            .header(reqwest::header::COOKIE, "r3v3rs3_lang=tr; r3v3rs3_theme=dark")
+            .send()
+            .await?;
+        assert_eq!(resp.status(), 502);
+        let body = resp.text().await?;
+        assert!(
+            body.contains(r#"<html lang="tr" data-theme="dark">"#),
+            "{body}"
+        );
+        assert!(
+            body.contains(r3v3rs3_api::i18n::Locale::Tr.t("error_page.502")),
+            "{body}"
+        );
+        Ok(())
+    })
+    .await
+}
