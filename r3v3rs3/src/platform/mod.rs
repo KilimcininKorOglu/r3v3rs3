@@ -578,16 +578,21 @@ impl Platform {
         now: u64,
     ) -> anyhow::Result<AppEntry> {
         let current = self.app(id).await?;
-        request.spec.preview_of = current.spec.preview_of;
+        request.spec.preview_of = current.spec.preview_of.clone();
         request.spec.replica_of = current.spec.replica_of;
         let hook = self.check_request_for(Some(id), &request).await?;
-        // The containers of the deployments run on the old target.
-        if request.target != current.target && !self.store.deployments(id, 1).await?.is_empty() {
-            return Err(Error::AppTargetFixed {
-                name: current.name.to_string(),
+        let _lock = if request.target != current.target {
+            let lock = self.lock_app(&current)?;
+            if !self.store.deployments(id, 1).await?.is_empty() {
+                return Err(Error::AppTargetFixed {
+                    name: current.name.to_string(),
+                }
+                .into());
             }
-            .into());
-        }
+            Some(lock)
+        } else {
+            None
+        };
         let app = AppEntry {
             id,
             name: request.name,
@@ -2204,6 +2209,39 @@ mod tests {
 
         let updated = platform.update_app(shop.id, malicious_request, 2).await?;
         assert!(updated.spec.replica_of.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_app_target_requires_app_lock_when_busy() -> anyhow::Result<()> {
+        let (command, _) = mpsc::channel(1);
+        let config = PlatformConfig {
+            agent_port: Some(0),
+            ..Default::default()
+        };
+        let (platform, _, _dir) = platform_with(&config, command).await?;
+        let platform = Arc::new(platform);
+        let edge = platform
+            .add_target(
+                r3v3rs3_api::platform::TargetRequest {
+                    name: "edge".parse().unwrap(),
+                    region: None,
+                },
+                1,
+            )
+            .await?
+            .target;
+        let shop = platform.add_app(request("shop"), 1).await?;
+        let lock = platform.lock_app(&shop)?;
+
+        let mut moved = request("shop");
+        moved.target = edge.id;
+        let err = platform.update_app(shop.id, moved.clone(), 2).await.unwrap_err();
+        assert!(matches!(api_error(err), Error::AppBusy { .. }));
+
+        drop(lock);
+        let updated = platform.update_app(shop.id, moved, 3).await?;
+        assert_eq!(updated.target, edge.id);
         Ok(())
     }
 
