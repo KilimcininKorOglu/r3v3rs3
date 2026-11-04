@@ -38,6 +38,10 @@ impl fmt::Display for ShortId {
     }
 }
 
+fn is_valid_short_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 8 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
 impl FromStr for ShortId {
     type Err = Error;
 
@@ -47,7 +51,7 @@ impl FromStr for ShortId {
             return Ok(ShortId(id));
         }
         let str = s.to_ascii_lowercase();
-        if !str.is_ascii() || str.len() > 8 {
+        if !is_valid_short_id(&str) {
             return Err(Error::InvalidShortId { id: s.to_string() });
         }
         let bytes = str.as_bytes();
@@ -84,5 +88,15 @@ mod test {
     fn parse_hyphen_id() {
         let id = ShortId::from_str("djs-vjd").unwrap();
         assert_eq!(id.to_string(), "djs-vjd");
+    }
+
+    #[test]
+    fn reject_characters_outside_alphanumeric_and_hyphen() {
+        assert!(ShortId::from_str("/abc-def").is_err());
+        assert!(ShortId::from_str("abc/def").is_err());
+        assert!(ShortId::from_str("abc.def").is_err());
+        assert!(ShortId::from_str("abc?def").is_err());
+        assert!(ShortId::from_str("").is_err());
+        assert!(ShortId::from_str("toolongid").is_err());
     }
 }
