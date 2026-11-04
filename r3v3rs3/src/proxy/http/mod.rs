@@ -77,7 +77,7 @@ mod error;
 pub(crate) mod filter;
 mod fixed;
 pub(crate) mod grpc_web;
-mod header_rules;
+pub(crate) mod header_rules;
 pub(crate) mod hyper_tls;
 mod mirror;
 mod page;

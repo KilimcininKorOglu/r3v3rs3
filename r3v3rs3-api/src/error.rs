@@ -8,6 +8,8 @@ use crate::{id::ShortId, multiaddr::Multiaddr};
 pub struct ErrorMessage {
     pub message: String,
     pub error: Option<Error>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Error, Serialize, Deserialize, ToSchema)]

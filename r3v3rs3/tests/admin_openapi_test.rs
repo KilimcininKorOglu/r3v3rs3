@@ -1,4 +1,5 @@
 use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
+use r3v3rs3_api::error::ErrorMessage;
 use reqwest::header::{CONTENT_TYPE, COOKIE};
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
@@ -319,7 +320,17 @@ async fn openapi_document_and_swagger_ui_require_a_session() -> anyhow::Result<(
         wait_for_listener(addr).await?;
         let client = Client::new();
 
-        assert_eq!(status(&client, addr, "/api/openapi.json", None).await?, 401);
+        let unauth_res = client.get(format!("http://{addr}/api/openapi.json")).send().await?;
+        assert_eq!(unauth_res.status(), StatusCode::UNAUTHORIZED);
+        let req_id_header = unauth_res
+            .headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        assert!(req_id_header.is_some());
+        let err_json: ErrorMessage = unauth_res.json().await?;
+        assert_eq!(err_json.request_id, req_id_header);
+
         assert_eq!(status(&client, addr, "/api/docs/", None).await?, 401);
 
         let cookie = admin_session_cookie(addr).await?;

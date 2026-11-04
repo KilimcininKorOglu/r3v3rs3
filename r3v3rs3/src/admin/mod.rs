@@ -10,7 +10,7 @@ use auth::LoginAttempts;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{
     HeaderName, HeaderValue, StatusCode,
-    header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, RETRY_AFTER},
+    header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE, RETRY_AFTER},
 };
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json, middleware};
@@ -371,6 +371,7 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
     Ok(api
         .merge(mcp_router)
         .merge(docs)
+        .layer(middleware::from_fn(request_id_middleware))
         .layer(CompressionLayer::new())
         // Every admin response carries the config of the server, so no cache may keep it. The
         // layer sits above the fallback, which sets its own Cache-Control for the WebUI files.
@@ -378,6 +379,59 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .layer(middleware::map_response(no_store))
         .fallback(static_file::fallback)
         .with_state(app_state))
+}
+
+pub const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
+
+async fn request_id_middleware(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let request_id = extract_or_generate_request_id(req.headers());
+    let mut res = next.run(req).await;
+    if let Ok(val) = HeaderValue::from_str(&request_id) {
+        res.headers_mut().insert(X_REQUEST_ID, val);
+    }
+    if res.status().is_client_error() || res.status().is_server_error() {
+        inject_error_request_id(res, &request_id).await
+    } else {
+        res
+    }
+}
+
+fn extract_or_generate_request_id(headers: &axum::http::HeaderMap) -> String {
+    match headers.get(&X_REQUEST_ID).and_then(|v| v.to_str().ok()) {
+        Some(s) if !s.trim().is_empty() => s.trim().to_string(),
+        _ => crate::proxy::http::header_rules::new_request_id(),
+    }
+}
+
+async fn inject_error_request_id(
+    res: axum::response::Response,
+    request_id: &str,
+) -> axum::response::Response {
+    let is_json = res
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map_or(false, |ct| ct.starts_with("application/json"));
+    if !is_json {
+        return res;
+    }
+    let (parts, body) = res.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, 64 * 1024).await else {
+        return Response::from_parts(parts, axum::body::Body::empty());
+    };
+    let Ok(mut err_msg) = serde_json::from_slice::<ErrorMessage>(&bytes) else {
+        return Response::from_parts(parts, axum::body::Body::from(bytes));
+    };
+    err_msg.request_id = Some(request_id.to_string());
+    let Ok(new_body) = serde_json::to_vec(&err_msg) else {
+        return Response::from_parts(parts, axum::body::Body::from(bytes));
+    };
+    let mut res = Response::from_parts(parts, axum::body::Body::from(new_body));
+    res.headers_mut().remove(CONTENT_LENGTH);
+    res
 }
 
 async fn map_extractor_rejections(
@@ -395,7 +449,7 @@ async fn map_extractor_rejections(
 
     let is_text_plain = res
         .headers()
-        .get(axum::http::header::CONTENT_TYPE)
+        .get(CONTENT_TYPE)
         .and_then(|val| val.to_str().ok())
         .is_some_and(|ct| ct.starts_with("text/plain"));
 
@@ -414,6 +468,7 @@ async fn map_extractor_rejections(
         Json(ErrorMessage {
             message,
             error: None,
+            request_id: None,
         }),
     )
         .into_response()
@@ -1279,7 +1334,15 @@ impl IntoResponse for AppError {
                 error = Some(err);
             }
         }
-        (code, Json(ErrorMessage { message, error })).into_response()
+        (
+            code,
+            Json(ErrorMessage {
+                message,
+                error,
+                request_id: None,
+            }),
+        )
+            .into_response()
     }
 }
 

@@ -131,6 +131,7 @@ pub fn login() -> Html {
                     Err(err) => form.error.set(Some(ErrorMessage {
                         message: err,
                         error: None,
+                        request_id: None,
                     })),
                 }
             });
@@ -288,6 +289,7 @@ async fn send_login(username: String, method: LoginMethod) -> ApiResult<LoginRes
             return ApiResult::Err(ErrorMessage {
                 message: err.to_string(),
                 error: None,
+                request_id: None,
             });
         }
     };
@@ -297,6 +299,7 @@ async fn send_login(username: String, method: LoginMethod) -> ApiResult<LoginRes
             return ApiResult::Err(ErrorMessage {
                 message: err.to_string(),
                 error: None,
+                request_id: None,
             });
         }
     };
@@ -306,6 +309,7 @@ async fn send_login(username: String, method: LoginMethod) -> ApiResult<LoginRes
             Err(err) => ApiResult::Err(ErrorMessage {
                 message: err.to_string(),
                 error: None,
+                request_id: None,
             }),
         };
     }
@@ -314,6 +318,7 @@ async fn send_login(username: String, method: LoginMethod) -> ApiResult<LoginRes
         Err(err) => ApiResult::Err(ErrorMessage {
             message: err.to_string(),
             error: None,
+            request_id: None,
         }),
     }
 }
