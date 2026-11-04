@@ -1799,6 +1799,14 @@ async fn capture_mysql_wal(
     Ok((filename, dump))
 }
 
+fn mongodb_uri(user: &str, password: &str) -> String {
+    let mut uri = url::Url::parse("mongodb://127.0.0.1:27017/?authSource=admin")
+        .expect("static url is valid");
+    let _ = uri.set_username(user);
+    let _ = uri.set_password(Some(password));
+    uri.to_string()
+}
+
 async fn capture_mongodb_oplog(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
@@ -1810,15 +1818,11 @@ async fn capture_mongodb_oplog(
         .exec_capture(
             container,
             vec![
-                "mongodump".into(),
-                "--archive".into(),
-                "-u".into(),
-                info.user.clone(),
-                "-p".into(),
-                password.into(),
-                "--oplog".into(),
+                "sh".into(),
+                "-c".into(),
+                "mongodump --uri=\"$MONGO_URI\" --archive --oplog".into(),
             ],
-            Vec::new(),
+            vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password))],
         )
         .await
         .unwrap_or_default();
@@ -2004,14 +2008,11 @@ fn dump_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Result<
         },
         "mongodb" => DumpPlan {
             command: vec![
-                "mongodump".into(),
-                "--archive".into(),
-                "-u".into(),
-                info.user.clone(),
-                "-p".into(),
-                password.into(),
+                "sh".into(),
+                "-c".into(),
+                "mongodump --uri=\"$MONGO_URI\" --archive".into(),
             ],
-            env: Vec::new(),
+            env: vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password))],
             file: None,
         },
         "redis" => DumpPlan {
@@ -2062,15 +2063,11 @@ fn restore_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Resu
         "mongodb" => RestorePlan {
             upload: Some(format!("{RESTORE_DIR}/dump.archive")),
             command: vec![
-                "mongorestore".into(),
-                format!("--archive={RESTORE_DIR}/dump.archive"),
-                "-u".into(),
-                info.user.clone(),
-                "-p".into(),
-                password.into(),
-                "--drop".into(),
+                "sh".into(),
+                "-c".into(),
+                format!("mongorestore --uri=\"$MONGO_URI\" --archive={RESTORE_DIR}/dump.archive --drop"),
             ],
-            env: Vec::new(),
+            env: vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password))],
         },
         // Redis takes no upload: the restore writes the dump into the data volume and
         // restarts the server, which loads it.
@@ -2935,6 +2932,38 @@ mod tests {
         assert_eq!(plan.command, ["pg_dump", "-U", "postgres", "postgres"]);
         assert_eq!(plan.env, ["PGPASSWORD=pass"]);
         assert!(plan.file.is_none());
+    }
+
+    #[test]
+    fn mongodb_dumps_and_restores_without_plaintext_password_in_command() {
+        catalog();
+        let info = r3v3rs3_api::platform::engine_info("mongodb").unwrap();
+        let secret = "super:secret@pass";
+        let dump = dump_plan("mongodb", &info, secret).unwrap();
+        assert_eq!(
+            dump.command,
+            ["sh", "-c", "mongodump --uri=\"$MONGO_URI\" --archive"]
+        );
+        assert!(!dump.command.iter().any(|arg| arg.contains(secret)));
+        assert_eq!(
+            dump.env,
+            [format!("MONGO_URI={}", mongodb_uri(&info.user, secret))]
+        );
+
+        let restore = restore_plan("mongodb", &info, secret).unwrap();
+        assert_eq!(
+            restore.command,
+            [
+                "sh",
+                "-c",
+                "mongorestore --uri=\"$MONGO_URI\" --archive=/tmp/r3v3rs3-restore/dump.archive --drop"
+            ]
+        );
+        assert!(!restore.command.iter().any(|arg| arg.contains(secret)));
+        assert_eq!(
+            restore.env,
+            [format!("MONGO_URI={}", mongodb_uri(&info.user, secret))]
+        );
     }
 
     #[test]
