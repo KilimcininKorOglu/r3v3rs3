@@ -190,7 +190,7 @@ pub struct StartArgs {
 pub struct AddUserArgs {
     pub name: String,
 
-    #[clap(long, short, value_name = "PASSWORD")]
+    #[clap(long, short, value_name = "PASSWORD", env = "R3V3RS3_PASSWORD")]
     pub password: Option<String>,
 
     #[clap(long, short, value_name = "DIR", env = "R3V3RS3_CONFIG_DIR")]

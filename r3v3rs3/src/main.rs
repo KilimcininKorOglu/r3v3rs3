@@ -426,14 +426,23 @@ async fn create_account(
         .await?)
 }
 
+fn read_password(password: Option<String>) -> anyhow::Result<String> {
+    if let Some(password) = password {
+        return Ok(password);
+    }
+    if !std::io::stdin().is_terminal() {
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        return Ok(line.trim_end_matches(['\r', '\n']).to_string());
+    }
+    Ok(rpassword::prompt_password("password?: ")?)
+}
+
 async fn add_user(mut args: r3v3rs3::args::AddUserArgs) -> anyhow::Result<()> {
     r3v3rs3_api::auth::validate_username(&args.name)?;
     let config_dir = get_config_dir(args.config_dir.take())?;
     let local = read_local_config(&config_dir).await?;
-    let password = match args.password.take() {
-        Some(password) => password,
-        None => rpassword::prompt_password("password?: ")?,
-    };
+    let password = read_password(args.password.take())?;
     if password.chars().count() < MIN_PASSWORD_LENGTH {
         anyhow::bail!("the password needs at least {MIN_PASSWORD_LENGTH} characters");
     }

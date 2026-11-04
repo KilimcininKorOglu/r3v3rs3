@@ -252,7 +252,7 @@ create_admin() {
 	if [ -z "$password" ]; then
 		password=$(generate_password)
 	fi
-	if ! "$BIN" add-user --config-dir "$CONFIG_DIR" --password "$password" admin </dev/null; then
+	if ! printf '%s\n' "$password" | R3V3RS3_PASSWORD="$password" "$BIN" add-user --config-dir "$CONFIG_DIR" admin; then
 		die "cannot create the admin account"
 	fi
 	account_created=true
