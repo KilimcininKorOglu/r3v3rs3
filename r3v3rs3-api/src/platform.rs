@@ -192,10 +192,10 @@ pub struct SftpConfig {
     /// Remote directory path where backups will be stored.
     pub path: String,
     /// Written only: password for authentication (stored sealed).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub password: String,
     /// Written only: SSH private key for authentication (stored sealed).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub key: String,
 }
 
@@ -3258,5 +3258,25 @@ EMPTY_VAL=
         assert!(invalid_sched.validate().is_err());
         invalid_sched.schedule = "60 * * * *".to_string(); // minute > 59
         assert!(invalid_sched.validate().is_err());
+    }
+
+    #[test]
+    fn sftp_config_omits_empty_secrets_when_serializing() {
+        let sftp = SftpConfig {
+            host: "backup.example.com".to_string(),
+            port: 22,
+            user: "backupuser".to_string(),
+            path: "/backups".to_string(),
+            password: String::new(),
+            key: String::new(),
+        };
+        let json = serde_json::to_string(&sftp).unwrap();
+        assert!(!json.contains("password"));
+        assert!(!json.contains("key"));
+
+        let deserialized: SftpConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.host, "backup.example.com");
+        assert_eq!(deserialized.password, "");
+        assert_eq!(deserialized.key, "");
     }
 }

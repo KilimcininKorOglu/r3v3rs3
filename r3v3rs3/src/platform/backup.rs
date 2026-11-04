@@ -348,16 +348,11 @@ impl Platform {
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         sftp: &mut Option<r3v3rs3_api::platform::SftpConfig>,
     ) -> anyhow::Result<()> {
-        let secret = sftp
+        let (key, password) = sftp
             .as_mut()
-            .map(|s| {
-                if !s.key.is_empty() {
-                    std::mem::take(&mut s.key)
-                } else {
-                    std::mem::take(&mut s.password)
-                }
-            })
+            .map(|s| (std::mem::take(&mut s.key), std::mem::take(&mut s.password)))
             .unwrap_or_default();
+        let secret = if !key.is_empty() { key } else { password };
         match (sftp.is_some(), secret.is_empty()) {
             (true, false) => {
                 let sealed = hex::encode(self.keys().seal(SFTP_SECRET_AAD, secret.as_bytes())?);
