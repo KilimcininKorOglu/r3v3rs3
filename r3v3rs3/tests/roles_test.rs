@@ -58,6 +58,7 @@ fn proxy_entry(id: &str, upstream: &str) -> ProxyEntry {
         id: id.parse().unwrap(),
         proxy: http_proxy(upstream),
         source: None,
+        status: None,
     }
 }
 
@@ -210,11 +211,13 @@ async fn a_restricted_editor_cannot_overlap_hosts_of_an_unseen_proxy() -> anyhow
                 id: web_id,
                 proxy: web_proxy,
                 source: None,
+                status: None,
             },
             ProxyEntry {
                 id: other_id,
                 proxy: other_proxy,
                 source: None,
+                status: None,
             },
         ])
         .account("admin", "admin-secret", Role::Admin, None)
@@ -272,11 +275,13 @@ async fn a_restricted_editor_cannot_take_tcp_port_of_an_unseen_proxy() -> anyhow
                 id: web_id,
                 proxy: tcp_proxy_with_port(p1),
                 source: None,
+                status: None,
             },
             ProxyEntry {
                 id: other_id,
                 proxy: tcp_proxy_with_port(p2),
                 source: None,
+                status: None,
             },
         ])
         .account("admin", "admin-secret", Role::Admin, None)

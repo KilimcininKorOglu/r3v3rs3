@@ -79,6 +79,7 @@ async fn a_worker_serves_the_listeners_of_the_master() -> anyhow::Result<()> {
         proxies: vec![ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: tcp_proxy_to(&upstream_port.socket_addr()),
         }],
         access_lists: Vec::<AccessListEntry>::new(),
@@ -227,6 +228,7 @@ async fn the_supervisor_serves_the_ports_through_a_worker() -> anyhow::Result<()
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: tcp_proxy_to(&upstream_port.socket_addr()),
         }])
         .build();

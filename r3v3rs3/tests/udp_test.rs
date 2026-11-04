@@ -33,10 +33,12 @@ fn udp_storage(proxy_port: &TestPort, upstream_port: &TestPort, idle: Duration) 
                 listen: proxy_port.multiaddr_udp(),
                 opts: Default::default(),
             },
+            status: None,
         }])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Udp(UdpProxy {
@@ -141,10 +143,12 @@ fn udp_storage_with_size(
                 listen: proxy_port.multiaddr_udp(),
                 opts: Default::default(),
             },
+            status: None,
         }])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Udp(UdpProxy {

@@ -1288,10 +1288,11 @@ impl ServerState {
     fn publish_proxies(&self) {
         let entries = self
             .proxies
-            .entries()
-            .cloned()
-            .map(|mut entry| {
+            .contexts()
+            .map(|ctx| {
+                let mut entry = ctx.entry.clone();
                 super::credentials::mask_proxy(&mut entry.proxy);
+                entry.status = Some(super::rpc::proxies::proxy_status(self, ctx));
                 entry
             })
             .collect::<Vec<_>>();

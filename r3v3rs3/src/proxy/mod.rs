@@ -206,6 +206,7 @@ impl PortContext {
                     listen: Multiaddr::default(),
                     opts: Default::default(),
                 },
+                status: None,
             },
             kind: PortContextKind::Reserved,
         }

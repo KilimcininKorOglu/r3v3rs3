@@ -245,6 +245,7 @@ mod tests {
                     listen: "/ip4/127.0.0.1/tcp/0".parse().unwrap(),
                     opts: Default::default(),
                 },
+                status: None,
             }])
             .await
             .unwrap();

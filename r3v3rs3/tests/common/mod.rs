@@ -555,6 +555,7 @@ pub fn port_entry(id: &str, listen: Multiaddr) -> PortEntry {
             listen,
             opts: Default::default(),
         },
+        status: None,
     }
 }
 
@@ -654,6 +655,7 @@ pub fn proxy_entry(id: &str, port_id: &str, kind: ProxyKind) -> ProxyEntry {
             ..Default::default()
         },
         source: None,
+        status: None,
     }
 }
 

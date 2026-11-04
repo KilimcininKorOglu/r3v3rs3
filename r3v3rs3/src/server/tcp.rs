@@ -231,6 +231,7 @@ mod tests {
                 listen: "/ip4/127.0.0.1/udp/5353".parse().unwrap(),
                 opts: Default::default(),
             },
+            status: None,
         };
         let mut ports =
             [PortContext::new(entry, &Default::default(), &Default::default()).unwrap()];

@@ -45,6 +45,7 @@ fn make_entry(upstream: &str, maintenance: MaintenanceConfig) -> ProxyEntry {
     ProxyEntry {
         id: "px1".parse().unwrap(),
         source: None,
+        status: None,
         proxy: r3v3rs3_api::proxy::Proxy {
             ports: vec!["p1".parse().unwrap()],
             kind: ProxyKind::Http(Box::new(HttpProxy {

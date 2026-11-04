@@ -215,10 +215,10 @@ fn dn_attribute_matches(val: &str, pattern: &str) -> bool {
     }
     let val_lower = val_trimmed.to_lowercase();
     let pat_lower = pat_trimmed.to_lowercase();
-    if let Some(rest) = val_lower.strip_prefix(&pat_lower) {
-        if rest.starts_with(|c: char| c.is_whitespace() || c == ',' || c == '.' || c == '-') {
-            return true;
-        }
+    if let Some(rest) = val_lower.strip_prefix(&pat_lower)
+        && rest.starts_with(|c: char| c.is_whitespace() || c == ',' || c == '.' || c == '-')
+    {
+        return true;
     }
     false
 }

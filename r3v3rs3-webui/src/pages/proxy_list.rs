@@ -216,10 +216,10 @@ fn bulk_delete_callback(
         dialog::confirm_then(locale, question, async move {
             let mut failed = Vec::new();
             for id_str in selected_ids {
-                if let Ok(id) = id_str.parse::<ShortId>() {
-                    if let Err(err) = delete_site(locale, id).await {
-                        failed.push(err);
-                    }
+                if let Ok(id) = id_str.parse::<ShortId>()
+                    && let Err(err) = delete_site(locale, id).await
+                {
+                    failed.push(err);
                 }
             }
             if let Some(err) = failed.first() {
@@ -691,16 +691,23 @@ fn unhealthy_line(locale: Locale, server: &UpstreamHealth) -> String {
     }
 }
 
+static PROXIES_LOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Loads the proxies and their statuses into the store.
 fn load_proxies(dispatcher: Dispatch<ProxyStore>) {
+    if PROXIES_LOADING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     wasm_bindgen_futures::spawn_local(async move {
-        let Ok(entries) = get_list().await else {
+        let res = get_list().await;
+        PROXIES_LOADING.store(false, std::sync::atomic::Ordering::SeqCst);
+        let Ok(entries) = res else {
             return;
         };
         let mut statuses = HashMap::new();
         for entry in &entries {
-            if let Ok(status) = get_status(entry.id).await {
-                statuses.insert(entry.id, status);
+            if let Some(status) = &entry.status {
+                statuses.insert(entry.id, status.clone());
             }
         }
         dispatcher.set(ProxyStore {
@@ -721,14 +728,6 @@ async fn get_ports() -> Result<Vec<PortEntry>, gloo_net::Error> {
 
 async fn get_list() -> Result<Vec<ProxyEntry>, gloo_net::Error> {
     Request::get(&format!("{API_ENDPOINT}/proxies"))
-        .send()
-        .await?
-        .json()
-        .await
-}
-
-async fn get_status(id: ShortId) -> Result<ProxyStatus, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/proxies/{id}/status"))
         .send()
         .await?
         .json()

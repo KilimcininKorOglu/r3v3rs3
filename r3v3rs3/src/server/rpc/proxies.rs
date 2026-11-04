@@ -23,7 +23,16 @@ impl RpcMethod for GetProxyList {
     type Output = Vec<ProxyEntry>;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        Ok(state.proxies.entries().cloned().map(masked).collect())
+        let entries = state
+            .proxies
+            .contexts()
+            .map(|ctx| {
+                let mut entry = masked(ctx.entry.clone());
+                entry.status = Some(proxy_status(state, ctx));
+                entry
+            })
+            .collect();
+        Ok(entries)
     }
 
     fn restrict(mut output: Self::Output, caller: &Caller) -> Self::Output {
@@ -44,7 +53,11 @@ impl RpcMethod for GetProxy {
         state
             .proxies
             .get(self.id)
-            .map(|ctx| masked(ctx.entry.clone()))
+            .map(|ctx| {
+                let mut entry = masked(ctx.entry.clone());
+                entry.status = Some(proxy_status(state, ctx));
+                entry
+            })
             .ok_or(Error::IdNotFound {
                 id: self.id.to_string(),
             })
@@ -67,14 +80,7 @@ impl RpcMethod for GetProxyStatus {
         state
             .proxies
             .get(self.id)
-            .map(|ctx| ProxyStatus {
-                state: ctx.status.state,
-                upstreams: state.registries.groups.snapshot(self.id),
-                srv: match &ctx.entry.proxy.kind {
-                    ProxyKind::Http(http) => state.registries.srv.snapshot(&http.srv_names()),
-                    _ => Vec::new(),
-                },
-            })
+            .map(|ctx| proxy_status(state, ctx))
             .ok_or(Error::IdNotFound {
                 id: self.id.to_string(),
             })
@@ -82,6 +88,20 @@ impl RpcMethod for GetProxyStatus {
 
     fn proxy_scope(&self) -> Option<ShortId> {
         Some(self.id)
+    }
+}
+
+pub(crate) fn proxy_status(
+    state: &ServerState,
+    ctx: &crate::server::proxy_list::ProxyContext,
+) -> ProxyStatus {
+    ProxyStatus {
+        state: ctx.status.state,
+        upstreams: state.registries.groups.snapshot(ctx.entry.id),
+        srv: match &ctx.entry.proxy.kind {
+            ProxyKind::Http(http) => state.registries.srv.snapshot(&http.srv_names()),
+            _ => Vec::new(),
+        },
     }
 }
 

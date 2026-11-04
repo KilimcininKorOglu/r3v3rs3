@@ -472,6 +472,7 @@ mod tests {
                 listen: "/ip4/127.0.0.1/udp/53".parse().unwrap(),
                 opts: Default::default(),
             },
+            status: None,
         }
     }
 
@@ -479,6 +480,7 @@ mod tests {
         ProxyEntry {
             id: id.parse().unwrap(),
             source: None,
+            status: None,
             proxy: Proxy {
                 ports: vec![port_entry().id],
                 kind: ProxyKind::Udp(UdpProxy {

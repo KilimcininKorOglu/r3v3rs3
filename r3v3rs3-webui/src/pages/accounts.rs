@@ -1011,6 +1011,7 @@ mod tests {
                 ..Default::default()
             },
             source: None,
+            status: None,
         };
         let entries = [entry];
         assert_eq!(proxies_label(Locale::En, None, &entries), "All proxies");

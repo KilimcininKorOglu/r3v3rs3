@@ -277,6 +277,7 @@ mod tests {
             id,
             proxy: Default::default(),
             source: None,
+            status: None,
         };
         let viewer = Caller {
             username: "viewer".to_string(),

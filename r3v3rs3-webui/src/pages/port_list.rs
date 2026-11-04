@@ -12,7 +12,7 @@ use gloo_net::http::Request;
 use r3v3rs3_api::{
     i18n::Locale,
     id::ShortId,
-    port::{PortEntry, PortState, PortStatus, SocketState},
+    port::{PortEntry, PortState, SocketState},
     tls::TlsState,
 };
 use std::collections::{HashMap, HashSet};
@@ -43,13 +43,20 @@ const COLUMNS: [Column; 5] = [
     },
 ];
 
+static PORTS_LOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn load_ports(dispatcher: Dispatch<PortStore>) {
+    if PORTS_LOADING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     wasm_bindgen_futures::spawn_local(async move {
-        if let Ok(res) = get_list().await {
+        let res = get_list().await;
+        PORTS_LOADING.store(false, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(res) = res {
             let mut statuses = HashMap::new();
             for entry in &res {
-                if let Ok(status) = get_status(entry.id).await {
-                    statuses.insert(entry.id, status);
+                if let Some(status) = &entry.status {
+                    statuses.insert(entry.id, *status);
                 }
             }
             dispatcher.set(PortStore {
@@ -125,10 +132,10 @@ fn bulk_delete_callback(
         dialog::confirm_then(locale, question, async move {
             let mut failed = Vec::new();
             for id_str in selected_ids {
-                if let Ok(id) = id_str.parse::<ShortId>() {
-                    if let Err(err) = delete_port(locale, id).await {
-                        failed.push(err);
-                    }
+                if let Ok(id) = id_str.parse::<ShortId>()
+                    && let Err(err) = delete_port(locale, id).await
+                {
+                    failed.push(err);
                 }
             }
             if let Some(err) = failed.first() {
@@ -341,14 +348,6 @@ fn socket_state(state: &SocketState) -> (&'static str, &'static str) {
 
 async fn get_list() -> Result<Vec<PortEntry>, gloo_net::Error> {
     Request::get(&format!("{API_ENDPOINT}/ports"))
-        .send()
-        .await?
-        .json()
-        .await
-}
-
-async fn get_status(id: ShortId) -> Result<PortStatus, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/ports/{id}/status"))
         .send()
         .await?
         .json()

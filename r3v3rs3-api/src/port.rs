@@ -111,11 +111,17 @@ pub struct PortEntry {
     #[schema(inline)]
     #[serde(flatten)]
     pub port: Port,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<PortStatus>,
 }
 
 impl From<(ShortId, Port)> for PortEntry {
     fn from((id, port): (ShortId, Port)) -> Self {
-        Self { id, port }
+        Self {
+            id,
+            port,
+            status: None,
+        }
     }
 }
 

@@ -467,6 +467,8 @@ pub struct UpstreamHealth {
     pub total_bytes: u64,
 }
 
+impl Eq for UpstreamHealth {}
+
 impl Default for UpstreamHealth {
     fn default() -> Self {
         Self {

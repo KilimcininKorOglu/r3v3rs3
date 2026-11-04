@@ -1086,6 +1086,7 @@ fn get_secure_uri(
         .headers()
         .get(HOST)
         .and_then(|h| h.to_str().ok())
+        .or_else(|| req.uri().authority().map(|a| a.as_str()))
         .unwrap_or_default();
     let host_only = host_str.split(':').next().unwrap_or(host_str);
     let host_clean = host_only.trim_start_matches('[').trim_end_matches(']');

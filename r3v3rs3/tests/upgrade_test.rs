@@ -72,6 +72,7 @@ async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> 
         .save_proxies(&[ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: tcp_proxy_to(&upstream_port.socket_addr()),
         }])
         .await?;

@@ -97,10 +97,12 @@ async fn http_proxy() -> anyhow::Result<()> {
                 listen: proxy_port.multiaddr_http(),
                 opts: Default::default(),
             },
+            status: None,
         }])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Http(Box::new(HttpProxy {
@@ -264,6 +266,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                     listen: proxy_port.multiaddr_http(),
                     opts: Default::default(),
                 },
+                status: None,
             },
             PortEntry {
                 id: "secure".parse().unwrap(),
@@ -282,11 +285,13 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                         stream_priority: None,
                     },
                 },
+                status: None,
             },
         ])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap(), "secure".parse().unwrap()],
                 kind: ProxyKind::Http(Box::new(HttpProxy {
@@ -381,10 +386,12 @@ async fn http_proxy_dns_error() -> anyhow::Result<()> {
                 listen: proxy_port.multiaddr_http(),
                 opts: Default::default(),
             },
+            status: None,
         }])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Http(Box::new(HttpProxy {
@@ -461,10 +468,12 @@ async fn dot_segments_in_path_match_protected_route() -> anyhow::Result<()> {
                 listen: proxy_port.multiaddr_http(),
                 opts: Default::default(),
             },
+            status: None,
         }])
         .proxies(vec![ProxyEntry {
             id: "proxy".parse().unwrap(),
             source: None,
+            status: None,
             proxy: Proxy {
                 ports: vec!["port".parse().unwrap()],
                 kind: ProxyKind::Http(Box::new(HttpProxy {

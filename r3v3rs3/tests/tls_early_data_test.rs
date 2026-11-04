@@ -83,6 +83,7 @@ async fn test_port_options_with_early_data() -> anyhow::Result<()> {
                     stream_priority: None,
                 },
             },
+            status: None,
         }])
         .build();
 

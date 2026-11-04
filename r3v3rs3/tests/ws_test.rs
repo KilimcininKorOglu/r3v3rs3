@@ -33,10 +33,12 @@ async fn ws_proxy() -> anyhow::Result<()> {
                 listen: proxy_port.multiaddr_http(),
                 opts: Default::default(),
             },
+            status: None,
         }])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Http(Box::new(HttpProxy {

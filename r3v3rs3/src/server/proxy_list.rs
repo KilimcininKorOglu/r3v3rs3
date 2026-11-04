@@ -226,6 +226,7 @@ mod tests {
                 provider,
                 resource: id.into(),
             }),
+            status: None,
         }
     }
 

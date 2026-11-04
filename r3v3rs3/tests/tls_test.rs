@@ -52,10 +52,12 @@ async fn tls_proxy() -> anyhow::Result<()> {
                     stream_priority: None,
                 },
             },
+            status: None,
         }])
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: Proxy {
                 ports: vec!["test".parse().unwrap()],
                 kind: ProxyKind::Tcp(TcpProxy {

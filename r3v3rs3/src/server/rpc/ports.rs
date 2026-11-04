@@ -16,7 +16,17 @@ impl RpcMethod for GetPortList {
     type Output = Vec<PortEntry>;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        Ok(state.ports.entries().cloned().collect())
+        let entries = state
+            .ports
+            .as_slice()
+            .iter()
+            .map(|port| {
+                let mut entry = port.entry().clone();
+                entry.status = Some(*port.status());
+                entry
+            })
+            .collect();
+        Ok(entries)
     }
 }
 
@@ -32,7 +42,11 @@ impl RpcMethod for GetPort {
         state
             .ports
             .get(self.id)
-            .map(|port| port.entry().clone())
+            .map(|port| {
+                let mut entry = port.entry().clone();
+                entry.status = Some(*port.status());
+                entry
+            })
             .ok_or(Error::IdNotFound {
                 id: self.id.to_string(),
             })

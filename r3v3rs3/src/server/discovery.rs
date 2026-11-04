@@ -453,6 +453,7 @@ pub fn build(
                     id,
                     proxy: value,
                     source: Some(proxy.source.clone()),
+                    status: None,
                 });
             }
             Err(message) => built.issues.push(DiscoveryIssue {
@@ -564,6 +565,7 @@ mod tests {
                 listen: listen.parse().unwrap(),
                 opts: Default::default(),
             },
+            status: None,
         }
     }
 

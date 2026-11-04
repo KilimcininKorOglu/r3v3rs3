@@ -99,14 +99,20 @@ async fn a_change_is_not_applied_when_the_storage_cannot_save() -> anyhow::Resul
             matches!(deleted, Err(Error::FailedToSaveConfig)),
             "{deleted:?}"
         );
-        assert_eq!(call(&mut channels, GetProxyList).await??, [manual]);
+        let proxies = call(&mut channels, GetProxyList).await??;
+        assert_eq!(proxies.len(), 1);
+        assert_eq!(proxies[0].id, manual.id);
+        assert_eq!(proxies[0].proxy, manual.proxy);
 
         let deleted = call(&mut channels, DeletePort { id: port.id }).await?;
         assert!(
             matches!(deleted, Err(Error::FailedToSaveConfig)),
             "{deleted:?}"
         );
-        assert_eq!(call(&mut channels, GetPortList).await??, [port]);
+        let ports = call(&mut channels, GetPortList).await??;
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].id, port.id);
+        assert_eq!(ports[0].port, port.port);
 
         let config = AppConfig {
             background_task_interval: Duration::from_secs(600),
@@ -130,4 +136,43 @@ async fn a_change_is_not_applied_when_the_storage_cannot_save() -> anyhow::Resul
 #[test]
 fn storage_errors_have_their_http_status() {
     assert_eq!(Error::FailedToSaveConfig.status_code(), 500);
+}
+
+#[tokio::test]
+async fn list_requests_return_proxy_and_port_statuses() -> anyhow::Result<()> {
+    let proxy_port = alloc_tcp_port().await?;
+    let port = http_port_entry("port1", &proxy_port);
+    let manual = http_proxy_entry(
+        "proxy1",
+        "port1",
+        HttpProxy {
+            routes: vec![http_route("/", "http://127.0.0.1:1/", None)],
+            ..Default::default()
+        },
+    );
+    let storage = TestStorage::builder()
+        .ports(vec![port.clone()])
+        .proxies(vec![manual.clone()])
+        .build();
+
+    with_server(storage, |mut channels| async move {
+        let proxies = call(&mut channels, GetProxyList).await??;
+        assert_eq!(proxies.len(), 1);
+        assert!(proxies[0].status.is_some());
+        assert_eq!(
+            proxies[0].status.as_ref().unwrap().state,
+            r3v3rs3_api::proxy::ProxyState::Active
+        );
+
+        let ports = call(&mut channels, GetPortList).await??;
+        assert_eq!(ports.len(), 1);
+        assert!(ports[0].status.is_some());
+        assert_eq!(
+            ports[0].status.as_ref().unwrap().state.socket,
+            r3v3rs3_api::port::SocketState::Listening
+        );
+        Ok(())
+    })
+    .await?;
+    Ok(())
 }

@@ -45,6 +45,7 @@ async fn shutdown_drains_the_open_connections() -> anyhow::Result<()> {
         .proxies(vec![ProxyEntry {
             id: "test2".parse().unwrap(),
             source: None,
+            status: None,
             proxy: tcp_proxy_to(&listen_port),
         }])
         .build();

@@ -162,10 +162,12 @@ async fn test_proxy_injects_priority_header() -> anyhow::Result<()> {
                 listen: proxy_port.multiaddr_http(),
                 opts: Default::default(),
             },
+            status: None,
         }])
         .proxies(vec![ProxyEntry {
             id: "proxy1".parse().unwrap(),
             source: None,
+            status: None,
             proxy: Proxy {
                 active: true,
                 name: "priority-proxy".into(),

@@ -450,7 +450,7 @@ pub enum ProxyState {
     Unknown,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct ProxyStatus {
     pub state: ProxyState,
     /// The health of the upstream servers. An HTTP proxy lists the servers of each route in route
@@ -472,6 +472,8 @@ pub struct ProxyEntry {
     /// manually. A discovered proxy is read-only and is not saved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<DiscoverySource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<ProxyStatus>,
 }
 
 impl ProxyEntry {
@@ -486,6 +488,7 @@ impl From<(ShortId, Proxy)> for ProxyEntry {
             id,
             proxy,
             source: None,
+            status: None,
         }
     }
 }
