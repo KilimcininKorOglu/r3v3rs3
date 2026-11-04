@@ -843,7 +843,7 @@ fn validate_webhook_timestamp(headers: &HeaderMap) -> Result<(), Error> {
 }
 
 impl Platform {
-    fn queued_hooks(&self) -> std::sync::MutexGuard<'_, HashMap<ShortId, Option<GitRef>>> {
+    pub(super) fn queued_hooks(&self) -> std::sync::MutexGuard<'_, HashMap<ShortId, Option<GitRef>>> {
         match self.queued.lock() {
             Ok(queued) => queued,
             // The map stays valid when a holder panics.
@@ -1087,28 +1087,29 @@ impl Platform {
         id: ShortId,
         target_ref: Option<GitRef>,
     ) -> anyhow::Result<HookResponse> {
-        match self
-            .deploy_with_ref(
-                id,
-                HOOK_USERNAME,
-                DeploymentTrigger::Webhook,
-                target_ref.clone(),
-            )
-            .await
-        {
-            Ok(deployment) => Ok(HookResponse {
-                outcome: HookOutcome::Deployed,
-                deployment: Some(deployment),
-            }),
-            Err(err) if matches!(err.downcast_ref(), Some(Error::AppBusy { .. })) => {
-                self.queued_hooks().insert(id, target_ref);
-                Ok(HookResponse {
+        let app = self.app(id).await?;
+        let lock = match self.lock_or_queue_hook(app.id, target_ref.clone()) {
+            super::deploy::LockOrQueued::Queued => {
+                return Ok(HookResponse {
                     outcome: HookOutcome::Queued,
                     deployment: None,
-                })
+                });
             }
-            Err(err) => Err(err),
-        }
+            super::deploy::LockOrQueued::Lock(lock) => lock,
+        };
+        let deployment = self
+            .deploy_app_locked(
+                lock,
+                &app,
+                HOOK_USERNAME,
+                DeploymentTrigger::Webhook,
+                target_ref,
+            )
+            .await?;
+        Ok(HookResponse {
+            outcome: HookOutcome::Deployed,
+            deployment: Some(deployment),
+        })
     }
 
     /// Starts the deployment that a push queued while the app was busy. The pipeline calls it

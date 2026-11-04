@@ -241,7 +241,30 @@ impl Drop for AppLock {
     }
 }
 
+pub(crate) enum LockOrQueued {
+    Lock(AppLock),
+    Queued,
+}
+
 impl Platform {
+    pub(crate) fn lock_or_queue_hook(
+        &self,
+        id: ShortId,
+        target_ref: Option<GitRef>,
+    ) -> LockOrQueued {
+        let mut busy = self.busy_apps();
+        if busy.contains(&id) {
+            self.queued_hooks().insert(id, target_ref);
+            LockOrQueued::Queued
+        } else {
+            busy.insert(id);
+            LockOrQueued::Lock(AppLock {
+                busy: self.busy.clone(),
+                app: id,
+            })
+        }
+    }
+
     /// Takes the app for one pipeline or one deletion.
     pub fn lock_app(&self, app: &AppEntry) -> Result<AppLock, Error> {
         if !self.busy_apps().insert(app.id) {
@@ -334,17 +357,31 @@ impl Platform {
         git_ref: Option<GitRef>,
     ) -> anyhow::Result<DeploymentEntry> {
         let app = self.app(id).await?;
+        let lock = self.lock_app(&app)?;
+        self.deploy_app_locked(lock, &app, username, trigger, git_ref)
+            .await
+    }
+
+    pub(crate) async fn deploy_app_locked(
+        self: &Arc<Self>,
+        lock: AppLock,
+        app: &AppEntry,
+        username: &str,
+        trigger: DeploymentTrigger,
+        git_ref: Option<GitRef>,
+    ) -> anyhow::Result<DeploymentEntry> {
         let mut spec = app.spec.clone();
         apply_target_ref(&mut spec, git_ref.as_ref());
-        self.sync_image_spec(&app, &spec).await?;
-        let env = self.store.env(id).await?;
-        let new = NewDeployment::new(&app, trigger, username, &spec, &env)?;
+        self.sync_image_spec(app, &spec).await?;
+        let env = self.store.env(app.id).await?;
+        let new = NewDeployment::new(app, trigger, username, &spec, &env)?;
         if let Some(reason) = needs_approval(&spec) {
+            drop(lock);
+            self.clone().run_queued_hook(app.id).await;
             return self.insert_pending(new.pending(reason)).await;
         }
         let image = JobImage::from_spec(&spec);
-        let lock = self.lock_app(&app)?;
-        self.start_job(lock, &app, new, image).await
+        self.start_job(lock, app, new, image).await
     }
 
     async fn rollback_source(
