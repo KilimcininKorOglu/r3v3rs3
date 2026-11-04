@@ -254,6 +254,7 @@ jobs:
           sha256sum --binary ./* > ../SHA256SUMS
           # minisign reads the password from stdin, not from the environment.
           printf '%s\n' "$MINISIGN_PASSWORD" | minisign -Sm ../SHA256SUMS -s /tmp/minisign.key
+          shred -u /tmp/minisign.key 2>/dev/null || rm -f /tmp/minisign.key
       - name: Verify the signature
         working-directory: assets
         # The same command that the release verification docs give the users.
@@ -262,6 +263,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber SHA256SUMS SHA256SUMS.minisig
+      - name: Clean up the signing key
+        if: always()
+        run: |
+          if [ -f /tmp/minisign.key ]; then
+            shred -u /tmp/minisign.key 2>/dev/null || rm -f /tmp/minisign.key
+          fi
 
   # The command line client also runs on macOS, Windows, and static musl Linux systems.
   # Because it embeds no WebUI, all of these builds run in parallel immediately without waiting for webui.
