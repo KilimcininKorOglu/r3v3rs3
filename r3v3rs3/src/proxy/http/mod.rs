@@ -396,7 +396,7 @@ impl HttpPortContext {
                                                 break;
                                             }
                                         };
-                                        if let Err(err) = start_quic(
+                                        spawn_quic_stream(
                                             req,
                                             stream,
                                             shared_cache.clone(),
@@ -407,11 +407,7 @@ impl HttpPortContext {
                                             },
                                             span_cloned.clone(),
                                             stop_notifier.clone(),
-                                        )
-                                        .await
-                                        {
-                                            error!("{err}");
-                                        }
+                                        );
                                     }
                                     Ok(None) => break,
                                     Err(err) => {
@@ -1839,6 +1835,25 @@ fn upgrade_redirect<B>(
         .ok()
 }
 
+fn spawn_quic_stream<T>(
+    req: Request<()>,
+    stream: RequestStream<T, Bytes>,
+    shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
+    ctx: QuickContext,
+    span: Span,
+    stop_notifier: Arc<Notify>,
+) where
+    T: BidiStream<Bytes> + Send + 'static,
+    <T as BidiStream<Bytes>>::RecvStream: Send + Sync,
+    <T as BidiStream<Bytes>>::SendStream: Send + 'static,
+{
+    tokio::spawn(async move {
+        if let Err(err) = start_quic(req, stream, shared_cache, ctx, span, stop_notifier).await {
+            error!("{err}");
+        }
+    });
+}
+
 async fn start_quic<T>(
     req: Request<()>,
     stream: RequestStream<T, Bytes>,
@@ -1850,6 +1865,7 @@ async fn start_quic<T>(
 where
     T: BidiStream<Bytes> + Send + 'static,
     <T as BidiStream<Bytes>>::RecvStream: Send + Sync,
+    <T as BidiStream<Bytes>>::SendStream: Send + 'static,
 {
     let enter = span.clone();
     let _enter = enter.enter();
