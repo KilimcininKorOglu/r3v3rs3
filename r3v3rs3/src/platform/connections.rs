@@ -75,6 +75,8 @@ impl Platform {
         } else {
             request.validate()?
         };
+        self.ensure_address_change_allowed(id, &current, request.provider, &url)
+            .await?;
         let entry = GitConnectionEntry {
             name: request.name,
             provider: request.provider,
@@ -83,13 +85,7 @@ impl Platform {
             updated_at: now,
             ..current
         };
-        let sealed = request
-            .client_secret
-            .map(|secret| {
-                self.keys()
-                    .seal(&connection_aad(id, "client_secret"), secret.as_bytes())
-            })
-            .transpose()?;
+        let sealed = self.seal_client_secret(id, request.client_secret.as_deref())?;
         match self
             .store
             .update_git_connection(&entry, sealed.as_deref())
@@ -99,6 +95,38 @@ impl Platform {
             Write::NameTaken => Err(connection_name_taken(&entry).into()),
             _ => Err(not_found(id)),
         }
+    }
+
+    async fn ensure_address_change_allowed(
+        &self,
+        id: ShortId,
+        current: &GitConnectionEntry,
+        provider: GitProvider,
+        url: &ProviderUrl,
+    ) -> anyhow::Result<()> {
+        if current.provider == provider && &current.url == url {
+            return Ok(());
+        }
+        if let Some(app) = self.store.app_using_connection(id).await? {
+            return Err(Error::GitConnectionInUse {
+                name: app.to_string(),
+            }
+            .into());
+        }
+        Ok(())
+    }
+
+    fn seal_client_secret(
+        &self,
+        id: ShortId,
+        secret: Option<&str>,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        secret
+            .map(|secret| {
+                self.keys()
+                    .seal(&connection_aad(id, "client_secret"), secret.as_bytes())
+            })
+            .transpose()
     }
 
     /// Deletes a connection that no app uses.
@@ -326,6 +354,56 @@ mod tests {
         };
         let resolved = resolve_public_url(&config, &platform.store).await?;
         assert_eq!(resolved, Some("https://other.example.com".parse().unwrap()));
+        Ok(())
+    }
+
+    async fn setup_app_with_connection(
+    ) -> anyhow::Result<(std::sync::Arc<Platform>, ShortId, super::super::tests::TempDir)> {
+        let (platform, dir) = platform().await?;
+        let entry = platform
+            .add_git_connection(request("team", Some("s3cr3t")), 1)
+            .await?;
+        let mut app_req = super::super::tests::request("site");
+        app_req.spec.source = r3v3rs3_api::platform::AppSource::Git {
+            repository: format!("{}/team/site.git", entry.url).parse()?,
+            branch: "main".parse()?,
+            context: ".".parse()?,
+            dockerfile: "Dockerfile".parse()?,
+            connection: Some(entry.id),
+        };
+        platform.add_app(app_req, 1).await?;
+        Ok((platform, entry.id, dir))
+    }
+
+    #[tokio::test]
+    async fn an_address_change_of_a_connection_in_use_is_rejected() -> anyhow::Result<()> {
+        let (platform, connection, _dir) = setup_app_with_connection().await?;
+        let mut changed_url = request("team", None);
+        changed_url.url = Some("https://git.other.com".parse()?);
+        let err = platform
+            .update_git_connection(connection, changed_url, 2)
+            .await
+            .unwrap_err();
+        assert!(matches!(api_error(err), Error::GitConnectionInUse { name } if name == "site"));
+
+        let mut changed_provider = request("team", None);
+        changed_provider.provider = GitProvider::Gitlab;
+        let err = platform
+            .update_git_connection(connection, changed_provider, 2)
+            .await
+            .unwrap_err();
+        assert!(matches!(api_error(err), Error::GitConnectionInUse { name } if name == "site"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_connection_in_use_can_be_renamed_without_address_change() -> anyhow::Result<()> {
+        let (platform, connection, _dir) = setup_app_with_connection().await?;
+        let entry = platform.git_connection(connection).await?;
+        let mut renamed = request("renamed", Some("new-secret"));
+        renamed.url = Some(entry.url);
+        let updated = platform.update_git_connection(connection, renamed, 3).await?;
+        assert_eq!(updated.name.as_str(), "renamed");
         Ok(())
     }
 }
