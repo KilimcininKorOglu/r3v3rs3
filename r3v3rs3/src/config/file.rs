@@ -1,64 +1,7 @@
-use super::{account, build_info, storage::Storage};
-use crate::cdn::CdnRanges;
-use crate::certs::{
-    Cert,
-    acme::{AcmeAccount, AcmeEntry},
-};
-use crate::keys::crypto::ClusterKeys;
-use crate::keys::key_file::{load_keys, write_new_key_file};
-use anyhow::Context as _;
-use indexmap::map::IndexMap;
-
-/// The config file that the server writes on its first start, with every setting and its default.
-const DEFAULT_CONFIG: &str = include_str!("../../data/default-config.toml");
-use r3v3rs3_api::{
-    access_list::{AccessList, AccessListEntry},
-    acme::{DnsCredentialInfo, DnsProvider},
-    app::AppConfig,
-    auth::{Account, LoginRequest, LoginResponse, Role},
-    cert::CertKind,
-    id::ShortId,
-};
-use r3v3rs3_api::{
-    error::Error,
-    port::{Port, PortEntry},
-    proxy::{Proxy, ProxyEntry},
-    store::StoreCatalog,
-};
-use serde_derive::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use r3v3rs3_api::app::AppConfig;
+use std::path::{Path, PathBuf};
 use tokio::fs;
-use tokio::io::AsyncReadExt;
-use toml_edit::DocumentMut;
-use tracing::{error, info, warn};
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "T: serde::Serialize",
-    deserialize = "T: serde::de::DeserializeOwned"
-))]
-struct Versioned<T> {
-    #[serde(default = "default_version")]
-    pub version: String,
-    #[serde(flatten, default)]
-    pub data: T,
-}
-
-fn default_version() -> String {
-    build_info::PKG_VERSION.to_owned()
-}
-
-/// Logs a failed write with its path. The caller gets an error without the path.
-fn saved(path: &Path, result: anyhow::Result<()>) -> Result<(), Error> {
-    result.map_err(|err| {
-        error!(?path, "failed to save: {err}");
-        Error::FailedToSaveConfig
-    })
-}
+use tracing::info;
 
 /// Creates the directory of the file.
 async fn create_parent(path: &Path) -> anyhow::Result<()> {
@@ -67,28 +10,6 @@ async fn create_parent(path: &Path) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("the path has no directory: {}", path.display()))?;
     fs::create_dir_all(dir).await?;
     Ok(())
-}
-
-/// Reads a file into memory. A missing or unreadable file logs its path and reads as empty.
-async fn read_file_or_log(path: &Path) -> Vec<u8> {
-    let mut data = Vec::new();
-    match fs::File::open(path).await {
-        Ok(mut file) => {
-            if let Err(err) = file.read_to_end(&mut data).await {
-                error!(?path, "failed to load: {err}");
-            }
-        }
-        Err(err) => error!(?path, "failed to load: {err}"),
-    }
-    data
-}
-
-/// Reads one certificate from its `cert.pem`, with the `key.pem` beside it when that file exists.
-async fn load_cert_pair(kind: CertKind, chain: &Path) -> Result<Cert, Error> {
-    let chain_data = read_file_or_log(chain).await;
-    let key_data = read_file_or_log(&chain.with_file_name("key.pem")).await;
-    let key_data = (!key_data.is_empty()).then_some(key_data);
-    Cert::new(kind, chain_data, key_data)
 }
 
 /// Writes to a temporary file, sets mode if specified, flushes and fsyncs to disk.
@@ -103,7 +24,8 @@ async fn write_tmp_file(
 
     let mut file = options.open(tmp_path).await?;
     if let Some(m) = mode {
-        file.set_permissions(std::fs::Permissions::from_mode(m)).await?;
+        file.set_permissions(std::fs::Permissions::from_mode(m))
+            .await?;
     }
     file.write_all(contents).await?;
     file.sync_all().await?;
@@ -141,14 +63,43 @@ pub(crate) async fn write_private(path: &Path, contents: impl AsRef<[u8]>) -> an
 }
 
 /// Writes a configuration file atomically through a temporary file, fsync and rename.
+#[allow(dead_code)]
 pub(crate) async fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> anyhow::Result<()> {
     write_atomic_impl(path, contents.as_ref(), None).await
 }
 
+/// Reads `config.toml` from the legacy configuration directory if it exists.
+pub async fn read_legacy_app_config(config_dir: &Path) -> anyhow::Result<AppConfig> {
+    let path = config_dir.join("config.toml");
+    info!(?path, "load legacy config");
+    let content = fs::read_to_string(&path).await?;
+    Ok(toml::from_str(&content)?)
+}
+
+/// Legacy file storage wrapper retained for reading old `config.toml` during SQLite migration.
+pub struct FileStorage {
+    dir: PathBuf,
+}
+
+impl FileStorage {
+    pub fn new(dir: &Path) -> Self {
+        Self {
+            dir: dir.to_path_buf(),
+        }
+    }
+
+    /// Reads `config.toml` from the legacy configuration directory.
+    pub async fn read_app_config(&self) -> anyhow::Result<AppConfig> {
+        read_legacy_app_config(&self.dir).await
+    }
+}
+
 #[cfg(test)]
-mod private_file_test {
-    use super::write_private;
+mod tests {
+    use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    const DEFAULT_CONFIG: &str = include_str!("../../data/default-config.toml");
 
     #[tokio::test]
     async fn an_existing_readable_file_becomes_owner_only() -> anyhow::Result<()> {
@@ -183,970 +134,48 @@ mod private_file_test {
     #[tokio::test]
     async fn write_atomic_persists_contents_via_rename() -> anyhow::Result<()> {
         let path = std::env::temp_dir().join(format!("r3v3rs3-atomic-{}.toml", std::process::id()));
-        super::write_atomic(&path, "atomic test content").await?;
+        write_atomic(&path, "atomic test content").await?;
         assert_eq!(std::fs::read_to_string(&path)?, "atomic test content");
         std::fs::remove_file(&path)?;
         Ok(())
     }
-}
-
-#[cfg(test)]
-mod secret_files_test {
-    use super::FileStorage;
-    use crate::config::storage::Storage;
-    use r3v3rs3_api::access_list::{AccessList, AccessListEntry};
-    use r3v3rs3_api::auth::{Account, Role};
-    use r3v3rs3_api::cidr::parse_cidr_list;
-    use r3v3rs3_api::policy::IpFilter;
-    use std::collections::{BTreeSet, HashMap};
-    use std::os::unix::fs::PermissionsExt;
-    use std::path::{Path, PathBuf};
-
-    /// A storage in a new temporary directory.
-    fn temp_storage(name: &str) -> (PathBuf, FileStorage) {
-        let dir = std::env::temp_dir().join(format!(
-            "r3v3rs3-{name}-{}",
-            hex::encode(rand::random::<[u8; 8]>())
-        ));
-        let files = FileStorage::new(&dir);
-        (dir, files)
-    }
-
-    fn mode(path: &Path) -> std::io::Result<u32> {
-        std::fs::metadata(path).map(|metadata| metadata.permissions().mode() & 0o777)
-    }
-
-    #[tokio::test]
-    async fn accounts_keep_their_roles_in_an_owner_only_file() -> anyhow::Result<()> {
-        let (dir, files) = temp_storage("accounts");
-        let editor = Account {
-            password: "$argon2id$hash".into(),
-            role: Role::Editor,
-            proxies: Some(BTreeSet::from(["web".parse()?])),
-            ..Default::default()
-        };
-        let accounts = HashMap::from([("editor".to_string(), editor)]);
-
-        let saved = files.save_accounts_impl(&accounts).await;
-        let mode = mode(&dir.join("accounts.toml"));
-        let loaded = files.read_accounts().await;
-        std::fs::remove_dir_all(&dir)?;
-
-        saved?;
-        assert_eq!(mode?, 0o600);
-        let loaded = loaded?;
-        assert_eq!(loaded["editor"].role, Role::Editor);
-        assert_eq!(loaded["editor"].proxies, accounts["editor"].proxies);
-        Ok(())
-    }
-
-    fn entry(id: &str, name: &str) -> anyhow::Result<AccessListEntry> {
-        let ip_filter = IpFilter {
-            allow: parse_cidr_list("10.0.0.0/8")?,
-            ..Default::default()
-        };
-        let list = AccessList {
-            name: name.into(),
-            ip_filter,
-            ..Default::default()
-        };
-        Ok(AccessListEntry {
-            id: id.parse()?,
-            list,
-        })
-    }
-
-    #[tokio::test]
-    async fn access_lists_keep_their_order_in_an_owner_only_file() -> anyhow::Result<()> {
-        let (dir, files) = temp_storage("access-lists");
-        let lists = vec![entry("office", "Office")?, entry("home", "Home")?];
-
-        let missing = files.load_access_lists().await;
-        let saved = files.save_access_lists(&lists).await;
-        let mode = mode(&dir.join("access_lists.toml"));
-        let loaded = files.load_access_lists().await;
-        std::fs::remove_dir_all(&dir)?;
-
-        assert!(missing.is_empty());
-        saved?;
-        assert_eq!(mode?, 0o600);
-        assert_eq!(loaded, lists);
-        Ok(())
-    }
-}
-
-pub struct FileStorage {
-    dir: PathBuf,
-    /// The keys that seal the DNS credentials. They load once, from the key file of the
-    /// config directory.
-    secrets: tokio::sync::OnceCell<ClusterKeys>,
-}
-
-impl FileStorage {
-    pub fn new(dir: &Path) -> Self {
-        Self {
-            dir: dir.to_owned(),
-            secrets: tokio::sync::OnceCell::new(),
-        }
-    }
-
-    /// The keys that seal the DNS credentials. The key file is created at the first save,
-    /// so a server without the deployment platform carries one too.
-    async fn secret_keys(&self) -> anyhow::Result<&ClusterKeys> {
-        self.secrets
-            .get_or_try_init(|| async {
-                let path = self.dir.join(crate::platform::KEY_FILE);
-                if !fs::try_exists(&path).await? {
-                    fs::create_dir_all(&self.dir).await?;
-                    write_new_key_file(&path).await?;
-                }
-                let mut paths = vec![path];
-                let old_key_path = self.dir.join(crate::platform::KEY_FILE_OLD);
-                if fs::try_exists(&old_key_path).await? {
-                    paths.push(old_key_path);
-                } else {
-                    let legacy_old = self.dir.join("platform.key.old");
-                    if fs::try_exists(&legacy_old).await? {
-                        paths.push(legacy_old);
-                    }
-                }
-                load_keys(&paths).await
-            })
-            .await
-    }
-
-    /// Reads the stored DNS credentials by their ids, in the order of the file.
-    async fn read_dns_credentials(
-        &self,
-        path: &Path,
-    ) -> anyhow::Result<Vec<(ShortId, StoredDnsCredential)>> {
-        // The store starts empty, so a missing file holds no credentials.
-        if !fs::try_exists(path).await? {
-            return Ok(Vec::new());
-        }
-        info!(?path, "load config");
-        let content = fs::read_to_string(path).await?;
-        let table: Versioned<IndexMap<ShortId, StoredDnsCredential>> = toml::from_str(&content)?;
-        Ok(table.data.into_iter().collect())
-    }
-
-    /// Opens the sealed provider of one stored credential.
-    async fn open_stored(
-        &self,
-        id: ShortId,
-        stored: &StoredDnsCredential,
-    ) -> anyhow::Result<DnsProvider> {
-        let keys = self.secret_keys().await?;
-        stored.open(id, keys)
-    }
-
-    /// Seals the provider and stores the credential beside the stored ones.
-    async fn save_dns_credential_impl(
-        &self,
-        path: &Path,
-        id: ShortId,
-        name: &str,
-        provider: &DnsProvider,
-    ) -> anyhow::Result<()> {
-        let keys = self.secret_keys().await?;
-        let stored = StoredDnsCredential::seal(id, name, provider, keys)?;
-        let mut doc = self.load_document_or_new(path).await?;
-        doc[&id.to_string()].clone_from(toml_edit::ser::to_document(&stored)?.as_item());
-        doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        write_private(path, doc.to_string()).await?;
-        Ok(())
-    }
-
-    async fn delete_dns_credential_impl(&self, path: &Path, id: ShortId) -> anyhow::Result<()> {
-        let mut doc = self.load_document_or_new(path).await?;
-        doc.remove(&id.to_string());
-        doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        write_private(path, doc.to_string()).await?;
-        Ok(())
-    }
-
-    /// Reads `config.toml`. Unlike [`Storage::load_app_config`], a missing or invalid file is an
-    /// error.
-    pub async fn read_app_config(&self) -> anyhow::Result<AppConfig> {
-        self.load_app_config_impl(&self.dir.join("config.toml"))
-            .await
-    }
-
-    /// Writes `config.toml` with every setting and its default when the file is missing, so a
-    /// fresh install shows what the server reads. A file that exists is never overwritten,
-    /// because a broken file is a mistake that the operator has to see.
-    async fn write_default_config(&self, path: &Path) {
-        if fs::try_exists(path).await.unwrap_or(true) {
-            return;
-        }
-        match write_atomic(path, DEFAULT_CONFIG).await {
-            Ok(()) => info!(?path, "wrote the default config"),
-            Err(err) => error!(?path, "failed to write the default config: {err}"),
-        }
-    }
-
-    /// Removes the directory of the certificate below each kind directory.
-    async fn delete_cert_impl(&self, certs: &Path, id: ShortId) -> anyhow::Result<()> {
-        if !fs::try_exists(certs).await? {
-            return Ok(());
-        }
-        let pattern = format!("*/{id}");
-        let walker = globwalk::GlobWalkerBuilder::from_patterns(certs, &[&pattern]).build()?;
-        for entry in walker {
-            fs::remove_dir_all(entry?.path()).await?;
-        }
-        Ok(())
-    }
-
-    async fn save_cdn_ranges_impl(&self, path: &Path, ranges: &CdnRanges) -> anyhow::Result<()> {
-        fs::create_dir_all(&self.dir).await?;
-        info!(?path, "save CDN IP ranges");
-        write_atomic(path, serde_json::to_vec(ranges)?).await?;
-        Ok(())
-    }
-
-    async fn save_app_store_impl(&self, path: &Path, catalog: &StoreCatalog) -> anyhow::Result<()> {
-        fs::create_dir_all(&self.dir).await?;
-        info!(?path, "save app store catalog");
-        write_atomic(path, serde_json::to_vec(catalog)?).await?;
-        Ok(())
-    }
-
-    async fn load_cdn_ranges_impl(&self, path: &Path) -> anyhow::Result<CdnRanges> {
-        info!(?path, "load CDN IP ranges");
-        Ok(serde_json::from_slice(&fs::read(path).await?)?)
-    }
-
-    async fn save_app_config_impl(&self, path: &Path, config: &AppConfig) -> anyhow::Result<()> {
-        create_parent(path).await?;
-        info!(?path, "save config");
-        let mut doc = toml_edit::ser::to_document(&config)?;
-        doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        write_atomic(path, doc.to_string()).await?;
-        Ok(())
-    }
-
-    async fn load_app_config_impl(&self, path: &Path) -> anyhow::Result<AppConfig> {
-        info!(?path, "load config");
-        let content = fs::read_to_string(path).await?;
-        Ok(toml::from_str(&content)?)
-    }
-
-    async fn save_ports_impl(&self, path: &Path, ports: &[PortEntry]) -> anyhow::Result<()> {
-        let entries = ports.iter().cloned().map(Into::into);
-        self.save_table(path, entries.collect::<Vec<(ShortId, Port)>>())
-            .await
-    }
-
-    async fn load_document(&self, path: &Path) -> anyhow::Result<DocumentMut> {
-        info!(?path, "load config");
-        let content = fs::read_to_string(path).await?;
-        Ok(content.parse::<DocumentMut>()?)
-    }
-
-    /// Reads the file as a document. A missing file starts an empty one.
-    async fn load_document_or_new(&self, path: &Path) -> anyhow::Result<DocumentMut> {
-        if !fs::try_exists(path).await? {
-            return Ok(DocumentMut::new());
-        }
-        self.load_document(path).await
-    }
-
-    /// Writes every entry by its id and drops the keys the file no longer holds. The comments and
-    /// the order of the file survive, because the document is edited in place.
-    async fn save_table<T: serde::Serialize>(
-        &self,
-        path: &Path,
-        entries: Vec<(ShortId, T)>,
-    ) -> anyhow::Result<()> {
-        create_parent(path).await?;
-        info!(?path, "save config");
-        let mut doc = self.load_document_or_new(path).await?;
-
-        let mut unused = doc
-            .as_table()
-            .iter()
-            .map(|(key, _)| key.to_string())
-            .collect::<HashSet<_>>();
-        for (id, entry) in entries {
-            let id = id.to_string();
-            doc[&id].clone_from(toml_edit::ser::to_document(&entry)?.as_item());
-            unused.remove(&id);
-        }
-        for key in unused {
-            doc.remove(&key);
-        }
-
-        doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        write_atomic(path, doc.to_string()).await?;
-        Ok(())
-    }
-
-    /// Reads a versioned table of entries by their ids, in the order of the file.
-    async fn read_entries<T, E>(&self, path: &Path) -> anyhow::Result<Vec<E>>
-    where
-        T: serde::de::DeserializeOwned,
-        E: From<(ShortId, T)>,
-    {
-        info!(?path, "load config");
-        let content = fs::read_to_string(path).await?;
-        let table: Versioned<IndexMap<ShortId, T>> = toml::from_str(&content)?;
-        Ok(table.data.into_iter().map(E::from).collect())
-    }
-
-    /// Writes a versioned table to a file that only the owner can read, because it holds secrets.
-    async fn write_private_table<T: serde::Serialize>(
-        &self,
-        path: &Path,
-        data: T,
-    ) -> anyhow::Result<()> {
-        fs::create_dir_all(&self.dir).await?;
-        info!(?path, "save config");
-        let table = Versioned {
-            version: default_version(),
-            data,
-        };
-        write_private(path, toml::to_string(&table)?).await
-    }
-
-    async fn load_ports_impl(&self, path: &Path) -> anyhow::Result<Vec<PortEntry>> {
-        self.read_entries::<Port, _>(path).await
-    }
-
-    async fn load_proxies_impl(&self, path: &Path) -> anyhow::Result<Vec<ProxyEntry>> {
-        self.read_entries::<Proxy, _>(path).await
-    }
-
-    async fn read_access_lists(&self, path: &Path) -> anyhow::Result<Vec<AccessListEntry>> {
-        self.read_entries::<AccessList, _>(path).await
-    }
-
-    /// Writes every access list. The file holds password hashes and token digests.
-    async fn save_access_lists_impl(
-        &self,
-        path: &Path,
-        lists: &[AccessListEntry],
-    ) -> anyhow::Result<()> {
-        let data = lists
-            .iter()
-            .map(|entry| (entry.id, &entry.list))
-            .collect::<IndexMap<_, _>>();
-        self.write_private_table(path, data).await
-    }
-
-    async fn save_proxies_impl(&self, path: &Path, proxies: &[ProxyEntry]) -> anyhow::Result<()> {
-        let entries = proxies.iter().cloned().map(Into::into);
-        self.save_table(path, entries.collect::<Vec<(ShortId, Proxy)>>())
-            .await
-    }
-
-    async fn save_cert_impl(&self, path: &Path, cert: &Cert) -> anyhow::Result<()> {
-        fs::create_dir_all(path).await?;
-        info!(?path, "save cert");
-        write_atomic(&path.join("cert.pem"), &cert.pem_chain).await?;
-        if let Some(key) = &cert.pem_key {
-            write_private(&path.join("key.pem"), key).await?;
-        }
-        Ok(())
-    }
-
-    async fn save_acme_impl(&self, path: &Path, acme: &AcmeEntry) -> anyhow::Result<()> {
-        create_parent(path).await?;
-        info!(?path, "save config");
-        let mut doc = self.load_document_or_new(path).await?;
-
-        let (id, entry): (ShortId, AcmeAccount) = acme.clone().into();
-        let id = id.to_string();
-        doc[&id].clone_from(toml_edit::ser::to_document(&entry)?.as_item());
-
-        doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        write_private(path, doc.to_string()).await?;
-        Ok(())
-    }
-
-    async fn delete_acme_impl(&self, path: &Path, id: ShortId) -> anyhow::Result<()> {
-        info!(?path, "delete acme");
-        let mut doc = self.load_document_or_new(path).await?;
-
-        doc.remove(&id.to_string());
-        doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        write_private(path, doc.to_string()).await?;
-        Ok(())
-    }
-
-    pub async fn load_certs_impl(
-        &self,
-        path: &Path,
-        kind: CertKind,
-    ) -> anyhow::Result<Vec<Arc<Cert>>> {
-        let walker = globwalk::GlobWalkerBuilder::from_patterns(
-            path.join(kind.to_string()),
-            &["*/cert.pem"],
-        )
-        .build()?
-        .filter_map(Result::ok);
-
-        let mut certs = Vec::new();
-        for pem in walker {
-            match load_cert_pair(kind, pem.path()).await {
-                Ok(cert) => certs.push(Arc::new(cert)),
-                Err(err) => error!(?path, "failed to load: {err}"),
-            }
-        }
-        Ok(certs)
-    }
-
-    pub async fn load_acmes_impl(&self, path: &Path) -> anyhow::Result<Vec<AcmeEntry>> {
-        self.read_entries::<AcmeAccount, _>(path).await
-    }
-
-    fn previous_credentials_changed_at(doc: &DocumentMut, name: &str) -> u64 {
-        if let Some(item) = doc.get(name)
-            && let Some(val) = item.get("credentials_changed_at")
-            && let Some(int) = val.as_integer()
-        {
-            return int as u64;
-        }
-        0
-    }
-
-    async fn add_account_impl(
-        &self,
-        name: &str,
-        password: &str,
-        totp: bool,
-        role: Role,
-    ) -> anyhow::Result<Account> {
-        r3v3rs3_api::auth::validate_username(name)?;
-        fs::create_dir_all(&self.dir).await?;
-        let path = self.dir.join("accounts.toml");
-        info!(?path, "save account");
-
-        let mut doc = load_account_document(&path).await?;
-        let prev = Self::previous_credentials_changed_at(&doc, name);
-        let mut account = account::new_account(password, totp)?;
-        account.role = role;
-        account.credentials_changed_at = account.credentials_changed_at.max(prev);
-        doc[name].clone_from(toml_edit::ser::to_document(&account)?.as_item());
-
-        doc["version"] = toml_edit::value(build_info::PKG_VERSION);
-        write_private(&path, doc.to_string()).await?;
-        Ok(account)
-    }
-}
-
-async fn load_account_document(path: &Path) -> anyhow::Result<DocumentMut> {
-    match fs::read_to_string(path).await {
-        Ok(content) => content
-            .parse::<DocumentMut>()
-            .with_context(|| format!("failed to parse {}", path.display())),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(DocumentMut::default()),
-        Err(err) => Err(anyhow::Error::new(err).context(format!("failed to read {}", path.display()))),
-    }
-}
-
-impl FileStorage {
-
-    async fn read_accounts(&self) -> anyhow::Result<HashMap<String, Account>> {
-        let path = self.dir.join("accounts.toml");
-        info!(?path, "load accounts");
-        let content = fs::read_to_string(&path).await?;
-        let accounts: Versioned<HashMap<String, Account>> = toml::from_str(&content)?;
-        Ok(accounts.data)
-    }
-
-    /// Writes every account. The file holds password hashes and TOTP secrets.
-    async fn save_accounts_impl(&self, accounts: &HashMap<String, Account>) -> anyhow::Result<()> {
-        let path = self.dir.join("accounts.toml");
-        let data = accounts.iter().collect::<BTreeMap<_, _>>();
-        self.write_private_table(&path, data).await
-    }
-
-    /// Reads every file. A missing file is empty, but a file that cannot be read is an error, and
-    /// `config.toml` must exist.
-    pub async fn read_state(&self) -> anyhow::Result<FileState> {
-        let ports = self.dir.join("ports.toml");
-        let proxies = self.dir.join("proxies.toml");
-        let access_lists = self.dir.join("access_lists.toml");
-        let acmes = self.dir.join("acme.toml");
-        let accounts = self.dir.join("accounts.toml");
-        let cdn = self.dir.join("cdn-ranges.json");
-        Ok(FileState {
-            config: self.read_app_config().await?,
-            ports: if_exists(&ports, self.load_ports_impl(&ports)).await?,
-            proxies: if_exists(&proxies, self.load_proxies_impl(&proxies)).await?,
-            access_lists: if_exists(&access_lists, self.read_access_lists(&access_lists)).await?,
-            certs: self.load_certs().await,
-            acmes: if_exists(&acmes, self.load_acmes_impl(&acmes)).await?,
-            accounts: if_exists(&accounts, self.read_accounts()).await?,
-            cdn_ranges: if_exists(&cdn, async {
-                self.load_cdn_ranges_impl(&cdn).await.map(Some)
-            })
-            .await?,
-        })
-    }
-}
-
-/// The state that the files of a node store.
-#[derive(Default)]
-pub struct FileState {
-    pub config: AppConfig,
-    pub ports: Vec<PortEntry>,
-    pub proxies: Vec<ProxyEntry>,
-    pub access_lists: Vec<AccessListEntry>,
-    pub certs: Vec<Arc<Cert>>,
-    pub acmes: Vec<AcmeEntry>,
-    pub accounts: HashMap<String, Account>,
-    pub cdn_ranges: Option<CdnRanges>,
-}
-
-use crate::dns_credential::StoredDnsCredential;
-
-/// Reads a file when it exists. A missing file gives the default value.
-async fn if_exists<T: Default>(
-    path: &Path,
-    read: impl std::future::Future<Output = anyhow::Result<T>>,
-) -> anyhow::Result<T> {
-    if !fs::try_exists(path).await? {
-        return Ok(T::default());
-    }
-    read.await
-        .with_context(|| format!("failed to read {}", path.display()))
-}
-
-#[async_trait::async_trait]
-impl Storage for FileStorage {
-    async fn save_app_config(&self, config: &AppConfig) -> Result<(), Error> {
-        let path = self.dir.join("config.toml");
-        let result = self.save_app_config_impl(&path, config).await;
-        saved(&path, result)
-    }
-
-    async fn load_app_config(&self) -> AppConfig {
-        let dir = &self.dir;
-        let path = dir.join("config.toml");
-        match self.load_app_config_impl(&path).await {
-            Ok(config) => config,
-            Err(err) => {
-                warn!(?path, "failed to load: {err}");
-                self.write_default_config(&path).await;
-                Default::default()
-            }
-        }
-    }
-
-    async fn save_ports(&self, entries: &[PortEntry]) -> Result<(), Error> {
-        let path = self.dir.join("ports.toml");
-        let result = self.save_ports_impl(&path, entries).await;
-        saved(&path, result)
-    }
-
-    async fn load_ports(&self) -> Vec<PortEntry> {
-        let path = self.dir.join("ports.toml");
-        if_exists(&path, self.load_ports_impl(&path))
-            .await
-            .unwrap_or_else(|err| panic!("failed to load {}: {err}", path.display()))
-    }
-
-    async fn save_proxies(&self, proxies: &[ProxyEntry]) -> Result<(), Error> {
-        let path = self.dir.join("proxies.toml");
-        let result = self.save_proxies_impl(&path, proxies).await;
-        saved(&path, result)
-    }
-
-    async fn load_proxies(&self) -> Vec<ProxyEntry> {
-        let path = self.dir.join("proxies.toml");
-        if_exists(&path, self.load_proxies_impl(&path))
-            .await
-            .unwrap_or_else(|err| panic!("failed to load {}: {err}", path.display()))
-    }
-
-    async fn load_access_lists(&self) -> Vec<AccessListEntry> {
-        let path = self.dir.join("access_lists.toml");
-        if_exists(&path, self.read_access_lists(&path))
-            .await
-            .unwrap_or_else(|err| {
-                error!(?path, "failed to load: {err:#}");
-                Vec::new()
-            })
-    }
-
-    async fn save_access_lists(&self, lists: &[AccessListEntry]) -> Result<(), Error> {
-        let path = self.dir.join("access_lists.toml");
-        let result = self.save_access_lists_impl(&path, lists).await;
-        saved(&path, result)
-    }
-
-    async fn save_cert(&self, cert: &Cert) -> Result<(), Error> {
-        let path = self
-            .dir
-            .join("certs")
-            .join(cert.kind.to_string())
-            .join(cert.id().to_string());
-        let result = self.save_cert_impl(&path, cert).await;
-        saved(&path, result)
-    }
-
-    async fn save_acme(&self, acme: &AcmeEntry) -> Result<(), Error> {
-        let path = self.dir.join("acme.toml");
-        let result = self.save_acme_impl(&path, acme).await;
-        saved(&path, result)
-    }
-
-    async fn delete_acme(&self, id: ShortId) -> Result<(), Error> {
-        let path = self.dir.join("acme.toml");
-        let result = self.delete_acme_impl(&path, id).await;
-        saved(&path, result)
-    }
-
-    async fn delete_cert(&self, id: ShortId) -> Result<(), Error> {
-        let path = self.dir.join("certs");
-        let result = self.delete_cert_impl(&path, id).await;
-        saved(&path, result)
-    }
-
-    async fn load_acmes(&self) -> Vec<AcmeEntry> {
-        let dir = &self.dir;
-        let path = dir.join("acme.toml");
-        match self.load_acmes_impl(&path).await {
-            Ok(acmes) => acmes,
-            Err(err) => {
-                warn!(?path, "failed to load: {err}");
-                Default::default()
-            }
-        }
-    }
-
-    async fn load_dns_credentials(&self) -> Result<Vec<DnsCredentialInfo>, Error> {
-        let path = self.dir.join("dns-credentials.toml");
-        self.read_dns_credentials(&path)
-            .await
-            .map(|stored| {
-                stored
-                    .into_iter()
-                    .map(|(id, entry)| entry.info(id))
-                    .collect()
-            })
-            .map_err(|err| {
-                error!(?path, "failed to load: {err:#}");
-                Error::FailedToLoadDnsCredentials
-            })
-    }
-
-    async fn save_dns_credential(
-        &self,
-        id: ShortId,
-        name: &str,
-        provider: &DnsProvider,
-    ) -> Result<(), Error> {
-        let path = self.dir.join("dns-credentials.toml");
-        let result = self
-            .save_dns_credential_impl(&path, id, name, provider)
-            .await;
-        saved(&path, result)
-    }
-
-    async fn delete_dns_credential(&self, id: ShortId) -> Result<(), Error> {
-        let path = self.dir.join("dns-credentials.toml");
-        let result = self.delete_dns_credential_impl(&path, id).await;
-        saved(&path, result)
-    }
-
-    async fn dns_provider_of(&self, id: ShortId) -> Result<Option<DnsProvider>, Error> {
-        let path = self.dir.join("dns-credentials.toml");
-        let fail = |err: anyhow::Error| {
-            error!(?path, "failed to load: {err:#}");
-            Error::FailedToLoadDnsCredentials
-        };
-        let stored = self
-            .read_dns_credentials(&path)
-            .await
-            .map_err(|err| fail(err.context("the dns credentials are not readable")))?;
-        let Some((_, stored)) = stored.into_iter().find(|(known, _)| *known == id) else {
-            return Ok(None);
-        };
-        self.open_stored(id, &stored).await.map(Some).map_err(fail)
-    }
-
-    async fn load_certs(&self) -> Vec<Arc<Cert>> {
-        let dir = &self.dir;
-        let path = dir.join("certs");
-        let mut certs = Vec::new();
-        // Every kind has its own directory below `certs`.
-        for kind in [CertKind::Server, CertKind::Client, CertKind::Root] {
-            match self.load_certs_impl(&path, kind).await {
-                Ok(mut entries) => certs.append(&mut entries),
-                Err(err) => {
-                    warn!(?path, %kind, "failed to load: {err}");
-                }
-            }
-        }
-        certs
-    }
-
-    async fn add_account(
-        &self,
-        name: &str,
-        password: &str,
-        totp: bool,
-        role: Role,
-    ) -> Result<Account, Error> {
-        self.add_account_impl(name, password, totp, role)
-            .await
-            .map_err(|_| Error::FailedToCreateAccount)
-    }
-
-    async fn load_accounts(&self) -> Result<HashMap<String, Account>, Error> {
-        let path = self.dir.join("accounts.toml");
-        if_exists(&path, self.read_accounts()).await.map_err(|err| {
-            error!(?path, "failed to load: {err:#}");
-            Error::FailedToLoadAccounts
-        })
-    }
-
-    async fn save_accounts(&self, accounts: &HashMap<String, Account>) -> Result<(), Error> {
-        let path = self.dir.join("accounts.toml");
-        let result = self.save_accounts_impl(accounts).await;
-        saved(&path, result)
-    }
-
-    async fn verify_account(&self, request: LoginRequest) -> Result<LoginResponse, Error> {
-        let mut accounts = self.read_accounts().await.map_err(|err| {
-            error!(%err, "failed to load accounts: {err}");
-            Error::InvalidLoginCredentials
-        })?;
-        let (result, accounts) = tokio::task::spawn_blocking(move || {
-            let res = account::verify_and_update(&mut accounts, request);
-            (res, accounts)
-        })
-        .await
-        .map_err(|_| Error::InvalidLoginCredentials)?;
-        let (response, updated) = result?;
-        if updated {
-            let _ = self.save_accounts_impl(&accounts).await;
-        }
-        Ok(response)
-    }
-
-    async fn save_cdn_ranges(&self, ranges: &CdnRanges) -> Result<(), Error> {
-        let path = self.dir.join("cdn-ranges.json");
-        let result = self.save_cdn_ranges_impl(&path, ranges).await;
-        saved(&path, result)
-    }
-
-    async fn load_cdn_ranges(&self) -> Option<CdnRanges> {
-        let path = self.dir.join("cdn-ranges.json");
-        match self.load_cdn_ranges_impl(&path).await {
-            Ok(ranges) => Some(ranges),
-            Err(err) => {
-                warn!(?path, "failed to load: {err}");
-                None
-            }
-        }
-    }
-
-    async fn save_app_store(&self, catalog: &StoreCatalog) -> Result<(), Error> {
-        let path = self.dir.join("app-store.json");
-        let result = self.save_app_store_impl(&path, catalog).await;
-        saved(&path, result)
-    }
-
-    async fn load_app_store(&self) -> Option<StoreCatalog> {
-        let path = self.dir.join("app-store.json");
-        match fs::read(&path).await {
-            Ok(bytes) => match serde_json::from_slice(&bytes) {
-                Ok(catalog) => Some(catalog),
-                Err(err) => {
-                    warn!(?path, %err, "failed to parse the app store catalog");
-                    None
-                }
-            },
-            Err(_) => None,
-        }
-    }
-
-    async fn save_engines(
-        &self,
-        catalog: &r3v3rs3_api::platform::EnginesCatalog,
-    ) -> Result<(), Error> {
-        let path = self.dir.join("engines.json");
-        let result = async {
-            fs::create_dir_all(&self.dir).await?;
-            info!(?path, "save engine catalog");
-            write_atomic(&path, serde_json::to_vec(catalog)?).await?;
-            Ok(())
-        }
-        .await;
-        saved(&path, result)
-    }
-
-    async fn load_engines(&self) -> Option<r3v3rs3_api::platform::EnginesCatalog> {
-        let path = self.dir.join("engines.json");
-        match fs::read(&path).await {
-            Ok(bytes) => match serde_json::from_slice(&bytes) {
-                Ok(catalog) => Some(catalog),
-                Err(err) => {
-                    warn!(?path, %err, "failed to parse the engine catalog");
-                    None
-                }
-            },
-            Err(_) => None,
-        }
-    }
-
-    async fn load_sent_notifications(&self) -> std::collections::HashSet<String> {
-        let path = self.dir.join("notifications.json");
-        let result: anyhow::Result<_> = async {
-            if !fs::try_exists(&path).await? {
-                return Ok(Default::default());
-            }
-            Ok(serde_json::from_slice(&fs::read(&path).await?)?)
-        }
-        .await;
-        result.unwrap_or_else(|err| {
-            warn!(?path, "failed to load: {err}");
-            Default::default()
-        })
-    }
-
-    async fn save_sent_notifications(
-        &self,
-        keys: &std::collections::HashSet<String>,
-    ) -> Result<(), Error> {
-        let path = self.dir.join("notifications.json");
-        let result = async {
-            create_parent(&path).await?;
-            write_atomic(&path, serde_json::to_vec(keys)?).await?;
-            Ok(())
-        }
-        .await;
-        saved(&path, result)
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[tokio::test]
-    async fn every_certificate_kind_is_loaded_after_save() {
-        let dir = std::env::temp_dir().join(format!("r3v3rs3-file-certs-{}", std::process::id()));
-        let storage = FileStorage::new(&dir);
-
-        let ca = Cert::new_ca().unwrap();
-        let san = ["client.example.com".parse().unwrap()];
-        let server = Cert::new_self_signed(&san, &ca).unwrap();
-        let client = Cert::new_client(&san, &ca).unwrap();
-        for cert in [&ca, &server, &client] {
-            storage.save_cert(cert).await.unwrap();
-        }
-
-        let loaded = storage.load_certs().await;
-        std::fs::remove_dir_all(&dir).unwrap();
-
-        for cert in [&ca, &server, &client] {
-            let found = loaded
-                .iter()
-                .find(|loaded| loaded.id == cert.id)
-                .unwrap_or_else(|| panic!("{:?} certificate is not loaded", cert.kind));
-            assert_eq!(found.kind, cert.kind);
-            assert!(found.key.is_some());
-        }
-    }
-
-    #[tokio::test]
-    async fn save_cert_enforces_0600_permissions_on_key_pem() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let dir = std::env::temp_dir().join(format!("r3-cert-perm-{}", std::process::id()));
-        let storage = FileStorage::new(&dir);
-        let ca = Cert::new_ca().unwrap();
-        storage.save_cert(&ca).await.unwrap();
-
-        let key_path = dir
-            .join("certs")
-            .join(ca.kind.to_string())
-            .join(ca.id().to_string())
-            .join("key.pem");
-        let meta = std::fs::metadata(&key_path).unwrap();
-        let mode = meta.permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 
     #[test]
-    fn the_default_config_template_holds_the_default_values() {
+    fn default_config_template_holds_defaults() {
         let config: AppConfig = toml::from_str(DEFAULT_CONFIG).unwrap();
         assert_eq!(config, AppConfig::default());
     }
 
     #[tokio::test]
-    async fn a_fresh_directory_gets_the_default_config() {
-        let dir = std::env::temp_dir().join(format!("r33-default-config-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+    async fn read_legacy_app_config_parses_valid_toml() -> anyhow::Result<()> {
+        let dir =
+            std::env::temp_dir().join(format!("r3v3rs3-legacy-config-{}", rand::random::<u64>()));
+        tokio::fs::create_dir_all(&dir).await?;
+        let config_path = dir.join("config.toml");
+        tokio::fs::write(&config_path, "public_url = \"https://panel.example.com\"\n").await?;
+
         let storage = FileStorage::new(&dir);
-        let config = storage.load_app_config().await;
-        assert_eq!(config, AppConfig::default());
-        let written = std::fs::read_to_string(dir.join("config.toml")).unwrap();
-        let parsed: AppConfig = toml::from_str(&written).unwrap();
-        assert_eq!(parsed, AppConfig::default());
-        std::fs::remove_dir_all(&dir).unwrap();
+        let loaded = storage.read_app_config().await?;
+        assert_eq!(
+            loaded.public_url.as_ref().map(|u| u.as_str()),
+            Some("https://panel.example.com")
+        );
+
+        let direct = read_legacy_app_config(&dir).await?;
+        assert_eq!(
+            direct.public_url.as_ref().map(|u| u.as_str()),
+            Some("https://panel.example.com")
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_fresh_directory_holds_no_dns_credentials() {
-        let dir = std::env::temp_dir().join(format!("r33-dns-credentials-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let storage = FileStorage::new(&dir);
-        assert!(storage.load_dns_credentials().await.unwrap().is_empty());
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[tokio::test]
-    async fn malformed_config_file_returns_error_instead_of_empty() {
-        let dir = std::env::temp_dir().join(format!("r33-malformed-config-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("invalid.toml");
-        std::fs::write(&path, "this is = [invalid toml").unwrap();
-        let storage = FileStorage::new(&dir);
-        let res = storage.load_document_or_new(&path).await;
+    async fn read_legacy_app_config_fails_on_missing_file() {
+        let dir =
+            std::env::temp_dir().join(format!("r3v3rs3-missing-config-{}", rand::random::<u64>()));
+        let res = read_legacy_app_config(&dir).await;
         assert!(res.is_err());
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[tokio::test]
-    async fn add_account_on_existing_account_preserves_revocation_time() {
-        let dir = std::env::temp_dir().join(format!("r33-add-user-revocation-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let storage = FileStorage::new(&dir);
-        let acc1 = storage.add_account("bob", "password123", false, Role::Viewer).await.unwrap();
-        assert!(acc1.credentials_changed_at > 0);
-        let acc2 = storage.add_account("bob", "newpassword123", false, Role::Viewer).await.unwrap();
-        assert!(acc2.credentials_changed_at >= acc1.credentials_changed_at);
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[tokio::test]
-    async fn add_account_refuses_to_overwrite_corrupted_accounts_toml() {
-        let dir = std::env::temp_dir().join(format!("r33-add-user-corrupted-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("accounts.toml");
-        std::fs::write(&path, "this is = [invalid toml").unwrap();
-        let storage = FileStorage::new(&dir);
-        let res = storage.add_account("alice", "password123", false, Role::Admin).await;
-        assert!(res.is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "this is = [invalid toml");
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[tokio::test]
-    async fn add_account_rejects_version_username() {
-        let dir = std::env::temp_dir().join(format!("r33-add-user-version-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let storage = FileStorage::new(&dir);
-        let res = storage.add_account("version", "password123", false, Role::Admin).await;
-        assert!(res.is_err());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
