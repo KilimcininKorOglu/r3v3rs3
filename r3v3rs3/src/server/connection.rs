@@ -70,6 +70,8 @@ async fn serve_challenge(
     body: String,
     limits: r3v3rs3_api::app::Http2Limits,
 ) {
+    let peer_addr = stream.get_ref().peer_addr().ok();
+    let local_addr = stream.get_ref().local_addr().ok();
     let service = service_fn(move |_| {
         let body = body.clone();
         async move { Ok::<_, Infallible>(Response::new(body)) }
@@ -78,7 +80,7 @@ async fn serve_challenge(
         .serve_connection(TokioIo::new(stream), service)
         .await
     {
-        error!("Error serving connection: {:?}", err);
+        error!(%err, ?peer_addr, ?local_addr, "failed to serve ACME HTTP-01 challenge connection");
     }
 }
 
@@ -96,11 +98,13 @@ pub fn serve_reserved(
     let Some(config) = tls_alpn.filter(|_| on_tls_alpn_port) else {
         return;
     };
+    let peer_addr = stream.get_ref().peer_addr().ok();
+    let local_addr = stream.get_ref().local_addr().ok();
     let lease = crate::proxy::ConnectionLease::acquire();
     tokio::spawn(async move {
         let _lease = lease;
         if let Err(err) = serve_tls_alpn(stream, config).await {
-            error!(%err, "failed to serve the TLS-ALPN-01 challenge");
+            error!(%err, ?peer_addr, ?local_addr, "failed to serve the TLS-ALPN-01 challenge");
         }
     });
 }

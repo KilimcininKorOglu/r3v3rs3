@@ -262,14 +262,16 @@ fn spawn_tcp_pipe(
     mut client_stream: tokio::io::DuplexStream,
     stop_notifier: Arc<Notify>,
 ) {
+    let peer_addr = stream.get_ref().peer_addr().ok();
+    let local_addr = stream.get_ref().local_addr().ok();
     tokio::spawn(async move {
         tokio::select! {
             result = tokio::io::copy_bidirectional(&mut stream, &mut client_stream) => {
                 if let Err(err) = result {
                     if super::is_client_io_error(&err) {
-                        debug!(%err, "client tcp pipe closed");
+                        debug!(%err, ?peer_addr, ?local_addr, "client tcp pipe closed");
                     } else {
-                        error!(%err, "tcp pipe error");
+                        error!(%err, ?peer_addr, ?local_addr, "tcp pipe error");
                     }
                 }
             },
@@ -355,7 +357,11 @@ async fn start(
             super::stats::record_tx_bytes(tx);
         }
         Err(err) => {
-            error!("{err}");
+            if super::is_client_io_error(&err) {
+                debug!(%err, %remote, %peer, %local, %target, "tcp proxy connection closed");
+            } else {
+                error!(%err, %remote, %peer, %local, %target, "tcp proxy bidirectional copy error");
+            }
         }
     }
 
