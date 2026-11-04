@@ -388,8 +388,15 @@ pub async fn logout(
             }
         }
     }
-    // The removal cookie carries the path of the sign-in cookie, so the browser deletes it.
-    Ok(jar.add(Cookie::build((ADMIN_SESSION_COOKIE, "")).path("/").build()))
+    let is_secure = is_secure_connection(&state, &peer, &headers).await;
+    let cookie = Cookie::build((ADMIN_SESSION_COOKIE, ""))
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(time::Duration::ZERO)
+        .secure(is_secure)
+        .build();
+    Ok(jar.add(cookie))
 }
 
 /// Records the sign-out of the account of an admin session.
@@ -1487,5 +1494,22 @@ mod tests {
         assert_eq!(rp_id, "another-attacker.com");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn logout_cookie_sets_max_age_zero_and_security_attributes() {
+        let cookie = Cookie::build((ADMIN_SESSION_COOKIE, ""))
+            .http_only(true)
+            .same_site(SameSite::Lax)
+            .path("/")
+            .max_age(time::Duration::ZERO)
+            .secure(true)
+            .build();
+        assert_eq!(cookie.value(), "");
+        assert_eq!(cookie.path(), Some("/"));
+        assert_eq!(cookie.max_age(), Some(time::Duration::ZERO));
+        assert_eq!(cookie.http_only(), Some(true));
+        assert_eq!(cookie.same_site(), Some(SameSite::Lax));
+        assert_eq!(cookie.secure(), Some(true));
     }
 }
