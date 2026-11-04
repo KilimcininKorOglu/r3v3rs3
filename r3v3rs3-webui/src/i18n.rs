@@ -17,31 +17,37 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    const NAMESPACES: [&str; 42] = [
-        "acme",
+    const NAMESPACES: [&str; 47] = [
+        "access_lists",
         "accounts",
+        "acme",
         "anomalies",
         "apps",
+        "audit",
         "auth",
         "backups",
-        "metrics",
         "certs",
+        "cluster",
         "common",
         "compose",
         "dashboard",
         "databases",
         "deployments",
         "diagnostics",
-        "dns_credentials",
         "discovery",
+        "dns_credentials",
         "env_groups",
+        "error",
+        "error_page",
         "footer",
-        "git_connections",
         "geoip",
+        "git_connections",
         "grpc",
         "http_form",
+        "load_balancing",
         "log",
         "login",
+        "metrics",
         "nav",
         "period",
         "ports",
@@ -59,7 +65,6 @@ mod tests {
         "traffic",
         "webhooks",
         "workers",
-        "error",
     ];
 
     fn read_sources(dir: &Path, sources: &mut Vec<String>) {
