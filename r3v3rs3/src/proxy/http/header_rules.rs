@@ -120,6 +120,9 @@ fn apply(rules: &[CompiledRule], headers: &mut HeaderMap, variables: &HeaderVari
             Ok(value) => value,
             Err(err) => {
                 error!(name = %rule.name, %err, "header rule produced an invalid value");
+                if !append {
+                    headers.remove(&rule.name);
+                }
                 continue;
             }
         };
@@ -178,6 +181,22 @@ mod tests {
         rules.apply_request(&mut headers, &variables());
         assert_eq!(headers["x-client-cert"], "CN=client");
         assert_eq!(headers["x-client-cert-fingerprint"], "");
+    }
+
+    #[test]
+    fn set_rule_with_invalid_value_removes_client_header() {
+        let rules = CompiledHeaderRules::new(&HeaderRules {
+            request: parse_header_rules("set X-Client-Cert: {client_cert_subject}").unwrap(),
+            response: vec![],
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert("x-client-cert", HeaderValue::from_static("CN=spoofed"));
+
+        let mut vars = variables();
+        vars.client_cert_subject = "CN=invalid\x01subject".into();
+
+        rules.apply_request(&mut headers, &vars);
+        assert!(headers.get("x-client-cert").is_none());
     }
 
     #[test]
