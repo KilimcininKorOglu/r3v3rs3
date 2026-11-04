@@ -5,7 +5,6 @@ use components::footer::Footer;
 use components::navbar::Navbar;
 use components::sidebar::Sidebar;
 use components::update_banner::UpdateBanner;
-use console_error_panic_hook::set_once as set_panic_hook;
 use store::SessionStore;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -99,8 +98,34 @@ fn shell() -> Html {
     }
 }
 
+fn setup_panic_handler() {
+    std::panic::set_hook(Box::new(|info| {
+        console_error_panic_hook::hook(info);
+        render_panic_overlay();
+    }));
+}
+
+fn render_panic_overlay() {
+    let Some(window) = web_sys::window() else { return };
+    let Some(document) = window.document() else { return };
+    let Some(body) = document.body() else { return };
+    if document.get_element_by_id("r3v3rs3-panic-overlay").is_some() {
+        return;
+    }
+    let Ok(overlay) = document.create_element("div") else { return };
+    overlay.set_id("r3v3rs3-panic-overlay");
+    let _ = overlay.set_attribute(
+        "class",
+        "fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 text-white",
+    );
+    overlay.set_inner_html(
+        r#"<div class="bg-gray-800 rounded-lg p-6 max-w-md w-full border border-red-500 shadow-xl text-center"><h2 class="text-xl font-bold text-red-400 mb-2">Application Error</h2><p class="text-gray-300 mb-4">An unexpected error occurred. Please refresh the page to reload the application.</p><button onclick="window.location.reload()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium">Reload Page</button></div>"#,
+    );
+    let _ = body.append_child(&overlay);
+}
+
 fn main() {
-    set_panic_hook();
+    setup_panic_handler();
     yew::Renderer::<App>::new().render();
 }
 

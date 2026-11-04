@@ -1310,8 +1310,8 @@ async fn handle_dr_file_upload(
             let bytes = uint8_array.to_vec();
             handle_dr_restore_upload(locale, bytes, pass, load_backups).await;
         }
-        Err(err) => {
-            dialog::message(locale, &format!("{err:?}"), Icon::Error).await;
+        Err(_) => {
+            dialog::message(locale, locale.t("backups.file_read_failed"), Icon::Error).await;
         }
     }
 }

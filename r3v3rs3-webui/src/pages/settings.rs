@@ -528,11 +528,16 @@ fn platform_section(
                 locale,
                 locale.t("settings.rotate_key_question").to_string(),
                 async move {
-                    match Request::post(&format!("{API_ENDPOINT}/platform/key/rotate"))
-                        .send()
-                        .await
-                    {
-                        Ok(resp) if resp.ok() => {
+                    let req = match Request::post(&format!("{API_ENDPOINT}/platform/key/rotate")).build() {
+                        Ok(req) => req,
+                        Err(err) => {
+                            let msg = format_network_error(locale, &err);
+                            let _ = dialog::message(locale, &msg, dialog::Icon::Error).await;
+                            return;
+                        }
+                    };
+                    match send_request(locale, req).await {
+                        Ok(_) => {
                             let _ = dialog::message(
                                 locale,
                                 locale.t("settings.rotate_key_success"),
@@ -540,14 +545,8 @@ fn platform_section(
                             )
                             .await;
                         }
-                        Ok(resp) => {
-                            let _ =
-                                dialog::message(locale, &resp.status_text(), dialog::Icon::Error)
-                                    .await;
-                        }
                         Err(err) => {
-                            let _ = dialog::message(locale, &err.to_string(), dialog::Icon::Error)
-                                .await;
+                            let _ = dialog::message(locale, &err, dialog::Icon::Error).await;
                         }
                     }
                 },
@@ -1336,13 +1335,39 @@ async fn update_config(locale: Locale, config: &AppConfig) -> Result<(), String>
     .await
 }
 
+/// Formats a network or HTTP request error into a user-friendly localized message.
+pub fn format_network_error(locale: Locale, err: &gloo_net::Error) -> String {
+    let err_str = err.to_string();
+    if err_str.contains("fetch")
+        || err_str.contains("NetworkError")
+        || err_str.contains("Network")
+        || err_str.contains("network")
+    {
+        locale.t("common.network_error").to_string()
+    } else {
+        locale.t("common.request_failed").to_string()
+    }
+}
+
+fn fallback_status_error(locale: Locale, status: u16, status_text: &str) -> String {
+    if !status_text.is_empty() {
+        format!("HTTP {status} ({status_text})")
+    } else if status != 0 {
+        format!("HTTP {status}")
+    } else {
+        locale.t("common.unknown_error").to_string()
+    }
+}
+
 /// Sends `body` as JSON. The error is the message of the failure in the selected language.
 pub async fn send_json(
     locale: Locale,
     builder: RequestBuilder,
     body: &impl Serialize,
 ) -> Result<(), String> {
-    let request = builder.json(body).map_err(|err| err.to_string())?;
+    let request = builder
+        .json(body)
+        .map_err(|err| format_network_error(locale, &err))?;
     send_request(locale, request).await.map(|_| ())
 }
 
@@ -1352,18 +1377,23 @@ pub async fn post_json<T: serde::de::DeserializeOwned>(
     builder: RequestBuilder,
     body: &impl Serialize,
 ) -> Result<T, String> {
-    let request = builder.json(body).map_err(|err| err.to_string())?;
+    let request = builder
+        .json(body)
+        .map_err(|err| format_network_error(locale, &err))?;
     send_request(locale, request)
         .await?
         .json()
         .await
-        .map_err(|err| err.to_string())
+        .map_err(|_| locale.t("common.response_parse_failed").to_string())
 }
 
 /// Sends the request and returns a successful response. The error is the message of the failure
 /// in the selected language.
 pub async fn send_request(locale: Locale, request: Request) -> Result<Response, String> {
-    let response = request.send().await.map_err(|err| err.to_string())?;
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format_network_error(locale, &err))?;
     if response.ok() {
         return Ok(response);
     }
@@ -1372,12 +1402,14 @@ pub async fn send_request(locale: Locale, request: Request) -> Result<Response, 
 
 /// The message of an admin API error response in the selected language.
 pub async fn error_message(locale: Locale, response: Response) -> String {
+    let status = response.status();
+    let status_text = response.status_text();
     match response.json::<ErrorMessage>().await {
         Ok(ErrorMessage {
             error: Some(error), ..
         }) => locale.error_message(&error),
-        Ok(err) => err.message,
-        Err(err) => err.to_string(),
+        Ok(err) if !err.message.is_empty() => err.message,
+        _ => fallback_status_error(locale, status, &status_text),
     }
 }
 
@@ -1771,12 +1803,14 @@ pub async fn fetch_json<T: DeserializeOwned>(
     locale: Locale,
     request: gloo_net::http::RequestBuilder,
 ) -> Result<T, String> {
-    let request = request.build().map_err(|err| err.to_string())?;
+    let request = request
+        .build()
+        .map_err(|err| format_network_error(locale, &err))?;
     send_request(locale, request)
         .await?
         .json()
         .await
-        .map_err(|err| err.to_string())
+        .map_err(|_| locale.t("common.response_parse_failed").to_string())
 }
 
 #[cfg(test)]
@@ -1932,5 +1966,20 @@ mod tests {
             error_of(&invalid, "etcd_endpoints").as_deref(),
             Some(Locale::En.t("settings.invalid_endpoint"))
         );
+    }
+
+    #[test]
+    fn test_fallback_status_error_formatting() {
+        let err1 = fallback_status_error(Locale::En, 502, "Bad Gateway");
+        assert_eq!(err1, "HTTP 502 (Bad Gateway)");
+
+        let err2 = fallback_status_error(Locale::En, 500, "");
+        assert_eq!(err2, "HTTP 500");
+
+        let err3 = fallback_status_error(Locale::En, 0, "");
+        assert_eq!(err3, Locale::En.t("common.unknown_error"));
+
+        let tr_err = fallback_status_error(Locale::Tr, 0, "");
+        assert_eq!(tr_err, Locale::Tr.t("common.unknown_error"));
     }
 }
