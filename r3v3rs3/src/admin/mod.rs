@@ -44,7 +44,7 @@ use tokio::sync::{Mutex, broadcast, mpsc, oneshot, watch};
 use tokio_stream::wrappers::{ReceiverStream, WatchStream};
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::{GovernorError, GovernorLayer};
-use tracing::{trace, warn};
+use tracing::{error, trace, warn};
 use utoipa::OpenApi;
 use utoipa_axum::router::{OpenApiRouter, UtoipaMethodRouterExt};
 use utoipa_axum::routes;
@@ -1217,7 +1217,8 @@ impl IntoResponse for AppError {
                 code = StatusCode::BAD_REQUEST;
             }
             AppError::Anyhow(err) => {
-                message = err.to_string();
+                error!(%err, "internal server error");
+                message = "Internal server error".to_string();
                 code = StatusCode::INTERNAL_SERVER_ERROR;
             }
             AppError::R3v3rs3(err) => {
@@ -1420,5 +1421,19 @@ mod tests {
         assert_eq!(key, IpAddr::V4(Ipv4Addr::new(198, 51, 100, 10)));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn app_error_anyhow_masks_internal_details_in_500_response() {
+        let sensitive_err = anyhow::anyhow!("sqlite3 /var/data/r3v3rs3.db disk I/O error table users");
+        let response = AppError::Anyhow(sensitive_err).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+        assert!(!body_str.contains("disk I/O error"));
+        assert!(!body_str.contains("/var/data/r3v3rs3.db"));
+        assert!(body_str.contains("Internal server error"));
     }
 }
