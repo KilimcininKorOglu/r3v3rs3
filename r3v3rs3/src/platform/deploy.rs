@@ -23,7 +23,7 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, AppSource, AppSpec, DeploymentEntry, DeploymentStatus, DeploymentTrigger,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use time::OffsetDateTime;
@@ -224,26 +224,33 @@ fn ensure_pending_approval(id: ShortId, status: DeploymentStatus) -> anyhow::Res
 
 /// Holds the app of a running pipeline, so that the app gets one pipeline at a time.
 pub struct AppLock {
-    platform: Arc<Platform>,
+    busy: Arc<std::sync::Mutex<HashSet<ShortId>>>,
     app: ShortId,
 }
 
 impl Drop for AppLock {
     fn drop(&mut self) {
-        self.platform.busy_apps().remove(&self.app);
+        match self.busy.lock() {
+            Ok(mut busy) => {
+                busy.remove(&self.app);
+            }
+            Err(poisoned) => {
+                poisoned.into_inner().remove(&self.app);
+            }
+        }
     }
 }
 
 impl Platform {
     /// Takes the app for one pipeline or one deletion.
-    pub fn lock_app(self: &Arc<Self>, app: &AppEntry) -> Result<AppLock, Error> {
+    pub fn lock_app(&self, app: &AppEntry) -> Result<AppLock, Error> {
         if !self.busy_apps().insert(app.id) {
             return Err(Error::AppBusy {
                 name: app.name.to_string(),
             });
         }
         Ok(AppLock {
-            platform: self.clone(),
+            busy: self.busy.clone(),
             app: app.id,
         })
     }
@@ -2455,6 +2462,27 @@ mod tests {
             assert!(matches!(err, Error::AppBusy { .. }));
         }
         assert!(setup.platform.deployments(setup.app.id).await?.is_empty());
+        drop(lock);
+        assert!(setup.platform.lock_app(&setup.app).is_ok());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn database_backup_and_restore_respect_app_lock() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let lock = setup.platform.lock_app(&setup.app)?;
+        let backup = setup.platform.run_backup(setup.app.id).await;
+        let err = backup.unwrap_err().downcast::<Error>()?;
+        assert!(matches!(err, Error::AppBusy { .. }));
+
+        let restore = setup.platform.restore_backup(setup.app.id, "fake").await;
+        let err = restore.unwrap_err().downcast::<Error>()?;
+        assert!(matches!(err, Error::AppBusy { .. }));
+
+        let archive = setup.platform.archive_wal(setup.app.id).await;
+        let err = archive.unwrap_err().downcast::<Error>()?;
+        assert!(matches!(err, Error::AppBusy { .. }));
+
         drop(lock);
         assert!(setup.platform.lock_app(&setup.app).is_ok());
         Ok(())

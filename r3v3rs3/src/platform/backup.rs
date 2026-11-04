@@ -508,6 +508,8 @@ impl Platform {
     /// retention of the settings.
     pub async fn run_backup(&self, db_id: ShortId) -> anyhow::Result<BackupEntry> {
         let _guard = self.track_job();
+        let app = self.app(db_id).await?;
+        let _lock = self.lock_app(&app)?;
         let dir = self.backup_dir(db_id).await?;
         tokio::fs::create_dir_all(&dir).await?;
         let id = backup_id();
@@ -644,10 +646,44 @@ impl Platform {
         Ok(tokio::fs::read(dir.join(format!("{}.dump.gz", entry.id))).await?)
     }
 
-    /// Uploads a stored backup into the running container of the database and runs the restore
-    /// command of the engine. Redis replaces its dump file and restarts.
-    pub async fn restore_backup(&self, db_id: ShortId, backup_id: &str) -> anyhow::Result<()> {
-        let (app, container, runtime) = self.database_container(db_id).await?;
+    async fn restore_dump_bytes(
+        &self,
+        db_id: ShortId,
+        backup_id: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        let raw = self.download_backup(db_id, backup_id).await?;
+        Ok(ungzip(&raw).await?)
+    }
+
+    async fn dispatch_backup_restored(
+        &self,
+        db_id: ShortId,
+        app_name: &str,
+        engine: &str,
+        backup_id: &str,
+    ) {
+        let summary = format!(
+            "Backup '{backup_id}' restored successfully into database '{app_name}'"
+        );
+        let data = serde_json::json!({
+            "backup_id": backup_id,
+            "db_id": db_id.to_string(),
+            "db_name": app_name,
+            "engine": engine,
+        });
+        self.dispatch_webhook_event(
+            r3v3rs3_api::webhook::WebhookEvent::BackupRestored,
+            summary,
+            data,
+        )
+        .await;
+    }
+
+    async fn database_restore_context(
+        &self,
+        db_id: ShortId,
+        app: &AppEntry,
+    ) -> anyhow::Result<(String, EngineInfo, RestorePlan)> {
         let engine = app
             .spec
             .database
@@ -657,33 +693,46 @@ impl Platform {
             .context("the engine is not in the database catalog")?;
         let password = self.database_password(db_id, &info).await?;
         let plan = restore_plan(&engine, &info, &password)?;
-        let bytes = ungzip(&self.download_backup(db_id, backup_id).await?).await?;
-        validate_backup_engine_format(&engine, &bytes).map_err(|err| Error::RestoreFailed {
+        Ok((engine, info, plan))
+    }
+
+    async fn execute_and_validate_restore(
+        runtime: &Arc<dyn ContainerRuntime>,
+        container: &ContainerName,
+        plan: &RestorePlan,
+        engine: &str,
+        bytes: Vec<u8>,
+        data_path: &str,
+    ) -> anyhow::Result<()> {
+        validate_backup_engine_format(engine, &bytes).map_err(|err| Error::RestoreFailed {
             reason: format!("{err:#}"),
         })?;
-        run_restore(&runtime, &container, &plan, bytes, &info.data_path)
+        run_restore(runtime, container, plan, bytes, data_path)
             .await
             .map_err(|err| Error::RestoreFailed {
                 reason: format!("{err:#}"),
             })?;
+        Ok(())
+    }
 
-        let summary = format!(
-            "Backup '{backup_id}' restored successfully into database '{}'",
-            app.name
-        );
-        let data = serde_json::json!({
-            "backup_id": backup_id,
-            "db_id": db_id.to_string(),
-            "db_name": app.name.to_string(),
-            "engine": engine,
-        });
-        self.dispatch_webhook_event(
-            r3v3rs3_api::webhook::WebhookEvent::BackupRestored,
-            summary,
-            data,
+    /// Uploads a stored backup into the running container of the database and runs the restore
+    /// command of the engine. Redis replaces its dump file and restarts.
+    pub async fn restore_backup(&self, db_id: ShortId, backup_id: &str) -> anyhow::Result<()> {
+        let app = self.app(db_id).await?;
+        let _lock = self.lock_app(&app)?;
+        let (app, container, runtime) = self.database_container(db_id).await?;
+        let (engine, info, plan) = self.database_restore_context(db_id, &app).await?;
+        let bytes = self.restore_dump_bytes(db_id, backup_id).await?;
+        Self::execute_and_validate_restore(
+            &runtime,
+            &container,
+            &plan,
+            &engine,
+            bytes,
+            &info.data_path,
         )
-        .await;
-
+        .await?;
+        self.dispatch_backup_restored(db_id, app.name.as_str(), &engine, backup_id).await;
         Ok(())
     }
 
@@ -849,39 +898,39 @@ impl Platform {
         }
     }
 
+fn validate_target_engine(actual: &str, requested: Option<&str>) -> anyhow::Result<()> {
+    if let Some(req_engine) = requested {
+        if !req_engine.eq_ignore_ascii_case(actual) {
+            bail!(Error::RestoreFailed {
+                reason: format!(
+                    "requested engine '{req_engine}' does not match target database engine '{actual}'"
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
     async fn restore_s3_into_existing(
         &self,
         target_id: ShortId,
         dump_bytes: Vec<u8>,
         requested_engine: Option<&str>,
     ) -> anyhow::Result<RestoreFromS3Response> {
+        let app = self.app(target_id).await?;
+        let _lock = self.lock_app(&app)?;
         let (app, container, runtime) = self.database_container(target_id).await?;
-        let engine = app
-            .spec
-            .database
-            .clone()
-            .context("the target app is not a managed database")?;
-        if let Some(req_engine) = requested_engine {
-            if !req_engine.eq_ignore_ascii_case(&engine) {
-                bail!(Error::RestoreFailed {
-                    reason: format!(
-                        "requested engine '{req_engine}' does not match target database engine '{engine}'"
-                    ),
-                });
-            }
-        }
-        validate_backup_engine_format(&engine, &dump_bytes).map_err(|err| Error::RestoreFailed {
-            reason: format!("{err:#}"),
-        })?;
-        let info = r3v3rs3_api::platform::engine_info(&engine)
-            .context("the engine is not in the database catalog")?;
-        let password = self.database_password(target_id, &info).await?;
-        let plan = restore_plan(&engine, &info, &password)?;
-        run_restore(&runtime, &container, &plan, dump_bytes, &info.data_path)
-            .await
-            .map_err(|err| Error::RestoreFailed {
-                reason: format!("{err:#}"),
-            })?;
+        let (engine, info, plan) = self.database_restore_context(target_id, &app).await?;
+        Self::validate_target_engine(&engine, requested_engine)?;
+        Self::execute_and_validate_restore(
+            &runtime,
+            &container,
+            &plan,
+            &engine,
+            dump_bytes,
+            &info.data_path,
+        )
+        .await?;
         Ok(RestoreFromS3Response {
             success: true,
             message: format!("restored snapshot into {}", app.name),
@@ -1075,6 +1124,8 @@ impl Platform {
 
     /// Archives the current WAL or binary log segment from the running database container.
     pub async fn archive_wal(&self, db_id: ShortId) -> anyhow::Result<WalSegment> {
+        let app = self.app(db_id).await?;
+        let _lock = self.lock_app(&app)?;
         let (container, runtime, engine, info, password) = self.wal_capture_target(db_id).await?;
 
         let now = unix_ms();

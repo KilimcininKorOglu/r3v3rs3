@@ -224,7 +224,7 @@ pub struct Platform {
     /// The proxies and the issues of the last snapshot that the server got.
     sent: Mutex<Option<publish::Published>>,
     /// The apps that a pipeline or a deletion holds.
-    busy: std::sync::Mutex<HashSet<ShortId>>,
+    busy: Arc<std::sync::Mutex<HashSet<ShortId>>>,
     /// Active cancellation tokens for in-progress deployments.
     cancellations: std::sync::Mutex<HashMap<ShortId, tokio_util::sync::CancellationToken>>,
     /// Scheduled command IDs that are currently executing.
@@ -333,7 +333,7 @@ impl Platform {
             config_dir: config_dir.to_path_buf(),
             command,
             sent: Mutex::new(None),
-            busy: std::sync::Mutex::new(HashSet::new()),
+            busy: Arc::new(std::sync::Mutex::new(HashSet::new())),
             cancellations: std::sync::Mutex::new(HashMap::new()),
             running_commands: std::sync::Mutex::new(HashSet::new()),
             backup_attempts: std::sync::Mutex::new(HashMap::new()),
