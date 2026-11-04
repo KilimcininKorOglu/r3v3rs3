@@ -1403,6 +1403,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn queued_hook_starts_when_app_deletion_fails() -> anyhow::Result<()> {
+        let (command, _) = tokio::sync::mpsc::channel(1);
+        let (platform, runtime, _dir) = crate::platform::tests::platform_with(
+            &r3v3rs3_api::platform::PlatformConfig::default(),
+            command,
+        )
+        .await?;
+        let platform = Arc::new(platform);
+        let shop = platform.add_app(request("shop"), 1).await?;
+        let new_dep = crate::platform::store::NewDeployment::new(
+            &shop,
+            DeploymentTrigger::Manual,
+            "admin",
+            &shop.spec,
+            &[],
+        )?;
+        platform.store.insert_deployment(&new_dep).await?;
+        platform.queued_hooks().insert(shop.id, None);
+        runtime.state().broken = true;
+
+        let res = platform.delete_app(shop.id).await;
+        assert!(res.is_err());
+        assert!(!platform.queued_hooks().contains_key(&shop.id));
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn tag_trigger_deploys_matching_tags_on_git_app() -> anyhow::Result<()> {
         let (platform, _dir) = platform().await?;
         let mut req = git_request("tag-app");

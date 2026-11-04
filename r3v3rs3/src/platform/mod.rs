@@ -612,15 +612,29 @@ impl Platform {
     pub async fn delete_app(self: &Arc<Self>, id: ShortId) -> anyhow::Result<AppEntry> {
         let app = self.app(id).await?;
         self.ensure_database_free(&app).await?;
-        let _lock = self.lock_app(&app)?;
-        self.cleanup_app_targets(&app, id).await?;
+        let lock = self.lock_app(&app)?;
+        match self.perform_delete_app(&app, id).await {
+            Ok(deleted) => {
+                self.forget_queued_hook(id);
+                drop(lock);
+                self.publish().await;
+                Ok(deleted)
+            }
+            Err(err) => {
+                drop(lock);
+                self.clone().run_queued_hook(id).await;
+                Err(err)
+            }
+        }
+    }
+
+    async fn perform_delete_app(&self, app: &AppEntry, id: ShortId) -> anyhow::Result<AppEntry> {
+        self.cleanup_app_targets(app, id).await?;
         self.drop_app_hook(id).await?;
         if !self.store.delete_app(id).await? {
             return Err(not_found(id));
         }
-        self.forget_queued_hook(id);
-        self.publish().await;
-        Ok(app)
+        Ok(app.clone())
     }
 
     async fn cleanup_app_targets(&self, app: &AppEntry, id: ShortId) -> anyhow::Result<()> {
