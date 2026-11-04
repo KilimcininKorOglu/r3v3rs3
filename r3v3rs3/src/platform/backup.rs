@@ -1763,8 +1763,10 @@ async fn capture_postgres_wal(
             ],
             vec![format!("PGPASSWORD={password}")],
         )
-        .await
-        .unwrap_or_default();
+        .await?;
+    if dump.is_empty() {
+        bail!("pg_dump captured empty database dump");
+    }
     Ok((filename, dump))
 }
 
@@ -1794,8 +1796,10 @@ async fn capture_mysql_wal(
             ],
             vec![format!("MYSQL_PWD={password}")],
         )
-        .await
-        .unwrap_or_default();
+        .await?;
+    if dump.is_empty() {
+        bail!("mysqldump captured empty database dump");
+    }
     Ok((filename, dump))
 }
 
@@ -1824,8 +1828,10 @@ async fn capture_mongodb_oplog(
             ],
             vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password))],
         )
-        .await
-        .unwrap_or_default();
+        .await?;
+    if dump.is_empty() {
+        bail!("mongodump captured empty oplog archive");
+    }
     Ok((filename, dump))
 }
 
@@ -1835,18 +1841,18 @@ async fn capture_redis_aof(
     info: &EngineInfo,
 ) -> anyhow::Result<(String, Vec<u8>)> {
     let filename = format!("aof-{}.rdb", unix_ms());
-    let _ = runtime
+    runtime
         .exec_capture(
             container,
             vec!["redis-cli".into(), "SAVE".into()],
             Vec::new(),
         )
-        .await;
+        .await?;
     let path = format!("{}/dump.rdb", info.data_path);
-    let bytes = runtime
-        .download_file(container, &path)
-        .await
-        .unwrap_or_default();
+    let bytes = runtime.download_file(container, &path).await?;
+    if bytes.is_empty() {
+        bail!("downloaded empty redis dump.rdb file");
+    }
     Ok((filename, bytes))
 }
 
