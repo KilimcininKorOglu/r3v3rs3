@@ -86,7 +86,7 @@ impl RpcMethod for AddAccount {
         let mut account = hash_account(password, totp).await?;
         account.role = role;
         account.proxies = proxies;
-        account.credentials_changed_at = unix_secs();
+        account.credentials_changed_at = unix_ms();
         let totp_secret = account.totp.clone();
         state
             .edit_accounts(move |accounts| {
@@ -304,7 +304,7 @@ impl RpcMethod for CreateApiToken {
         let raw_token = format!("r3v_{}", Alphanumeric.sample_string(&mut rand::rng(), 32));
         let token_hash = hex::encode(Sha256::digest(raw_token.as_bytes()));
         let id = format!("{:08x}", rand::random::<u32>());
-        let created_at = unix_secs();
+        let created_at = unix_ms();
 
         let token_entry = ApiToken {
             id: id.clone(),
@@ -408,10 +408,6 @@ fn scope_summary(role: Role, proxies: Option<&BTreeSet<ShortId>>) -> String {
     }
 }
 
-fn unix_secs() -> u64 {
-    unix_ms() / 1000
-}
-
 /// An admin sees every proxy, so only the other roles take a proxy list.
 fn validate_scope(role: Role, proxies: Option<&BTreeSet<ShortId>>) -> Result<(), Error> {
     if role.is_admin() && proxies.is_some() {
@@ -449,7 +445,7 @@ fn apply_update(
         account.password = password;
     }
     if changed {
-        account.credentials_changed_at = unix_secs();
+        account.credentials_changed_at = unix_ms();
     }
 }
 

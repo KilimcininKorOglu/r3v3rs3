@@ -127,6 +127,14 @@ pub struct AccountDirectory {
     accounts: HashMap<String, AccountEntry>,
 }
 
+fn to_millis(timestamp: u64) -> u64 {
+    if timestamp > 0 && timestamp < 10_000_000_000 {
+        timestamp * 1000
+    } else {
+        timestamp
+    }
+}
+
 impl AccountDirectory {
     pub fn new(accounts: &HashMap<String, Account>) -> Self {
         let accounts = accounts
@@ -174,7 +182,7 @@ impl AccountDirectory {
     pub fn token_caller(&self, token_hash: &str) -> Option<Caller> {
         self.accounts.iter().find_map(|(name, entry)| {
             let token = entry.tokens.iter().find(|t| t.token_hash == token_hash)?;
-            if token.created_at < entry.credentials_changed_at {
+            if to_millis(token.created_at) < to_millis(entry.credentials_changed_at) {
                 return None;
             }
             let role = match token.scope {
@@ -204,7 +212,7 @@ impl AccountDirectory {
 
     fn account_caller(&self, username: &str, started_at: u64) -> Option<Caller> {
         let entry = self.get(username)?;
-        (started_at >= entry.credentials_changed_at).then(|| Caller {
+        (to_millis(started_at) >= to_millis(entry.credentials_changed_at)).then(|| Caller {
             username: username.to_string(),
             role: entry.role,
             proxies: entry.proxies.clone(),
@@ -267,6 +275,26 @@ mod tests {
         assert_eq!(directory.caller(&session("viewer", 100)), Some(expected));
         assert_eq!(directory.caller(&session("viewer", 99)), None);
         assert_eq!(directory.caller(&session("removed", 100)), None);
+    }
+
+    #[test]
+    fn a_session_in_same_second_before_account_change_is_rejected() {
+        let accounts = HashMap::from([(
+            "viewer".to_string(),
+            Account {
+                role: Role::Viewer,
+                credentials_changed_at: 1_700_000_000_500,
+                ..Default::default()
+            },
+        )]);
+        let directory = AccountDirectory::new(&accounts);
+        let session = |started_at| SessionRecord {
+            subject: "viewer".to_string(),
+            started_at,
+            account: None,
+        };
+        assert_eq!(directory.caller(&session(1_700_000_000_100)), None);
+        assert!(directory.caller(&session(1_700_000_000_800)).is_some());
     }
 
     #[test]

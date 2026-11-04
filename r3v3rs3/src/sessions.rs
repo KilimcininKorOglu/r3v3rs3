@@ -68,7 +68,12 @@ impl SessionRecord {
     }
 
     pub fn is_active(&self, expiry: Duration) -> bool {
-        unix_now().saturating_sub(self.started_at) < expiry.as_secs()
+        let started = if self.started_at < 10_000_000_000 {
+            self.started_at * 1000
+        } else {
+            self.started_at
+        };
+        unix_now().saturating_sub(started) < expiry.as_millis() as u64
     }
 }
 
@@ -77,7 +82,7 @@ pub fn new_token() -> String {
 }
 
 fn unix_now() -> u64 {
-    unix_ms() / 1000
+    unix_ms()
 }
 
 #[async_trait::async_trait]
@@ -185,7 +190,7 @@ mod tests {
     fn a_record_is_active_for_its_expiry() {
         let old = SessionRecord {
             subject: "admin".into(),
-            started_at: unix_now() - 120,
+            started_at: unix_now() - 120 * 1000,
             account: None,
         };
         assert!(old.is_active(Duration::from_secs(180)));

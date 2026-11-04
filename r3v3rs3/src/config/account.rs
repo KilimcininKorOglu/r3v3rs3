@@ -38,7 +38,7 @@ pub fn new_account(password: &str, totp: bool) -> anyhow::Result<Account> {
     Ok(Account {
         password,
         totp: totp.then(|| Totp::default().secret().to_base32()),
-        credentials_changed_at: crate::clock::unix_secs(),
+        credentials_changed_at: crate::clock::unix_ms(),
         ..Default::default()
     })
 }

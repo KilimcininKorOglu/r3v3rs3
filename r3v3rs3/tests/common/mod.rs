@@ -406,7 +406,7 @@ impl Storage for TestStorage {
         role: Role,
     ) -> Result<Account, Error> {
         let mut account = plain_account(password, role, None);
-        account.credentials_changed_at = r3v3rs3::clock::unix_secs();
+        account.credentials_changed_at = r3v3rs3::clock::unix_ms();
         let mut inner = self.inner.lock().await;
         if let Some(prev) = inner.accounts.get(name) {
             account.credentials_changed_at =
