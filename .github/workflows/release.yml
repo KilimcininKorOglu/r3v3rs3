@@ -153,13 +153,13 @@ jobs:
             local target="$1"
             [ -z "$target" ] && { echo "none"; return; }
             local runs
-            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow Rust --commit "$target" --json conclusion,status)
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow Rust --commit "$target" --json conclusion,status,createdAt)
             if [ "$(echo "$runs" | jq 'length')" -eq 0 ]; then
               echo "none"
               return
             fi
             local conclusion
-            conclusion=$(echo "$runs" | jq -r '[.[] | select(.status == "completed")] | map(.conclusion) | sort | last // "running"')
+            conclusion=$(echo "$runs" | jq -r 'if any(.status != "completed") then "running" else (sort_by(.createdAt) | last | .conclusion // "running") end')
             echo "$conclusion"
           }
 
