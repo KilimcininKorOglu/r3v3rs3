@@ -1,6 +1,8 @@
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
-use hyper::header::{ALT_SVC, CACHE_CONTROL, CONTENT_TYPE, SET_COOKIE};
+use hyper::header::{
+    ALT_SVC, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, SET_COOKIE, X_FRAME_OPTIONS,
+};
 use hyper::{
     HeaderMap,
     header::{FORWARDED, VIA},
@@ -361,12 +363,16 @@ impl ResponseRewriter {
                     None => res,
                 })
             }
-            Err(err) => error_response(
-                err,
-                self.preferences,
-                &self.error_pages,
-                self.variables.as_ref(),
-            ),
+            Err(err) => {
+                let mut res = error_response(
+                    err,
+                    self.preferences,
+                    &self.error_pages,
+                    self.variables.as_ref(),
+                )?;
+                self.apply_post_headers(res.headers_mut());
+                Ok(res)
+            }
         }
     }
 
@@ -445,6 +451,12 @@ fn custom_response_body<B>(
     res.headers_mut()
         .insert(hyper::header::CONTENT_LENGTH, HeaderValue::from(body.len()));
     res.headers_mut().remove(hyper::header::CONTENT_ENCODING);
+    res.headers_mut()
+        .entry(X_FRAME_OPTIONS)
+        .or_insert(HeaderValue::from_static("DENY"));
+    res.headers_mut()
+        .entry(CONTENT_SECURITY_POLICY)
+        .or_insert(HeaderValue::from_static("frame-ancestors 'none'"));
     res.map(|_| BoxBody::new(Full::new(Bytes::from(body)).map_err(Into::into)))
 }
 
@@ -521,6 +533,12 @@ fn error_response(
     res.headers_mut().insert(CONTENT_TYPE, content_type);
     res.headers_mut()
         .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    res.headers_mut()
+        .insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    res.headers_mut().insert(
+        CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("frame-ancestors 'none'"),
+    );
     if let Ok(val) = HeaderValue::from_str(req_id) {
         res.headers_mut()
             .insert(HeaderName::from_static("x-request-id"), val);
@@ -609,6 +627,46 @@ mod test {
         assert_eq!(res.status(), 502);
         assert_eq!(res.headers()[CACHE_CONTROL], "no-store");
         assert_eq!(res.headers()[CONTENT_TYPE], "text/html; charset=utf-8");
+        assert_eq!(res.headers()[X_FRAME_OPTIONS], "DENY");
+        assert_eq!(
+            res.headers()[CONTENT_SECURITY_POLICY],
+            "frame-ancestors 'none'"
+        );
+    }
+
+    #[test]
+    fn test_response_rewriter_applies_header_rules_on_error() {
+        use r3v3rs3_api::header_rules::{HeaderRule, HeaderRules};
+        let rules = Arc::new(CompiledHeaderRules::new(&HeaderRules {
+            response: vec![HeaderRule::Set {
+                name: "x-custom-security".to_string(),
+                value: "error-protected".to_string(),
+            }],
+            ..Default::default()
+        }));
+        let vars = HeaderVariables {
+            client_ip: "127.0.0.1".parse().unwrap(),
+            host: "example.com".to_string(),
+            scheme: "http",
+            request_id: "req-test-123".to_string(),
+            route: "/".to_string(),
+            client_cert_subject: String::new(),
+            client_cert_fingerprint: String::new(),
+        };
+        let rewriter = ResponseRewriter::builder()
+            .header_rules(rules, vars)
+            .build();
+
+        let err: Result<Response<BoxBody<Bytes, anyhow::Error>>, _> =
+            Err(anyhow::Error::new(super::super::error::ProxyError::NoUpstreamServers));
+        let res = rewriter.map_response(err).unwrap();
+        assert_eq!(res.status(), 502);
+        assert_eq!(res.headers()["x-custom-security"], "error-protected");
+        assert_eq!(res.headers()[X_FRAME_OPTIONS], "DENY");
+        assert_eq!(
+            res.headers()[CONTENT_SECURITY_POLICY],
+            "frame-ancestors 'none'"
+        );
     }
 
     #[test]
