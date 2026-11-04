@@ -284,6 +284,24 @@ fn rate_limit_error_response(
     }
 }
 
+const RATE_LIMITER_PRUNE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+type RateLimiterPruner = Box<dyn Fn() + Send + Sync>;
+
+fn spawn_rate_limiter_pruner(pruners: Vec<RateLimiterPruner>) {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(async move {
+            let mut interval = tokio::time::interval(RATE_LIMITER_PRUNE_INTERVAL);
+            loop {
+                interval.tick().await;
+                for prune in &pruners {
+                    prune();
+                }
+            }
+        });
+    }
+}
+
 /// Builds the admin router. The OpenAPI document and the Swagger UI require a session, like the
 /// other endpoints under `/api` except sign-in and sign-out.
 fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
@@ -294,6 +312,7 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .key_extractor(Prefix64KeyExtractor)
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid mcp register rate limit config"))?;
+    let reg_limiter = register_governor.limiter().clone();
     let register_limit =
         GovernorLayer::new(Arc::new(register_governor))
             .error_handler(|error| rate_limit_error_response(StatusCode::TOO_MANY_REQUESTS, error));
@@ -303,9 +322,14 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .key_extractor(Prefix64KeyExtractor)
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid mcp token rate limit config"))?;
+    let tok_limiter = token_governor.limiter().clone();
     let token_limit =
         GovernorLayer::new(Arc::new(token_governor))
             .error_handler(|error| rate_limit_error_response(StatusCode::TOO_MANY_REQUESTS, error));
+    let mut pruners: Vec<RateLimiterPruner> = vec![
+        Box::new(move || reg_limiter.retain_recent()),
+        Box::new(move || tok_limiter.retain_recent()),
+    ];
     // The authorization endpoint redirects to the sign-in page when signed out; the consent
     // submission requires an active session. The token and metadata endpoints are public.
     let mcp_oauth = OpenApiRouter::new()
@@ -314,11 +338,11 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .routes(routes!(oauth2::token).layer(token_limit))
         .routes(routes!(oauth2::register).layer(register_limit));
     let (api, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .nest("/api", auth_routes()?)
+        .nest("/api", auth_routes(&mut pruners)?)
         .nest("/api", resource_routes().route_layer(verify.clone()))
         // The webhooks and the OAuth callback carry a signature or a one-time state instead of a
         // session.
-        .merge(public_routes(&app_state)?)
+        .merge(public_routes(&app_state, &mut pruners)?)
         .merge(
             OpenApiRouter::new()
                 .routes(routes!(oauth2::authorization_server_metadata))
@@ -328,6 +352,7 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .merge(metrics_routes(&app_state))
         .merge(health_routes())
         .split_for_parts();
+    spawn_rate_limiter_pruner(pruners);
     let docs: Router<AppState> = Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi))
         .route_layer(verify);
     let mcp_verify = middleware::from_fn_with_state(app_state.clone(), oauth2::verify_bearer);
@@ -461,13 +486,15 @@ impl tower_governor::key_extractor::KeyExtractor for Prefix64KeyExtractor {
     }
 }
 
-fn auth_routes() -> anyhow::Result<OpenApiRouter<AppState>> {
+fn auth_routes(pruners: &mut Vec<RateLimiterPruner>) -> anyhow::Result<OpenApiRouter<AppState>> {
     let governor_conf = GovernorConfigBuilder::default()
         .per_second(4)
         .burst_size(2)
         .key_extractor(Prefix64KeyExtractor)
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid login rate limit config"))?;
+    let limiter = governor_conf.limiter().clone();
+    pruners.push(Box::new(move || limiter.retain_recent()));
     let login_limit = GovernorLayer::new(Arc::new(governor_conf)).error_handler(|error| {
         rate_limit_error_response(AppError::R3v3rs3(Error::TooManyLoginAttempts), error)
     });
@@ -531,7 +558,10 @@ impl tower_governor::key_extractor::KeyExtractor for ResolvedClientIpKeyExtracto
 }
 
 /// The routes without a session. They share one rate limit per client address.
-fn public_routes(app_state: &AppState) -> anyhow::Result<OpenApiRouter<AppState>> {
+fn public_routes(
+    app_state: &AppState,
+    pruners: &mut Vec<RateLimiterPruner>,
+) -> anyhow::Result<OpenApiRouter<AppState>> {
     let governor_conf = GovernorConfigBuilder::default()
         .per_second(1)
         .burst_size(10)
@@ -540,6 +570,8 @@ fn public_routes(app_state: &AppState) -> anyhow::Result<OpenApiRouter<AppState>
         })
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid webhook rate limit config"))?;
+    let limiter = governor_conf.limiter().clone();
+    pruners.push(Box::new(move || limiter.retain_recent()));
     let limit = GovernorLayer::new(Arc::new(governor_conf))
         .error_handler(|error| rate_limit_error_response(StatusCode::TOO_MANY_REQUESTS, error));
     let hooks = OpenApiRouter::new()
@@ -1532,5 +1564,17 @@ mod tests {
         let bare_response = rate_limit_error_response(StatusCode::TOO_MANY_REQUESTS, bare_error);
         assert_eq!(bare_response.status(), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(bare_response.headers().get(RETRY_AFTER).unwrap(), "15");
+    }
+
+    #[test]
+    fn rate_limiter_pruner_prunes_state() {
+        let governor_conf = GovernorConfigBuilder::default()
+            .per_second(2)
+            .burst_size(5)
+            .finish()
+            .unwrap();
+        let limiter = governor_conf.limiter().clone();
+        let pruner: RateLimiterPruner = Box::new(move || limiter.retain_recent());
+        pruner();
     }
 }
