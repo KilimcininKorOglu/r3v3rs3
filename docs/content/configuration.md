@@ -1428,7 +1428,7 @@ A system resolver can return cached answers. If the propagation check fails ofte
 | Exec             | Program Path                                                    | A program on the r3v3rs3 host that creates and deletes the TXT records. See "DNS exec" below.                                                                                                                                                                                                          |
 | RFC 2136         | DNS Server, Zone, TSIG Key Name, TSIG Algorithm, TSIG Secret    | A DNS server that accepts dynamic updates, for example BIND, Knot DNS or PowerDNS. See "RFC 2136" below.                                                                                                                                                                                               |
 
-r3v3rs3 is tested against mock servers of these APIs and against the [Pebble](https://github.com/letsencrypt/pebble) test certificate authority. It is not tested against real provider accounts.
+r3v3rs3 is tested against mock servers of these APIs and against the [Pebble](https://github.com/letsencrypt/pebble) test certificate authority. It is not tested against real provider accounts. When external DNS and Git provider APIs return an HTTP 429 Too Many Requests response, r3v3rs3 automatically handles rate limits: it parses the `Retry-After` header (up to 30 seconds) or applies exponential backoff, retrying requests up to 3 times before failing.
 
 ### DNS-01 CNAME Delegation / Alias Mode (RFC 8555)
 

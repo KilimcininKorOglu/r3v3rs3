@@ -1428,7 +1428,7 @@ Sistemin çözümleyicisi cache'teki eski yanıtları döndürebilir. Yayılma k
 | Exec             | Program Yolu                                                    | r3v3rs3 host'unda TXT kayıtlarını oluşturan ve silen bir program. Aşağıdaki "DNS exec" bölümüne bakın.                                                                                                                                                                                            |
 | RFC 2136         | DNS Sunucusu, Zone, TSIG Key Adı, TSIG Algoritması, TSIG Secret | Dinamik güncelleme (dynamic update) kabul eden bir DNS sunucusu, örneğin BIND, Knot DNS veya PowerDNS. Aşağıdaki "RFC 2136" bölümüne bakın.                                                                                                                                                       |
 
-r3v3rs3 bu API'lerin mock sunucularıyla ve [Pebble](https://github.com/letsencrypt/pebble) test sertifika otoritesiyle test edilir. Gerçek sağlayıcı hesaplarıyla test edilmez.
+r3v3rs3 bu API'lerin mock sunucularıyla ve [Pebble](https://github.com/letsencrypt/pebble) test sertifika otoritesiyle test edilir. Gerçek sağlayıcı hesaplarıyla test edilmez. Harici DNS ve Git sağlayıcı API'leri bir HTTP 429 Too Many Requests yanıtı döndürdüğünde, r3v3rs3 hız sınırlarını (rate limit) otomatik olarak yönetir: `Retry-After` başlığını ayrıştırır (en fazla 30 saniye) veya üstel geri çekilme uygulayarak isteği başarısız olmadan önce 3 defaya kadar yeniden dener.
 
 ### DNS-01 CNAME Yetkilendirmesi / Alias Modu (RFC 8555)
 

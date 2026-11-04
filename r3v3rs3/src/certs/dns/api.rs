@@ -14,6 +14,7 @@ use std::{
     future::Future,
     time::{Duration, Instant},
 };
+use tracing::warn;
 
 /// An ID as a string. Providers use strings or numbers as IDs.
 pub fn id_text(value: &Value) -> Option<String> {
@@ -89,6 +90,29 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY_SIZE: usize = 4 * 1024 * 1024;
 /// Bytes of an error response that the error message keeps.
 const MAX_ERROR_BODY: usize = 300;
+const MAX_RATE_LIMIT_RETRIES: u32 = 3;
+pub(crate) const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(30);
+
+pub(crate) fn parse_retry_after(header: Option<&hyper::header::HeaderValue>) -> Option<Duration> {
+    let header_str = header?.to_str().ok()?.trim();
+    if let Ok(seconds) = header_str.parse::<u64>() {
+        return Some(Duration::from_secs(
+            seconds.min(MAX_RATE_LIMIT_WAIT.as_secs()),
+        ));
+    }
+    None
+}
+
+pub(crate) fn calculate_rate_limit_backoff(
+    attempt: u32,
+    retry_after: Option<Duration>,
+) -> Duration {
+    if let Some(wait) = retry_after {
+        return wait;
+    }
+    let exp_secs = (1u64 << attempt.min(4)).min(MAX_RATE_LIMIT_WAIT.as_secs());
+    Duration::from_secs(exp_secs)
+}
 
 pub struct ApiClient {
     http: HttpClient,
@@ -96,6 +120,7 @@ pub struct ApiClient {
     authority: String,
 }
 
+#[derive(Clone, Debug)]
 pub struct ApiRequest {
     method: Method,
     path: String,
@@ -202,24 +227,22 @@ impl ApiClient {
         Ok(T::deserialize(value)?)
     }
 
-    /// Sends the request and returns the method and path, the status and the body. A status that
-    /// is not a success is not an error here.
-    pub async fn exchange(
+    async fn execute_single_exchange(
         &self,
-        request: ApiRequest,
-    ) -> anyhow::Result<(String, StatusCode, Bytes)> {
+        request: &ApiRequest,
+    ) -> anyhow::Result<(String, StatusCode, Bytes, Option<Duration>)> {
         let target = format!("{} {}", request.method, request.path);
         let mut builder = Request::builder()
-            .method(request.method)
+            .method(request.method.clone())
             .uri(self.url(&request.path))
             .header(USER_AGENT, concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")));
-        for (name, value) in request.headers {
-            builder = builder.header(name, value);
+        for (name, value) in &request.headers {
+            builder = builder.header(*name, value.clone());
         }
-        let body = match request.body {
+        let body = match &request.body {
             Some((content_type, body)) => {
-                builder = builder.header(CONTENT_TYPE, content_type);
-                Full::new(Bytes::from(body))
+                builder = builder.header(CONTENT_TYPE, *content_type);
+                Full::new(Bytes::from(body.clone()))
             }
             None => Full::new(Bytes::new()),
         };
@@ -228,6 +251,7 @@ impl ApiClient {
                 .await
                 .map_err(|_| anyhow!("{target} timed out"))??;
         let status = response.status();
+        let retry_after = parse_retry_after(response.headers().get(hyper::header::RETRY_AFTER));
         let body = tokio::time::timeout(
             REQUEST_TIMEOUT,
             Limited::new(response.into_body(), MAX_BODY_SIZE).collect(),
@@ -236,7 +260,34 @@ impl ApiClient {
         .map_err(|_| anyhow!("{target} timed out"))?
         .map_err(|err| anyhow!(err))?
         .to_bytes();
-        Ok((target, status, body))
+        Ok((target, status, body, retry_after))
+    }
+
+    /// Sends the request and returns the method and path, the status and the body. A status that
+    /// is not a success is not an error here. When an HTTP 429 Too Many Requests response is
+    /// encountered, backoff and retries are performed automatically using Retry-After.
+    pub async fn exchange(
+        &self,
+        request: ApiRequest,
+    ) -> anyhow::Result<(String, StatusCode, Bytes)> {
+        let mut attempt = 0;
+        loop {
+            let (target, status, body, retry_after) =
+                self.execute_single_exchange(&request).await?;
+            if status == StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RATE_LIMIT_RETRIES {
+                attempt += 1;
+                let wait = calculate_rate_limit_backoff(attempt, retry_after);
+                warn!(
+                    target = %target,
+                    attempt,
+                    wait_secs = wait.as_secs(),
+                    "rate limit encountered (HTTP 429); backing off"
+                );
+                tokio::time::sleep(wait).await;
+                continue;
+            }
+            return Ok((target, status, body));
+        }
     }
 
     /// Sends the request and parses the body as JSON. An empty body is `null`.
@@ -268,5 +319,65 @@ impl ApiClient {
             }
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyper::header::HeaderValue;
+
+    #[test]
+    fn parse_valid_retry_after_seconds() {
+        let header = HeaderValue::from_static("15");
+        assert_eq!(
+            parse_retry_after(Some(&header)),
+            Some(Duration::from_secs(15))
+        );
+    }
+
+    #[test]
+    fn parse_retry_after_capped_at_max() {
+        let header = HeaderValue::from_static("120");
+        assert_eq!(parse_retry_after(Some(&header)), Some(MAX_RATE_LIMIT_WAIT));
+    }
+
+    #[test]
+    fn parse_invalid_or_missing_retry_after() {
+        assert_eq!(parse_retry_after(None), None);
+        let header = HeaderValue::from_static("invalid");
+        assert_eq!(parse_retry_after(Some(&header)), None);
+    }
+
+    #[test]
+    fn rate_limit_backoff_calculation() {
+        assert_eq!(
+            calculate_rate_limit_backoff(1, Some(Duration::from_secs(5))),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            calculate_rate_limit_backoff(1, None),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            calculate_rate_limit_backoff(2, None),
+            Duration::from_secs(4)
+        );
+        assert_eq!(
+            calculate_rate_limit_backoff(3, None),
+            Duration::from_secs(8)
+        );
+    }
+
+    #[test]
+    fn api_request_cloning() {
+        let req = ApiRequest::new(Method::POST, "/v1/zones".to_string())
+            .bearer("token123")
+            .body("application/json", b"{}".to_vec());
+        let cloned = req.clone();
+        assert_eq!(cloned.method, Method::POST);
+        assert_eq!(cloned.path, "/v1/zones");
+        assert_eq!(cloned.headers.len(), 1);
+        assert_eq!(cloned.body, Some(("application/json", b"{}".to_vec())));
     }
 }
