@@ -27,6 +27,24 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+case "$INSTALL_DIR" in
+    /*) ;;
+    *)
+        echo "INSTALL_DIR must be an absolute path: $INSTALL_DIR" >&2
+        exit 1
+        ;;
+esac
+
+if [ -d "$INSTALL_DIR" ]; then
+    INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd -P)"
+elif [ -d "$(dirname "$INSTALL_DIR")" ]; then
+    PARENT="$(cd "$(dirname "$INSTALL_DIR")" && pwd -P)"
+    BASE_DIR="$(basename "$INSTALL_DIR")"
+    INSTALL_DIR="$PARENT/$BASE_DIR"
+fi
+
+[ "$INSTALL_DIR" != "/" ] || { echo "INSTALL_DIR cannot be root (/)" >&2; exit 1; }
+
 case "$(uname -s)/$(uname -m)" in
     Linux/x86_64)  ASSET="r3-x86_64-unknown-linux-musl.tar.gz" ;;
     Linux/aarch64|Linux/arm64) ASSET="r3-aarch64-unknown-linux-musl.tar.gz" ;;
