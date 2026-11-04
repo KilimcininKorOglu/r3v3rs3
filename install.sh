@@ -398,20 +398,47 @@ check_docker() {
 	fi
 }
 
+install_docker() {
+	if command -v docker >/dev/null 2>&1; then
+		return
+	fi
+	info "Installing Docker"
+	local installed=false
+	if command -v apt-get >/dev/null 2>&1; then
+		if apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io docker-compose-plugin >/dev/null 2>&1; then
+			installed=true
+		fi
+	elif command -v dnf >/dev/null 2>&1; then
+		if dnf install -y -q moby-engine docker-compose-plugin >/dev/null 2>&1; then
+			installed=true
+		fi
+	elif command -v apk >/dev/null 2>&1; then
+		if apk add --no-cache docker docker-cli-compose >/dev/null 2>&1; then
+			installed=true
+		fi
+	fi
+	if [ "$installed" = false ]; then
+		local d_script
+		d_script=$(mktemp)
+		if curl -fsSL https://get.docker.com -o "$d_script" && [ -s "$d_script" ]; then
+			sh "$d_script" || warn "Docker setup script failed; install Docker by hand"
+		else
+			warn "failed to download Docker installation script; install Docker by hand"
+		fi
+		rm -f "$d_script"
+	fi
+}
+
 # Installs the packages that the server and its deployment platform need: git builds a Git
 # app, Docker runs the apps, the compose plugin starts Compose apps, and nano edits the
-# config files. Docker comes from get.docker.com, because the default repositories of the
-# older distributions ship no Docker at all. Already-installed packages stay untouched.
+# config files. Already-installed packages stay untouched.
 install_packages() {
 	local pkgs=()
 	local pkg
 	for pkg in git nano; do
 		command -v "$pkg" >/dev/null 2>&1 || pkgs+=("$pkg")
 	done
-	if ! command -v docker >/dev/null 2>&1; then
-		info "Installing Docker from get.docker.com"
-		curl -fsSL https://get.docker.com | sh || warn "get.docker.com failed; install Docker by hand"
-	fi
+	install_docker
 	if command -v docker >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
 		if command -v apt-get >/dev/null 2>&1; then
 			pkgs+=(docker-compose-plugin)
