@@ -19,14 +19,8 @@ ignore = [
     # The crates below have no maintained release. Each one is a transitive dependency. Check
     # for a new release of the crate that pulls it in before every release.
     "RUSTSEC-2025-0141", # bincode 1.x, through gloo-worker of yew (WebUI)
-    "RUSTSEC-2024-0436", # paste, through utoipa-axum
     "RUSTSEC-2024-0370", # proc-macro-error, through yew-macro and yewdux-macros (WebUI)
     "RUSTSEC-2024-0449", # unsafe-libyaml, unmaintained transitive dependency of serde_yaml_ng
-    # zip 3.0.0 is a build-dependency of utoipa-swagger-ui, used only during compile time to unpack Swagger UI
-    "RUSTSEC-2026-0367",
-    "RUSTSEC-2026-0368",
-    "RUSTSEC-2026-0369",
-    "RUSTSEC-2026-0429",
 ]
 
 [licenses]
