@@ -937,6 +937,9 @@ async fn logs_live_bridge(
     }
 }
 
+const MAX_LOG_FRAME_SIZE: usize = 1024 * 1024; // 1 MiB
+const MAX_LOG_BUFFER_SIZE: usize = 2 * 1024 * 1024; // 2 MiB
+
 async fn logs_stream_bridge(
     mut sink: futures::stream::SplitSink<WebSocket, Message>,
     mut ws_stream: futures::stream::SplitStream<WebSocket>,
@@ -962,6 +965,9 @@ async fn logs_stream_bridge(
                     break;
                 }
             } else {
+                if buffer.len() + data.len() > MAX_LOG_BUFFER_SIZE {
+                    break;
+                }
                 buffer.extend_from_slice(data);
                 if send_demuxed_chunks(&mut sink, &mut buffer).await.is_err() {
                     break;
@@ -984,17 +990,27 @@ async fn logs_stream_bridge(
     }
 }
 
+fn extract_demuxed_chunk(buffer: &mut Vec<u8>) -> Result<Option<String>, ()> {
+    if buffer.len() < 8 {
+        return Ok(None);
+    }
+    let size = u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]) as usize;
+    if size > MAX_LOG_FRAME_SIZE {
+        return Err(());
+    }
+    if buffer.len() < 8 + size {
+        return Ok(None);
+    }
+    let text = String::from_utf8_lossy(&buffer[8..8 + size]).into_owned();
+    buffer.drain(..8 + size);
+    Ok(Some(text))
+}
+
 async fn send_demuxed_chunks(
     sink: &mut futures::stream::SplitSink<WebSocket, Message>,
     buffer: &mut Vec<u8>,
 ) -> Result<(), ()> {
-    while buffer.len() >= 8 {
-        let size = u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]) as usize;
-        if buffer.len() < 8 + size {
-            break;
-        }
-        let text = String::from_utf8_lossy(&buffer[8..8 + size]).into_owned();
-        buffer.drain(..8 + size);
+    while let Some(text) = extract_demuxed_chunk(buffer)? {
         if sink.send(Message::Text(text.into())).await.is_err() {
             return Err(());
         }
@@ -2555,5 +2571,39 @@ mod tests {
         headers_pub.insert(HOST, "internal:80".parse().unwrap());
         headers_pub.insert(ORIGIN, "https://panel.example.com".parse().unwrap());
         assert!(verify_websocket_origin(&headers_pub, Some("https://panel.example.com")).is_ok());
+    }
+
+    #[test]
+    fn test_extract_demuxed_chunk() {
+        let mut buffer = Vec::new();
+        assert_eq!(extract_demuxed_chunk(&mut buffer), Ok(None));
+
+        // Incomplete header (< 8 bytes)
+        buffer.extend_from_slice(&[1, 0, 0, 0]);
+        assert_eq!(extract_demuxed_chunk(&mut buffer), Ok(None));
+        assert_eq!(buffer.len(), 4);
+
+        // Frame header for 5 bytes: "hello"
+        let size: u32 = 5;
+        buffer.extend_from_slice(&size.to_be_bytes());
+        // Currently 8 bytes (header only, body missing)
+        assert_eq!(extract_demuxed_chunk(&mut buffer), Ok(None));
+        assert_eq!(buffer.len(), 8);
+
+        // Append 3 bytes ("hel") - incomplete body
+        buffer.extend_from_slice(b"hel");
+        assert_eq!(extract_demuxed_chunk(&mut buffer), Ok(None));
+
+        // Append remaining 2 bytes ("lo")
+        buffer.extend_from_slice(b"lo");
+        let result = extract_demuxed_chunk(&mut buffer);
+        assert_eq!(result, Ok(Some("hello".to_string())));
+        assert!(buffer.is_empty());
+
+        // Oversized frame exceeding MAX_LOG_FRAME_SIZE
+        let excessive_size: u32 = (MAX_LOG_FRAME_SIZE as u32) + 1;
+        buffer.extend_from_slice(&[1, 0, 0, 0]);
+        buffer.extend_from_slice(&excessive_size.to_be_bytes());
+        assert_eq!(extract_demuxed_chunk(&mut buffer), Err(()));
     }
 }
