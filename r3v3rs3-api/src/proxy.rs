@@ -333,6 +333,14 @@ pub struct HttpProxy {
 }
 
 impl HttpProxy {
+    /// Constructs a new HTTP proxy with default OWASP anti-framing rules.
+    pub fn with_default_frame_protection() -> Self {
+        Self {
+            headers: HeaderRules::default_frame_protection(),
+            ..Default::default()
+        }
+    }
+
     pub fn validate_upstream(&self) -> Result<(), Error> {
         validate_http_upstream(self)
     }

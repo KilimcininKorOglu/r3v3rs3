@@ -5,6 +5,7 @@
 use crate::discovery::{DiscoveredProxy, DiscoverySnapshot, ProxyDefinition};
 use r3v3rs3_api::container::ContainerName;
 use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryProvider, DiscoverySource, DiscoveryState};
+use r3v3rs3_api::header_rules::HeaderRules;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppSpec, PlatformConfig};
 use r3v3rs3_api::proxy::{HttpProxy, ProxyKind, Route, Server, ServerUrl};
@@ -103,6 +104,11 @@ pub fn app_proxy(
         sticky: app.spec.sticky.clone().unwrap_or_default(),
         bot_blocker: app.spec.bot_blocker,
         grpc_web: app.spec.grpc_web,
+        headers: if app.spec.frame_protection {
+            HeaderRules::default_frame_protection()
+        } else {
+            HeaderRules::default()
+        },
         ..Default::default()
     };
     let key = app.id.to_string();
@@ -228,6 +234,7 @@ mod tests {
             buildkit: None,
             bot_blocker: false,
             grpc_web: false,
+            frame_protection: true,
             project_id: None,
             environment_id: None,
             lifecycle_hooks: None,
@@ -381,6 +388,39 @@ mod tests {
     fn a_container_name_joins_the_app_and_the_deployment() -> anyhow::Result<()> {
         let name = container_name("abc-def".parse()?, "ghj-klm".parse()?)?;
         assert_eq!(name.as_str(), "r3v3rs3-abc-def-ghj-klm");
+        Ok(())
+    }
+
+    #[test]
+    fn app_proxy_enforces_default_frame_protection() -> anyhow::Result<()> {
+        let mut shop_spec = spec(&["shop.example.com"]);
+        shop_spec.frame_protection = true;
+        let app = LiveApp {
+            id: "abc-def".parse()?,
+            name: "shop",
+            spec: &shop_spec,
+            host_ports: vec![HostServer::from(49153)],
+        };
+        let config = PlatformConfig::default();
+        let proxy = app_proxy(&app, &config)?.expect("a proxy");
+        let ProxyKind::Http(http) = &proxy.definition.kind else {
+            panic!("an HTTP proxy");
+        };
+        assert_eq!(http.headers, HeaderRules::default_frame_protection());
+
+        let mut shop_spec2 = spec(&["shop.example.com"]);
+        shop_spec2.frame_protection = false;
+        let app2 = LiveApp {
+            id: "abc-def".parse()?,
+            name: "shop",
+            spec: &shop_spec2,
+            host_ports: vec![HostServer::from(49153)],
+        };
+        let proxy2 = app_proxy(&app2, &config)?.expect("a proxy");
+        let ProxyKind::Http(http2) = &proxy2.definition.kind else {
+            panic!("an HTTP proxy");
+        };
+        assert_eq!(http2.headers, HeaderRules::default());
         Ok(())
     }
 }

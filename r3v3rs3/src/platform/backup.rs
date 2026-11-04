@@ -1018,6 +1018,7 @@ fn create_database_spec(
         database: Some(engine_key.to_string()),
         bot_blocker: false,
         grpc_web: false,
+        frame_protection: false,
         uses_database: None,
         replica_of: None,
         auto_deploy: false,

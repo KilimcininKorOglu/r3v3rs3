@@ -107,6 +107,7 @@ An app names an image, the port that the container listens on and the domains th
 - `auto_deploy` (optional, default `false`) enables automatic deployment when a newer image tag or updated digest is detected in the container registry.
 - `bot_blocker` (optional, default `false`) enables automated AI scraper and bot protection for the app's proxy routes.
 - `grpc_web` (optional, default `false`) enables gRPC-Web proxy translation for browser gRPC clients.
+- `frame_protection` (optional, default `true`) enables default OWASP anti-framing defenses (`X-Frame-Options: SAMEORIGIN` and `Content-Security-Policy: frame-ancestors 'self'`) on the generated proxy route. Set to `false` to permit embedding the app in external iframes.
 
 A change of an app, of its domains or of its environment variables takes effect at the next deployment.
 

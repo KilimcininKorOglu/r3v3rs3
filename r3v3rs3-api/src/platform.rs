@@ -990,6 +990,10 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
 /// What a deployment of an app runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct AppSpec {
@@ -1125,6 +1129,10 @@ pub struct AppSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub environment_id: Option<ShortId>,
+
+    /// When true (default), enables anti-framing protection (SAMEORIGIN / frame-ancestors 'self') on the generated proxy.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub frame_protection: bool,
 
     /// Optional deployment lifecycle hooks (pre-deploy migration, post-deploy cache warmup, etc.).
     #[serde(default, skip_serializing_if = "Option::is_none")]

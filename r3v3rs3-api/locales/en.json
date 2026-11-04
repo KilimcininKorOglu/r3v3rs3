@@ -1976,6 +1976,8 @@
   "apps.bot_blocker_hint": "Blocks automated AI crawlers, scrapers and aggressive bots (GPTBot, ClaudeBot, Bytespider, CCBot, PerplexityBot, etc.) with 403 Forbidden.",
   "apps.grpc_web": "gRPC-Web Proxy Translation",
   "apps.grpc_web_hint": "Enables gRPC-Web translation for browser gRPC clients connecting to this app.",
+  "apps.frame_protection": "Anti-Clickjacking / Frame Protection",
+  "apps.frame_protection_hint": "Applies SAMEORIGIN and frame-ancestors 'self' to block external framing. Uncheck to allow external iframe embedding.",
   "apps.lifecycle_hooks_title": "Deployment Lifecycle Hooks",
   "apps.lifecycle_hooks_hint": "Execute migration or warmup commands automatically before or after deployments.",
   "apps.pre_deploy_cmd": "Pre-Deploy Hook (e.g. Migrations)",

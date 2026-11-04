@@ -107,6 +107,7 @@ Bir uygulama bir image'ı, container'ın dinlediği portu ve uygulamaya yönlene
 - `auto_deploy` (isteğe bağlı, varsayılan `false`), container registry'de yeni bir image tag'i veya güncellenmiş digest tespit edildiğinde otomatik deployment'ı etkinleştirir.
 - `bot_blocker` (isteğe bağlı, varsayılan `false`), uygulamanın proxy route'ları için otomatik yapay zeka kazıyıcı ve bot korumasını etkinleştirir.
 - `grpc_web` (isteğe bağlı, varsayılan `false`), tarayıcı gRPC istemcileri için gRPC-Web dönüştürme desteğini etkinleştirir.
+- `frame_protection` (isteğe bağlı, varsayılan `true`), oluşturulan proxy route'unda varsayılan OWASP anti-framing korumasını (`X-Frame-Options: SAMEORIGIN` ve `Content-Security-Policy: frame-ancestors 'self'`) etkinleştirir. Uygulamanın harici iframe içine gömülmesine izin vermek için `false` olarak ayarlanabilir.
 
 Uygulamanın, alan adlarının veya ortam değişkenlerinin değişikliği sonraki deployment'ta geçerli olur.
 

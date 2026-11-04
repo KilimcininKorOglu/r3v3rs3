@@ -1976,6 +1976,8 @@
   "apps.bot_blocker_hint": "Uygulamayı yapay zeka tarayıcılarından, kazıyıcılardan ve agresif botlardan (GPTBot, ClaudeBot, Bytespider, CCBot, PerplexityBot vb.) 403 Forbidden ile korur.",
   "apps.grpc_web": "gRPC-Web Proxy Dönüştürme",
   "apps.grpc_web_hint": "Bu uygulamaya bağlanan tarayıcı gRPC istemcileri için gRPC-Web dönüştürme desteğini etkinleştirir.",
+  "apps.frame_protection": "Frame Koruması / Clickjacking Engelleme",
+  "apps.frame_protection_hint": "Harici sitelerde iframe içine almayı engellemek için SAMEORIGIN ve frame-ancestors 'self' uygular. Harici iframe gömülmesine izin vermek için işareti kaldırın.",
   "apps.lifecycle_hooks_title": "Dağıtım Yaşam Döngüsü Kancaları (Lifecycle Hooks)",
   "apps.lifecycle_hooks_hint": "Dağıtım öncesinde veya sonrasında veritabanı geçişi veya önbellek ısıtma komutlarını otomatik çalıştırın.",
   "apps.pre_deploy_cmd": "Dağıtım Öncesi Kancası (Örn: Veritabanı Geçişi / Migration)",

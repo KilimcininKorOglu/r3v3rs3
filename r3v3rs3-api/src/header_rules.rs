@@ -40,6 +40,23 @@ impl HeaderRules {
             .chain(&self.response)
             .try_for_each(HeaderRule::validate)
     }
+
+    /// Returns standard OWASP anti-framing rules (SAMEORIGIN framing and frame-ancestors 'self').
+    pub fn default_frame_protection() -> Self {
+        Self {
+            request: Vec::new(),
+            response: vec![
+                HeaderRule::Set {
+                    name: "X-Frame-Options".into(),
+                    value: "SAMEORIGIN".into(),
+                },
+                HeaderRule::Set {
+                    name: "Content-Security-Policy".into(),
+                    value: "frame-ancestors 'self'".into(),
+                },
+            ],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]

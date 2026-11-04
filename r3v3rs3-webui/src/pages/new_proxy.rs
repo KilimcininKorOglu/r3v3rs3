@@ -55,8 +55,14 @@ impl Preset {
     /// The new proxy of the template: a redirect host sends every path to the same path of the
     /// target with 301, and a 404 host answers every request with 404.
     fn proxy(self) -> Proxy {
+        let default_http = HttpProxy::with_default_frame_protection();
         let response = match self {
-            Self::Proxy => return Proxy::default(),
+            Self::Proxy => {
+                return Proxy {
+                    kind: ProxyKind::Http(Box::new(default_http)),
+                    ..Default::default()
+                };
+            }
             Self::Redirect => FixedResponse::Redirect(FixedRedirect {
                 target: String::new(),
                 status: RedirectStatus::MovedPermanently,
@@ -74,7 +80,7 @@ impl Preset {
         };
         let http = HttpProxy {
             routes: vec![route],
-            ..Default::default()
+            ..default_http
         };
         Proxy {
             kind: ProxyKind::Http(Box::new(http)),
@@ -191,7 +197,11 @@ mod tests {
         for preset in Preset::ALL {
             assert_eq!(Preset::parse(preset.as_str()), preset);
         }
-        assert_eq!(Preset::Proxy.proxy(), Proxy::default());
+        let expected_default_proxy = Proxy {
+            kind: ProxyKind::Http(Box::new(HttpProxy::with_default_frame_protection())),
+            ..Default::default()
+        };
+        assert_eq!(Preset::Proxy.proxy(), expected_default_proxy);
 
         let routes = |preset: Preset| match preset.proxy().kind {
             ProxyKind::Http(http) => http.routes,

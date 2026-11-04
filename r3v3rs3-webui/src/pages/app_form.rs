@@ -124,6 +124,7 @@ pub struct AppForm {
     pub buildkit_cache_to: String,
     pub bot_blocker: bool,
     pub grpc_web: bool,
+    pub frame_protection: bool,
     pub project_id: Option<String>,
     pub environment_id: Option<String>,
     pub pre_deploy: String,
@@ -188,6 +189,7 @@ impl Default for AppForm {
             buildkit_cache_to: String::new(),
             bot_blocker: false,
             grpc_web: false,
+            frame_protection: true,
             project_id: None,
             environment_id: None,
             pre_deploy: String::new(),
@@ -353,6 +355,7 @@ impl AppForm {
                 .unwrap_or_default(),
             bot_blocker: spec.bot_blocker,
             grpc_web: spec.grpc_web,
+            frame_protection: spec.frame_protection,
             project_id: spec.project_id.map(|id| id.to_string()),
             environment_id: spec.environment_id.map(|id| id.to_string()),
             pre_deploy: spec
@@ -476,6 +479,7 @@ impl AppForm {
             buildkit: self.parse_buildkit(),
             bot_blocker: self.bot_blocker,
             grpc_web: self.grpc_web,
+            frame_protection: self.frame_protection,
             project_id: self.project_id.as_deref().and_then(|id| id.parse().ok()),
             environment_id: self
                 .environment_id
@@ -902,6 +906,7 @@ pub fn fields_view(
             { lifecycle_hooks_view(locale, form) }
             { bot_blocker_view(locale, form) }
             { grpc_web_view(locale, form) }
+            { frame_protection_view(locale, form) }
         </>
     }
 }
@@ -1060,6 +1065,27 @@ fn grpc_web_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
                 <span class={LABEL_CLASS}>{locale.t("apps.grpc_web")}</span>
             </label>
             <p class={HINT_CLASS}>{locale.t("apps.grpc_web_hint")}</p>
+        </div>
+    }
+}
+
+fn frame_protection_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
+    let form_handle = form.clone();
+    let checked = form.frame_protection;
+    let onchange = Callback::from(move |e: Event| {
+        if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+            let mut updated = (*form_handle).clone();
+            updated.frame_protection = target.checked();
+            form_handle.set(updated);
+        }
+    });
+    html! {
+        <div class="mt-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={checked} {onchange} class="w-4 h-4 text-blue-600 bg-neutral-100 border-neutral-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-neutral-800 focus:ring-2 dark:bg-neutral-700 dark:border-neutral-600" />
+                <span class={LABEL_CLASS}>{locale.t("apps.frame_protection")}</span>
+            </label>
+            <p class={HINT_CLASS}>{locale.t("apps.frame_protection_hint")}</p>
         </div>
     }
 }

@@ -1004,6 +1004,7 @@ fn build_store_app_request(
         buildkit: None,
         bot_blocker: false,
         grpc_web: false,
+        frame_protection: true,
         project_id: None,
         environment_id: None,
         lifecycle_hooks: None,
