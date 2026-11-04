@@ -77,7 +77,7 @@ pub fn app_log_view(props: &Props) -> Html {
     let refresh = {
         let page = page.clone();
         let service = (*selected_service).clone();
-        Callback::from(move |_: MouseEvent| load_page(locale, id, service.clone(), page.clone()))
+        Callback::from(move |()| load_page(locale, id, service.clone(), page.clone()))
     };
 
     let title = page_title(locale, &page);
@@ -176,7 +176,7 @@ struct ContentProps<'a> {
     auto_scroll: &'a UseStateHandle<bool>,
     search: &'a UseStateHandle<String>,
     selected_service: &'a UseStateHandle<Option<String>>,
-    refresh: Callback<MouseEvent>,
+    refresh: Callback<()>,
 }
 
 fn content_view(props: ContentProps<'_>) -> Html {
@@ -231,7 +231,7 @@ fn log_box_view(page: &LogPage, props: ContentProps<'_>) -> Html {
                             Icon::Success,
                         )
                         .await;
-                        refresh.emit(MouseEvent::new("click").unwrap());
+                        refresh.emit(());
                     }
                 },
             );
@@ -277,7 +277,7 @@ struct ToolbarProps<'a> {
     services: &'a [String],
     on_download: Callback<MouseEvent>,
     on_vacuum: Callback<MouseEvent>,
-    refresh: Callback<MouseEvent>,
+    refresh: Callback<()>,
 }
 
 fn toolbar_view(props: ToolbarProps<'_>) -> Html {
@@ -390,7 +390,10 @@ fn toolbar_view(props: ToolbarProps<'_>) -> Html {
                 </button>
                 if !**live {
                     <button
-                        onclick={refresh}
+                        onclick={{
+                            let refresh = refresh.clone();
+                            move |_: MouseEvent| refresh.emit(())
+                        }}
                         type="button"
                         class="text-xs sm:text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
                     >
