@@ -367,7 +367,7 @@ async fn http_failover_and_passive_health_check() -> anyhow::Result<()> {
             .body("data")
             .send()
             .await?;
-        assert_eq!(resp.status(), 502);
+        assert_eq!(resp.status(), 523);
 
         // After one failure, the passive health check moves the first server behind the second
         // server, so the next request with a body reaches the second server.
@@ -822,7 +822,7 @@ async fn http_replays_a_body_up_to_the_limit() -> anyhow::Result<()> {
             .body("123456789")
             .send()
             .await?;
-        assert_eq!(large.status(), 502);
+        assert_eq!(large.status(), 523);
         Ok(())
     })
     .await
@@ -994,7 +994,7 @@ async fn http_one_attempt_disables_retries() -> anyhow::Result<()> {
 
     with_server(config, |_| async move {
         let resp = reqwest::get(proxy_port.http_url("/")).await?;
-        assert_eq!(resp.status(), 502);
+        assert_eq!(resp.status(), 523);
         Ok(())
     })
     .await

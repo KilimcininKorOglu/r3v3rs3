@@ -237,9 +237,9 @@ async fn http_upstream_client_cert() -> anyhow::Result<()> {
         let client = reqwest::Client::new();
         let get = |vhost: &'static str| client.get(url.clone()).header(HOST, vhost).send();
         for (vhost, status) in [
-            ("nocert.localhost", StatusCode::BAD_GATEWAY),
+            ("nocert.localhost", StatusCode::from_u16(525).unwrap()),
             ("withcert.localhost", StatusCode::OK),
-            ("nocert.localhost", StatusCode::BAD_GATEWAY),
+            ("nocert.localhost", StatusCode::from_u16(525).unwrap()),
             ("badcert.localhost", StatusCode::BAD_GATEWAY),
         ] {
             assert_eq!(get(vhost).await?.status(), status, "{vhost}");

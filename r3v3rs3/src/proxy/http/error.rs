@@ -98,23 +98,75 @@ pub fn error_headers(err: &anyhow::Error) -> HeaderMap {
     headers
 }
 
+fn check_rustls_error(err: &(dyn std::error::Error + 'static)) -> Option<StatusCode> {
+    if let Some(err) = err.downcast_ref::<rustls::Error>() {
+        return Some(if matches!(err, rustls::Error::InvalidCertificate(_)) {
+            status_code(526)
+        } else {
+            status_code(525)
+        });
+    }
+    None
+}
+
+fn classify_tls_error(err: &anyhow::Error) -> Option<StatusCode> {
+    for cause in err.chain() {
+        if let Some(code) = check_rustls_error(cause) {
+            return Some(code);
+        }
+        if let Some(io_err) = cause.downcast_ref::<std::io::Error>()
+            && let Some(inner) = io_err.get_ref()
+            && let Some(code) = check_rustls_error(inner)
+        {
+            return Some(code);
+        }
+    }
+    None
+}
+
+fn is_unreachable_io_error(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::HostUnreachable
+            | std::io::ErrorKind::NetworkUnreachable
+            | std::io::ErrorKind::ConnectionReset
+    )
+}
+
+fn classify_connect_error(err: &anyhow::Error) -> Option<StatusCode> {
+    for cause in err.chain() {
+        if let Some(err) = cause.downcast_ref::<hyper_util::client::legacy::Error>() {
+            if err.is_connect() {
+                return Some(status_code(523));
+            }
+        }
+        if let Some(err) = cause.downcast_ref::<std::io::Error>() {
+            if err.kind() == std::io::ErrorKind::TimedOut {
+                return Some(StatusCode::GATEWAY_TIMEOUT);
+            }
+            if is_unreachable_io_error(err) {
+                return Some(status_code(523));
+            }
+        }
+    }
+    None
+}
+
 pub fn map_error(err: anyhow::Error) -> StatusCode {
     if let Some(err) = err.downcast_ref::<ProxyError>() {
         return err.code();
     }
-    if let Some(err) = err.downcast_ref::<rustls::Error>() {
-        if matches!(err, rustls::Error::InvalidCertificate(_)) {
-            return status_code(526);
-        } else {
-            return status_code(525);
+    for cause in err.chain() {
+        if let Some(err) = cause.downcast_ref::<ProxyError>() {
+            return err.code();
         }
     }
-    if let Ok(err) = err.downcast::<hyper::Error>() {
-        if err.is_timeout() {
-            return StatusCode::GATEWAY_TIMEOUT;
-        } else {
-            return status_code(523);
-        }
+    if let Some(code) = classify_tls_error(&err) {
+        return code;
+    }
+    if let Some(code) = classify_connect_error(&err) {
+        return code;
     }
     StatusCode::BAD_GATEWAY
 }
@@ -192,5 +244,34 @@ mod tests {
             status_text(StatusCode::FORBIDDEN, Locale::Tr),
             status_text(StatusCode::FORBIDDEN, Locale::En)
         );
+    }
+
+    #[test]
+    fn test_map_error_classifies_sources() {
+        use std::io;
+
+        let invalid_cert =
+            rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer);
+        let wrapped_tls = anyhow::Error::new(io::Error::new(io::ErrorKind::Other, invalid_cert));
+        assert_eq!(map_error(wrapped_tls), status_code(526));
+
+        let handshake_err = rustls::Error::General("handshake failed".into());
+        let wrapped_handshake =
+            anyhow::Error::new(io::Error::new(io::ErrorKind::Other, handshake_err));
+        assert_eq!(map_error(wrapped_handshake), status_code(525));
+
+        let refused = io::Error::new(io::ErrorKind::ConnectionRefused, "connection refused");
+        let wrapped_refused = anyhow::Error::new(refused).context("client connect error");
+        assert_eq!(map_error(wrapped_refused), status_code(523));
+
+        let timed_out = io::Error::new(io::ErrorKind::TimedOut, "operation timed out");
+        let wrapped_timeout = anyhow::Error::new(timed_out);
+        assert_eq!(map_error(wrapped_timeout), StatusCode::GATEWAY_TIMEOUT);
+
+        let proxy_err = anyhow::Error::new(ProxyError::UpstreamTimeout);
+        assert_eq!(map_error(proxy_err), StatusCode::GATEWAY_TIMEOUT);
+
+        let generic = anyhow::anyhow!("unknown upstream failure");
+        assert_eq!(map_error(generic), StatusCode::BAD_GATEWAY);
     }
 }

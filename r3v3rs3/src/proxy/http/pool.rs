@@ -586,7 +586,7 @@ fn record_response_permit(
         }
         Ok(_) => Some(permit.success_keep()),
         Err(err) => {
-            permit.failure(&err.error.to_string());
+            permit.failure(&format!("{:#}", err.error));
             None
         }
     }
@@ -670,7 +670,7 @@ fn finish(
 ) -> Result<Response<ProxyBody>, anyhow::Error> {
     let result = result.map_err(|err| err.error);
     if let Err(err) = &result {
-        error!(%err);
+        error!("{err:#}");
         crate::proxy::stats::count_upstream_error_with_kind(
             proxy,
             route,

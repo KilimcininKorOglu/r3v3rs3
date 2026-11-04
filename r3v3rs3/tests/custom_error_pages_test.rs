@@ -32,6 +32,7 @@ fn proxy_with_error_pages(routes: Vec<Route>, error_pages: Vec<CustomErrorPage>)
 async fn create_test_fixture(
     custom_404: &str,
     custom_502: &str,
+    custom_523: &str,
 ) -> anyhow::Result<(TestPort, TestStorage)> {
     let not_found_upstream =
         serve_http_upstream(axum::Router::new().fallback(|| async { StatusCode::NOT_FOUND }))
@@ -57,6 +58,10 @@ async fn create_test_fixture(
                 status: 502,
                 body: custom_502.to_string(),
             },
+            CustomErrorPage {
+                status: 523,
+                body: custom_523.to_string(),
+            },
         ],
     );
 
@@ -72,12 +77,13 @@ async fn create_test_fixture(
 async fn test_custom_error_pages_for_404_and_502() -> anyhow::Result<()> {
     let custom_404 = "<html><body>Custom 404 Not Found</body></html>";
     let custom_502 = "<html><body>Custom 502 Bad Gateway</body></html>";
-    let (port, storage) = create_test_fixture(custom_404, custom_502).await?;
+    let custom_523 = "<html><body>Custom 523 Origin Unreachable</body></html>";
+    let (port, storage) = create_test_fixture(custom_404, custom_502, custom_523).await?;
 
     with_server(storage, |_| async move {
         let client = reqwest::Client::new();
         assert_custom_rewritten(&client, port.http_url("/missing"), 404, custom_404).await?;
-        assert_custom_rewritten(&client, port.http_url("/broken"), 502, custom_502).await?;
+        assert_custom_rewritten(&client, port.http_url("/broken"), 523, custom_523).await?;
 
         let res_200 = client.get(port.http_url("/ok")).send().await?;
         assert_eq!(res_200.status(), 200);
@@ -145,14 +151,14 @@ async fn test_upstream_error_page_uses_request_preferences() -> anyhow::Result<(
             .header(reqwest::header::COOKIE, "r3v3rs3_lang=tr; r3v3rs3_theme=dark")
             .send()
             .await?;
-        assert_eq!(resp.status(), 502);
+        assert_eq!(resp.status(), 523);
         let body = resp.text().await?;
         assert!(
             body.contains(r#"<html lang="tr" data-theme="dark">"#),
             "{body}"
         );
         assert!(
-            body.contains(r3v3rs3_api::i18n::Locale::Tr.t("error_page.502")),
+            body.contains(r3v3rs3_api::i18n::Locale::Tr.t("error_page.523")),
             "{body}"
         );
         Ok(())
