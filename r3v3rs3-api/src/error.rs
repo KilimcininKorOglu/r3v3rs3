@@ -618,6 +618,7 @@ impl Error {
             | Self::GitProviderFailed { .. }
             | Self::FailedToRefreshAppStore
             | Self::FailedToRefreshEngines
+            | Self::FailedToRefreshCdnRanges
             | Self::GrpcError { .. }
             | Self::GeoIpUpdateFailed { .. }
             | Self::WebhookDeliveryFailed { .. }
@@ -628,10 +629,30 @@ impl Error {
             | Self::FailedToHashPassword
             | Self::FailedToLoadAccounts
             | Self::FailedToCreateCertificateArchive
+            | Self::FailedToListNetworkInterfaces
+            | Self::FailedToGenerateSelfSignedCertificate
+            | Self::UpgradeFailed
             | Self::BackupFailed { .. }
             | Self::RestoreFailed { .. }
             | Self::S3OperationFailed { .. } => 500,
             _ => 400,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_status_codes() {
+        assert_eq!(Error::FailedToRefreshCdnRanges.status_code(), 502);
+        assert_eq!(Error::FailedToListNetworkInterfaces.status_code(), 500);
+        assert_eq!(Error::FailedToGenerateSelfSignedCertificate.status_code(), 500);
+        assert_eq!(Error::UpgradeFailed.status_code(), 500);
+        assert_eq!(Error::FailedToSaveConfig.status_code(), 500);
+        assert_eq!(Error::FailedToRefreshAppStore.status_code(), 502);
+        assert_eq!(Error::Unauthorized.status_code(), 401);
+        assert_eq!(Error::Forbidden.status_code(), 403);
     }
 }
