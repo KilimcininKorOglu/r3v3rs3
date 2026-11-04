@@ -282,36 +282,65 @@ impl Platform {
         if entry.provider == GitProvider::Github {
             return self.renew_installation_token(entry).await;
         }
-        let Some(sealed_refresh) = stored.refresh_token else {
+        let Some(ref sealed_refresh) = stored.refresh_token else {
             return self
-                .expire(entry, "the connection has no refresh token")
+                .expire(entry, None, "the connection has no refresh token")
                 .await;
         };
-        let refresh = self.open_connection_value(id, "refresh_token", &sealed_refresh)?;
+        self.perform_git_token_renewal(entry, &stored, sealed_refresh)
+            .await
+    }
+
+    async fn perform_git_token_renewal(
+        &self,
+        entry: &GitConnectionEntry,
+        stored: &StoredConnection,
+        sealed_refresh: &[u8],
+    ) -> anyhow::Result<String> {
+        let id = entry.id;
+        let refresh = self.open_connection_value(id, "refresh_token", sealed_refresh)?;
         let secret = self.client_secret(id).await?;
-        let redirect_uri = stored.redirect_uri.unwrap_or_default();
+        let redirect_uri = stored.redirect_uri.as_deref().unwrap_or_default();
         let form = [
             ("client_id", entry.client_id.as_str()),
             ("client_secret", secret.as_str()),
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh.as_str()),
-            ("redirect_uri", redirect_uri.as_str()),
+            ("redirect_uri", redirect_uri),
         ];
         match site(entry).grant(self.http().await?, &form).await {
             Ok(grant) => {
-                let tokens = self.seal_grant(id, &grant, Some(sealed_refresh))?;
-                self.store.renew_git_tokens(id, &tokens.stored()).await?;
+                let tokens = self.seal_grant(id, &grant, Some(sealed_refresh.to_vec()))?;
+                let renewed = self
+                    .store
+                    .renew_git_tokens(id, &tokens.stored(), Some(sealed_refresh))
+                    .await?;
+                if !renewed {
+                    return self.current_stored_token(id).await;
+                }
                 Ok(grant.access_token)
             }
-            Err(GrantError::Refused(reason)) => self.expire(entry, &reason).await,
+            Err(GrantError::Refused(reason)) => {
+                self.expire(entry, Some(sealed_refresh), &reason).await
+            }
             Err(GrantError::Failed(err)) => Err(provider_failed(err)),
         }
+    }
+
+    /// Reads the decrypted access token from storage if it is still valid.
+    pub(super) async fn current_stored_token(&self, id: ShortId) -> anyhow::Result<String> {
+        let stored = self.connection_secrets(id).await?;
+        if let Some(sealed) = current_token(&stored) {
+            return self.open_connection_value(id, "access_token", sealed);
+        }
+        Err(Error::GitConnectionNotConnected { id }.into())
     }
 
     /// Marks a connection expired after the provider refused its tokens.
     pub(super) async fn expire(
         &self,
         entry: &GitConnectionEntry,
+        current_refresh: Option<&[u8]>,
         reason: &str,
     ) -> anyhow::Result<String> {
         warn!(
@@ -319,7 +348,13 @@ impl Platform {
             reason,
             "the Git provider refused the token renewal, so the connection needs a new authorization"
         );
-        self.store.expire_git_connection(entry.id).await?;
+        let expired = self
+            .store
+            .expire_git_connection(entry.id, current_refresh)
+            .await?;
+        if !expired {
+            return self.current_stored_token(entry.id).await;
+        }
         Err(Error::GitConnectionNotConnected { id: entry.id }.into())
     }
 
@@ -602,6 +637,22 @@ mod tests {
         assert_eq!(entry.status, ConnectionStatus::Connected);
         let stored = setup.platform.connection_secrets(setup.id).await?;
         assert!(stored.access_token.is_some() && stored.refresh_token.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_refused_stale_renewal_does_not_expire_new_tokens() -> anyhow::Result<()> {
+        let mut setup = setup().await?;
+        connect(&mut setup, 3600).await?;
+        let entry = setup.platform.git_connection(setup.id).await?;
+        let stale_refresh = b"stale-refresh-token";
+        let token = setup
+            .platform
+            .expire(&entry, Some(stale_refresh), "stale renewal")
+            .await?;
+        assert_eq!(token, "access-1");
+        let entry_after = setup.platform.git_connection(setup.id).await?;
+        assert_eq!(entry_after.status, ConnectionStatus::Connected);
         Ok(())
     }
 

@@ -11,7 +11,7 @@ use serde_json::Value;
 
 mod github_app;
 mod repos;
-pub(super) use github_app::{Conversion, TokenError};
+pub(super) use github_app::{Conversion, InstallationToken, TokenError};
 pub(super) use repos::NewHook;
 
 /// The REST API of github.com.

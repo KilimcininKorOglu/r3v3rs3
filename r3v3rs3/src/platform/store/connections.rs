@@ -252,35 +252,116 @@ impl PlatformStore {
         Ok(result.rows_affected() == 1)
     }
 
-    /// Replaces the tokens of a connected connection after a renewal.
+    /// Replaces the tokens of a connected connection after a renewal if it still holds the
+    /// refresh token that was renewed.
     pub async fn renew_git_tokens(
         &self,
         id: ShortId,
         tokens: &StoredTokens<'_>,
+        current_refresh: Option<&[u8]>,
+    ) -> anyhow::Result<bool> {
+        let result = match current_refresh {
+            Some(refresh) => {
+                sqlx::query(
+                    "UPDATE git_connections SET access_token = ?, refresh_token = ?, expires_at = ?
+                    WHERE id = ? AND status = 'connected' AND refresh_token = ?",
+                )
+                .bind(tokens.access_token)
+                .bind(tokens.refresh_token)
+                .bind(tokens.expires_at.map(sql_int))
+                .bind(id.to_string())
+                .bind(refresh)
+                .execute(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query(
+                    "UPDATE git_connections SET access_token = ?, refresh_token = ?, expires_at = ?
+                    WHERE id = ? AND status = 'connected' AND refresh_token IS NULL",
+                )
+                .bind(tokens.access_token)
+                .bind(tokens.refresh_token)
+                .bind(tokens.expires_at.map(sql_int))
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?
+            }
+        };
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Replaces the tokens of a GitHub App installation after a renewal if the installation
+    /// did not change.
+    pub async fn renew_github_installation_tokens(
+        &self,
+        id: ShortId,
+        installation_id: u64,
+        tokens: &StoredTokens<'_>,
     ) -> anyhow::Result<bool> {
         let result = sqlx::query(
-            "UPDATE git_connections SET access_token = ?, refresh_token = ?, expires_at = ?
-            WHERE id = ? AND status = 'connected'",
+            "UPDATE git_connections SET access_token = ?, expires_at = ?
+            WHERE id = ? AND status = 'connected'
+            AND id IN (SELECT connection_id FROM github_apps WHERE installation_id = ?)",
         )
         .bind(tokens.access_token)
-        .bind(tokens.refresh_token)
         .bind(tokens.expires_at.map(sql_int))
         .bind(id.to_string())
+        .bind(sql_int(installation_id))
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() == 1)
     }
 
-    /// Marks a connection expired and drops its tokens, because the provider refused them.
-    pub async fn expire_git_connection(&self, id: ShortId) -> anyhow::Result<()> {
-        sqlx::query(
+    /// Marks a connection expired and drops its tokens if it still holds the refresh token
+    /// that the provider refused.
+    pub async fn expire_git_connection(
+        &self,
+        id: ShortId,
+        current_refresh: Option<&[u8]>,
+    ) -> anyhow::Result<bool> {
+        let result = match current_refresh {
+            Some(refresh) => {
+                sqlx::query(
+                    "UPDATE git_connections SET status = 'expired', access_token = NULL,
+                        refresh_token = NULL, expires_at = NULL
+                    WHERE id = ? AND status = 'connected' AND refresh_token = ?",
+                )
+                .bind(id.to_string())
+                .bind(refresh)
+                .execute(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query(
+                    "UPDATE git_connections SET status = 'expired', access_token = NULL,
+                        refresh_token = NULL, expires_at = NULL
+                    WHERE id = ? AND status = 'connected' AND refresh_token IS NULL",
+                )
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?
+            }
+        };
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Marks a GitHub App connection expired if its installation was removed.
+    pub async fn expire_github_installation(
+        &self,
+        id: ShortId,
+        installation_id: u64,
+    ) -> anyhow::Result<bool> {
+        let result = sqlx::query(
             "UPDATE git_connections SET status = 'expired', access_token = NULL,
-                refresh_token = NULL, expires_at = NULL WHERE id = ?",
+                refresh_token = NULL, expires_at = NULL
+            WHERE id = ? AND status = 'connected'
+            AND id IN (SELECT connection_id FROM github_apps WHERE installation_id = ?)",
         )
         .bind(id.to_string())
+        .bind(sql_int(installation_id))
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() == 1)
     }
 
     /// Deletes a connection. Returns false when no connection has the id.

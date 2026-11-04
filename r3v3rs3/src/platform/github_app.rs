@@ -5,7 +5,7 @@
 
 use super::connections::connection_aad;
 use super::oauth::{Authorized, Pending, Purpose, provider_failed, random_word, site};
-use super::provider::{Conversion, Site, TokenError};
+use super::provider::{Conversion, InstallationToken, Site, TokenError};
 use super::store::{StoredGithubApp, StoredTokens, Write};
 use super::{Platform, not_found};
 use crate::clock::unix_ms;
@@ -262,10 +262,20 @@ impl Platform {
         };
         let jwt = self.github_jwt(entry, &app)?;
         let now = unix_ms();
-        match site(entry)
+        let granted = site(entry)
             .installation_token(self.http().await?, &jwt, installation, now)
+            .await;
+        self.apply_installation_grant(entry, installation, granted)
             .await
-        {
+    }
+
+    async fn apply_installation_grant(
+        &self,
+        entry: &GitConnectionEntry,
+        installation: u64,
+        granted: Result<InstallationToken, TokenError>,
+    ) -> anyhow::Result<String> {
+        match granted {
             Ok(granted) => {
                 let aad = connection_aad(entry.id, "access_token");
                 let sealed = self.keys().seal(&aad, granted.token.as_bytes())?;
@@ -274,12 +284,24 @@ impl Platform {
                     refresh_token: None,
                     expires_at: Some(granted.expires_at),
                 };
-                self.store.renew_git_tokens(entry.id, &tokens).await?;
+                let renewed = self
+                    .store
+                    .renew_github_installation_tokens(entry.id, installation, &tokens)
+                    .await?;
+                if !renewed {
+                    return self.current_stored_token(entry.id).await;
+                }
                 Ok(granted.token)
             }
             Err(TokenError::Gone) => {
-                self.expire(entry, "the GitHub App is not installed anymore")
-                    .await
+                let expired = self
+                    .store
+                    .expire_github_installation(entry.id, installation)
+                    .await?;
+                if !expired {
+                    return self.current_stored_token(entry.id).await;
+                }
+                Err(Error::GitConnectionNotConnected { id: entry.id }.into())
             }
             Err(TokenError::Failed(err)) => Err(provider_failed(err)),
         }
