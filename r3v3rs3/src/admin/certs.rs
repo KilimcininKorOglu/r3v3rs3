@@ -274,11 +274,12 @@ pub async fn download(
     Path(id): Path<ShortId>,
 ) -> Result<impl IntoResponse, AppError> {
     let file = state.call(&caller, DownloadCert { id }).await?;
+    let filename = format!("{id}.tar.gz");
     let headers = [
         (CONTENT_TYPE, "application/gzip".to_string()),
         (
             CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{id}.tar.gz\""),
+            super::content_disposition_attachment(&filename, "cert.tar.gz"),
         ),
     ];
     Ok((headers, file.deref().clone()))

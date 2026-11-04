@@ -1232,6 +1232,24 @@ impl IntoResponse for AppError {
     }
 }
 
+fn is_safe_filename_char(c: char) -> bool {
+    c != '"' && c != ';' && c != '\\' && !c.is_control()
+}
+
+/// Builds a sanitized Content-Disposition attachment header value, stripping quotes, semicolons,
+/// backslashes, and control characters to prevent header and parameter injection.
+pub fn content_disposition_attachment(filename: &str, default_fallback: &str) -> String {
+    let base = filename.rsplit(['/', '\\']).next().unwrap_or(default_fallback);
+    let sanitized: String = base.chars().filter(|&c| is_safe_filename_char(c)).collect();
+    let trimmed = sanitized.trim();
+    let safe_name = if trimmed.is_empty() {
+        default_fallback
+    } else {
+        trimmed
+    };
+    format!("attachment; filename=\"{safe_name}\"")
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub sender: mpsc::Sender<ServerCommand>,
@@ -1435,5 +1453,25 @@ mod tests {
         assert!(!body_str.contains("disk I/O error"));
         assert!(!body_str.contains("/var/data/r3v3rs3.db"));
         assert!(body_str.contains("Internal server error"));
+    }
+
+    #[test]
+    fn content_disposition_attachment_sanitizes_injected_parameters() {
+        assert_eq!(
+            content_disposition_attachment("/path/to/test.txt", "file"),
+            "attachment; filename=\"test.txt\""
+        );
+        assert_eq!(
+            content_disposition_attachment("test.txt\"; filename*=\"evil.sh", "file"),
+            "attachment; filename=\"test.txt filename*=evil.sh\""
+        );
+        assert_eq!(
+            content_disposition_attachment("evil\r\nname.txt", "file"),
+            "attachment; filename=\"evilname.txt\""
+        );
+        assert_eq!(
+            content_disposition_attachment(";;;\"\"\"", "fallback.txt"),
+            "attachment; filename=\"fallback.txt\""
+        );
     }
 }

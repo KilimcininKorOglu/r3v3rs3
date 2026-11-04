@@ -87,11 +87,12 @@ pub async fn download(
         .download_backup(id, &backup_id)
         .await
         .map_err(platform_error)?;
+    let filename = format!("{backup_id}.dump.gz");
     let headers = [
         ("content-type", "application/octet-stream".to_string()),
         (
             CONTENT_DISPOSITION.as_str(),
-            format!("attachment; filename=\"{backup_id}.dump.gz\""),
+            super::content_disposition_attachment(&filename, "backup.dump.gz"),
         ),
     ];
     Ok((headers, content))
@@ -371,12 +372,11 @@ pub async fn download_s3(
         .download_s3_backup(&query.key)
         .await
         .map_err(platform_error)?;
-    let filename = query.key.rsplit('/').next().unwrap_or("backup.dump.gz");
     let headers = [
         ("content-type", "application/octet-stream".to_string()),
         (
             CONTENT_DISPOSITION.as_str(),
-            format!("attachment; filename=\"{filename}\""),
+            super::content_disposition_attachment(&query.key, "backup.dump.gz"),
         ),
     ];
     Ok((headers, content))

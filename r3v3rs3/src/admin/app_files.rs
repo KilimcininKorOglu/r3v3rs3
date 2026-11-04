@@ -70,12 +70,11 @@ pub async fn download(
         .download_file(id, &query.path)
         .await
         .map_err(platform_error)?;
-    let name = query.path.rsplit('/').next().unwrap_or("file");
     let headers = [
         ("content-type", "application/octet-stream".to_string()),
         (
             CONTENT_DISPOSITION.as_str(),
-            format!("attachment; filename=\"{name}\""),
+            super::content_disposition_attachment(&query.path, "file"),
         ),
     ];
     Ok((headers, content))
@@ -229,7 +228,7 @@ pub async fn download_volume_backup(
         ("content-type", "application/gzip".to_string()),
         (
             CONTENT_DISPOSITION.as_str(),
-            format!("attachment; filename=\"{filename}\""),
+            super::content_disposition_attachment(&filename, "backup.tar.gz"),
         ),
     ];
     Ok((headers, content))
@@ -331,7 +330,7 @@ pub async fn export_volume_archive(
         ("content-type", "application/gzip".to_string()),
         (
             CONTENT_DISPOSITION.as_str(),
-            format!("attachment; filename=\"{filename}\""),
+            super::content_disposition_attachment(&filename, "volume-export.tar.gz"),
         ),
     ];
     Ok((headers, content))
