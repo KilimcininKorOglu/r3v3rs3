@@ -448,15 +448,13 @@ mod tests {
 
     #[tokio::test]
     async fn authorize_with_user_file() {
-        let dir = std::env::temp_dir().join(format!("r3v3rs3-userfile-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let file_path = dir.join("users.txt");
+        let file_name = format!("test-users-unit-{}.txt", std::process::id());
         let hash = Argon2::default()
             .hash_password(b"argonpass")
             .unwrap()
             .to_string();
         std::fs::write(
-            &file_path,
+            &file_name,
             format!("# Comments\nplainuser:plainpass\nhashuser:{hash}\n"),
         )
         .unwrap();
@@ -464,7 +462,7 @@ mod tests {
         let auth = BasicAuthenticator::new(BasicAuth {
             realm: "FileRealm".into(),
             users: vec![],
-            user_file: Some(file_path.to_str().unwrap().to_string()),
+            user_file: Some(file_name.clone()),
         });
         let client_ip = IpAddr::from([127, 0, 0, 1]);
 
@@ -477,7 +475,7 @@ mod tests {
         let mut headers = basic("plainuser:wrong");
         assert!(auth.authorize(&mut headers, client_ip).await.is_err());
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&file_name);
     }
 
     #[tokio::test]
