@@ -1049,12 +1049,20 @@ struct StreamWrapper {
     sender: Sender<ServerCommand>,
 }
 
+fn send_broadcast_toggle(sender: Sender<ServerCommand>, enabled: bool) {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(async move {
+            let _ = sender.send(ServerCommand::SetBroadcastEvents { enabled }).await;
+        });
+    }
+}
+
 impl StreamWrapper {
     fn new(state: &AppState, caller: Caller, session_token: Option<String>) -> Self {
         let counter = state.event_listener_counter.clone();
         let sender = state.sender.clone();
         if counter.fetch_add(1, Ordering::Relaxed) == 0 {
-            let _ = sender.try_send(ServerCommand::SetBroadcastEvents { enabled: true });
+            send_broadcast_toggle(sender.clone(), true);
         }
         let initial_account = state.accounts.borrow().get(&caller.username).cloned();
         let (tx, rx) = mpsc::channel(32);
@@ -1165,9 +1173,7 @@ impl Stream for StreamWrapper {
 impl Drop for StreamWrapper {
     fn drop(&mut self) {
         if self.counter.fetch_sub(1, Ordering::Release) == 1 {
-            let _ = self
-                .sender
-                .try_send(ServerCommand::SetBroadcastEvents { enabled: false });
+            send_broadcast_toggle(self.sender.clone(), false);
         }
     }
 }
@@ -1473,5 +1479,25 @@ mod tests {
             content_disposition_attachment(";;;\"\"\"", "fallback.txt"),
             "attachment; filename=\"fallback.txt\""
         );
+    }
+
+    #[tokio::test]
+    async fn send_broadcast_toggle_delivers_reliably_even_when_channel_is_full() {
+        let (tx, mut rx) = mpsc::channel(1);
+        tx.try_send(ServerCommand::SetBroadcastEvents { enabled: true })
+            .unwrap();
+        send_broadcast_toggle(tx, false);
+
+        let first = rx.recv().await.unwrap();
+        assert!(matches!(
+            first,
+            ServerCommand::SetBroadcastEvents { enabled: true }
+        ));
+
+        let second = rx.recv().await.unwrap();
+        assert!(matches!(
+            second,
+            ServerCommand::SetBroadcastEvents { enabled: false }
+        ));
     }
 }
