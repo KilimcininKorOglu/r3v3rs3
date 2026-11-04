@@ -86,6 +86,18 @@ impl PendingAuthorizations {
             .remove(state)
             .filter(|pending| pending.created.elapsed() < AUTHORIZATION_LIFETIME)
     }
+
+    pub(super) fn username(&self, state: &str) -> Option<String> {
+        self.lock()
+            .get(state)
+            .filter(|pending| pending.created.elapsed() < AUTHORIZATION_LIFETIME)
+            .map(|pending| pending.username.clone())
+    }
+
+    pub(super) fn drop_user(&self, username: &str) {
+        let mut map = self.lock();
+        map.retain(|_, pending| pending.username != username);
+    }
 }
 
 /// A connection that an account of the provider authorized, or a new GitHub App connection.
@@ -173,6 +185,16 @@ impl Platform {
     /// Drops the authorization of `state`, because the provider reported an error.
     pub fn cancel_git_authorization(&self, state: &str) -> Option<ShortId> {
         self.pending.take(state).map(|pending| pending.connection)
+    }
+
+    /// The username of the account that started the pending Git authorization of `state`, if still waiting.
+    pub fn pending_git_authorization_username(&self, state: &str) -> Option<String> {
+        self.pending.username(state)
+    }
+
+    /// Drops any pending Git authorizations started by the account.
+    pub fn cancel_git_authorizations_for_user(&self, username: &str) {
+        self.pending.drop_user(username);
     }
 
     /// Trades the code of the callback for the tokens of the connection, or for a new GitHub App.
@@ -653,6 +675,53 @@ mod tests {
         assert_eq!(token, "access-1");
         let entry_after = setup.platform.git_connection(setup.id).await?;
         assert_eq!(entry_after.status, ConnectionStatus::Connected);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cancel_git_authorizations_for_user_drops_only_matching_user() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let redirect: RedirectUri = CALLBACK.parse()?;
+        let auth_admin = setup
+            .platform
+            .authorize_git_connection(setup.id, &redirect, "admin", None)
+            .await?;
+        let auth_other = setup
+            .platform
+            .authorize_git_connection(setup.id, &redirect, "other", None)
+            .await?;
+        let state_admin = url::Url::parse(&auth_admin.url)?
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .context("admin state")?
+            .1
+            .to_string();
+        let state_other = url::Url::parse(&auth_other.url)?
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .context("other state")?
+            .1
+            .to_string();
+
+        assert_eq!(
+            setup.platform.pending_git_authorization_username(&state_admin),
+            Some("admin".to_string())
+        );
+        assert_eq!(
+            setup.platform.pending_git_authorization_username(&state_other),
+            Some("other".to_string())
+        );
+
+        setup.platform.cancel_git_authorizations_for_user("admin");
+
+        assert_eq!(
+            setup.platform.pending_git_authorization_username(&state_admin),
+            None
+        );
+        assert_eq!(
+            setup.platform.pending_git_authorization_username(&state_other),
+            Some("other".to_string())
+        );
         Ok(())
     }
 

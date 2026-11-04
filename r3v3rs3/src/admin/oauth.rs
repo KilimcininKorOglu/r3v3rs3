@@ -52,7 +52,7 @@ pub async fn git_callback(
         .await?
         .get()?
         .clone();
-    let target = match finish(&platform, query).await {
+    let target = match finish(&state, &platform, query).await {
         Ok(authorized) => {
             record(&state, &authorized).await;
             match authorized.install_url {
@@ -67,23 +67,52 @@ pub async fn git_callback(
 
 /// The authorized connection, or the error code of the failure.
 async fn finish(
+    state: &AppState,
     platform: &crate::platform::Platform,
     query: CallbackQuery,
 ) -> Result<Authorized, &'static str> {
-    let state = query.state.unwrap_or_default();
+    let state_param = query.state.unwrap_or_default();
     if let Some(reason) = query.error {
-        let connection = platform.cancel_git_authorization(&state);
+        let connection = platform.cancel_git_authorization(&state_param);
         warn!(
             ?connection,
             reason, "the Git provider refused the authorization"
         );
         return Err("git_authorization_refused");
     }
+    verify_pending_admin(state, platform, &state_param).await?;
     let code = query.code.unwrap_or_default();
     platform
-        .finish_git_authorization(&state, &code)
+        .finish_git_authorization(&state_param, &code)
         .await
         .map_err(|err| error_code(&err))
+}
+
+/// Checks that the account that started the pending Git authorization still exists and is an admin.
+async fn verify_pending_admin(
+    state: &AppState,
+    platform: &crate::platform::Platform,
+    state_param: &str,
+) -> Result<(), &'static str> {
+    let username = platform
+        .pending_git_authorization_username(state_param)
+        .ok_or("oauth_state_invalid")?;
+    let accounts = state
+        .call_system(crate::server::rpc::accounts::GetAccountList)
+        .await
+        .map_err(|_| "failed_to_load_accounts")?;
+    let is_admin = accounts
+        .iter()
+        .any(|acc| acc.username == username && acc.role.is_admin());
+    if !is_admin {
+        platform.cancel_git_authorization(state_param);
+        warn!(
+            username,
+            "the account that started the Git authorization is no longer an admin"
+        );
+        return Err("unauthorized");
+    }
+    Ok(())
 }
 
 /// The code of an API error. Any other failure is logged, because its text can hold file paths of
@@ -91,6 +120,7 @@ async fn finish(
 fn error_code(err: &anyhow::Error) -> &'static str {
     match err.downcast_ref::<Error>() {
         Some(Error::OauthStateInvalid) => "oauth_state_invalid",
+        Some(Error::Unauthorized) | Some(Error::Forbidden) => "unauthorized",
         Some(Error::GitProviderFailed { reason }) => {
             warn!(reason, "the Git provider failed the authorization");
             "git_provider_failed"

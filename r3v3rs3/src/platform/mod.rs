@@ -138,6 +138,13 @@ impl PlatformHandle {
         }
     }
 
+    /// Drops any pending Git authorizations started by the account.
+    pub fn cancel_git_authorizations_for_user(&self, username: &str) {
+        if let Self::Ready(platform) = self {
+            platform.cancel_git_authorizations_for_user(username);
+        }
+    }
+
     /// Opens the platform when `config.toml` enables it, and starts the task that sends the proxies
     /// of the apps to the server through `command`.
     pub async fn start(

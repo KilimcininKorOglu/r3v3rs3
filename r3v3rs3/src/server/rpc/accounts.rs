@@ -111,6 +111,13 @@ impl RpcMethod for AddAccount {
     }
 }
 
+async fn hash_optional_password(password: Option<String>) -> Result<Option<String>, Error> {
+    match password {
+        Some(password) => Ok(Some(hash_account(password, false).await?.password)),
+        None => Ok(None),
+    }
+}
+
 pub struct UpdateAccount {
     /// The account that sends the change.
     pub actor: String,
@@ -134,12 +141,11 @@ impl RpcMethod for UpdateAccount {
             return Err(Error::CannotChangeOwnAccount);
         }
         validate_scope(role, proxies.as_ref())?;
-        let password = match password {
-            Some(password) => Some(hash_account(password, false).await?.password),
-            None => None,
-        };
+        let password = hash_optional_password(password).await?;
+        let is_admin = role.is_admin();
         let username = self.username;
-        state
+        let username_clone = username.clone();
+        let result = state
             .edit_accounts(move |accounts| {
                 let account =
                     accounts
@@ -151,7 +157,11 @@ impl RpcMethod for UpdateAccount {
                 ensure_admin_remains(accounts)?;
                 Ok(true)
             })
-            .await
+            .await?;
+        if !is_admin {
+            state.platform().cancel_git_authorizations_for_user(&username_clone);
+        }
+        Ok(result)
     }
 
     fn audit(&self) -> Option<AuditRecord> {
@@ -185,7 +195,8 @@ impl RpcMethod for DeleteAccount {
             return Err(Error::CannotChangeOwnAccount);
         }
         let username = self.username;
-        state
+        let username_clone = username.clone();
+        let result = state
             .edit_accounts(move |accounts| {
                 if accounts.remove(&username).is_none() {
                     return Err(Error::AccountNotFound { username });
@@ -193,7 +204,9 @@ impl RpcMethod for DeleteAccount {
                 ensure_admin_remains(accounts)?;
                 Ok(true)
             })
-            .await
+            .await?;
+        state.platform().cancel_git_authorizations_for_user(&username_clone);
+        Ok(result)
     }
 
     fn audit(&self) -> Option<AuditRecord> {
