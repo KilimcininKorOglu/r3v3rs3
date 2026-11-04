@@ -33,7 +33,7 @@ try {
 
     $Expected = ($Work | ForEach-Object { Get-Content "$_\SHA256SUMS" } | ForEach-Object {
         $Parts = $_.Trim() -split "\s+"
-        if ($Parts[1].TrimStart("./") -eq $Asset) { $Parts[0] }
+        if (($Parts[1] -replace '^\*?(\./)?', '') -eq $Asset) { $Parts[0] }
     })
     if (-not $Expected) { throw "$Asset is not in the checksums of the release" }
     $Actual = (Get-FileHash "$Work\$Asset" -Algorithm SHA256).Hash.ToLower()

@@ -57,7 +57,7 @@ echo "Downloading r3 $VERSION..."
 curl -fsSL -H 'user-agent: r3 installer' "$BASE/SHA256SUMS" -o "$WORK/SHA256SUMS"
 curl -fsSL -H 'user-agent: r3 installer' "$BASE/$ASSET" -o "$WORK/$ASSET"
 
-EXPECTED="$(sed 's/[[:space:]]\.\// /' "$WORK/SHA256SUMS" | awk -v a="$ASSET" '$2 == a {print $1}')"
+EXPECTED="$(awk -v a="$ASSET" '{ name = $2; sub(/^\*/, "", name); sub(/^\.\//, "", name); if (name == a) { print $1; exit } }' "$WORK/SHA256SUMS")"
 [ -n "$EXPECTED" ] || { echo "$ASSET is not in the checksums of the release" >&2; exit 1; }
 if command -v sha256sum > /dev/null 2>&1; then
     ACTUAL="$(sha256sum "$WORK/$ASSET" | cut -d' ' -f1)"
