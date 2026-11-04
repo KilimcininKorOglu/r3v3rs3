@@ -24,6 +24,7 @@ use rand::distr::{Alphanumeric, SampleString};
 use sha2::Sha256;
 use std::sync::Arc;
 use std::time::Duration;
+use subtle::ConstantTimeEq;
 use tokio_rustls::rustls::ClientConfig;
 use tracing::error;
 use url::form_urlencoded;
@@ -142,7 +143,7 @@ impl OidcAuthenticator {
                 "Missing or expired authentication state\n",
             );
         };
-        if state != expected_state {
+        if !bool::from(state.as_bytes().ct_eq(expected_state.as_bytes())) {
             return text_response(StatusCode::BAD_REQUEST, "Invalid OIDC state\n");
         }
         let user = match self.exchange_code_for_user(&code, ctx).await {
@@ -1078,5 +1079,14 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(hyper::header::ORIGIN, "https://example.com".parse().unwrap());
         assert!(verify_origin(&headers, &ctx));
+    }
+
+    #[test]
+    fn oidc_state_constant_time_comparison() {
+        let state = "abcdef123456";
+        let expected = "abcdef123456";
+        let wrong = "abcdef123457";
+        assert!(bool::from(state.as_bytes().ct_eq(expected.as_bytes())));
+        assert!(!bool::from(state.as_bytes().ct_eq(wrong.as_bytes())));
     }
 }
