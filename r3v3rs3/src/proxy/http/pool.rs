@@ -170,6 +170,7 @@ impl ConnectionPool {
         let is_ws = is_websocket_upgrade_request(&req);
         let upgrading_req = if is_ws {
             let mut cloned_req = Request::builder()
+                .method(req.method().clone())
                 .uri(req.uri())
                 .body(empty_body())
                 .map_err(SendError::other)?;
