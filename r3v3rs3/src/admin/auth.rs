@@ -20,7 +20,7 @@ use r3v3rs3_api::{
     auth::{
         ApiTokenCreated, ApiTokenInfo, CreateApiTokenRequest, LoginMethod, LoginRequest,
         LoginResponse, PasskeyChallenge, PasskeyCredential, PasskeyRegisterRequest, Role,
-        SessionInfo, TokenScope,
+        SessionInfo, TokenScope, validate_username,
     },
     client_ip::canonical_client_ip,
     error::{Error, ErrorMessage},
@@ -297,10 +297,22 @@ async fn release_login_attempt(state: &AppState, key: &LoginAttemptKey) {
     data.login_attempts.release(key);
 }
 
+pub(crate) fn sanitize_audit_username(state: &AppState, raw: &str) -> String {
+    if validate_username(raw).is_err() {
+        return "[invalid-username]".to_string();
+    }
+    if state.accounts.borrow().get(raw).is_some() {
+        raw.to_string()
+    } else {
+        "[unknown-account]".to_string()
+    }
+}
+
 /// Counts a failed sign-in and records it in the audit log.
 async fn record_login_failure(state: &AppState, key: LoginAttemptKey) {
+    let audit_username = sanitize_audit_username(state, &key.1);
     let record = AuditRecord::new(AuditAction::LoginFailed);
-    state.record_audit(&key.1, Some(key.0), record).await;
+    state.record_audit(&audit_username, Some(key.0), record).await;
     let mut data = state.data.lock().await;
     let admin = data.config.admin.clone();
     let now = Instant::now();
@@ -1392,5 +1404,43 @@ mod tests {
         // 5. Untrusted client sending x-forwarded-proto is ignored
         let empty_trusted: Vec<ipnet::IpNet> = Vec::new();
         assert!(!is_secure_request(&empty_trusted, &loopback, &headers_https));
+    }
+
+    #[tokio::test]
+    async fn sanitize_audit_username_prevents_password_and_invalid_leakage() {
+        let temp_dir = std::env::temp_dir().join(format!("r3-auth-test-{}", r3v3rs3_api::id::ShortId::new()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let _ = crate::log::open_database(&temp_dir.join("log.db")).await.unwrap();
+        let app_info = crate::config::new_appinfo(&temp_dir, &temp_dir);
+        let data = Arc::new(tokio::sync::Mutex::new(crate::admin::Data::new(app_info).await.unwrap()));
+        let (sender, _) = tokio::sync::mpsc::channel(1);
+        let (event, _) = tokio::sync::broadcast::channel(1);
+        let mut accounts_map = HashMap::new();
+        accounts_map.insert("admin".to_string(), r3v3rs3_api::auth::Account::default());
+        let directory = Arc::new(crate::accounts::AccountDirectory::new(&accounts_map));
+        let (_, accounts) = tokio::sync::watch::channel(directory);
+        let (upgrade, _) = tokio::sync::mpsc::channel(1);
+        let state = AppState {
+            sender,
+            event,
+            event_listener_counter: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            accounts,
+            upgrade,
+            upgrade_stage: Arc::new(std::sync::Mutex::new(None)),
+            data,
+        };
+
+        // 1. Existing account is retained
+        assert_eq!(sanitize_audit_username(&state, "admin"), "admin");
+
+        // 2. Unknown account (valid format, but not in directory) is redacted
+        assert_eq!(sanitize_audit_username(&state, "secretpass123"), "[unknown-account]");
+
+        // 3. Invalid username format (contains invalid characters or spaces) is redacted
+        assert_eq!(sanitize_audit_username(&state, "secret:password"), "[invalid-username]");
+        assert_eq!(sanitize_audit_username(&state, "secret password"), "[invalid-username]");
+        assert_eq!(sanitize_audit_username(&state, ""), "[invalid-username]");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
