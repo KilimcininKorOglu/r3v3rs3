@@ -1118,11 +1118,23 @@ struct RequestInfo<'a> {
     early_data: bool,
 }
 
+fn split_host_port(host: &str) -> Option<&str> {
+    if host.is_empty() {
+        return None;
+    }
+    if host.starts_with('[') {
+        let closing = host.find(']')?;
+        Some(&host[..=closing])
+    } else {
+        host.split(':').next()
+    }
+}
+
 fn header_host<B>(req: &Request<B>) -> Option<&str> {
     req.headers()
         .get(HOST)
         .and_then(|h| h.to_str().ok())
-        .and_then(|host| host.split(':').next())
+        .and_then(split_host_port)
 }
 
 fn is_domain_fronting<B>(req: &Request<B>, sni: Option<&str>) -> bool {
@@ -2376,5 +2388,29 @@ mod tests {
         assert!(is_valid_secure_redirect_host("localhost", &router, local));
         assert!(is_valid_secure_redirect_host("127.0.0.1", &router, local));
         assert!(!is_valid_secure_redirect_host("evil.com", &router, local));
+    }
+
+    #[test]
+    fn test_header_host_ipv6_literal() {
+        let req = Request::builder()
+            .header(HOST, "[::1]:8080")
+            .body(())
+            .unwrap();
+        assert_eq!(header_host(&req), Some("[::1]"));
+
+        let req = Request::builder().header(HOST, "[::1]").body(()).unwrap();
+        assert_eq!(header_host(&req), Some("[::1]"));
+
+        let req = Request::builder()
+            .header(HOST, "example.com:8080")
+            .body(())
+            .unwrap();
+        assert_eq!(header_host(&req), Some("example.com"));
+
+        let req = Request::builder()
+            .header(HOST, "example.com")
+            .body(())
+            .unwrap();
+        assert_eq!(header_host(&req), Some("example.com"));
     }
 }
