@@ -45,6 +45,11 @@ struct UpgradeGuardSender(
     Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Option<ConnGuard>>>>>,
 );
 
+#[derive(Clone)]
+pub struct UpgradeRouteGuardSender(
+    pub Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Box<dyn std::any::Any + Send>>>>>,
+);
+
 pin_project_lite::pin_project! {
     struct ConnGuardedBody<B> {
         #[pin]
@@ -194,13 +199,18 @@ impl ConnectionPool {
                     .map_err(SendError::other)?;
                 cloned_res.headers_mut().clone_from(res.headers());
                 let (guard_tx, guard_rx) = tokio::sync::oneshot::channel();
+                let (route_guard_tx, route_guard_rx) = tokio::sync::oneshot::channel();
                 cloned_res.extensions_mut().insert(UpgradeGuardSender(
                     Arc::new(std::sync::Mutex::new(Some(guard_tx))),
+                ));
+                cloned_res.extensions_mut().insert(UpgradeRouteGuardSender(
+                    Arc::new(std::sync::Mutex::new(Some(route_guard_tx))),
                 ));
                 tokio::spawn(upgrade_connection(
                     upgrading_req,
                     res,
                     guard_rx,
+                    route_guard_rx,
                     request_timeout,
                 ));
                 Ok(cloned_res)
@@ -883,6 +893,7 @@ async fn upgrade_connection(
     req: Request<ProxyBody>,
     res: Response<ProxyBody>,
     mut guard_rx: tokio::sync::oneshot::Receiver<Option<ConnGuard>>,
+    mut route_guard_rx: tokio::sync::oneshot::Receiver<Box<dyn std::any::Any + Send>>,
     idle_timeout: Duration,
 ) {
     let is_ws = req
@@ -903,12 +914,17 @@ async fn upgrade_connection(
     let upstream_addr = req.uri().to_string();
 
     let early_guard = guard_rx.try_recv().ok().flatten();
+    let early_route_guard = route_guard_rx.try_recv().ok();
 
     match tokio::try_join!(hyper::upgrade::on(req), hyper::upgrade::on(res)) {
         Ok((req, res)) => {
             let _conn_guard = match early_guard {
                 Some(g) => Some(g),
                 None => guard_rx.await.ok().flatten(),
+            };
+            let _route_guard = match early_route_guard {
+                Some(g) => Some(g),
+                None => route_guard_rx.await.ok(),
             };
             let mut req = TokioIo::new(req);
             let mut res = TokioIo::new(res);

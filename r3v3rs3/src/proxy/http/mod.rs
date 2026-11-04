@@ -1983,11 +1983,23 @@ where
                 .instrument(span)
                 .await;
             match res {
-                Ok(resp) => {
-                    let (parts, body) = resp.into_parts();
-                    let guarded =
-                        concurrency_limit::GuardedBody::new(body, guard, stream_permit);
-                    Ok(Response::from_parts(parts, BoxBody::new(guarded)))
+                Ok(mut resp) => {
+                    let route_guard = (guard, stream_permit);
+                    if let Some(sender) = resp.extensions_mut().remove::<pool::UpgradeRouteGuardSender>() {
+                        if let Ok(mut lock) = sender.0.lock()
+                            && let Some(tx) = lock.take()
+                        {
+                            let _ = tx.send(Box::new(route_guard));
+                        }
+                        let (parts, body) = resp.into_parts();
+                        let guarded = concurrency_limit::GuardedBody::new(body, None, None);
+                        Ok(Response::from_parts(parts, BoxBody::new(guarded)))
+                    } else {
+                        let (parts, body) = resp.into_parts();
+                        let guarded =
+                            concurrency_limit::GuardedBody::new(body, route_guard.0, route_guard.1);
+                        Ok(Response::from_parts(parts, BoxBody::new(guarded)))
+                    }
                 }
                 Err(err) => {
                     drop(guard);
