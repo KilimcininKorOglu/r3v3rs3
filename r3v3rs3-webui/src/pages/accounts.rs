@@ -7,6 +7,8 @@ use super::settings::{send_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::data_list::{Column, Row, list_card};
+#[cfg(target_arch = "wasm32")]
+use crate::format::format_passkey_error;
 use crate::i18n::use_locale;
 use crate::store::{ProxyStore, SessionStore};
 use gloo_net::http::Request;
@@ -723,21 +725,6 @@ async fn register_passkey_request(
             .await
             .unwrap_or_else(|_| locale.t("error.invalid_passkey").to_string());
         Err(msg)
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn format_passkey_error(locale: Locale, err: &str) -> String {
-    if err.contains("PASSKEY_ORIGIN_IP")
-        || err.contains("127.0.0.1")
-        || err.contains("cannot be used with the current origin")
-        || err.contains("relying party ID")
-    {
-        locale.t("accounts.passkey_origin_error").to_string()
-    } else if err.contains("PASSKEY_ORIGIN_IP_OTHER") {
-        locale.t("accounts.passkey_ip_error").to_string()
-    } else {
-        err.to_string()
     }
 }
 

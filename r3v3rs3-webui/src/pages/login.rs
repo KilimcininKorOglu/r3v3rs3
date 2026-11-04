@@ -4,6 +4,8 @@ use crate::{
     components::{language_menu::LanguageMenu, theme_menu::ThemeMenu},
     i18n::use_locale,
 };
+#[cfg(target_arch = "wasm32")]
+use crate::format::format_passkey_error;
 use gloo_events::EventListener;
 use gloo_net::http::Request;
 use r3v3rs3_api::{
@@ -342,21 +344,6 @@ fn js_error_message(err: wasm_bindgen::JsValue) -> String {
         return s;
     }
     "Passkey authentication failed".to_string()
-}
-
-#[cfg(target_arch = "wasm32")]
-fn format_passkey_error(locale: Locale, err: &str) -> String {
-    if err.contains("PASSKEY_ORIGIN_IP")
-        || err.contains("127.0.0.1")
-        || err.contains("cannot be used with the current origin")
-        || err.contains("relying party ID")
-    {
-        locale.t("accounts.passkey_origin_error").to_string()
-    } else if err.contains("PASSKEY_ORIGIN_IP_OTHER") {
-        locale.t("accounts.passkey_ip_error").to_string()
-    } else {
-        err.to_string()
-    }
 }
 
 async fn fetch_passkey_challenge() -> Result<r3v3rs3_api::auth::PasskeyChallenge, String> {

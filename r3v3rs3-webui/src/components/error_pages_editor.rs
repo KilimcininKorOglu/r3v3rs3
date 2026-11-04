@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 use crate::components::http_proxy_config::ErrorPageForm;
+use crate::format::format_bytes;
 use crate::i18n::use_locale;
 use r3v3rs3_api::error_page_templates::{TEMPLATES, render_template, status_title_and_description};
 use r3v3rs3_api::i18n::Locale;
@@ -39,14 +40,6 @@ impl PreviewViewport {
 
 pub fn parse_status_code(status_str: &str) -> u16 {
     status_str.trim().parse::<u16>().unwrap_or(404)
-}
-
-pub fn format_byte_size(bytes: usize) -> String {
-    if bytes < 1024 {
-        format!("{bytes} B")
-    } else {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    }
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -525,7 +518,7 @@ fn code_textarea_view(ctx: &EditorLayoutContext) -> Html {
                     }
                 </div>
                 <div class={size_color}>
-                    {format!("{}: {} / {}", ctx.locale.t("http_form.error_page_size"), format_byte_size(ctx.body_len), format_byte_size(MAX_BODY_BYTES))}
+                    {format!("{}: {} / {}", ctx.locale.t("http_form.error_page_size"), format_bytes(ctx.body_len as u64), format_bytes(MAX_BODY_BYTES as u64))}
                 </div>
             </div>
         </div>
@@ -560,13 +553,6 @@ mod tests {
         assert_eq!(parse_status_code(" 503 "), 503);
         assert_eq!(parse_status_code("invalid"), 404);
         assert_eq!(parse_status_code(""), 404);
-    }
-
-    #[test]
-    fn test_format_byte_size() {
-        assert_eq!(format_byte_size(500), "500 B");
-        assert_eq!(format_byte_size(1024), "1.0 KB");
-        assert_eq!(format_byte_size(2560), "2.5 KB");
     }
 
     #[test]

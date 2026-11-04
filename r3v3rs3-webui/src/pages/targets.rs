@@ -14,7 +14,7 @@ use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::data_list::{Column, Row, list_card, status_badge};
 use crate::dialog::{self, Icon};
-use crate::format::format_time;
+use crate::format::{format_disk_bytes, format_time};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -1427,19 +1427,6 @@ fn save_node_alerts_callback(
             busy.set(false);
         });
     })
-}
-
-fn format_disk_bytes(bytes: u64) -> String {
-    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-    const TIB: f64 = 1024.0 * GIB;
-    let b = bytes as f64;
-    if b >= TIB {
-        format!("{:.1} TiB", b / TIB)
-    } else if b >= GIB {
-        format!("{:.1} GiB", b / GIB)
-    } else {
-        format!("{:.1} MiB", b / (1024.0 * 1024.0))
-    }
 }
 
 #[cfg(test)]

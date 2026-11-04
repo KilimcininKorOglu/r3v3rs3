@@ -194,6 +194,36 @@ pub fn format_latency(ms: f64) -> String {
     }
 }
 
+/// Formats disk bytes into binary units (MiB, GiB, TiB).
+pub fn format_disk_bytes(bytes: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const TIB: f64 = 1024.0 * GIB;
+    let b = bytes as f64;
+    if b >= TIB {
+        format!("{:.1} TiB", b / TIB)
+    } else if b >= GIB {
+        format!("{:.1} GiB", b / GIB)
+    } else {
+        format!("{:.1} MiB", b / (1024.0 * 1024.0))
+    }
+}
+
+/// Formats passkey authentication or registration errors into localized user messages.
+#[allow(dead_code)]
+pub fn format_passkey_error(locale: Locale, err: &str) -> String {
+    if err.contains("PASSKEY_ORIGIN_IP_OTHER") {
+        locale.t("accounts.passkey_ip_error").to_string()
+    } else if err.contains("PASSKEY_ORIGIN_IP")
+        || err.contains("127.0.0.1")
+        || err.contains("cannot be used with the current origin")
+        || err.contains("relying party ID")
+    {
+        locale.t("accounts.passkey_origin_error").to_string()
+    } else {
+        err.to_string()
+    }
+}
+
 /// Formats an uptime in seconds into a human-readable duration (e.g. `2d 4h`, `3h 12m`, `45s`).
 pub fn format_uptime(secs: u64) -> String {
     if secs >= 86400 {
@@ -241,6 +271,29 @@ mod tests {
         assert_eq!(format_bytes(2048), "2.0 KB");
         assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MB");
         assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.00 GB");
+    }
+
+    #[test]
+    fn format_disk_bytes_scales_binary_units() {
+        assert_eq!(format_disk_bytes(500 * 1024 * 1024), "500.0 MiB");
+        assert_eq!(format_disk_bytes(2 * 1024 * 1024 * 1024), "2.0 GiB");
+        assert_eq!(format_disk_bytes(3 * 1024 * 1024 * 1024 * 1024), "3.0 TiB");
+    }
+
+    #[test]
+    fn format_passkey_error_translates_known_errors() {
+        assert_eq!(
+            format_passkey_error(Locale::En, "The operation cannot be used with the current origin"),
+            Locale::En.t("accounts.passkey_origin_error")
+        );
+        assert_eq!(
+            format_passkey_error(Locale::Tr, "PASSKEY_ORIGIN_IP_OTHER"),
+            Locale::Tr.t("accounts.passkey_ip_error")
+        );
+        assert_eq!(
+            format_passkey_error(Locale::En, "Unknown error"),
+            "Unknown error"
+        );
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::data_list::status_badge;
-use crate::format::format_time;
+use crate::format::{format_disk_bytes, format_time};
 use crate::i18n::use_locale;
 use crate::pages::Route;
 use crate::pages::settings::fetch_json;
@@ -307,18 +307,5 @@ fn render_quick_links(locale: Locale, platform_enabled: bool) -> Html {
                 </Link<Route>>
             </div>
         </div>
-    }
-}
-
-fn format_disk_bytes(bytes: u64) -> String {
-    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-    const TIB: f64 = 1024.0 * GIB;
-    let b = bytes as f64;
-    if b >= TIB {
-        format!("{:.1} TiB", b / TIB)
-    } else if b >= GIB {
-        format!("{:.1} GiB", b / GIB)
-    } else {
-        format!("{:.1} MiB", b / (1024.0 * 1024.0))
     }
 }
