@@ -176,7 +176,16 @@ pub struct StartArgs {
     )]
     pub webui: SocketAddr,
 
-    #[clap(long, short, env = "R3V3RS3_NO_WEBUI", conflicts_with = "webui")]
+    #[clap(
+        long,
+        short,
+        env = "R3V3RS3_NO_WEBUI",
+        value_parser = parse_boolish,
+        num_args = 0..=1,
+        default_value = "false",
+        default_missing_value = "true",
+        action = clap::ArgAction::Set,
+    )]
     pub no_webui: bool,
 
     #[clap(long, short, value_name = "DIR", env = "R3V3RS3_CONFIG_DIR")]
@@ -207,4 +216,107 @@ pub struct AddUserArgs {
 fn parse_role(value: &str) -> Result<r3v3rs3_api::auth::Role, String> {
     serde_json::from_value(serde_json::Value::String(value.to_string()))
         .map_err(|_| format!("unknown role {value}, use admin, editor or viewer"))
+}
+
+fn parse_boolish(value: &str) -> Result<bool, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "t" | "yes" | "y" | "on" => Ok(true),
+        "0" | "false" | "f" | "no" | "n" | "off" | "" => Ok(false),
+        other => Err(format!(
+            "unknown boolean value '{other}', use 1, true, 0 or false"
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_boolish() {
+        assert_eq!(parse_boolish("1"), Ok(true));
+        assert_eq!(parse_boolish("true"), Ok(true));
+        assert_eq!(parse_boolish("YES"), Ok(true));
+        assert_eq!(parse_boolish("on"), Ok(true));
+        assert_eq!(parse_boolish("0"), Ok(false));
+        assert_eq!(parse_boolish("false"), Ok(false));
+        assert_eq!(parse_boolish("no"), Ok(false));
+        assert_eq!(parse_boolish("off"), Ok(false));
+        assert_eq!(parse_boolish(""), Ok(false));
+        assert!(parse_boolish("invalid").is_err());
+    }
+
+    #[test]
+    fn test_no_webui_cli_parsing() {
+        let default_cli = Cli::try_parse_from(["r3-server", "start"]).unwrap();
+        if let Command::Start(args) = default_cli.command {
+            assert!(!args.no_webui);
+            assert_eq!(args.webui, "127.0.0.1:46492".parse().unwrap());
+        } else {
+            panic!("expected Start command");
+        }
+
+        let flag_cli = Cli::try_parse_from(["r3-server", "start", "--no-webui"]).unwrap();
+        if let Command::Start(args) = flag_cli.command {
+            assert!(args.no_webui);
+        } else {
+            panic!("expected Start command");
+        }
+
+        let short_flag_cli = Cli::try_parse_from(["r3-server", "start", "-n"]).unwrap();
+        if let Command::Start(args) = short_flag_cli.command {
+            assert!(args.no_webui);
+        } else {
+            panic!("expected Start command");
+        }
+
+        let with_webui_cli = Cli::try_parse_from([
+            "r3-server",
+            "start",
+            "--webui",
+            "0.0.0.0:8080",
+            "--no-webui",
+        ])
+        .unwrap();
+        if let Command::Start(args) = with_webui_cli.command {
+            assert!(args.no_webui);
+            assert_eq!(args.webui, "0.0.0.0:8080".parse().unwrap());
+        } else {
+            panic!("expected Start command");
+        }
+
+        let explicit_false =
+            Cli::try_parse_from(["r3-server", "start", "--no-webui=0"]).unwrap();
+        if let Command::Start(args) = explicit_false.command {
+            assert!(!args.no_webui);
+        } else {
+            panic!("expected Start command");
+        }
+
+        let explicit_true =
+            Cli::try_parse_from(["r3-server", "start", "--no-webui=1"]).unwrap();
+        if let Command::Start(args) = explicit_true.command {
+            assert!(args.no_webui);
+        } else {
+            panic!("expected Start command");
+        }
+    }
+
+    #[test]
+    fn test_no_webui_env_parsing() {
+        unsafe {
+            std::env::set_var("R3V3RS3_NO_WEBUI", "1");
+            std::env::set_var("R3V3RS3_WEBUI", "127.0.0.1:46492");
+        }
+        let cli = Cli::try_parse_from(["r3-server", "start"]).unwrap();
+        if let Command::Start(args) = cli.command {
+            assert!(args.no_webui);
+        } else {
+            panic!("expected Start command");
+        }
+        unsafe {
+            std::env::remove_var("R3V3RS3_NO_WEBUI");
+            std::env::remove_var("R3V3RS3_WEBUI");
+        }
+    }
 }
