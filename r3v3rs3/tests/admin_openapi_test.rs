@@ -323,6 +323,52 @@ async fn openapi_document_and_swagger_ui_require_a_session() -> anyhow::Result<(
         assert_eq!(status(&client, addr, "/api/docs/", None).await?, 401);
 
         let cookie = admin_session_cookie(addr).await?;
+        let raw_client = Client::builder().no_gzip().no_brotli().no_zstd().build()?;
+        let compressed_openapi = raw_client
+            .get(format!("http://{addr}/api/openapi.json"))
+            .header(COOKIE, &cookie)
+            .header("accept-encoding", "gzip")
+            .send()
+            .await?;
+        assert_eq!(compressed_openapi.status(), StatusCode::OK);
+        assert_eq!(
+            compressed_openapi
+                .headers()
+                .get("content-encoding")
+                .and_then(|v| v.to_str().ok()),
+            Some("gzip")
+        );
+
+        let compressed_br = raw_client
+            .get(format!("http://{addr}/api/openapi.json"))
+            .header(COOKIE, &cookie)
+            .header("accept-encoding", "br")
+            .send()
+            .await?;
+        assert_eq!(compressed_br.status(), StatusCode::OK);
+        assert_eq!(
+            compressed_br
+                .headers()
+                .get("content-encoding")
+                .and_then(|v| v.to_str().ok()),
+            Some("br")
+        );
+
+        let compressed_zstd = raw_client
+            .get(format!("http://{addr}/api/openapi.json"))
+            .header(COOKIE, &cookie)
+            .header("accept-encoding", "zstd")
+            .send()
+            .await?;
+        assert_eq!(compressed_zstd.status(), StatusCode::OK);
+        assert_eq!(
+            compressed_zstd
+                .headers()
+                .get("content-encoding")
+                .and_then(|v| v.to_str().ok()),
+            Some("zstd")
+        );
+
         let document: Value = client
             .get(format!("http://{addr}/api/openapi.json"))
             .header(COOKIE, &cookie)

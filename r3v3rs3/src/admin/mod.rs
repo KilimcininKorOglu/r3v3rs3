@@ -44,6 +44,7 @@ use tokio::sync::{Mutex, broadcast, mpsc, oneshot, watch};
 use tokio_stream::wrappers::{ReceiverStream, WatchStream};
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::{GovernorError, GovernorLayer};
+use tower_http::compression::CompressionLayer;
 use tracing::{error, trace, warn};
 use utoipa::OpenApi;
 use utoipa_axum::router::{OpenApiRouter, UtoipaMethodRouterExt};
@@ -370,6 +371,7 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
     Ok(api
         .merge(mcp_router)
         .merge(docs)
+        .layer(CompressionLayer::new())
         // Every admin response carries the config of the server, so no cache may keep it. The
         // layer sits above the fallback, which sets its own Cache-Control for the WebUI files.
         .layer(middleware::from_fn(map_extractor_rejections))
