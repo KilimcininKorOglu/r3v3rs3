@@ -6,7 +6,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use url::Url;
@@ -58,15 +59,23 @@ pub fn load_tokens(server: &str) -> anyhow::Result<Option<StoredTokens>> {
 /// Saves the tokens of a server with mode `0600`.
 pub fn save_tokens(tokens: &StoredTokens) -> anyhow::Result<()> {
     let path = token_path(&tokens.server)?;
+    write_token_file(&path, tokens)
+}
+
+fn write_token_file(path: &Path, tokens: &StoredTokens) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, serde_json::to_vec(tokens)?)?;
+    let bytes = serde_json::to_vec(tokens)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
+    let mut file = options.open(path)?;
+    file.write_all(&bytes)?;
     Ok(())
 }
 
@@ -329,5 +338,22 @@ mod tests {
         stream.write_all(req.as_bytes()).await.unwrap();
         let code = handle.await.unwrap().unwrap();
         assert_eq!(code, "abc123xyz");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn write_token_file_sets_mode_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let test_path = std::env::temp_dir().join(format!("test_token_{}.json", std::process::id()));
+        let tokens = StoredTokens {
+            server: "https://example.com".into(),
+            access_token: "secret_access".into(),
+            refresh_token: "secret_refresh".into(),
+            expires_at: 123456789,
+        };
+        write_token_file(&test_path, &tokens).unwrap();
+        let meta = std::fs::metadata(&test_path).unwrap();
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        let _ = std::fs::remove_file(&test_path);
     }
 }
