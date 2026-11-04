@@ -83,13 +83,26 @@ pub trait SharedCacheStore: Send + Sync {
         proxy: ShortId,
         key: &str,
     ) -> anyhow::Result<Option<SharedResponse>>;
+
+    async fn delete_response(
+        &self,
+        _proxy: ShortId,
+        _key: &str,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+enum ShareCommand {
+    Put(String, SharedResponse),
+    Delete(String),
 }
 
 /// The shared responses of the cache of one proxy.
 pub struct CacheShare {
     proxy: ShortId,
     store: Arc<dyn SharedCacheStore>,
-    writes: mpsc::Sender<(String, SharedResponse)>,
+    writes: mpsc::Sender<ShareCommand>,
     /// The Unix time in milliseconds of the last purge. Older responses do not count.
     purged_at: AtomicU64,
     max_size: u64,
@@ -147,10 +160,17 @@ impl CacheShare {
             debug!(proxy = %self.proxy, "shared cache byte budget exceeded, so a response stays local");
             return;
         }
-        if self.writes.try_send((key.to_string(), response)).is_err() {
+        if self.writes.try_send(ShareCommand::Put(key.to_string(), response)).is_err() {
             debug!(proxy = %self.proxy, "the shared cache queue is full, so a response stays local");
         } else {
             self.current_size.fetch_add(size, Ordering::Relaxed);
+        }
+    }
+
+    /// Queues an invalidation for the other nodes.
+    pub fn invalidate(&self, key: &str) {
+        if self.writes.try_send(ShareCommand::Delete(key.to_string())).is_err() {
+            debug!(proxy = %self.proxy, "the shared cache queue is full, so an invalidation was dropped");
         }
     }
 
@@ -184,11 +204,20 @@ impl CacheShare {
 async fn write_responses(
     proxy: ShortId,
     store: Arc<dyn SharedCacheStore>,
-    mut queue: mpsc::Receiver<(String, SharedResponse)>,
+    mut queue: mpsc::Receiver<ShareCommand>,
 ) {
-    while let Some((key, response)) = queue.recv().await {
-        if let Err(err) = store.put_response(proxy, &key, &response).await {
-            warn!(%proxy, "failed to share a cached response: {err:#}");
+    while let Some(cmd) = queue.recv().await {
+        match cmd {
+            ShareCommand::Put(key, response) => {
+                if let Err(err) = store.put_response(proxy, &key, &response).await {
+                    warn!(%proxy, "failed to share a cached response: {err:#}");
+                }
+            }
+            ShareCommand::Delete(key) => {
+                if let Err(err) = store.delete_response(proxy, &key).await {
+                    warn!(%proxy, "failed to delete a shared cached response: {err:#}");
+                }
+            }
         }
     }
 }
@@ -227,6 +256,16 @@ mod tests {
             key: &str,
         ) -> anyhow::Result<Option<SharedResponse>> {
             Ok(self.responses.lock().unwrap().get(key).cloned())
+        }
+
+        async fn delete_response(
+            &self,
+            _proxy: ShortId,
+            key: &str,
+        ) -> anyhow::Result<()> {
+            let mut responses = self.responses.lock().unwrap();
+            responses.remove(key);
+            Ok(())
         }
     }
 
@@ -299,5 +338,29 @@ mod tests {
         share.offer("second", r2);
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert_eq!(share.lookup("second").await, None);
+    }
+
+    #[tokio::test]
+    async fn cache_share_invalidates_entry_in_shared_store() {
+        let store = Arc::new(MemoryCache::default());
+        let proxy: ShortId = "shrinv".parse().unwrap();
+        let share = CacheShare::new(proxy, store.clone(), 0, 1024 * 1024);
+        share.offer("key1", response(1000, b"data"));
+        for _ in 0..50 {
+            if store.responses.lock().unwrap().contains_key("key1") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(store.responses.lock().unwrap().contains_key("key1"));
+
+        share.invalidate("key1");
+        for _ in 0..50 {
+            if !store.responses.lock().unwrap().contains_key("key1") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!store.responses.lock().unwrap().contains_key("key1"));
     }
 }

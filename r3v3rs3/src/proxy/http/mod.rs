@@ -1625,7 +1625,7 @@ where
         .cache
         .as_ref()
         .and_then(|cache| CacheRequest::new(cache, &mut req, cache_key, authorized));
-    if route.cache.is_some() && cache_request.is_none() {
+    if route.cache.is_some() && cache_request.as_ref().map_or(true, |c| c.is_unsafe()) {
         super::stats::count_cache_bypass();
     }
     (

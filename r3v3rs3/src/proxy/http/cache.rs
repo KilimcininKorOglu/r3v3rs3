@@ -69,6 +69,16 @@ fn extract_key_path(key: &str) -> &str {
     }
 }
 
+/// Extracts the host from a cache key (`"{proto} {host} {path}"` or `"{host} {path}"`).
+fn extract_key_host(key: &str) -> &str {
+    let mut parts = key.splitn(3, ' ');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(_proto), Some(host), Some(_path)) => host,
+        (Some(host), Some(_path), None) => host,
+        _ => "",
+    }
+}
+
 impl HttpCache {
     fn new(config: CacheConfig, share: Option<CacheShare>) -> Self {
         let default_swr = config.stale_while_revalidate;
@@ -116,6 +126,24 @@ impl HttpCache {
             }
         }
         count
+    }
+
+    /// Invalidates stored responses matching the given request URI.
+    pub fn invalidate_target(&self, key: &str, host: &str, path: &str) {
+        self.invalidate_key(key);
+        if !host.is_empty() && !path.is_empty() {
+            self.invalidate_key(&format!("http {host} {path}"));
+            self.invalidate_key(&format!("https {host} {path}"));
+            self.invalidate_key(&format!("{host} {path}"));
+        }
+    }
+
+    /// Invalidates a single cache key locally and in the shared store.
+    pub fn invalidate_key(&self, key: &str) {
+        self.entries.invalidate(key);
+        if let Some(share) = &self.share {
+            share.invalidate(key);
+        }
     }
 
     fn mark_revalidating(&self, key: &str) -> bool {
@@ -397,7 +425,7 @@ impl Expiry<String, Arc<CachedResponse>> for EntryExpiry {
     }
 }
 
-/// The cache state of one GET or HEAD request.
+/// The cache state of one request.
 #[derive(Debug)]
 pub struct CacheRequest {
     cache: Arc<HttpCache>,
@@ -409,25 +437,32 @@ pub struct CacheRequest {
     lookup: bool,
     /// True when the client request had an `Authorization` header.
     authorized: bool,
+    unsafe_method: bool,
+    host: String,
+    path: String,
 }
 
 impl CacheRequest {
-    /// Returns `None` when the request cannot use the cache. Removes `Accept-Encoding`, so the
-    /// upstream server sends an unencoded response that every client can receive. `key`
-    /// identifies the stored response.
+    /// Returns `None` when the request cannot use or affect the cache. For cacheable requests,
+    /// removes `Accept-Encoding`, so the upstream server sends an unencoded response that every
+    /// client can receive. `key` identifies the stored response.
     pub fn new<B>(
         cache: &Arc<HttpCache>,
         req: &mut Request<B>,
         key: String,
         authorized: bool,
     ) -> Option<Self> {
-        if !is_cacheable_request(req) {
+        let unsafe_method = is_unsafe_method(req.method());
+        if !unsafe_method && !is_cacheable_request(req) {
             return None;
         }
-        req.headers_mut().remove(ACCEPT_ENCODING);
+        if !unsafe_method {
+            req.headers_mut().remove(ACCEPT_ENCODING);
+        }
         let headers = req.headers().clone();
-        let lookup = !has_directive(&headers, CACHE_CONTROL, "no-cache")
-            && !has_directive(&headers, PRAGMA, "no-cache");
+        let lookup = !unsafe_method && is_lookup_allowed(&headers);
+        let host = extract_key_host(&key).to_string();
+        let path = extract_key_path(&key).to_string();
         Some(Self {
             cache: cache.clone(),
             key,
@@ -435,7 +470,18 @@ impl CacheRequest {
             headers,
             lookup,
             authorized,
+            unsafe_method,
+            host,
+            path,
         })
+    }
+
+    pub fn is_unsafe(&self) -> bool {
+        self.unsafe_method
+    }
+
+    pub fn invalidate_target(&self) {
+        self.cache.invalidate_target(&self.key, &self.host, &self.path);
     }
 
     fn stored(&self) -> Option<Arc<CachedResponse>> {
@@ -819,6 +865,9 @@ pub async fn fetch(
     let Some(cache) = cache else {
         return upstream.request(req).await;
     };
+    if cache.is_unsafe() {
+        return fetch_unsafe(upstream, req, &cache).await;
+    }
     let stored = find_stored(&cache).await;
     if let Some(res) = cached_response(&cache, stored.as_ref()) {
         return Ok(res);
@@ -841,6 +890,18 @@ pub async fn fetch(
     }
 }
 
+async fn fetch_unsafe(
+    upstream: &Upstream,
+    req: Request<ProxyBody>,
+    cache: &CacheRequest,
+) -> Result<Response<ProxyBody>, anyhow::Error> {
+    let res = upstream.request(req).await?;
+    if res.status().is_success() || res.status().is_redirection() {
+        cache.invalidate_target();
+    }
+    Ok(res)
+}
+
 /// Replaces the client validators with the validators of the stored response.
 fn set_validators(headers: &mut HeaderMap, stored: &HeaderMap) {
     headers.remove(IF_NONE_MATCH);
@@ -851,6 +912,18 @@ fn set_validators(headers: &mut HeaderMap, stored: &HeaderMap) {
     if let Some(modified) = stored.get(LAST_MODIFIED) {
         headers.insert(IF_MODIFIED_SINCE, modified.clone());
     }
+}
+
+fn is_unsafe_method(method: &Method) -> bool {
+    !matches!(
+        *method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
+    )
+}
+
+fn is_lookup_allowed(headers: &HeaderMap) -> bool {
+    !has_directive(headers, CACHE_CONTROL, "no-cache")
+        && !has_directive(headers, PRAGMA, "no-cache")
 }
 
 fn is_cacheable_request<B>(req: &Request<B>) -> bool {
@@ -1333,6 +1406,9 @@ mod tests {
                     headers: HeaderMap::new(),
                     lookup: true,
                     authorized: false,
+                    unsafe_method: false,
+                    host: String::new(),
+                    path: String::new(),
                 };
                 wait_for_flight(&req, notify).await
             } else {
@@ -1376,6 +1452,9 @@ mod tests {
             headers: req_headers,
             lookup: true,
             authorized: false,
+            unsafe_method: false,
+            host: String::new(),
+            path: String::new(),
         };
         let stored = CachedResponse {
             head: StoredHead {
@@ -1416,6 +1495,9 @@ mod tests {
             headers: HeaderMap::new(),
             lookup: true,
             authorized: false,
+            unsafe_method: false,
+            host: String::new(),
+            path: String::new(),
         };
         let res = Response::builder()
             .status(StatusCode::OK)
@@ -1476,5 +1558,40 @@ mod tests {
         unclean_recorder.finish(false);
         assert!(cache.entries.get("truncated-key").is_none());
         assert!(unclean_recorder.buffer.is_empty());
+    }
+
+    #[test]
+    fn extract_key_host_extracts_host_from_keys() {
+        assert_eq!(extract_key_host("https example.com /test?a=1"), "example.com");
+        assert_eq!(extract_key_host("http sub.example.com /test"), "sub.example.com");
+        assert_eq!(extract_key_host("legacy.com /path"), "legacy.com");
+        assert_eq!(extract_key_host("opaque-key"), "");
+    }
+
+    #[test]
+    fn unsafe_methods_identified_correctly() {
+        assert!(is_unsafe_method(&Method::POST));
+        assert!(is_unsafe_method(&Method::PUT));
+        assert!(is_unsafe_method(&Method::DELETE));
+        assert!(is_unsafe_method(&Method::PATCH));
+        assert!(!is_unsafe_method(&Method::GET));
+        assert!(!is_unsafe_method(&Method::HEAD));
+        assert!(!is_unsafe_method(&Method::OPTIONS));
+        assert!(!is_unsafe_method(&Method::TRACE));
+    }
+
+    #[test]
+    fn invalidate_target_removes_both_schemes_and_legacy_key() {
+        let cache = HttpCache::new(CacheConfig::default(), None);
+        cache.entries.insert("https example.com /resource".into(), Arc::new(stored_entry()));
+        cache.entries.insert("http example.com /resource".into(), Arc::new(stored_entry()));
+        cache.entries.insert("example.com /resource".into(), Arc::new(stored_entry()));
+        cache.entries.insert("https example.com /other".into(), Arc::new(stored_entry()));
+
+        cache.invalidate_target("https example.com /resource", "example.com", "/resource");
+        assert!(cache.entries.get("https example.com /resource").is_none());
+        assert!(cache.entries.get("http example.com /resource").is_none());
+        assert!(cache.entries.get("example.com /resource").is_none());
+        assert!(cache.entries.get("https example.com /other").is_some());
     }
 }

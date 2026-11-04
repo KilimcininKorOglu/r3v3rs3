@@ -490,3 +490,65 @@ async fn cookie_authenticated_requests_are_not_cached_without_public() -> anyhow
     })
     .await
 }
+
+#[tokio::test]
+async fn unsafe_requests_invalidate_cached_response_of_the_same_uri() -> anyhow::Result<()> {
+    let mut server = mockito::Server::new_async().await;
+    let url = server.url();
+
+    let get_mock = server
+        .mock("GET", "/items/42")
+        .with_status(200)
+        .with_header("cache-control", "max-age=60")
+        .with_body("item 42 version 1")
+        .expect(2)
+        .create_async()
+        .await;
+
+    let delete_mock = server
+        .mock("DELETE", "/items/42")
+        .with_status(204)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let port = alloc_tcp_port().await?;
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse()?],
+        routes: vec![http_route("/", &url, None)],
+        cache: CacheConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("p_inv", &port)])
+        .proxies(vec![http_proxy_entry("pxinv", "p_inv", proxy)])
+        .build();
+
+    with_server(config, |_channels| async move {
+        let client = reqwest::Client::new();
+        let target_url = port.http_url("/items/42");
+
+        let r1 = client.get(target_url.clone()).send().await?;
+        assert_eq!(r1.status(), StatusCode::OK);
+        assert_eq!(x_cache(&r1), Some("MISS"));
+
+        let r2 = client.get(target_url.clone()).send().await?;
+        assert_eq!(r2.status(), StatusCode::OK);
+        assert_eq!(x_cache(&r2), Some("HIT"));
+
+        let del = client.delete(target_url.clone()).send().await?;
+        assert_eq!(del.status(), StatusCode::NO_CONTENT);
+
+        let r3 = client.get(target_url).send().await?;
+        assert_eq!(r3.status(), StatusCode::OK);
+        assert_eq!(x_cache(&r3), Some("MISS"));
+
+        get_mock.assert_async().await;
+        delete_mock.assert_async().await;
+        Ok(())
+    })
+    .await
+}
