@@ -665,6 +665,12 @@ fn sanitize_rp_domain(raw: &str) -> String {
 }
 
 fn domain_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
+    if let Some(host) = headers.get("host").and_then(|h| h.to_str().ok()) {
+        let domain = host.split(',').next().unwrap_or("").trim();
+        if !domain.is_empty() {
+            return Some(sanitize_rp_domain(domain));
+        }
+    }
     if let Some(fwd) = headers
         .get("x-forwarded-host")
         .and_then(|h| h.to_str().ok())
@@ -674,20 +680,20 @@ fn domain_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
             return Some(sanitize_rp_domain(host));
         }
     }
-    let host = headers.get("host").and_then(|h| h.to_str().ok())?;
-    Some(sanitize_rp_domain(host))
+    None
 }
 
 async fn extract_rp_id(state: &AppState, headers: &axum::http::HeaderMap) -> String {
-    if let Some(domain) = domain_from_headers(headers) {
-        return domain;
-    }
     let data = state.data.lock().await;
     if let Some(url) = &data.config.public_url
         && let Ok(parsed) = url::Url::parse(url.as_str())
         && let Some(host) = parsed.host_str()
     {
-        return host.to_string();
+        return sanitize_rp_domain(host);
+    }
+    drop(data);
+    if let Some(domain) = domain_from_headers(headers) {
+        return domain;
     }
     "localhost".to_string()
 }
@@ -1440,6 +1446,45 @@ mod tests {
         assert_eq!(sanitize_audit_username(&state, "secret:password"), "[invalid-username]");
         assert_eq!(sanitize_audit_username(&state, "secret password"), "[invalid-username]");
         assert_eq!(sanitize_audit_username(&state, ""), "[invalid-username]");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn extract_rp_id_prioritizes_public_url_over_forwarded_host() {
+        let temp_dir = std::env::temp_dir().join(format!("r3-rpid-test-{}", r3v3rs3_api::id::ShortId::new()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let _ = crate::log::open_database(&temp_dir.join("log.db")).await.unwrap();
+        let app_info = crate::config::new_appinfo(&temp_dir, &temp_dir);
+        let mut app_data = crate::admin::Data::new(app_info).await.unwrap();
+        app_data.config.public_url = "https://panel.example.com".parse().ok();
+        let data = Arc::new(tokio::sync::Mutex::new(app_data));
+        let (sender, _) = tokio::sync::mpsc::channel(1);
+        let (event, _) = tokio::sync::broadcast::channel(1);
+        let (_, accounts) = tokio::sync::watch::channel(Arc::new(Default::default()));
+        let (upgrade, _) = tokio::sync::mpsc::channel(1);
+        let state = AppState {
+            sender,
+            event,
+            event_listener_counter: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            accounts,
+            upgrade,
+            upgrade_stage: Arc::new(std::sync::Mutex::new(None)),
+            data,
+        };
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("x-forwarded-host", "attacker.com".parse().unwrap());
+        headers.insert("host", "another-attacker.com".parse().unwrap());
+
+        // 1. With configured public_url, attacker headers are ignored
+        let rp_id = extract_rp_id(&state, &headers).await;
+        assert_eq!(rp_id, "panel.example.com");
+
+        // 2. Without public_url, host header is preferred over x-forwarded-host
+        state.data.lock().await.config.public_url = None;
+        let rp_id = extract_rp_id(&state, &headers).await;
+        assert_eq!(rp_id, "another-attacker.com");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
