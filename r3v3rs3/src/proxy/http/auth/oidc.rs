@@ -10,7 +10,8 @@ use hyper::{
     HeaderMap, Method, Request, Response, StatusCode,
     body::Body,
     header::{
-        ALLOW, CACHE_CONTROL, CONTENT_TYPE, HeaderName, HeaderValue, LOCATION, PRAGMA, SET_COOKIE,
+        ALLOW, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderName, HeaderValue,
+        LOCATION, PRAGMA, SET_COOKIE,
     },
 };
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
@@ -780,9 +781,18 @@ fn forbidden_page(user: &str) -> Response<Full<Bytes>> {
     );
     let mut res = Response::new(Full::new(Bytes::from(body)));
     *res.status_mut() = StatusCode::FORBIDDEN;
-    res.headers_mut().insert(
+    let headers = res.headers_mut();
+    headers.insert(
         CONTENT_TYPE,
         HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    headers.insert(
+        CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("frame-ancestors 'none'"),
+    );
+    headers.insert(
+        HeaderName::from_static("x-frame-options"),
+        HeaderValue::from_static("DENY"),
     );
     res
 }
@@ -948,6 +958,13 @@ mod tests {
         let xss_user = "<script>alert(1)</script>";
         let res = forbidden_page(xss_user);
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            res.headers()
+                .get(hyper::header::CONTENT_SECURITY_POLICY)
+                .unwrap(),
+            "frame-ancestors 'none'"
+        );
+        assert_eq!(res.headers().get("x-frame-options").unwrap(), "DENY");
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(!text.contains("<script>"));
