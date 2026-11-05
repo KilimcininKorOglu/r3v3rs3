@@ -333,8 +333,8 @@ async fn stale_while_revalidate_and_purge() -> anyhow::Result<()> {
         ..Default::default()
     };
     let config = TestStorage::builder()
-        .ports(vec![http_port_entry("p_swr", &port)])
-        .proxies(vec![http_proxy_entry("pxswr", "p_swr", proxy)])
+        .ports(vec![http_port_entry("p-swr", &port)])
+        .proxies(vec![http_proxy_entry("pxswr", "p-swr", proxy)])
         .build();
 
     with_server(config, |mut channels| async move {
@@ -523,8 +523,8 @@ async fn unsafe_requests_invalidate_cached_response_of_the_same_uri() -> anyhow:
         ..Default::default()
     };
     let config = TestStorage::builder()
-        .ports(vec![http_port_entry("p_inv", &port)])
-        .proxies(vec![http_proxy_entry("pxinv", "p_inv", proxy)])
+        .ports(vec![http_port_entry("p-inv", &port)])
+        .proxies(vec![http_proxy_entry("pxinv", "p-inv", proxy)])
         .build();
 
     with_server(config, |_channels| async move {
