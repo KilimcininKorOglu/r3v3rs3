@@ -55,6 +55,9 @@ license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 [bans]
 multiple-versions = "allow"
 wildcards = "deny"
+# r3v3rs3-cli is publish = false and takes r3v3rs3-api by path, so its version follows the
+# workspace. A published crate still gets the wildcard error.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
