@@ -82,6 +82,7 @@ async fn an_admin_manages_the_accounts_through_the_admin_api() -> anyhow::Result
         assert!(ct.starts_with("application/json"));
         let err: r3v3rs3_api::error::ErrorMessage = res.json().await?;
         assert_eq!(err.message, "Malformed or invalid JSON payload");
+        assert!(err.request_id.is_some());
 
         // Invalid field type rejected with 422 and structured JSON ErrorMessage without internal type leakage
         let res = client

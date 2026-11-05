@@ -366,11 +366,13 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
     Ok(api
         .merge(mcp_router)
         .merge(docs)
+        // The rejection mapper reads the plain-text body, so it must run inside the compression
+        // layer, and inside the request id layer, which adds the id to the JSON it produces.
+        .layer(middleware::from_fn(map_extractor_rejections))
         .layer(middleware::from_fn(request_id_middleware))
         .layer(CompressionLayer::new())
         // Every admin response carries the config of the server, so no cache may keep it. The
         // layer sits above the fallback, which sets its own Cache-Control for the WebUI files.
-        .layer(middleware::from_fn(map_extractor_rejections))
         .layer(middleware::map_response(no_store))
         .fallback(static_file::fallback)
         .with_state(app_state))
