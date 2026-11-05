@@ -117,7 +117,7 @@ pub fn extract_and_propagate_trace_context(headers: &mut HeaderMap) -> String {
         headers.insert(HeaderName::from_static(TRACEPARENT), val);
     }
 
-    let request_id = match headers.get(X_REQUEST_ID).and_then(|v| v.to_str().ok()) {
+    match headers.get(X_REQUEST_ID).and_then(|v| v.to_str().ok()) {
         Some(s) if !s.trim().is_empty() => s.trim().to_string(),
         _ => {
             if let Ok(val) = HeaderValue::from_str(&trace_id) {
@@ -125,9 +125,7 @@ pub fn extract_and_propagate_trace_context(headers: &mut HeaderMap) -> String {
             }
             trace_id
         }
-    };
-
-    request_id
+    }
 }
 
 #[cfg(test)]

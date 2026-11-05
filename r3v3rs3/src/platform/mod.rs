@@ -1326,10 +1326,10 @@ impl Platform {
         port: Option<u16>,
         app_id: Option<ShortId>,
     ) -> anyhow::Result<()> {
-        if let Some(port) = port {
-            if !self.is_host_port_available(port, app_id).await? {
-                return Err(Error::HostPortUnavailable { port }.into());
-            }
+        if let Some(port) = port
+            && !self.is_host_port_available(port, app_id).await?
+        {
+            return Err(Error::HostPortUnavailable { port }.into());
         }
         Ok(())
     }

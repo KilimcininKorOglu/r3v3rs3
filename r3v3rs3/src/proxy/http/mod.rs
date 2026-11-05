@@ -1004,17 +1004,20 @@ async fn handshake(
     Ok(Some((accepted, info)))
 }
 
+/// A request for the upstream server with the upstream connections of the route, and its
+/// cache state when the proxy has a cache.
+struct UpstreamCall<R> {
+    req: R,
+    upstream: Upstream,
+    span: Span,
+    cache_request: Option<CacheRequest>,
+    guard: Option<concurrency_limit::ConcurrencyGuard>,
+    stream_permit: Option<r3v3rs3_api::priority::StreamPermit>,
+}
+
 enum ProxiedRequest<R> {
-    /// A request for the upstream server with the upstream connections of the route, and its
-    /// cache state when the proxy has a cache.
-    Ok(
-        R,
-        Upstream,
-        Span,
-        Option<CacheRequest>,
-        Option<concurrency_limit::ConcurrencyGuard>,
-        Option<r3v3rs3_api::priority::StreamPermit>,
-    ),
+    /// Boxed, because the call is much larger than the other variants.
+    Ok(Box<UpstreamCall<R>>),
     /// A response that r3v3rs3 sends without contacting the upstream server.
     Respond(Response<Full<Bytes>>),
     Err(ProxyError),
@@ -1637,18 +1640,18 @@ where
         .cache
         .as_ref()
         .and_then(|cache| CacheRequest::new(cache, &mut req, cache_key, authorized));
-    if route.cache.is_some() && cache_request.as_ref().map_or(true, |c| c.is_unsafe()) {
+    if route.cache.is_some() && cache_request.as_ref().is_none_or(|c| c.is_unsafe()) {
         super::stats::count_cache_bypass();
     }
     (
-        ProxiedRequest::Ok(
+        ProxiedRequest::Ok(Box::new(UpstreamCall {
             req,
             upstream,
             span,
             cache_request,
-            concurrency_guard,
+            guard: concurrency_guard,
             stream_permit,
-        ),
+        })),
         response_rewriter,
         Some(resource_id),
         Some(route_path),
@@ -2002,7 +2005,15 @@ where
     B::Error: Into<anyhow::Error>,
 {
     match req {
-        ProxiedRequest::Ok(req, upstream, span, cache_request, guard, stream_permit) => {
+        ProxiedRequest::Ok(call) => {
+            let UpstreamCall {
+                req,
+                upstream,
+                span,
+                cache_request,
+                guard,
+                stream_permit,
+            } = *call;
             let req = req.map(|b| BoxBody::new(b.map_err(Into::into)));
             let res = cache::fetch(&upstream, req, cache_request)
                 .instrument(span)

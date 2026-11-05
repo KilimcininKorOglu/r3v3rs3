@@ -314,10 +314,9 @@ fn parse_interval_ms(expr: &str) -> Option<i64> {
         (num, 3_600_000)
     } else if let Some(num) = clean.strip_suffix('s') {
         (num, 1_000)
-    } else if let Some(num) = clean.strip_suffix('d') {
-        (num, 86_400_000)
     } else {
-        return None;
+        let num = clean.strip_suffix('d')?;
+        (num, 86_400_000)
     };
     let val: i64 = num.parse().ok()?;
     let ms = val.checked_mul(multiplier)?;

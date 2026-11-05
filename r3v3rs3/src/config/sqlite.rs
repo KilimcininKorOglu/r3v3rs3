@@ -1533,7 +1533,7 @@ mod tests {
             .await?;
         assert!(r2.get::<i64, _>(0) > initial_ts);
 
-        storage.save_ports(&[p2.clone()]).await?;
+        storage.save_ports(std::slice::from_ref(&p2)).await?;
         let remaining = storage.load_ports().await;
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, p2.id);

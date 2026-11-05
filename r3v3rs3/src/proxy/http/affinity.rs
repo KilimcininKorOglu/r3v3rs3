@@ -68,10 +68,10 @@ fn parse_master_key_bytes(text: &str) -> Option<Vec<u8>> {
 }
 
 fn get_key() -> [u8; 32] {
-    if let Ok(guard) = KEY.read() {
-        if let Some(key) = *guard {
-            return key;
-        }
+    if let Ok(guard) = KEY.read()
+        && let Some(key) = *guard
+    {
+        return key;
     }
     generate_and_store_key()
 }

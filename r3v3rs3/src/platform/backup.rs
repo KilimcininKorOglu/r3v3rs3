@@ -649,7 +649,7 @@ impl Platform {
 
     async fn restore_dump_bytes(&self, db_id: ShortId, backup_id: &str) -> anyhow::Result<Vec<u8>> {
         let raw = self.download_backup(db_id, backup_id).await?;
-        Ok(ungzip(&raw).await?)
+        ungzip(&raw).await
     }
 
     async fn dispatch_backup_restored(
@@ -896,14 +896,14 @@ impl Platform {
     }
 
     fn validate_target_engine(actual: &str, requested: Option<&str>) -> anyhow::Result<()> {
-        if let Some(req_engine) = requested {
-            if !req_engine.eq_ignore_ascii_case(actual) {
-                bail!(Error::RestoreFailed {
-                    reason: format!(
-                        "requested engine '{req_engine}' does not match target database engine '{actual}'"
-                    ),
-                });
-            }
+        if let Some(req_engine) = requested
+            && !req_engine.eq_ignore_ascii_case(actual)
+        {
+            bail!(Error::RestoreFailed {
+                reason: format!(
+                    "requested engine '{req_engine}' does not match target database engine '{actual}'"
+                ),
+            });
         }
         Ok(())
     }

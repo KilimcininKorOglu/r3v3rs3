@@ -37,7 +37,7 @@ fn redirect_response<B>(redirect: &FixedRedirect, req: &Request<B>) -> Response<
 }
 
 fn sanitize_preserve_path(path: &str) -> &str {
-    path.trim_start_matches(|c| c == '/' || c == '\\')
+    path.trim_start_matches(['/', '\\'])
 }
 
 fn build_preserved_location(target: &str, raw_path: &str) -> String {

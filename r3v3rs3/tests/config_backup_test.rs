@@ -50,7 +50,7 @@ async fn export_and_import_config_backup_round_trip() -> anyhow::Result<()> {
         },
     };
     storage
-        .save_access_lists(&[access_list_entry.clone()])
+        .save_access_lists(std::slice::from_ref(&access_list_entry))
         .await?;
 
     let key = rcgen::KeyPair::generate()?;

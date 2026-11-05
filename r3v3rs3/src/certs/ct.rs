@@ -197,10 +197,10 @@ impl CtMonitorState {
     }
 
     pub fn is_check_in_progress(&self) -> bool {
-        if let Some(started_at) = *self.last_runtime_check.lock().unwrap() {
-            if started_at.elapsed() < Duration::from_secs(600) {
-                return true;
-            }
+        if let Some(started_at) = *self.last_runtime_check.lock().unwrap()
+            && started_at.elapsed() < Duration::from_secs(600)
+        {
+            return true;
         }
         false
     }

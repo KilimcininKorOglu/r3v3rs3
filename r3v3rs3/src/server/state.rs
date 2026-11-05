@@ -656,10 +656,10 @@ impl ServerState {
             current_keys.contains(k) && sent_at.elapsed() < FAILED_NOTIFICATION_COOLDOWN
         });
         for (notification, key) in notifications {
-            if let Some(sent_at) = self.notification_attempts.get(&key) {
-                if sent_at.elapsed() < FAILED_NOTIFICATION_COOLDOWN {
-                    continue;
-                }
+            if let Some(sent_at) = self.notification_attempts.get(&key)
+                && sent_at.elapsed() < FAILED_NOTIFICATION_COOLDOWN
+            {
+                continue;
             }
             self.notification_attempts
                 .insert(key.clone(), Instant::now());

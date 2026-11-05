@@ -87,15 +87,14 @@ impl SessionState {
     fn check_rate_limit(&mut self, ip: &IpAddr, now: Instant) -> bool {
         self.rate_limits
             .retain(|_, (_, time)| now.duration_since(*time) < Duration::from_secs(2));
-        if self.rate_limits.len() >= 1024 {
-            if let Some(oldest) = self
+        if self.rate_limits.len() >= 1024
+            && let Some(oldest) = self
                 .rate_limits
                 .iter()
                 .min_by_key(|(_, (_, time))| *time)
                 .map(|(k, _)| *k)
-            {
-                self.rate_limits.remove(&oldest);
-            }
+        {
+            self.rate_limits.remove(&oldest);
         }
         let entry = self.rate_limits.entry(*ip).or_insert((0, now));
         if now.duration_since(entry.1) >= Duration::from_secs(1) {
@@ -682,10 +681,10 @@ fn render_login_page(
         preferences: ctx.preferences,
     };
     let mut res = login_page(template, status);
-    if let Some(cookie) = cookie {
-        if let Ok(val) = HeaderValue::try_from(cookie) {
-            res.headers_mut().insert(SET_COOKIE, val);
-        }
+    if let Some(cookie) = cookie
+        && let Ok(val) = HeaderValue::try_from(cookie)
+    {
+        res.headers_mut().insert(SET_COOKIE, val);
     }
     res
 }

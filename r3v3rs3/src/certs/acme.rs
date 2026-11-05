@@ -272,10 +272,10 @@ fn cert_renewal_time(cert: &Cert, renewal_days: u64) -> Option<SystemTime> {
             }
         });
 
-    if let Some(start) = start_time {
-        if let Some(configured_renewal) = start.checked_add(Duration::from_secs(configured_secs)) {
-            return Some(configured_renewal.min(expiration_renewal));
-        }
+    if let Some(start) = start_time
+        && let Some(configured_renewal) = start.checked_add(Duration::from_secs(configured_secs))
+    {
+        return Some(configured_renewal.min(expiration_renewal));
     }
     Some(expiration_renewal)
 }
@@ -853,6 +853,6 @@ mod tests {
 
         let renewal = cert_renewal_time(&parsed, 60).unwrap();
         let diff = renewal.duration_since(SystemTime::now()).unwrap().as_secs();
-        assert!(diff >= 19 * 86_400 && diff <= 21 * 86_400);
+        assert!((19 * 86_400..=21 * 86_400).contains(&diff));
     }
 }

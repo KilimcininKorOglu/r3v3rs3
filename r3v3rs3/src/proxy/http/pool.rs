@@ -44,10 +44,10 @@ struct UpgradeGuardSender(
     Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Option<ConnGuard>>>>>,
 );
 
+type RouteGuardSlot = Option<tokio::sync::oneshot::Sender<Box<dyn std::any::Any + Send>>>;
+
 #[derive(Clone)]
-pub struct UpgradeRouteGuardSender(
-    pub Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Box<dyn std::any::Any + Send>>>>>,
-);
+pub struct UpgradeRouteGuardSender(pub Arc<std::sync::Mutex<RouteGuardSlot>>);
 
 pin_project_lite::pin_project! {
     struct ConnGuardedBody<B> {
@@ -105,7 +105,7 @@ fn is_websocket_upgrade_request<B>(req: &Request<B>) -> bool {
             .get(UPGRADE)
             .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"))
         && req.headers().get(CONNECTION).is_some_and(|v| {
-            v.to_str().map_or(false, |s| {
+            v.to_str().is_ok_and(|s| {
                 s.split(',')
                     .any(|p| p.trim().eq_ignore_ascii_case("upgrade"))
             })

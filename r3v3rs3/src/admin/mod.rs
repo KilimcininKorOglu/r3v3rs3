@@ -271,10 +271,10 @@ fn rate_limit_error_response(base: impl IntoResponse, error: GovernorError) -> R
             if let Some(headers) = headers {
                 res.headers_mut().extend(headers);
             }
-            if !res.headers().contains_key(RETRY_AFTER) {
-                if let Ok(val) = HeaderValue::from_str(&wait_time.to_string()) {
-                    res.headers_mut().insert(RETRY_AFTER, val);
-                }
+            if !res.headers().contains_key(RETRY_AFTER)
+                && let Ok(val) = HeaderValue::from_str(&wait_time.to_string())
+            {
+                res.headers_mut().insert(RETRY_AFTER, val);
             }
             res
         }
@@ -411,7 +411,7 @@ async fn inject_error_request_id(
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .map_or(false, |ct| ct.starts_with("application/json"));
+        .is_some_and(|ct| ct.starts_with("application/json"));
     if !is_json {
         return res;
     }

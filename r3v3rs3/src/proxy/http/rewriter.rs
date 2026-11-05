@@ -183,10 +183,11 @@ fn remove_connection_named_headers(headers: &mut HeaderMap) {
         if let Ok(val_str) = value.to_str() {
             for token in val_str.split(',') {
                 let trimmed = token.trim();
-                if !trimmed.is_empty() && !trimmed.eq_ignore_ascii_case("upgrade") {
-                    if let Ok(name) = hyper::header::HeaderName::from_bytes(trimmed.as_bytes()) {
-                        to_remove.push(name);
-                    }
+                if !trimmed.is_empty()
+                    && !trimmed.eq_ignore_ascii_case("upgrade")
+                    && let Ok(name) = hyper::header::HeaderName::from_bytes(trimmed.as_bytes())
+                {
+                    to_remove.push(name);
                 }
             }
         }
@@ -200,7 +201,7 @@ fn sanitize_te_header(headers: &mut HeaderMap) {
     let is_trailers = headers
         .get(hyper::header::TE)
         .and_then(|v| v.to_str().ok())
-        .map_or(false, |s| s.trim().eq_ignore_ascii_case("trailers"));
+        .is_some_and(|s| s.trim().eq_ignore_ascii_case("trailers"));
     if !is_trailers {
         headers.remove(hyper::header::TE);
     }

@@ -107,9 +107,7 @@ async fn a_worker_serves_the_listeners_of_the_master() -> anyhow::Result<()> {
     unsafe {
         use std::os::unix::process::CommandExt;
         command.pre_exec(move || {
-            if libc::dup2(raw_worker_end, 3) == -1 {
-                Err(std::io::Error::last_os_error())
-            } else if libc::fcntl(3, libc::F_SETFD, 0) == -1 {
+            if libc::dup2(raw_worker_end, 3) == -1 || libc::fcntl(3, libc::F_SETFD, 0) == -1 {
                 Err(std::io::Error::last_os_error())
             } else {
                 Ok(())

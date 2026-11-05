@@ -147,9 +147,7 @@ async fn non_websocket_upgrade_is_not_tunneled() -> anyhow::Result<()> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let mut stream = tokio::net::TcpStream::connect(proxy_port.socket_addr()).await?;
-        let raw = format!(
-            "GET /h2c HTTP/1.1\r\nHost: localhost\r\nUpgrade: h2c\r\nConnection: Upgrade, HTTP2-Settings\r\nHTTP2-Settings: AAMAAABkAARAAAAAAAIAAAAA\r\n\r\n"
-        );
+        let raw = "GET /h2c HTTP/1.1\r\nHost: localhost\r\nUpgrade: h2c\r\nConnection: Upgrade, HTTP2-Settings\r\nHTTP2-Settings: AAMAAABkAARAAAAAAAIAAAAA\r\n\r\n".to_string();
         stream.write_all(raw.as_bytes()).await?;
 
         let mut buf = vec![0u8; 1024];

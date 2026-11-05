@@ -149,13 +149,12 @@ impl BasicAuthenticator {
                 |until| until > now,
             )
         });
-        if let Some(attempt) = attempts.get(client_ip) {
-            if let Some(blocked_until) = attempt.blocked_until {
-                if blocked_until > now {
-                    let retry_after = blocked_until.duration_since(now);
-                    return Err(ProxyError::TooManyRequests { retry_after });
-                }
-            }
+        if let Some(attempt) = attempts.get(client_ip)
+            && let Some(blocked_until) = attempt.blocked_until
+            && blocked_until > now
+        {
+            let retry_after = blocked_until.duration_since(now);
+            return Err(ProxyError::TooManyRequests { retry_after });
         }
         Ok(())
     }

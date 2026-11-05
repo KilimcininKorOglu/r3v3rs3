@@ -136,10 +136,10 @@ fn is_unreachable_io_error(err: &std::io::Error) -> bool {
 
 fn classify_connect_error(err: &anyhow::Error) -> Option<StatusCode> {
     for cause in err.chain() {
-        if let Some(err) = cause.downcast_ref::<hyper_util::client::legacy::Error>() {
-            if err.is_connect() {
-                return Some(status_code(523));
-            }
+        if let Some(err) = cause.downcast_ref::<hyper_util::client::legacy::Error>()
+            && err.is_connect()
+        {
+            return Some(status_code(523));
         }
         if let Some(err) = cause.downcast_ref::<std::io::Error>() {
             if err.kind() == std::io::ErrorKind::TimedOut {
@@ -253,12 +253,11 @@ mod tests {
 
         let invalid_cert =
             rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer);
-        let wrapped_tls = anyhow::Error::new(io::Error::new(io::ErrorKind::Other, invalid_cert));
+        let wrapped_tls = anyhow::Error::new(io::Error::other(invalid_cert));
         assert_eq!(map_error(wrapped_tls), status_code(526));
 
         let handshake_err = rustls::Error::General("handshake failed".into());
-        let wrapped_handshake =
-            anyhow::Error::new(io::Error::new(io::ErrorKind::Other, handshake_err));
+        let wrapped_handshake = anyhow::Error::new(io::Error::other(handshake_err));
         assert_eq!(map_error(wrapped_handshake), status_code(525));
 
         let refused = io::Error::new(io::ErrorKind::ConnectionRefused, "connection refused");

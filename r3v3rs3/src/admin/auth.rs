@@ -173,18 +173,17 @@ fn is_secure_request(
     peer: &SocketAddr,
     headers: &axum::http::HeaderMap,
 ) -> bool {
-    if trusted_proxies.iter().any(|net| net.contains(&peer.ip())) {
-        if let Some(proto) = headers
+    if trusted_proxies.iter().any(|net| net.contains(&peer.ip()))
+        && let Some(proto) = headers
             .get("x-forwarded-proto")
             .or_else(|| headers.get("x-forwarded-scheme"))
             .and_then(|v| v.to_str().ok())
-        {
-            return proto
-                .split(',')
-                .next()
-                .map(|s| s.trim().eq_ignore_ascii_case("https"))
-                .unwrap_or(false);
-        }
+    {
+        return proto
+            .split(',')
+            .next()
+            .map(|s| s.trim().eq_ignore_ascii_case("https"))
+            .unwrap_or(false);
     }
     !peer.ip().is_loopback()
 }
