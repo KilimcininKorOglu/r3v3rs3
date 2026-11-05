@@ -52,9 +52,14 @@ fn oidc_proxy(
     }
 }
 
-async fn do_oidc_login(client: &reqwest::Client, base_url: &str) -> anyhow::Result<(String, String)> {
+async fn do_oidc_login(
+    client: &reqwest::Client,
+    base_url: &str,
+) -> anyhow::Result<(String, String)> {
     let resp = client
-        .get(format!("{base_url}/.r3v3rs3/auth/oidc/login?redirect=%2Fprotected"))
+        .get(format!(
+            "{base_url}/.r3v3rs3/auth/oidc/login?redirect=%2Fprotected"
+        ))
         .send()
         .await?;
     assert_eq!(resp.status(), StatusCode::FOUND);
@@ -71,7 +76,11 @@ async fn do_oidc_login(client: &reqwest::Client, base_url: &str) -> anyhow::Resu
             }
         })
         .expect("state cookie must be set");
-    let state_val = cookie_hdr.split(';').next().unwrap().trim_start_matches("r3v3rs3_oidc_state=");
+    let state_val = cookie_hdr
+        .split(';')
+        .next()
+        .unwrap()
+        .trim_start_matches("r3v3rs3_oidc_state=");
     let (state_token, _) = state_val.split_once(':').unwrap();
     Ok((state_val.to_string(), state_token.to_string()))
 }
@@ -82,9 +91,8 @@ async fn do_oidc_callback(
     state_val: &str,
     state_token: &str,
 ) -> anyhow::Result<String> {
-    let callback_url = format!(
-        "{base_url}/.r3v3rs3/auth/oidc/callback?code=mock_code_123&state={state_token}"
-    );
+    let callback_url =
+        format!("{base_url}/.r3v3rs3/auth/oidc/callback?code=mock_code_123&state={state_token}");
     let resp = client
         .get(&callback_url)
         .header(COOKIE, format!("r3v3rs3_oidc_state={state_val}"))
@@ -176,8 +184,7 @@ async fn verify_oidc_flow_and_logout(
     let resp = client.get(port.http_url("/protected")).send().await?;
     assert_eq!(resp.status(), StatusCode::FOUND);
 
-    let (state_val, state_token) =
-        do_oidc_login(client, port.http_url("").as_str()).await?;
+    let (state_val, state_token) = do_oidc_login(client, port.http_url("").as_str()).await?;
     let session_cookie =
         do_oidc_callback(client, port.http_url("").as_str(), &state_val, &state_token).await?;
 
@@ -358,8 +365,7 @@ async fn oidc_auth_flow_rejects_forged_or_expired_tokens() -> anyhow::Result<()>
             .redirect(Policy::none())
             .build()?;
 
-        let (state_val, state_token) =
-            do_oidc_login(&client, port.http_url("").as_str()).await?;
+        let (state_val, state_token) = do_oidc_login(&client, port.http_url("").as_str()).await?;
 
         let callback_url = format!(
             "{}/.r3v3rs3/auth/oidc/callback?code=mock_code_123&state={state_token}",
@@ -456,13 +462,23 @@ async fn oidc_cookie_scoped_to_base_path_and_stripped_on_unprotected_route() -> 
             .redirect(Policy::none())
             .build()?;
 
-        let login_url = format!("{}/internal/.r3v3rs3/auth/oidc/login?redirect=%2Finternal%2Fsecret", port.http_url(""));
+        let login_url = format!(
+            "{}/internal/.r3v3rs3/auth/oidc/login?redirect=%2Finternal%2Fsecret",
+            port.http_url("")
+        );
         let resp = client.get(&login_url).send().await?;
         assert_eq!(resp.status(), StatusCode::FOUND);
         let state_hdr = extract_set_cookie(&resp, "r3v3rs3_oidc_state=");
-        assert!(state_hdr.contains("Path=/internal"), "state cookie must be scoped: {state_hdr}");
+        assert!(
+            state_hdr.contains("Path=/internal"),
+            "state cookie must be scoped: {state_hdr}"
+        );
 
-        let state_val = state_hdr.split(';').next().unwrap().trim_start_matches("r3v3rs3_oidc_state=");
+        let state_val = state_hdr
+            .split(';')
+            .next()
+            .unwrap()
+            .trim_start_matches("r3v3rs3_oidc_state=");
         let (state_token, _) = state_val.split_once(':').unwrap();
 
         let callback_url = format!(
@@ -476,7 +492,10 @@ async fn oidc_cookie_scoped_to_base_path_and_stripped_on_unprotected_route() -> 
             .await?;
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         let session_hdr = extract_set_cookie(&resp, "r3v3rs3_oidc=");
-        assert!(session_hdr.contains("Path=/internal"), "session cookie must be scoped: {session_hdr}");
+        assert!(
+            session_hdr.contains("Path=/internal"),
+            "session cookie must be scoped: {session_hdr}"
+        );
 
         let resp = client
             .get(port.http_url("/public/hello"))

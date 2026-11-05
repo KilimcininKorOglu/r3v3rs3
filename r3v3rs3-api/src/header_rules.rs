@@ -18,7 +18,9 @@ pub const PROTECTED_HEADERS: [&str; 9] = [
 ];
 
 /// Header changes for proxied requests and responses.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct HeaderRules {
     /// Changes to the request that r3v3rs3 sends to the upstream server.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

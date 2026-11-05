@@ -328,13 +328,16 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_code_accepts_from_provided_listener() {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
         let port = listener.local_addr().unwrap().port();
-        let handle = tokio::spawn(async move {
-            wait_for_code(listener, "test-state").await
-        });
-        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        let req = "GET /callback?code=abc123xyz&state=test-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        let handle = tokio::spawn(async move { wait_for_code(listener, "test-state").await });
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        let req =
+            "GET /callback?code=abc123xyz&state=test-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
         stream.write_all(req.as_bytes()).await.unwrap();
         let code = handle.await.unwrap().unwrap();
         assert_eq!(code, "abc123xyz");
@@ -344,7 +347,8 @@ mod tests {
     #[cfg(unix)]
     fn write_token_file_sets_mode_0600() {
         use std::os::unix::fs::PermissionsExt;
-        let test_path = std::env::temp_dir().join(format!("test_token_{}.json", std::process::id()));
+        let test_path =
+            std::env::temp_dir().join(format!("test_token_{}.json", std::process::id()));
         let tokens = StoredTokens {
             server: "https://example.com".into(),
             access_token: "secret_access".into(),

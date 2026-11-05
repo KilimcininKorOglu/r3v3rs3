@@ -286,7 +286,9 @@ impl Cert {
         let signing_key = sign::any_supported_type(&key).map_err(|err| anyhow::anyhow!("{err}"))?;
         let chain = self.certificates()?;
         let certified = CertifiedKey::new(chain, signing_key);
-        certified.keys_match().map_err(|err| anyhow::anyhow!("{err}"))?;
+        certified
+            .keys_match()
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
         Ok(certified)
     }
 }
@@ -353,7 +355,10 @@ fn parse_key_document(pem_key: Option<&[u8]>) -> Result<Option<SecretDocument>, 
 }
 
 fn calculate_fingerprint(certs: &[CertificateDer<'_>]) -> Result<(ShortId, String), Error> {
-    let der = certs.first().ok_or(Error::FailedToReadCertificate)?.as_ref();
+    let der = certs
+        .first()
+        .ok_or(Error::FailedToReadCertificate)?
+        .as_ref();
     let mut hasher = Sha256::new();
     hasher.update(der);
     let id = hasher.finalize();

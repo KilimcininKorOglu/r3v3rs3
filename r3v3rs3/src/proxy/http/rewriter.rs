@@ -18,8 +18,8 @@ use super::client_ip::{CLIENT_IP_HEADERS, ClientAddr};
 use super::compression::ResponseCompression;
 use super::error::{ErrorTemplate, error_headers, map_error, status_text};
 use super::header_rules::{self, CompiledHeaderRules, HeaderVariables};
-use hyper::header::HeaderName;
 use super::page::PagePreferences;
+use hyper::header::HeaderName;
 
 #[derive(Default, Debug)]
 pub struct RequestRewriter {
@@ -164,18 +164,16 @@ fn is_websocket_upgrade(headers: &HeaderMap, method: &hyper::Method) -> bool {
     if method != hyper::Method::GET {
         return false;
     }
-    let has_ws = headers
-        .get_all(hyper::header::UPGRADE)
-        .iter()
-        .any(|v| v.to_str().is_ok_and(|s| s.eq_ignore_ascii_case("websocket")));
-    let has_upgrade = headers
-        .get_all(hyper::header::CONNECTION)
-        .iter()
-        .any(|v| {
-            v.to_str().is_ok_and(|s| {
-                s.split(',').any(|p| p.trim().eq_ignore_ascii_case("upgrade"))
-            })
-        });
+    let has_ws = headers.get_all(hyper::header::UPGRADE).iter().any(|v| {
+        v.to_str()
+            .is_ok_and(|s| s.eq_ignore_ascii_case("websocket"))
+    });
+    let has_upgrade = headers.get_all(hyper::header::CONNECTION).iter().any(|v| {
+        v.to_str().is_ok_and(|s| {
+            s.split(',')
+                .any(|p| p.trim().eq_ignore_ascii_case("upgrade"))
+        })
+    });
     has_ws && has_upgrade
 }
 
@@ -223,8 +221,14 @@ pub fn remove_hop_by_hop_headers(headers: &mut HeaderMap, method: &hyper::Method
     }
 
     if ws {
-        headers.insert(hyper::header::CONNECTION, HeaderValue::from_static("upgrade"));
-        headers.insert(hyper::header::UPGRADE, HeaderValue::from_static("websocket"));
+        headers.insert(
+            hyper::header::CONNECTION,
+            HeaderValue::from_static("upgrade"),
+        );
+        headers.insert(
+            hyper::header::UPGRADE,
+            HeaderValue::from_static("websocket"),
+        );
     }
 }
 
@@ -477,10 +481,7 @@ fn render_error_body(
         let status = custom.status;
         let message = code.canonical_reason().unwrap_or("Error");
         let (host, client_ip) = match variables {
-            Some(v) => (
-                v.host.as_str(),
-                v.client_ip.to_string(),
-            ),
+            Some(v) => (v.host.as_str(), v.client_ip.to_string()),
             None => ("-", "-".to_string()),
         };
         let rendered = r3v3rs3_api::error_page_theme::substitute_error_page_variables(
@@ -531,8 +532,14 @@ fn error_response(
             generated_id.as_str()
         }
     };
-    let (body, content_type) =
-        render_error_body(code, preferences, error_pages, variables, req_id, hide_branding)?;
+    let (body, content_type) = render_error_body(
+        code,
+        preferences,
+        error_pages,
+        variables,
+        req_id,
+        hide_branding,
+    )?;
     let mut res = Response::new(BoxBody::new(
         Full::new(Bytes::from(body)).map_err(Into::into),
     ));
@@ -670,8 +677,9 @@ mod test {
             .header_rules(rules, vars)
             .build();
 
-        let err: Result<Response<BoxBody<Bytes, anyhow::Error>>, _> =
-            Err(anyhow::Error::new(super::super::error::ProxyError::NoUpstreamServers));
+        let err: Result<Response<BoxBody<Bytes, anyhow::Error>>, _> = Err(anyhow::Error::new(
+            super::super::error::ProxyError::NoUpstreamServers,
+        ));
         let res = rewriter.map_response(err).unwrap();
         assert_eq!(res.status(), 502);
         assert_eq!(res.headers()["x-custom-security"], "error-protected");
@@ -712,7 +720,8 @@ mod test {
             client_cert_subject: String::new(),
             client_cert_fingerprint: String::new(),
         };
-        let res = error_response(err, PagePreferences::default(), &pages, Some(&vars), false).unwrap();
+        let res =
+            error_response(err, PagePreferences::default(), &pages, Some(&vars), false).unwrap();
         assert_eq!(res.status(), 502);
         let body_bytes = res.into_body().collect().await.unwrap().to_bytes();
         let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
@@ -824,7 +833,10 @@ mod test {
     #[test]
     fn removes_hop_by_hop_and_connection_named_headers() {
         let mut headers = HeaderMap::new();
-        headers.insert("connection", "close, X-Custom-Hop, X-Another".parse().unwrap());
+        headers.insert(
+            "connection",
+            "close, X-Custom-Hop, X-Another".parse().unwrap(),
+        );
         headers.insert("x-custom-hop", "drop-this".parse().unwrap());
         headers.insert("x-another", "also-drop".parse().unwrap());
         headers.insert("keep-alive", "timeout=5".parse().unwrap());

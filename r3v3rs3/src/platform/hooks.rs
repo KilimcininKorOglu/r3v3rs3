@@ -843,7 +843,9 @@ fn validate_webhook_timestamp(headers: &HeaderMap) -> Result<(), Error> {
 }
 
 impl Platform {
-    pub(super) fn queued_hooks(&self) -> std::sync::MutexGuard<'_, HashMap<ShortId, Option<GitRef>>> {
+    pub(super) fn queued_hooks(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<ShortId, Option<GitRef>>> {
         match self.queued.lock() {
             Ok(queued) => queued,
             // The map stays valid when a holder panics.
@@ -989,7 +991,8 @@ impl Platform {
             spec,
         };
         let preview_app = self.add_app(request, crate::clock::unix_ms()).await?;
-        self.copy_non_secret_app_env(parent.id, preview_app.id).await?;
+        self.copy_non_secret_app_env(parent.id, preview_app.id)
+            .await?;
         Ok(preview_app)
     }
 
@@ -1813,11 +1816,17 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        hdrs.insert("x-webhook-timestamp", HeaderValue::from_str(&now.to_string()).unwrap());
+        hdrs.insert(
+            "x-webhook-timestamp",
+            HeaderValue::from_str(&now.to_string()).unwrap(),
+        );
         assert!(validate_webhook_timestamp(&hdrs).is_ok());
 
         let old = now - 600;
-        hdrs.insert("x-webhook-timestamp", HeaderValue::from_str(&old.to_string()).unwrap());
+        hdrs.insert(
+            "x-webhook-timestamp",
+            HeaderValue::from_str(&old.to_string()).unwrap(),
+        );
         assert!(validate_webhook_timestamp(&hdrs).is_err());
     }
 
@@ -1829,14 +1838,20 @@ mod tests {
 
         let body = push("refs/heads/main");
         let mut hdrs = github(&secret.secret, "push", &body);
-        hdrs.insert("x-github-delivery", HeaderValue::from_static("delivery-uuid-999"));
+        hdrs.insert(
+            "x-github-delivery",
+            HeaderValue::from_static("delivery-uuid-999"),
+        );
 
         let res1 = platform.hook(app.id, &hdrs, &body).await;
         assert!(res1.is_ok());
 
         let res2 = platform.hook(app.id, &hdrs, &body).await;
         assert!(res2.is_err());
-        assert!(matches!(api_error(res2.unwrap_err()), Error::InvalidWebhookPayload { .. }));
+        assert!(matches!(
+            api_error(res2.unwrap_err()),
+            Error::InvalidWebhookPayload { .. }
+        ));
         Ok(())
     }
 }

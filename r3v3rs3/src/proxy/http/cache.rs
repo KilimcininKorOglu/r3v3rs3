@@ -211,8 +211,9 @@ impl CacheRegistry {
             id,
             |existing| existing.config == *config && existing.share.is_some() == store.is_some(),
             || {
-                let share =
-                    store.map(|store| CacheShare::new(id, store.clone(), self.purged_at(id), config.max_size));
+                let share = store.map(|store| {
+                    CacheShare::new(id, store.clone(), self.purged_at(id), config.max_size)
+                });
                 Arc::new(HttpCache::new(config.clone(), share))
             },
         ))
@@ -481,7 +482,8 @@ impl CacheRequest {
     }
 
     pub fn invalidate_target(&self) {
-        self.cache.invalidate_target(&self.key, &self.host, &self.path);
+        self.cache
+            .invalidate_target(&self.key, &self.host, &self.path);
     }
 
     fn stored(&self) -> Option<Arc<CachedResponse>> {
@@ -818,10 +820,7 @@ async fn find_stored(cache: &CacheRequest) -> Option<Arc<CachedResponse>> {
     }
 }
 
-async fn wait_for_flight(
-    cache: &CacheRequest,
-    notify: Arc<Notify>,
-) -> Option<Response<ProxyBody>> {
+async fn wait_for_flight(cache: &CacheRequest, notify: Arc<Notify>) -> Option<Response<ProxyBody>> {
     if let Some(stored) = cache.stored().filter(|entry| entry.is_fresh()) {
         return Some(cache.respond(&stored));
     }
@@ -935,10 +934,11 @@ fn is_cacheable_request<B>(req: &Request<B>) -> bool {
 }
 
 fn is_chunked(headers: &HeaderMap) -> bool {
-    headers
-        .get_all(TRANSFER_ENCODING)
-        .iter()
-        .any(|v| v.to_str().map(|s| s.eq_ignore_ascii_case("chunked")).unwrap_or(false))
+    headers.get_all(TRANSFER_ENCODING).iter().any(|v| {
+        v.to_str()
+            .map(|s| s.eq_ignore_ascii_case("chunked"))
+            .unwrap_or(false)
+    })
 }
 
 /// Returns true when a comma-separated header has the directive, with or without a value.
@@ -1372,9 +1372,16 @@ mod tests {
     #[test]
     fn purge_path_removes_matching_keys_across_schemes() {
         let cache = HttpCache::new(CacheConfig::default(), None);
-        cache.entries.insert("https example.com /fresh/a".into(), Arc::new(stored_entry()));
-        cache.entries.insert("http example.com /fresh/b".into(), Arc::new(stored_entry()));
-        cache.entries.insert("example.com /legacy".into(), Arc::new(stored_entry()));
+        cache.entries.insert(
+            "https example.com /fresh/a".into(),
+            Arc::new(stored_entry()),
+        );
+        cache
+            .entries
+            .insert("http example.com /fresh/b".into(), Arc::new(stored_entry()));
+        cache
+            .entries
+            .insert("example.com /legacy".into(), Arc::new(stored_entry()));
         assert_eq!(cache.purge_path("/fresh"), 2);
         assert_eq!(cache.purge_path("/legacy"), 1);
     }
@@ -1562,8 +1569,14 @@ mod tests {
 
     #[test]
     fn extract_key_host_extracts_host_from_keys() {
-        assert_eq!(extract_key_host("https example.com /test?a=1"), "example.com");
-        assert_eq!(extract_key_host("http sub.example.com /test"), "sub.example.com");
+        assert_eq!(
+            extract_key_host("https example.com /test?a=1"),
+            "example.com"
+        );
+        assert_eq!(
+            extract_key_host("http sub.example.com /test"),
+            "sub.example.com"
+        );
         assert_eq!(extract_key_host("legacy.com /path"), "legacy.com");
         assert_eq!(extract_key_host("opaque-key"), "");
     }
@@ -1583,10 +1596,20 @@ mod tests {
     #[test]
     fn invalidate_target_removes_both_schemes_and_legacy_key() {
         let cache = HttpCache::new(CacheConfig::default(), None);
-        cache.entries.insert("https example.com /resource".into(), Arc::new(stored_entry()));
-        cache.entries.insert("http example.com /resource".into(), Arc::new(stored_entry()));
-        cache.entries.insert("example.com /resource".into(), Arc::new(stored_entry()));
-        cache.entries.insert("https example.com /other".into(), Arc::new(stored_entry()));
+        cache.entries.insert(
+            "https example.com /resource".into(),
+            Arc::new(stored_entry()),
+        );
+        cache.entries.insert(
+            "http example.com /resource".into(),
+            Arc::new(stored_entry()),
+        );
+        cache
+            .entries
+            .insert("example.com /resource".into(), Arc::new(stored_entry()));
+        cache
+            .entries
+            .insert("https example.com /other".into(), Arc::new(stored_entry()));
 
         cache.invalidate_target("https example.com /resource", "example.com", "/resource");
         assert!(cache.entries.get("https example.com /resource").is_none());

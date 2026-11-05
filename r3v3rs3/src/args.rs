@@ -282,16 +282,14 @@ mod tests {
             panic!("expected Start command");
         }
 
-        let explicit_false =
-            Cli::try_parse_from(["r3-server", "start", "--no-webui=0"]).unwrap();
+        let explicit_false = Cli::try_parse_from(["r3-server", "start", "--no-webui=0"]).unwrap();
         if let Command::Start(args) = explicit_false.command {
             assert!(!args.no_webui);
         } else {
             panic!("expected Start command");
         }
 
-        let explicit_true =
-            Cli::try_parse_from(["r3-server", "start", "--no-webui=1"]).unwrap();
+        let explicit_true = Cli::try_parse_from(["r3-server", "start", "--no-webui=1"]).unwrap();
         if let Command::Start(args) = explicit_true.command {
             assert!(args.no_webui);
         } else {

@@ -438,7 +438,10 @@ mod tests {
             assert!(matches!(err, ProxyError::Unauthorized { .. }));
             assert!(headers.get(AUTHORIZATION).is_some());
         }
-        let err = auth.authorize(&mut HeaderMap::new(), client_ip).await.unwrap_err();
+        let err = auth
+            .authorize(&mut HeaderMap::new(), client_ip)
+            .await
+            .unwrap_err();
         let ProxyError::Unauthorized { challenge } = err else {
             panic!("expected unauthorized");
         };

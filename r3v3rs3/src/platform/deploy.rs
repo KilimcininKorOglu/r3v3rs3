@@ -448,7 +448,11 @@ impl Platform {
         let app = self.app(entry.app).await?;
         let _lock = self.lock_app(&app)?;
         let message = format!("Rejected by {username}");
-        if !self.store.reject_deployment(id, &message, unix_ms()).await? {
+        if !self
+            .store
+            .reject_deployment(id, &message, unix_ms())
+            .await?
+        {
             return Err(Error::DeploymentNotPendingApproval { id }.into());
         }
         self.deployment(id).await

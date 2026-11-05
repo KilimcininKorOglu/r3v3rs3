@@ -266,7 +266,13 @@ async fn test_grpc_web_cors_preflight_rejected_origins() -> anyhow::Result<()> {
         let client = reqwest::Client::new();
         let url = port.http_url("/helloworld.Greeter/SayHello");
 
-        check_preflight_status(&client, url.clone(), "https://evil.com", StatusCode::FORBIDDEN).await?;
+        check_preflight_status(
+            &client,
+            url.clone(),
+            "https://evil.com",
+            StatusCode::FORBIDDEN,
+        )
+        .await?;
         check_preflight_status(&client, url.clone(), "null", StatusCode::FORBIDDEN).await?;
         check_preflight_status(&client, url, "file:///etc/passwd", StatusCode::FORBIDDEN).await?;
 
@@ -299,7 +305,13 @@ async fn test_grpc_web_cors_preflight_requires_auth() -> anyhow::Result<()> {
         let client = reqwest::Client::new();
         let url = port.http_url("/helloworld.Greeter/SayHello");
 
-        check_preflight_status(&client, url.clone(), "http://localhost:3000", StatusCode::UNAUTHORIZED).await?;
+        check_preflight_status(
+            &client,
+            url.clone(),
+            "http://localhost:3000",
+            StatusCode::UNAUTHORIZED,
+        )
+        .await?;
 
         let auth_res = client
             .request(reqwest::Method::OPTIONS, url)
@@ -315,7 +327,10 @@ async fn test_grpc_web_cors_preflight_requires_auth() -> anyhow::Result<()> {
             .await?;
         assert_eq!(auth_res.status(), StatusCode::NO_CONTENT);
         assert_eq!(
-            auth_res.headers().get("access-control-allow-origin").unwrap(),
+            auth_res
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
             "http://localhost:3000"
         );
 
@@ -361,7 +376,9 @@ async fn test_grpc_web_post_untrusted_origin_not_reflected() -> anyhow::Result<(
             .header("Origin", "https://evil.com")
             .header("Content-Type", "application/grpc-web+proto")
             .header("x-grpc-web", "1")
-            .body(vec![0x00, 0x00, 0x00, 0x00, 0x05, b'h', b'e', b'l', b'l', b'o'])
+            .body(vec![
+                0x00, 0x00, 0x00, 0x00, 0x05, b'h', b'e', b'l', b'l', b'o',
+            ])
             .send()
             .await?;
 

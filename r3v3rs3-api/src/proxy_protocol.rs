@@ -12,7 +12,18 @@ use utoipa::ToSchema;
 pub const DEFAULT_PROXY_PROTOCOL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The PROXY protocol versions that a port accepts.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProxyProtocolAccept {
     V1,
@@ -22,7 +33,9 @@ pub enum ProxyProtocolAccept {
 }
 
 /// The PROXY protocol version that a TCP proxy sends to its upstream servers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProxyProtocolVersion {
     V1,
@@ -30,7 +43,17 @@ pub enum ProxyProtocolVersion {
 }
 
 /// Reads the PROXY protocol header on a TCP, TLS, HTTP or HTTPS port.
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct ProxyProtocolReceive {
     #[serde(default, skip_serializing_if = "is_any")]
     pub accept: ProxyProtocolAccept,

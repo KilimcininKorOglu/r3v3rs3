@@ -165,7 +165,9 @@ impl Default for BackupConfig {
 }
 
 /// An S3 compatible bucket that the backups upload to.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct S3Config {
     /// The base URL of the bucket, for example `https://s3.example.com/bucket`.
     pub endpoint: String,
@@ -180,7 +182,9 @@ pub struct S3Config {
 }
 
 /// An SFTP server target that the backups upload to.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct SftpConfig {
     /// Hostname or IP address of the SFTP server.
     pub host: String,
@@ -204,7 +208,9 @@ fn default_ssh_port() -> u16 {
 }
 
 /// An rsync remote destination that the backups sync to.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct RsyncConfig {
     /// Destination path (e.g. `user@host:/path` or `rsync://host/module`).
     pub destination: String,
@@ -680,7 +686,9 @@ pub struct PruneResult {
     pub space_reclaimed_bytes: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetKind {
     /// The Docker Engine of the server that runs r3v3rs3.
@@ -880,7 +888,18 @@ impl AppSource {
 }
 
 /// Alert thresholds for CPU and memory usage, triggering webhook notifications when exceeded.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct AlertRules {
     /// The CPU percentage threshold (e.g. 80 for 80%). When CPU usage meets or exceeds this, an alert is sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -912,7 +931,9 @@ impl AlertRules {
 }
 
 /// Alert thresholds for host nodes, triggering webhook notifications when free disk space is low, bandwidth spikes, or file descriptors and sockets are exhausted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct NodeAlertRules {
     /// Whether node-level threshold alerts are enabled.
     #[serde(default = "default_true")]
@@ -1140,7 +1161,9 @@ pub struct AppSpec {
 }
 
 /// Commands executed before or after a deployment lifecycle stage.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct DeploymentLifecycleHooks {
     /// Command executed in an ephemeral container using the new image before routing traffic.
     /// If non-zero, deployment fails and previous container remains active.
@@ -1155,7 +1178,9 @@ pub struct DeploymentLifecycleHooks {
 }
 
 /// Configuration for BuildKit remote builders and cache mounts.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct BuildKitConfig {
     /// Whether BuildKit is enabled for building this app's image.
     #[serde(default)]
@@ -1187,7 +1212,9 @@ pub struct BuildKitConfig {
 }
 
 /// Popular language ecosystem cache mount presets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheMountPreset {
     Cargo,
@@ -2466,7 +2493,9 @@ fn validate_cron_field(field: &str, min: u32, max: u32) -> bool {
             .parse::<u32>()
             .is_ok_and(|step| step > 0 && step <= max);
     }
-    field.split(',').all(|part| validate_cron_part(part, min, max))
+    field
+        .split(',')
+        .all(|part| validate_cron_part(part, min, max))
 }
 
 fn validate_cron_5(schedule: &str) -> bool {

@@ -432,7 +432,11 @@ impl Platform {
     pub fn cancel_all_running_jobs(&self) {
         let tokens: Vec<CancellationToken> = match self.cancellations.lock() {
             Ok(mut map) => map.drain().map(|(_, token)| token).collect(),
-            Err(poisoned) => poisoned.into_inner().drain().map(|(_, token)| token).collect(),
+            Err(poisoned) => poisoned
+                .into_inner()
+                .drain()
+                .map(|(_, token)| token)
+                .collect(),
         };
         for token in tokens {
             token.cancel();
@@ -1410,7 +1414,9 @@ impl Platform {
             return Err(not_found(primary_id));
         };
         if primary.spec.replica_of.is_some() {
-            return Err(anyhow!("replicas can only be created from primary databases"));
+            return Err(anyhow!(
+                "replicas can only be created from primary databases"
+            ));
         }
         if primary.spec.database.is_none() {
             return Err(anyhow!("referenced primary {primary_id} is not a database"));
@@ -2244,7 +2250,10 @@ mod tests {
 
         let mut moved = request("shop");
         moved.target = edge.id;
-        let err = platform.update_app(shop.id, moved.clone(), 2).await.unwrap_err();
+        let err = platform
+            .update_app(shop.id, moved.clone(), 2)
+            .await
+            .unwrap_err();
         assert!(matches!(api_error(err), Error::AppBusy { .. }));
 
         drop(lock);
@@ -2275,7 +2284,11 @@ mod tests {
         excess.spec.replica_of = Some(primary.id);
         let res = platform.add_app(excess, 99).await;
         assert!(res.is_err());
-        assert!(res.unwrap_err().to_string().contains("maximum number of read replicas"));
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("maximum number of read replicas")
+        );
         Ok(())
     }
 

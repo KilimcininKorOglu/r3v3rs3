@@ -2,6 +2,7 @@
 //! variables and their deployments. The schema is created at the first connection, and every query
 //! binds its values.
 
+use crate::admin::oauth2::{SCHEMA_CLIENTS, SCHEMA_TOKENS};
 use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::id::ShortId;
@@ -13,7 +14,6 @@ use serde_derive::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteRow, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
 use std::path::Path;
-use crate::admin::oauth2::{SCHEMA_CLIENTS, SCHEMA_TOKENS};
 
 const SCHEMA: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS targets (

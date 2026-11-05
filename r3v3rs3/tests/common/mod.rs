@@ -409,8 +409,9 @@ impl Storage for TestStorage {
         account.credentials_changed_at = r3v3rs3::clock::unix_ms();
         let mut inner = self.inner.lock().await;
         if let Some(prev) = inner.accounts.get(name) {
-            account.credentials_changed_at =
-                account.credentials_changed_at.max(prev.credentials_changed_at);
+            account.credentials_changed_at = account
+                .credentials_changed_at
+                .max(prev.credentials_changed_at);
         }
         inner.accounts.insert(name.to_string(), account.clone());
         Ok(account)

@@ -260,9 +260,9 @@ impl PlatformStore {
         tokens: &StoredTokens<'_>,
         current_refresh: Option<&[u8]>,
     ) -> anyhow::Result<bool> {
-        let result = match current_refresh {
-            Some(refresh) => {
-                sqlx::query(
+        let result =
+            match current_refresh {
+                Some(refresh) => sqlx::query(
                     "UPDATE git_connections SET access_token = ?, refresh_token = ?, expires_at = ?
                     WHERE id = ? AND status = 'connected' AND refresh_token = ?",
                 )
@@ -272,10 +272,8 @@ impl PlatformStore {
                 .bind(id.to_string())
                 .bind(refresh)
                 .execute(&self.pool)
-                .await?
-            }
-            None => {
-                sqlx::query(
+                .await?,
+                None => sqlx::query(
                     "UPDATE git_connections SET access_token = ?, refresh_token = ?, expires_at = ?
                     WHERE id = ? AND status = 'connected' AND refresh_token IS NULL",
                 )
@@ -284,9 +282,8 @@ impl PlatformStore {
                 .bind(tokens.expires_at.map(sql_int))
                 .bind(id.to_string())
                 .execute(&self.pool)
-                .await?
-            }
-        };
+                .await?,
+            };
         Ok(result.rows_affected() == 1)
     }
 

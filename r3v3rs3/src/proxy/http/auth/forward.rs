@@ -107,10 +107,7 @@ impl ForwardAuthenticator {
     pub fn new(config: ForwardAuth, tls_client_config: Arc<ClientConfig>) -> Self {
         let url = match Uri::from_str(config.url.0.as_str()) {
             Ok(uri) => {
-                let prohibited = uri
-                    .host()
-                    .map(is_cloud_metadata_host)
-                    .unwrap_or(true);
+                let prohibited = uri.host().map(is_cloud_metadata_host).unwrap_or(true);
                 if prohibited {
                     error!(url = %config.url, "forbidden forward auth url (cloud metadata)");
                     None
@@ -369,6 +366,8 @@ mod tests {
         assert!(is_safe_denied_header(&hyper::header::SET_COOKIE));
         assert!(is_safe_denied_header(&hyper::header::WWW_AUTHENTICATE));
         assert!(!is_safe_denied_header(&hyper::header::SERVER));
-        assert!(!is_safe_denied_header(&HeaderName::from_static("x-powered-by")));
+        assert!(!is_safe_denied_header(&HeaderName::from_static(
+            "x-powered-by"
+        )));
     }
 }

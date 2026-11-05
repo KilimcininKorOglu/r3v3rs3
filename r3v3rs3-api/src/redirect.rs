@@ -78,7 +78,9 @@ impl fmt::Display for RedirectRule {
 }
 
 /// The status code of a redirect.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(try_from = "u16", into = "u16")]
 #[schemars(with = "u16")]
 pub enum RedirectStatus {

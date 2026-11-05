@@ -182,11 +182,7 @@ fn decode_fixed32(data: &[u8], offset: &mut usize) -> Option<Value> {
     Some(Value::from(f32::from_bits(bits)))
 }
 
-fn decode_length_delimited_field(
-    data: &[u8],
-    offset: &mut usize,
-    depth: usize,
-) -> Option<Value> {
+fn decode_length_delimited_field(data: &[u8], offset: &mut usize, depth: usize) -> Option<Value> {
     let len = read_varint(data, offset)? as usize;
     if *offset + len > data.len() {
         return None;
@@ -196,11 +192,7 @@ fn decode_length_delimited_field(
     Some(decode_length_delimited(bytes, depth + 1))
 }
 
-fn parse_wire_field(
-    data: &[u8],
-    offset: &mut usize,
-    depth: usize,
-) -> Option<(u32, Value)> {
+fn parse_wire_field(data: &[u8], offset: &mut usize, depth: usize) -> Option<(u32, Value)> {
     let tag = read_varint(data, offset)?;
     let field_num = (tag >> 3) as u32;
     if field_num == 0 {
@@ -240,7 +232,9 @@ fn decode_length_delimited(bytes: &[u8], depth: usize) -> Value {
     if bytes.is_empty() {
         return Value::String(String::new());
     }
-    if depth < MAX_RECURSION_DEPTH && let Some(sub) = try_decode_submessage(bytes, depth) {
+    if depth < MAX_RECURSION_DEPTH
+        && let Some(sub) = try_decode_submessage(bytes, depth)
+    {
         return sub;
     }
     if let Ok(s) = std::str::from_utf8(bytes)
@@ -361,14 +355,8 @@ mod tests {
 
     #[test]
     fn test_submessage_and_string_discrimination() {
-        let schema = HashMap::from([
-            ("sub".to_string(), 1),
-            ("greeting".to_string(), 2),
-        ]);
-        let rev_schema = HashMap::from([
-            (1, "sub".to_string()),
-            (2, "greeting".to_string()),
-        ]);
+        let schema = HashMap::from([("sub".to_string(), 1), ("greeting".to_string(), 2)]);
+        let rev_schema = HashMap::from([(1, "sub".to_string()), (2, "greeting".to_string())]);
 
         let input = serde_json::json!({
             "sub": {

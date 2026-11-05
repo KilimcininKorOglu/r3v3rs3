@@ -211,7 +211,9 @@ async fn configure_and_trigger(
     assert_eq!(res.status(), StatusCode::OK);
 
     let res = client
-        .post(format!("http://{addr}/api/certs/ct/check?domain=example.com"))
+        .post(format!(
+            "http://{addr}/api/certs/ct/check?domain=example.com"
+        ))
         .header(COOKIE, cookie)
         .send()
         .await?;
@@ -221,11 +223,7 @@ async fn configure_and_trigger(
     Ok(())
 }
 
-async fn verify_and_dismiss_rogue(
-    client: &Client,
-    addr: &str,
-    cookie: &str,
-) -> anyhow::Result<()> {
+async fn verify_and_dismiss_rogue(client: &Client, addr: &str, cookie: &str) -> anyhow::Result<()> {
     let res = client
         .get(format!("http://{addr}/api/certs/ct/entries"))
         .header(COOKIE, cookie)

@@ -49,7 +49,9 @@ async fn export_and_import_config_backup_round_trip() -> anyhow::Result<()> {
             }),
         },
     };
-    storage.save_access_lists(&[access_list_entry.clone()]).await?;
+    storage
+        .save_access_lists(&[access_list_entry.clone()])
+        .await?;
 
     let key = rcgen::KeyPair::generate()?;
     let account = serde_json::from_value(serde_json::json!({
@@ -129,7 +131,9 @@ async fn export_and_import_config_backup_round_trip() -> anyhow::Result<()> {
 
     // Target storage with existing access list to verify secrets preservation
     let target_storage = TestStorage::builder().build();
-    target_storage.save_access_lists(&[access_list_entry]).await?;
+    target_storage
+        .save_access_lists(&[access_list_entry])
+        .await?;
 
     with_server(target_storage.clone(), |mut channels| async move {
         let arg = Box::new(RpcWrapper::new(ImportConfigBackup {

@@ -84,11 +84,7 @@ pub trait SharedCacheStore: Send + Sync {
         key: &str,
     ) -> anyhow::Result<Option<SharedResponse>>;
 
-    async fn delete_response(
-        &self,
-        _proxy: ShortId,
-        _key: &str,
-    ) -> anyhow::Result<()> {
+    async fn delete_response(&self, _proxy: ShortId, _key: &str) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -147,7 +143,11 @@ impl CacheShare {
         let entry_size = encoded_len + ENTRY_OVERHEAD;
         remaining_freshness >= MIN_SHARED_FRESHNESS
             && entry_size <= self.store.max_value_size()
-            && self.current_size.load(Ordering::Relaxed).saturating_add(entry_size) <= self.max_size
+            && self
+                .current_size
+                .load(Ordering::Relaxed)
+                .saturating_add(entry_size)
+                <= self.max_size
     }
 
     /// Queues a response for the other nodes. A full queue drops the response.
@@ -156,11 +156,20 @@ impl CacheShare {
         if size > self.store.max_value_size() || response.stored_at < self.purged_at() {
             return;
         }
-        if self.current_size.load(Ordering::Relaxed).saturating_add(size) > self.max_size {
+        if self
+            .current_size
+            .load(Ordering::Relaxed)
+            .saturating_add(size)
+            > self.max_size
+        {
             debug!(proxy = %self.proxy, "shared cache byte budget exceeded, so a response stays local");
             return;
         }
-        if self.writes.try_send(ShareCommand::Put(key.to_string(), response)).is_err() {
+        if self
+            .writes
+            .try_send(ShareCommand::Put(key.to_string(), response))
+            .is_err()
+        {
             debug!(proxy = %self.proxy, "the shared cache queue is full, so a response stays local");
         } else {
             self.current_size.fetch_add(size, Ordering::Relaxed);
@@ -169,7 +178,11 @@ impl CacheShare {
 
     /// Queues an invalidation for the other nodes.
     pub fn invalidate(&self, key: &str) {
-        if self.writes.try_send(ShareCommand::Delete(key.to_string())).is_err() {
+        if self
+            .writes
+            .try_send(ShareCommand::Delete(key.to_string()))
+            .is_err()
+        {
             debug!(proxy = %self.proxy, "the shared cache queue is full, so an invalidation was dropped");
         }
     }
@@ -258,11 +271,7 @@ mod tests {
             Ok(self.responses.lock().unwrap().get(key).cloned())
         }
 
-        async fn delete_response(
-            &self,
-            _proxy: ShortId,
-            key: &str,
-        ) -> anyhow::Result<()> {
+        async fn delete_response(&self, _proxy: ShortId, key: &str) -> anyhow::Result<()> {
             let mut responses = self.responses.lock().unwrap();
             responses.remove(key);
             Ok(())

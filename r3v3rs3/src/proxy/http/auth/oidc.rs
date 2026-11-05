@@ -3,8 +3,10 @@ use super::session::{ENDPOINT_PREFIX, safe_redirect};
 use super::{AuthContext, AuthRejection};
 use crate::cdn::fetch::HttpClient;
 use crate::proxy::http::hyper_tls::client::HttpsConnector;
+use aws_lc_rs::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
 use base64::Engine;
 use bytes::Bytes;
+use hmac::{Hmac, KeyInit, Mac};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
     HeaderMap, Method, Request, Response, StatusCode,
@@ -15,8 +17,6 @@ use hyper::{
     },
 };
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
-use aws_lc_rs::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
-use hmac::{Hmac, KeyInit, Mac};
 use r3v3rs3_api::app::is_loopback_host;
 use r3v3rs3_api::policy::{OidcAuth, default_oidc_scopes, is_email_allowed};
 use r3v3rs3_api::subject_name::SubjectName;
@@ -173,8 +173,13 @@ impl OidcAuthenticator {
         }
         let secure = secure_attr(ctx);
         let path = cookie_path(ctx);
-        let cookie = format!("{COOKIE_NAME}=; Path={path}; Max-Age=0; HttpOnly; SameSite=Lax{secure}");
-        let target = if ctx.base_path.is_empty() { "/" } else { ctx.base_path };
+        let cookie =
+            format!("{COOKIE_NAME}=; Path={path}; Max-Age=0; HttpOnly; SameSite=Lax{secure}");
+        let target = if ctx.base_path.is_empty() {
+            "/"
+        } else {
+            ctx.base_path
+        };
         redirect_response(StatusCode::FOUND, target, Some(&cookie))
     }
 
@@ -499,11 +504,7 @@ fn callback_uri(ctx: &AuthContext<'_>) -> String {
     let host = resolve_callback_host(ctx);
     format!(
         "{}://{}{}/{}/{}/oidc/callback",
-        ctx.proto,
-        host,
-        ctx.base_path,
-        ENDPOINT_PREFIX[0],
-        ENDPOINT_PREFIX[1]
+        ctx.proto, host, ctx.base_path, ENDPOINT_PREFIX[0], ENDPOINT_PREFIX[1]
     )
 }
 
@@ -845,7 +846,11 @@ fn verify_origin(headers: &HeaderMap, ctx: &AuthContext<'_>) -> bool {
     };
     let expected_host = ctx
         .host
-        .or_else(|| headers.get(hyper::header::HOST).and_then(|v| v.to_str().ok()))
+        .or_else(|| {
+            headers
+                .get(hyper::header::HOST)
+                .and_then(|v| v.to_str().ok())
+        })
         .unwrap_or_default();
     matches_origin_host(&origin_url, expected_host)
 }
@@ -888,7 +893,11 @@ fn redirect_response(
 mod tests {
     use super::*;
 
-    fn build_test_jwt(header: &serde_json::Value, payload: &serde_json::Value, secret: &str) -> String {
+    fn build_test_jwt(
+        header: &serde_json::Value,
+        payload: &serde_json::Value,
+        secret: &str,
+    ) -> String {
         let b64 = &base64::engine::general_purpose::URL_SAFE_NO_PAD;
         let h = b64.encode(header.to_string());
         let p = b64.encode(payload.to_string());
@@ -1043,7 +1052,12 @@ mod tests {
 
     #[test]
     fn oidc_action_enforces_correct_methods() {
-        let seg_logout = vec![".r3v3rs3".into(), "auth".into(), "oidc".into(), "logout".into()];
+        let seg_logout = vec![
+            ".r3v3rs3".into(),
+            "auth".into(),
+            "oidc".into(),
+            "logout".into(),
+        ];
         assert_eq!(
             oidc_action(&seg_logout, &Method::POST),
             Some(OidcAction::Logout)
@@ -1053,7 +1067,12 @@ mod tests {
             Some(OidcAction::MethodNotAllowed("POST"))
         );
 
-        let seg_login = vec![".r3v3rs3".into(), "auth".into(), "oidc".into(), "login".into()];
+        let seg_login = vec![
+            ".r3v3rs3".into(),
+            "auth".into(),
+            "oidc".into(),
+            "login".into(),
+        ];
         assert_eq!(
             oidc_action(&seg_login, &Method::GET),
             Some(OidcAction::Login)
@@ -1094,7 +1113,10 @@ mod tests {
 
         // Origin host and port match -> allowed
         let mut headers = HeaderMap::new();
-        headers.insert(hyper::header::ORIGIN, "https://example.com".parse().unwrap());
+        headers.insert(
+            hyper::header::ORIGIN,
+            "https://example.com".parse().unwrap(),
+        );
         assert!(verify_origin(&headers, &ctx));
     }
 

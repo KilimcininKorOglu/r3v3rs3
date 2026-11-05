@@ -283,7 +283,10 @@ mod tests {
     #[test]
     fn format_passkey_error_translates_known_errors() {
         assert_eq!(
-            format_passkey_error(Locale::En, "The operation cannot be used with the current origin"),
+            format_passkey_error(
+                Locale::En,
+                "The operation cannot be used with the current origin"
+            ),
             Locale::En.t("accounts.passkey_origin_error")
         );
         assert_eq!(

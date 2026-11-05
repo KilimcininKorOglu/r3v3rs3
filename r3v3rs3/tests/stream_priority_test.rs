@@ -115,7 +115,9 @@ async fn test_controller_backpressure_and_counters() {
 
     // Throttle when max background concurrency is reached
     assert!(GLOBAL_STREAM_CONTROLLER.should_throttle_background(1));
-    assert!(GLOBAL_STREAM_CONTROLLER.stats().throttled_background > initial_stats.throttled_background);
+    assert!(
+        GLOBAL_STREAM_CONTROLLER.stats().throttled_background > initial_stats.throttled_background
+    );
 
     drop(permit);
     assert!(!GLOBAL_STREAM_CONTROLLER.should_throttle_background(1));

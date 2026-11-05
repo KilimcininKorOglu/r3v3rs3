@@ -176,7 +176,9 @@ pub async fn remove_other_dirs(dir: &Path, keep: &Path) -> anyhow::Result<()> {
 
 fn is_ignored(ignore: Option<&Gitignore>, base_dir: &Path, path: &Path, is_dir: bool) -> bool {
     let Some(ignore) = ignore else { return false };
-    let Ok(rel) = path.strip_prefix(base_dir) else { return false };
+    let Ok(rel) = path.strip_prefix(base_dir) else {
+        return false;
+    };
     ignore.matched_path_or_any_parents(rel, is_dir).is_ignore()
 }
 

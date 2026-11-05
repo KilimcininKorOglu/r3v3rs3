@@ -2346,7 +2346,10 @@ pub async fn get_environment(
     Path((id, env_id)): Path<(ShortId, ShortId)>,
 ) -> Result<Json<ProjectEnvironment>, AppError> {
     let platform = state.platform(&caller, Permission::Read).await?;
-    let env = platform.environment(id, env_id).await.map_err(platform_error)?;
+    let env = platform
+        .environment(id, env_id)
+        .await
+        .map_err(platform_error)?;
     Ok(Json(env))
 }
 
@@ -2432,7 +2435,10 @@ pub async fn get_environment_env(
     Path((id, env_id)): Path<(ShortId, ShortId)>,
 ) -> Result<Json<Vec<EnvEntry>>, AppError> {
     let platform = state.platform(&caller, Permission::Read).await?;
-    let env = platform.environment(id, env_id).await.map_err(platform_error)?;
+    let env = platform
+        .environment(id, env_id)
+        .await
+        .map_err(platform_error)?;
     Ok(Json(env.variables))
 }
 

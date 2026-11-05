@@ -178,7 +178,10 @@ mod tests {
             "1.2.3.4",
         );
         assert!(!rendered.contains("<script>"));
-        assert!(rendered.contains("evil.com&quot;&gt;&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;"));
+        assert!(
+            rendered
+                .contains("evil.com&quot;&gt;&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;")
+        );
         assert!(rendered.contains("Bad &lt;Gateway&gt;"));
     }
 

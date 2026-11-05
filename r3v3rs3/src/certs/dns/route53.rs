@@ -197,7 +197,10 @@ fn decode_xml_entity(entity: &str, out: &mut String) -> bool {
 }
 
 fn decode_numeric_entity(num_str: &str, out: &mut String) -> bool {
-    let code_point = if let Some(hex) = num_str.strip_prefix('x').or_else(|| num_str.strip_prefix('X')) {
+    let code_point = if let Some(hex) = num_str
+        .strip_prefix('x')
+        .or_else(|| num_str.strip_prefix('X'))
+    {
         u32::from_str_radix(hex, 16).ok()
     } else {
         num_str.parse::<u32>().ok()

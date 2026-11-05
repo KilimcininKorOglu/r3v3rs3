@@ -134,7 +134,11 @@ async fn hop_by_hop_and_connection_headers_are_stripped_before_forwarding() -> a
             "pxhop",
             "phop",
             HttpProxy {
-                routes: vec![http_route("/test", &format!("{}/test", upstream.url()), None)],
+                routes: vec![http_route(
+                    "/test",
+                    &format!("{}/test", upstream.url()),
+                    None,
+                )],
                 ..Default::default()
             },
         )])

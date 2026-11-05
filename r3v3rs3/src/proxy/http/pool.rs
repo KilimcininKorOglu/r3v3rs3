@@ -104,14 +104,12 @@ fn is_websocket_upgrade_request<B>(req: &Request<B>) -> bool {
             .headers()
             .get(UPGRADE)
             .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"))
-        && req
-            .headers()
-            .get(CONNECTION)
-            .is_some_and(|v| {
-                v.to_str().map_or(false, |s| {
-                    s.split(',').any(|p| p.trim().eq_ignore_ascii_case("upgrade"))
-                })
+        && req.headers().get(CONNECTION).is_some_and(|v| {
+            v.to_str().map_or(false, |s| {
+                s.split(',')
+                    .any(|p| p.trim().eq_ignore_ascii_case("upgrade"))
             })
+        })
 }
 
 impl ConnectionPool {
@@ -200,12 +198,16 @@ impl ConnectionPool {
                 cloned_res.headers_mut().clone_from(res.headers());
                 let (guard_tx, guard_rx) = tokio::sync::oneshot::channel();
                 let (route_guard_tx, route_guard_rx) = tokio::sync::oneshot::channel();
-                cloned_res.extensions_mut().insert(UpgradeGuardSender(
-                    Arc::new(std::sync::Mutex::new(Some(guard_tx))),
-                ));
-                cloned_res.extensions_mut().insert(UpgradeRouteGuardSender(
-                    Arc::new(std::sync::Mutex::new(Some(route_guard_tx))),
-                ));
+                cloned_res
+                    .extensions_mut()
+                    .insert(UpgradeGuardSender(Arc::new(std::sync::Mutex::new(Some(
+                        guard_tx,
+                    )))));
+                cloned_res
+                    .extensions_mut()
+                    .insert(UpgradeRouteGuardSender(Arc::new(std::sync::Mutex::new(
+                        Some(route_guard_tx),
+                    ))));
                 tokio::spawn(upgrade_connection(
                     upgrading_req,
                     res,
@@ -435,11 +437,7 @@ impl Upstream {
             }
         });
         let proxy_id = self.proxy_id.to_string();
-        finish(
-            result,
-            Some(&proxy_id),
-            Some(&self.route_path),
-        )
+        finish(result, Some(&proxy_id), Some(&self.route_path))
     }
 
     /// Starts the copy of the request for the mirror servers when the mirror admits the request.
@@ -564,7 +562,12 @@ fn attach_guard_or_upgrade(
         }
         res
     } else if let Some(guard) = guard {
-        res.map(|body| BoxBody::new(ConnGuardedBody { inner: body, _guard: guard }))
+        res.map(|body| {
+            BoxBody::new(ConnGuardedBody {
+                inner: body,
+                _guard: guard,
+            })
+        })
     } else {
         res
     }

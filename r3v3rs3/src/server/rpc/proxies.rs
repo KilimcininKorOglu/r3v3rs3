@@ -394,9 +394,7 @@ fn ensure_manual(state: &ServerState, id: ShortId) -> Result<&ProxyContext, Erro
     match state.proxies.get(id) {
         Some(ctx) if ctx.entry.is_discovered() => Err(Error::ProxyReadOnly { id }),
         Some(ctx) => Ok(ctx),
-        None => Err(Error::IdNotFound {
-            id: id.to_string(),
-        }),
+        None => Err(Error::IdNotFound { id: id.to_string() }),
     }
 }
 

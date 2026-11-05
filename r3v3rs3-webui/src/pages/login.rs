@@ -1,11 +1,11 @@
+#[cfg(target_arch = "wasm32")]
+use crate::format::format_passkey_error;
 use crate::{
     API_ENDPOINT,
     auth::{LoginQuery, test_token},
     components::{language_menu::LanguageMenu, theme_menu::ThemeMenu},
     i18n::use_locale,
 };
-#[cfg(target_arch = "wasm32")]
-use crate::format::format_passkey_error;
 use gloo_events::EventListener;
 use gloo_net::http::Request;
 use r3v3rs3_api::{

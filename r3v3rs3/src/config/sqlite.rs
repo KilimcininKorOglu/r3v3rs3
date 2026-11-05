@@ -5,7 +5,6 @@
 //! in a single unified SQLite database (`r3v3rs3.db`).
 
 use super::{account, storage::Storage};
-use anyhow::Context as _;
 use crate::audit::AuditStore;
 use crate::cdn::CdnRanges;
 use crate::certs::{Cert, acme::AcmeEntry};
@@ -13,6 +12,7 @@ use crate::dns_credential::StoredDnsCredential;
 use crate::keys::crypto::ClusterKeys;
 use crate::keys::key_file::{load_keys, write_new_key_file};
 use crate::platform::{DATABASE_FILE, KEY_FILE};
+use anyhow::Context as _;
 use indexmap::map::IndexMap;
 use r3v3rs3_api::{
     access_list::{AccessList, AccessListEntry},
@@ -917,8 +917,9 @@ impl Storage for SqliteStorage {
             account::new_account(password, totp).map_err(|_| Error::FailedToCreateAccount)?;
         account.role = role;
         if let Some(prev) = existing {
-            account.credentials_changed_at =
-                account.credentials_changed_at.max(prev.credentials_changed_at);
+            account.credentials_changed_at = account
+                .credentials_changed_at
+                .max(prev.credentials_changed_at);
         }
         accounts.insert(name.to_string(), account.clone());
         self.save_accounts(&accounts).await?;
@@ -1071,10 +1072,13 @@ impl Storage for SqliteStorage {
 }
 
 async fn load_json_list<T: DeserializeOwned>(pool: &SqlitePool, query: &'static str) -> Vec<T> {
-    let rows = sqlx::query(query).fetch_all(pool).await.unwrap_or_else(|err| {
-        error!(query, %err, "failed to query database for records");
-        panic!("failed to execute {query}: {err}");
-    });
+    let rows = sqlx::query(query)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_else(|err| {
+            error!(query, %err, "failed to query database for records");
+            panic!("failed to execute {query}: {err}");
+        });
     rows.into_iter()
         .map(|r| {
             let data: String = r.get(0);
@@ -1459,9 +1463,11 @@ mod tests {
         let dir = temp_test_dir("corrupted");
         let storage = SqliteStorage::open(&dir).await?;
 
-        sqlx::query("INSERT INTO accounts (username, data, updated_at) VALUES ('bad', '{not-json}', 1)")
-            .execute(&storage.pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO accounts (username, data, updated_at) VALUES ('bad', '{not-json}', 1)",
+        )
+        .execute(&storage.pool)
+        .await?;
         assert!(matches!(
             storage.load_accounts().await,
             Err(Error::FailedToLoadAccounts)

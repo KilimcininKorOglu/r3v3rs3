@@ -318,6 +318,9 @@ mod tests {
         assert_eq!(&decompressed, input);
 
         let err = ungzip_bytes_limited(&compressed, 10).await.unwrap_err();
-        assert!(err.to_string().contains("exceeds maximum allowed size"), "{err}");
+        assert!(
+            err.to_string().contains("exceeds maximum allowed size"),
+            "{err}"
+        );
     }
 }

@@ -840,10 +840,15 @@ mod tests {
         let res = login_page(template, StatusCode::OK);
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(
-            res.headers().get(hyper::header::CONTENT_SECURITY_POLICY).unwrap(),
+            res.headers()
+                .get(hyper::header::CONTENT_SECURITY_POLICY)
+                .unwrap(),
             CONTENT_SECURITY
         );
         assert_eq!(res.headers().get("x-frame-options").unwrap(), "DENY");
-        assert_eq!(res.headers().get(hyper::header::REFERRER_POLICY).unwrap(), "no-referrer");
+        assert_eq!(
+            res.headers().get(hyper::header::REFERRER_POLICY).unwrap(),
+            "no-referrer"
+        );
     }
 }

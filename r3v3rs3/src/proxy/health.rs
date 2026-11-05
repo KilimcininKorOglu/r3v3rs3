@@ -630,14 +630,18 @@ impl UpstreamGroup {
         if let (Some(prev_h), Some(new_h)) =
             (previous.servers.get(prev_idx), self.servers.get(new_idx))
         {
-            *new_h.lock().unwrap_or_else(PoisonError::into_inner) =
-                prev_h.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            *new_h.lock().unwrap_or_else(PoisonError::into_inner) = prev_h
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
         }
         if let (Some(prev_b), Some(new_b)) =
             (previous.breakers.get(prev_idx), self.breakers.get(new_idx))
         {
-            *new_b.lock().unwrap_or_else(PoisonError::into_inner) =
-                prev_b.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            *new_b.lock().unwrap_or_else(PoisonError::into_inner) = prev_b
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
         }
         if let (Some(prev_c), Some(new_c)) = (
             previous.active_conns.get(prev_idx),

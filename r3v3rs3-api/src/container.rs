@@ -195,7 +195,9 @@ impl fmt::Display for ImageRef {
 }
 
 /// The name of an environment variable: `[A-Za-z_][A-Za-z0-9_]*`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(try_from = "String", into = "String")]
 #[schemars(with = "String")]
 pub struct EnvKey(String);
@@ -309,7 +311,18 @@ pub struct VolumeMount {
     pub read_only: bool,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum RestartPolicy {
     No,
@@ -331,7 +344,18 @@ impl RestartPolicy {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct ResourceLimits {
     /// The memory limit in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]

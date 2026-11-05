@@ -394,8 +394,8 @@ pub fn export_audit_csv(entries: &[AuditEntry], locale: Locale) -> String {
 
 fn escape_csv(field: &str) -> String {
     let trimmed = field.trim_start();
-    let needs_quote = trimmed.starts_with(['=', '+', '-', '@', '\t', '\r'])
-        || field.starts_with(['\t', '\r']);
+    let needs_quote =
+        trimmed.starts_with(['=', '+', '-', '@', '\t', '\r']) || field.starts_with(['\t', '\r']);
     let escaped = if needs_quote {
         format!("'{field}")
     } else {

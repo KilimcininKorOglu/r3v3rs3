@@ -704,22 +704,30 @@ mod tests {
             .to_string();
 
         assert_eq!(
-            setup.platform.pending_git_authorization_username(&state_admin),
+            setup
+                .platform
+                .pending_git_authorization_username(&state_admin),
             Some("admin".to_string())
         );
         assert_eq!(
-            setup.platform.pending_git_authorization_username(&state_other),
+            setup
+                .platform
+                .pending_git_authorization_username(&state_other),
             Some("other".to_string())
         );
 
         setup.platform.cancel_git_authorizations_for_user("admin");
 
         assert_eq!(
-            setup.platform.pending_git_authorization_username(&state_admin),
+            setup
+                .platform
+                .pending_git_authorization_username(&state_admin),
             None
         );
         assert_eq!(
-            setup.platform.pending_git_authorization_username(&state_other),
+            setup
+                .platform
+                .pending_git_authorization_username(&state_other),
             Some("other".to_string())
         );
         Ok(())

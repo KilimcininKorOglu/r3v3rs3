@@ -13,7 +13,9 @@ pub static GLOBAL_STREAM_CONTROLLER: LazyLock<Arc<AdaptiveStreamController>> =
     LazyLock::new(|| Arc::new(AdaptiveStreamController::new()));
 
 /// RFC 9218 Stream Priority parameters (`Priority: u=urgency, i=?incremental`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct StreamPriority {
     /// Urgency level from 0 (highest/critical) to 7 (lowest/background). Default is 3.
     pub urgency: u8,

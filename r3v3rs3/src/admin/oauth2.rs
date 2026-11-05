@@ -22,7 +22,7 @@ use axum_extra::extract::CookieJar;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use r3v3rs3_api::app::{is_loopback_host, McpClientConfig, McpConfig, McpSession};
+use r3v3rs3_api::app::{McpClientConfig, McpConfig, McpSession, is_loopback_host};
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use rand::distr::{Alphanumeric, SampleString};
@@ -381,7 +381,11 @@ impl McpAuthorizations {
             if grant.refresh_expires_at > now {
                 let client_name = McpClientConfig::find(config_clients, &grant.client_id)
                     .map(|c| c.name.clone())
-                    .or_else(|| self.clients.get(&grant.client_id).map(|c| c.config.name.clone()))
+                    .or_else(|| {
+                        self.clients
+                            .get(&grant.client_id)
+                            .map(|c| c.config.name.clone())
+                    })
                     .unwrap_or_else(|| grant.client_id.clone());
                 sessions.push(McpSession {
                     id: grant.id.clone(),
@@ -603,8 +607,7 @@ impl McpAuthorizations {
             tracing::warn!(err = %err, "failed to persist issued MCP token");
         }
         self.tokens.insert(access_hash.clone(), grant);
-        self.refresh
-            .insert(refresh_hash, access_hash.clone());
+        self.refresh.insert(refresh_hash, access_hash.clone());
         self.by_id.insert(id, access_hash);
         IssuedTokens {
             access_token,
@@ -636,7 +639,10 @@ impl McpAuthorizations {
         let ref_hash = hash_token(refresh_token);
         let now = unix_now();
         self.check_token_reuse(&ref_hash, now).await?;
-        let access = self.refresh.remove(&ref_hash).ok_or(RefreshError::Invalid)?;
+        let access = self
+            .refresh
+            .remove(&ref_hash)
+            .ok_or(RefreshError::Invalid)?;
         let grant = self.tokens.remove(&access).ok_or(RefreshError::Invalid)?;
         self.by_id.remove(&grant.id);
         if let Some(pool) = &self.pool
@@ -1388,7 +1394,9 @@ pub async fn consent(
     let public_url = get_platform_public_url(&state).await;
     super::auth::verify_origin(&headers, public_url.as_deref())?;
 
-    let session_token = jar.get(super::auth::ADMIN_SESSION_COOKIE).map(|c| c.value());
+    let session_token = jar
+        .get(super::auth::ADMIN_SESSION_COOKIE)
+        .map(|c| c.value());
     let mut data = state.data.lock().await;
     if !data
         .mcp
@@ -1881,7 +1889,9 @@ mod tests {
         let resp = unauthorized("http://evil.com\"inj");
         let header = resp.headers().get(header::WWW_AUTHENTICATE).unwrap();
         let val = header.to_str().unwrap();
-        assert!(val.contains(r#"resource_metadata="http://evil.com\"inj/.well-known/oauth-protected-resource""#));
+        assert!(val.contains(
+            r#"resource_metadata="http://evil.com\"inj/.well-known/oauth-protected-resource""#
+        ));
     }
 
     #[test]
@@ -2063,7 +2073,8 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_token_reuse_detection_revokes_token_family() -> anyhow::Result<()> {
-        let dir = TempDir(std::env::temp_dir().join(format!("mcp-reuse-{}", rand::random::<u64>())));
+        let dir =
+            TempDir(std::env::temp_dir().join(format!("mcp-reuse-{}", rand::random::<u64>())));
         std::fs::create_dir_all(&dir.0)?;
         let db_path = dir.0.join("tokens.db");
         let mut auth = McpAuthorizations::open(&db_path).await?;
@@ -2083,18 +2094,12 @@ mod tests {
         assert!(auth.verify(&t1.access_token).is_none());
 
         // 3. Attacker attempts to reuse rotated R1
-        let reuse_err = auth
-            .refresh_tokens(&t1.refresh_token)
-            .await
-            .unwrap_err();
+        let reuse_err = auth.refresh_tokens(&t1.refresh_token).await.unwrap_err();
         assert_eq!(reuse_err, RefreshError::Reused);
 
         // 4. Verify the active token family (A2, R2) was completely revoked
         assert!(auth.verify(&t2.access_token).is_none());
-        let r2_err = auth
-            .refresh_tokens(&t2.refresh_token)
-            .await
-            .unwrap_err();
+        let r2_err = auth.refresh_tokens(&t2.refresh_token).await.unwrap_err();
         assert_eq!(r2_err, RefreshError::Invalid);
 
         // 5. Verify database records for this session were purged

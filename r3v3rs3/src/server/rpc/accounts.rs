@@ -159,7 +159,9 @@ impl RpcMethod for UpdateAccount {
             })
             .await?;
         if !is_admin {
-            state.platform().cancel_git_authorizations_for_user(&username_clone);
+            state
+                .platform()
+                .cancel_git_authorizations_for_user(&username_clone);
         }
         Ok(result)
     }
@@ -205,7 +207,9 @@ impl RpcMethod for DeleteAccount {
                 Ok(true)
             })
             .await?;
-        state.platform().cancel_git_authorizations_for_user(&username_clone);
+        state
+            .platform()
+            .cancel_git_authorizations_for_user(&username_clone);
         Ok(result)
     }
 
@@ -486,7 +490,17 @@ mod tests {
     fn usernames_without_separators_are_valid() {
         assert!(validate_username("editor.1@example").is_ok());
         let long = "a".repeat(MAX_USERNAME_LENGTH + 1);
-        for username in ["", "a:b", "a/b", "a b", "a\tb", long.as_str(), "version", "Version", "VERSION"] {
+        for username in [
+            "",
+            "a:b",
+            "a/b",
+            "a b",
+            "a\tb",
+            long.as_str(),
+            "version",
+            "Version",
+            "VERSION",
+        ] {
             assert!(
                 matches!(
                     validate_username(username),

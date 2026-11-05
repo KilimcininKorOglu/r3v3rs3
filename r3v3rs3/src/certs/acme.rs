@@ -257,7 +257,9 @@ fn cert_renewal_time(cert: &Cert, renewal_days: u64) -> Option<SystemTime> {
     let lead_secs = (validity_secs / 3).clamp(86_400.min(validity_secs / 2), 30 * 86_400);
     let expiration_renewal = not_after_time.checked_sub(Duration::from_secs(lead_secs))?;
 
-    let configured_secs = renewal_days.clamp(1, MAX_RENEWAL_DAYS).checked_mul(86_400)?;
+    let configured_secs = renewal_days
+        .clamp(1, MAX_RENEWAL_DAYS)
+        .checked_mul(86_400)?;
     let start_time = cert
         .metadata
         .as_ref()

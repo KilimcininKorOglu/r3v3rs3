@@ -249,7 +249,8 @@ pub(crate) fn record_request_duration(
         }
     }
     rc.duration_count.fetch_add(1, Ordering::Relaxed);
-    rc.duration_sum_micros.fetch_add(micros as u64, Ordering::Relaxed);
+    rc.duration_sum_micros
+        .fetch_add(micros as u64, Ordering::Relaxed);
 }
 
 /// A snapshot of latency histogram buckets, inf count, sum in seconds, and total count.
@@ -281,7 +282,11 @@ pub(crate) fn snapshot_labeled_latency_histograms() -> Vec<LabeledLatencyHistogr
                 .enumerate()
                 .map(|(i, &le)| (le, v.buckets[i].load(Ordering::Relaxed)))
                 .collect();
-            (k.proxy.clone(), k.route.clone(), (buckets, count, sum, count))
+            (
+                k.proxy.clone(),
+                k.route.clone(),
+                (buckets, count, sum, count),
+            )
         })
         .collect()
 }

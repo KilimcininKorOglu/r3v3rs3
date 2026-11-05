@@ -528,7 +528,9 @@ fn platform_section(
                 locale,
                 locale.t("settings.rotate_key_question").to_string(),
                 async move {
-                    let req = match Request::post(&format!("{API_ENDPOINT}/platform/key/rotate")).build() {
+                    let req = match Request::post(&format!("{API_ENDPOINT}/platform/key/rotate"))
+                        .build()
+                    {
                         Ok(req) => req,
                         Err(err) => {
                             let msg = format_network_error(locale, &err);

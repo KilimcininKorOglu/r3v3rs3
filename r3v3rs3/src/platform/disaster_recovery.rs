@@ -118,9 +118,7 @@ pub fn decrypt_dr_bundle(bundle: &[u8], passphrase: &str) -> anyhow::Result<Vec<
     }
     let version = bundle[4];
     if version != 1 && version != DR_VERSION {
-        anyhow::bail!(
-            "unsupported disaster recovery bundle version: {version}"
-        );
+        anyhow::bail!("unsupported disaster recovery bundle version: {version}");
     }
     let mut salt = [0u8; SALT_LEN];
     salt.copy_from_slice(&bundle[5..5 + SALT_LEN]);
@@ -333,11 +331,15 @@ fn check_entry_limits(
     }
     let entry_size = entry.header().size()?;
     if entry_size > MAX_DR_ENTRY_BYTES {
-        anyhow::bail!("archive entry exceeds maximum allowed file size of {MAX_DR_ENTRY_BYTES} bytes");
+        anyhow::bail!(
+            "archive entry exceeds maximum allowed file size of {MAX_DR_ENTRY_BYTES} bytes"
+        );
     }
     *total_unpacked_bytes = total_unpacked_bytes.saturating_add(entry_size);
     if *total_unpacked_bytes > MAX_DR_UNPACKED_BYTES {
-        anyhow::bail!("total uncompressed archive size exceeds limit of {MAX_DR_UNPACKED_BYTES} bytes");
+        anyhow::bail!(
+            "total uncompressed archive size exceeds limit of {MAX_DR_UNPACKED_BYTES} bytes"
+        );
     }
     Ok(())
 }
@@ -396,10 +398,7 @@ fn dr_backup_id() -> String {
     if rng.fill(&mut bytes).is_err() {
         bytes = rand::random();
     }
-    let rand_suffix: String = bytes
-        .iter()
-        .map(|b| char::from(b'a' + (b % 26)))
-        .collect();
+    let rand_suffix: String = bytes.iter().map(|b| char::from(b'a' + (b % 26))).collect();
     format!("dr-{now}-{rand_suffix}")
 }
 
@@ -731,14 +730,16 @@ mod tests {
             h1.set_size(key_data.len() as u64);
             h1.set_mode(0o644);
             h1.set_cksum();
-            tar.append_data(&mut h1, "r3v3rs3.key", &key_data[..]).unwrap();
+            tar.append_data(&mut h1, "r3v3rs3.key", &key_data[..])
+                .unwrap();
 
             // Append certs/mycert/key.pem with mode 0o777 (loose permissions)
             let mut h2 = tar::Header::new_old();
             h2.set_size(key_data.len() as u64);
             h2.set_mode(0o777);
             h2.set_cksum();
-            tar.append_data(&mut h2, "certs/key.pem", &key_data[..]).unwrap();
+            tar.append_data(&mut h2, "certs/key.pem", &key_data[..])
+                .unwrap();
 
             tar.into_inner().unwrap().finish().unwrap();
         }
@@ -784,16 +785,22 @@ mod tests {
         // 3. Decompression bomb / oversized file entry
         let mut bomb_bytes = Vec::new();
         {
-            let enc = flate2::write::GzEncoder::new(&mut bomb_bytes, flate2::Compression::default());
+            let enc =
+                flate2::write::GzEncoder::new(&mut bomb_bytes, flate2::Compression::default());
             let mut tar = tar::Builder::new(enc);
             let mut header = tar::Header::new_old();
             header.set_size(MAX_DR_ENTRY_BYTES + 1024);
             header.set_cksum();
-            tar.append_data(&mut header, "config.toml", std::io::empty()).unwrap();
+            tar.append_data(&mut header, "config.toml", std::io::empty())
+                .unwrap();
             tar.into_inner().unwrap().finish().unwrap();
         }
         let err = unpack_tar_gz(&bomb_bytes, &temp_dir).unwrap_err();
-        assert!(err.to_string().contains("exceeds maximum allowed file size"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("exceeds maximum allowed file size"),
+            "{err}"
+        );
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -809,9 +816,18 @@ mod tests {
             .filename(&db_path)
             .create_if_missing(true);
         let pool = SqlitePool::connect_with(options).await.unwrap();
-        sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await.unwrap();
-        sqlx::query("CREATE TABLE test_data (id INTEGER PRIMARY KEY, val TEXT)").execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO test_data (val) VALUES ('uncheckpointed_wal_row')").execute(&pool).await.unwrap();
+        sqlx::query("PRAGMA journal_mode = WAL")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE test_data (id INTEGER PRIMARY KEY, val TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO test_data (val) VALUES ('uncheckpointed_wal_row')")
+            .execute(&pool)
+            .await
+            .unwrap();
         let _ = pool.close().await;
 
         // Create a dummy .db-shm file and config.toml

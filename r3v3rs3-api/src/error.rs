@@ -650,7 +650,10 @@ mod tests {
     fn test_error_status_codes() {
         assert_eq!(Error::FailedToRefreshCdnRanges.status_code(), 502);
         assert_eq!(Error::FailedToListNetworkInterfaces.status_code(), 500);
-        assert_eq!(Error::FailedToGenerateSelfSignedCertificate.status_code(), 500);
+        assert_eq!(
+            Error::FailedToGenerateSelfSignedCertificate.status_code(),
+            500
+        );
         assert_eq!(Error::UpgradeFailed.status_code(), 500);
         assert_eq!(Error::FailedToSaveConfig.status_code(), 500);
         assert_eq!(Error::FailedToRefreshAppStore.status_code(), 502);

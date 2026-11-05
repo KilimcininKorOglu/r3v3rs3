@@ -320,7 +320,10 @@ async fn openapi_document_and_swagger_ui_require_a_session() -> anyhow::Result<(
         wait_for_listener(addr).await?;
         let client = Client::new();
 
-        let unauth_res = client.get(format!("http://{addr}/api/openapi.json")).send().await?;
+        let unauth_res = client
+            .get(format!("http://{addr}/api/openapi.json"))
+            .send()
+            .await?;
         assert_eq!(unauth_res.status(), StatusCode::UNAUTHORIZED);
         let req_id_header = unauth_res
             .headers()
@@ -398,11 +401,15 @@ async fn openapi_document_and_swagger_ui_require_a_session() -> anyhow::Result<(
         assert_eq!(docs.status(), StatusCode::OK);
         assert!(content_type(&docs).starts_with("text/html"));
         assert_eq!(
-            docs.headers().get("x-frame-options").and_then(|v| v.to_str().ok()),
+            docs.headers()
+                .get("x-frame-options")
+                .and_then(|v| v.to_str().ok()),
             Some("DENY")
         );
         assert_eq!(
-            docs.headers().get("content-security-policy").and_then(|v| v.to_str().ok()),
+            docs.headers()
+                .get("content-security-policy")
+                .and_then(|v| v.to_str().ok()),
             Some("frame-ancestors 'none'")
         );
 

@@ -5,7 +5,17 @@ use std::time::Duration;
 use utoipa::ToSchema;
 
 /// Stores upstream responses in memory and sends them without contacting the upstream server.
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct CacheConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -35,7 +45,9 @@ pub struct CacheConfig {
 }
 
 /// Request payload to purge specific or all cache entries.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct CachePurge {
     /// Optional URI path or prefix to purge. When empty or omitted, purges the entire cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]

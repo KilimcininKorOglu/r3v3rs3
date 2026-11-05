@@ -148,7 +148,10 @@ async fn test_upstream_error_page_uses_request_preferences() -> anyhow::Result<(
         let client = reqwest::Client::new();
         let resp = client
             .get(port.http_url("/broken"))
-            .header(reqwest::header::COOKIE, "r3v3rs3_lang=tr; r3v3rs3_theme=dark")
+            .header(
+                reqwest::header::COOKIE,
+                "r3v3rs3_lang=tr; r3v3rs3_theme=dark",
+            )
             .send()
             .await?;
         assert_eq!(resp.status(), 523);

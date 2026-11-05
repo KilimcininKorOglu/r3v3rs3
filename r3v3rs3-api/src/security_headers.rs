@@ -3,7 +3,9 @@ use serde_derive::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Predefined OWASP security header hardening profiles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityProfile {
     /// Highest security level: Preloaded HSTS, strict CSP, no-referrer, deny framing.
@@ -218,7 +220,9 @@ pub struct AnalyzeHeadersRequest {
 }
 
 /// Calculated security grade.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityGrade {
     APlus,
@@ -243,7 +247,9 @@ impl SecurityGrade {
 }
 
 /// Status of an individual security header audit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum HeaderAuditStatus {
     Present,

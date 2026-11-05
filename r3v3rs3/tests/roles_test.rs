@@ -24,11 +24,11 @@ use tokio::sync::mpsc;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use r3v3rs3::server::ServerChannels;
 use common::{
     TestStorage, alloc_tcp_port, call, call_as, http_route, port_entry, session_cookie,
     wait_for_listener, with_server,
 };
+use r3v3rs3::server::ServerChannels;
 
 fn caller(role: Role, proxies: Option<BTreeSet<ShortId>>) -> Caller {
     Caller {
@@ -183,11 +183,7 @@ async fn assert_update_rejected(
     assert!(matches!(res, Err(Error::Forbidden)));
 }
 
-async fn assert_add_rejected(
-    channels: &mut ServerChannels,
-    caller: Caller,
-    conflicting: Proxy,
-) {
+async fn assert_add_rejected(channels: &mut ServerChannels, caller: Caller, conflicting: Proxy) {
     let add = AddProxy {
         entry: conflicting,
         owner: Some("editor".into()),
@@ -246,7 +242,9 @@ async fn a_restricted_editor_cannot_overlap_hosts_of_an_unseen_proxy() -> anyhow
             entry: admin_proxy,
             owner: None,
         };
-        let res = call_as(&mut channels, admin, add_admin).await.expect("rpc call");
+        let res = call_as(&mut channels, admin, add_admin)
+            .await
+            .expect("rpc call");
         assert!(res.is_ok(), "{res:?}");
 
         Ok(())
@@ -292,7 +290,13 @@ async fn a_restricted_editor_cannot_take_tcp_port_of_an_unseen_proxy() -> anyhow
         let editor = caller(Role::Editor, web_only());
 
         // 1. Updating 'web' with port p2 (held by unseen proxy 'other') is rejected
-        assert_update_rejected(&mut channels, editor.clone(), web_id, tcp_proxy_with_port(p2)).await;
+        assert_update_rejected(
+            &mut channels,
+            editor.clone(),
+            web_id,
+            tcp_proxy_with_port(p2),
+        )
+        .await;
 
         // 2. Adding a new proxy with port p2 is rejected
         assert_add_rejected(&mut channels, editor.clone(), tcp_proxy_with_port(p2)).await;
@@ -303,7 +307,9 @@ async fn a_restricted_editor_cannot_take_tcp_port_of_an_unseen_proxy() -> anyhow
             entry: tcp_proxy_with_port(p2),
             owner: None,
         };
-        let res = call_as(&mut channels, admin, add_admin).await.expect("rpc call");
+        let res = call_as(&mut channels, admin, add_admin)
+            .await
+            .expect("rpc call");
         assert!(res.is_ok(), "{res:?}");
 
         Ok(())
@@ -344,7 +350,9 @@ async fn a_restricted_editor_cannot_use_stored_client_certificates() -> anyhow::
             entry: with_cert,
             owner: None,
         };
-        let res = call_as(&mut channels, admin, add_admin).await.expect("rpc call");
+        let res = call_as(&mut channels, admin, add_admin)
+            .await
+            .expect("rpc call");
         assert!(res.is_ok(), "{res:?}");
 
         Ok(())
@@ -385,14 +393,22 @@ async fn forward_auth_ssrf_destinations_are_restricted() -> anyhow::Result<()> {
         // 2. Loopback destination is rejected for restricted editor
         let loopback_proxy = make_forward("http://127.0.0.1:4180/auth");
         assert_add_rejected(&mut channels, editor.clone(), loopback_proxy.clone()).await;
-        assert_update_rejected(&mut channels, editor.clone(), web_id, loopback_proxy.clone()).await;
+        assert_update_rejected(
+            &mut channels,
+            editor.clone(),
+            web_id,
+            loopback_proxy.clone(),
+        )
+        .await;
 
         // 3. Admin can configure forward auth on loopback
         let add_admin = AddProxy {
             entry: loopback_proxy,
             owner: None,
         };
-        let res = call_as(&mut channels, admin, add_admin).await.expect("rpc call");
+        let res = call_as(&mut channels, admin, add_admin)
+            .await
+            .expect("rpc call");
         assert!(res.is_ok(), "{res:?}");
 
         Ok(())
@@ -450,7 +466,11 @@ async fn the_admin_api_answers_403_to_an_action_that_the_role_does_not_allow() -
             (Method::POST, "/api/grpc/reflect", 403),
             (Method::POST, "/api/grpc/health", 403),
             (Method::GET, "/api/databases/abc/backups/b1/download", 403),
-            (Method::GET, "/api/databases/s3/download?key=test.dump.gz", 403),
+            (
+                Method::GET,
+                "/api/databases/s3/download?key=test.dump.gz",
+                403,
+            ),
         ];
         for (method, path, expected) in checks {
             let actual = status(&client, addr, method.clone(), path, &viewer).await?;
@@ -465,7 +485,11 @@ async fn the_admin_api_answers_403_to_an_action_that_the_role_does_not_allow() -
             (Method::POST, "/api/grpc/reflect", 403),
             (Method::POST, "/api/grpc/health", 403),
             (Method::GET, "/api/databases/abc/backups/b1/download", 403),
-            (Method::GET, "/api/databases/s3/download?key=test.dump.gz", 403),
+            (
+                Method::GET,
+                "/api/databases/s3/download?key=test.dump.gz",
+                403,
+            ),
         ];
         for (method, path, expected) in checks {
             let actual = status(&client, addr, method.clone(), path, &editor).await?;

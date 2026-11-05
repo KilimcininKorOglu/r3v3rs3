@@ -665,10 +665,7 @@ async fn proxied_response(
         route_request(shared, req, info).await
     };
     let proxy_id = resource_id.map(|id| id.to_string());
-    crate::proxy::stats::count_http_request(
-        proxy_id.as_deref(),
-        route_path.as_deref(),
-    );
+    crate::proxy::stats::count_http_request(proxy_id.as_deref(), route_path.as_deref());
     if shared.quarantine.is_quarantined(&client_ip) {
         return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
     }
@@ -1918,10 +1915,7 @@ where
     let (req, response_rewriter, resource_id, route_path, client_ip) =
         route_request(shared, req.map(|()| body), &info).await;
     let proxy_id = resource_id.map(|id| id.to_string());
-    crate::proxy::stats::count_h3_request(
-        proxy_id.as_deref(),
-        route_path.as_deref(),
-    );
+    crate::proxy::stats::count_h3_request(proxy_id.as_deref(), route_path.as_deref());
     if shared.quarantine.is_quarantined(&client_ip) {
         return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
     }
@@ -2016,7 +2010,10 @@ where
             match res {
                 Ok(mut resp) => {
                     let route_guard = (guard, stream_permit);
-                    if let Some(sender) = resp.extensions_mut().remove::<pool::UpgradeRouteGuardSender>() {
+                    if let Some(sender) = resp
+                        .extensions_mut()
+                        .remove::<pool::UpgradeRouteGuardSender>()
+                    {
                         if let Ok(mut lock) = sender.0.lock()
                             && let Some(tx) = lock.take()
                         {

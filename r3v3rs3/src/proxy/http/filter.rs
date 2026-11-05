@@ -214,10 +214,22 @@ mod tests {
         assert!(admin_filter.rank(&req3, None).is_some());
         assert!(admin_filter.rank(&req4, None).is_some());
 
-        assert_eq!(admin_filter.result(&req1).path_segments, Vec::<String>::new());
-        assert_eq!(admin_filter.result(&req2).path_segments, Vec::<String>::new());
-        assert_eq!(admin_filter.result(&req3).path_segments, Vec::<String>::new());
-        assert_eq!(admin_filter.result(&req4).path_segments, Vec::<String>::new());
+        assert_eq!(
+            admin_filter.result(&req1).path_segments,
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            admin_filter.result(&req2).path_segments,
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            admin_filter.result(&req3).path_segments,
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            admin_filter.result(&req4).path_segments,
+            Vec::<String>::new()
+        );
 
         let req_sub = request("/./admin/users");
         assert_eq!(

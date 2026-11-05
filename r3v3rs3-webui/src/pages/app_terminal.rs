@@ -1498,10 +1498,7 @@ fn build_socket_address(window: &web_sys::Window, id: ShortId, shell: &str) -> O
     ))
 }
 
-fn attach_terminal_io(
-    socket: &web_sys::WebSocket,
-    term: &JsValue,
-) -> TerminalIoListeners {
+fn attach_terminal_io(socket: &web_sys::WebSocket, term: &JsValue) -> TerminalIoListeners {
     let writer = term.clone();
     let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::wrap(Box::new(
         move |event: web_sys::MessageEvent| {

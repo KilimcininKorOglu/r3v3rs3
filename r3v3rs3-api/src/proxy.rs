@@ -28,7 +28,17 @@ use std::time::Duration;
 use url::Url;
 use utoipa::ToSchema;
 
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct Proxy {
     #[serde(default = "default_active", skip_serializing_if = "is_true")]
     pub active: bool,
@@ -183,7 +193,17 @@ fn validate_route_target(route: &Route) -> Result<(), Error> {
     }
 }
 
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct TcpProxy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub upstream_servers: Vec<UpstreamServer>,
@@ -213,7 +233,17 @@ pub struct TcpProxy {
     pub proxy_protocol: Option<ProxyProtocolVersion>,
 }
 
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct UdpProxy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub upstream_servers: Vec<UpstreamServer>,
@@ -238,7 +268,17 @@ pub struct UdpProxy {
     pub health_check: HealthCheck,
 }
 
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct HttpProxy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schema(value_type = [String], example = json!(["example.com"]))]
@@ -358,7 +398,17 @@ pub fn is_default_maintenance_status(status: &u16) -> bool {
 }
 
 /// Maintenance mode configuration for an HTTP proxy.
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct MaintenanceConfig {
     /// When true, the proxy returns an immediate maintenance response instead of routing to upstreams.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -399,7 +449,17 @@ impl MaintenanceConfig {
 }
 
 /// Custom error page configuration for an HTTP proxy.
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct CustomErrorPage {
     /// HTTP status code (400 to 599).
     pub status: u16,
@@ -451,7 +511,18 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProxyState {
     Active,
@@ -461,7 +532,9 @@ pub enum ProxyState {
     Unknown,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct ProxyStatus {
     pub state: ProxyState,
     /// The health of the upstream servers. An HTTP proxy lists the servers of each route in route
@@ -510,7 +583,17 @@ impl From<ProxyEntry> for (ShortId, Proxy) {
     }
 }
 
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct Route {
     #[schema(example = "/")]
     #[serde(default = "default_route_path")]
@@ -843,7 +926,10 @@ mod tests {
             ..Default::default()
         };
         let proxy = ProxyKind::Http(Box::new(http));
-        assert!(matches!(proxy.validate_upstream(), Err(Error::InvalidCacheSize)));
+        assert!(matches!(
+            proxy.validate_upstream(),
+            Err(Error::InvalidCacheSize)
+        ));
 
         let http = HttpProxy {
             headers: HeaderRules {
@@ -856,7 +942,10 @@ mod tests {
             ..Default::default()
         };
         let proxy = ProxyKind::Http(Box::new(http));
-        assert!(matches!(proxy.validate_upstream(), Err(Error::ProtectedHeader { .. })));
+        assert!(matches!(
+            proxy.validate_upstream(),
+            Err(Error::ProtectedHeader { .. })
+        ));
 
         let http = HttpProxy {
             routes: vec![Route {
@@ -872,6 +961,9 @@ mod tests {
             ..Default::default()
         };
         let proxy = ProxyKind::Http(Box::new(http));
-        assert!(matches!(proxy.validate_upstream(), Err(Error::ProtectedHeader { .. })));
+        assert!(matches!(
+            proxy.validate_upstream(),
+            Err(Error::ProtectedHeader { .. })
+        ));
     }
 }

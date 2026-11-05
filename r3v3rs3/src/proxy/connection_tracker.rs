@@ -352,16 +352,9 @@ mod tests {
         let start = Instant::now();
         let timeout = Duration::from_millis(150);
 
-        copy_tracked_bidirectional_with_timeout(
-            server_a,
-            server_b,
-            sent,
-            recv,
-            cancel_rx,
-            timeout,
-        )
-        .await
-        .unwrap();
+        copy_tracked_bidirectional_with_timeout(server_a, server_b, sent, recv, cancel_rx, timeout)
+            .await
+            .unwrap();
 
         assert!(start.elapsed() >= timeout);
         drop(client_a);

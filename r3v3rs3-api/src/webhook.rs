@@ -469,7 +469,8 @@ pub fn validate_webhook_url(url: &str) -> Result<(), Error> {
     })?;
     if is_restricted_host(&host) {
         return Err(Error::InvalidWebhook {
-            reason: "webhook URL cannot target private, loopback, or restricted addresses".to_string(),
+            reason: "webhook URL cannot target private, loopback, or restricted addresses"
+                .to_string(),
         });
     }
     Ok(())

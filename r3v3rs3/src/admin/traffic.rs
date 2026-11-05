@@ -265,7 +265,9 @@ pub async fn replay(
     Extension(caller): Extension<Caller>,
     Json(request): Json<RequestReplayRequest>,
 ) -> Result<Json<RequestReplayResponse>, AppError> {
-    caller.authorize(Permission::Admin).map_err(AppError::from)?;
+    caller
+        .authorize(Permission::Admin)
+        .map_err(AppError::from)?;
     let parsed_url = url::Url::parse(&request.url)
         .map_err(|e| AppError::Anyhow(anyhow::anyhow!("invalid replay URL: {e}")))?;
     validate_replay_target(&parsed_url, request.allow_internal).await?;

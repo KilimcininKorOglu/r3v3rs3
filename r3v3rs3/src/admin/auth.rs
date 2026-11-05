@@ -61,7 +61,10 @@ async fn verify_totp_preconditions(
     };
     let mut data = state.data.lock().await;
     let reset = data.config.admin.login_attempts_reset;
-    if data.totp_attempts.is_account_blocked(username, reset, Instant::now()) {
+    if data
+        .totp_attempts
+        .is_account_blocked(username, reset, Instant::now())
+    {
         return Err(Error::TooManyLoginAttempts);
     }
     Ok(record)
@@ -255,9 +258,7 @@ pub async fn login(
     };
 
     let (backend, expiry) = session_backend(&state).await;
-    let token = backend
-        .create(scope, session_record, expiry)
-        .await?;
+    let token = backend.create(scope, session_record, expiry).await?;
 
     // Lax instead of Strict, because the MCP authorization flow reaches /oauth/authorize as a
     // cross-site top-level navigation. State-changing requests are POST, PUT or DELETE, which
@@ -312,7 +313,9 @@ pub(crate) fn sanitize_audit_username(state: &AppState, raw: &str) -> String {
 async fn record_login_failure(state: &AppState, key: LoginAttemptKey) {
     let audit_username = sanitize_audit_username(state, &key.1);
     let record = AuditRecord::new(AuditAction::LoginFailed);
-    state.record_audit(&audit_username, Some(key.0), record).await;
+    state
+        .record_audit(&audit_username, Some(key.0), record)
+        .await;
     let mut data = state.data.lock().await;
     let admin = data.config.admin.clone();
     let now = Instant::now();
@@ -1030,8 +1033,7 @@ impl LoginAttempts {
     pub fn is_blocked(&self, key: &LoginAttemptKey, reset: Duration, now: Instant) -> bool {
         let key = bounded_key(key);
         self.entries.get(&key).is_some_and(|attempt| {
-            attempt.is_active(reset, now)
-                && attempt.blocked_until.is_some_and(|until| until > now)
+            attempt.is_active(reset, now) && attempt.blocked_until.is_some_and(|until| until > now)
         })
     }
 
@@ -1058,7 +1060,8 @@ impl LoginAttempts {
 
     /// Prunes expired attempt entries outside the request path.
     pub fn prune_expired(&mut self, reset: Duration, now: Instant) {
-        self.entries.retain(|_, attempt| attempt.is_active(reset, now));
+        self.entries
+            .retain(|_, attempt| attempt.is_active(reset, now));
     }
 
     fn prune_oldest(&mut self) {
@@ -1092,7 +1095,9 @@ impl LoginAttempts {
                 self.prune_oldest();
             }
         }
-        self.entries.entry(key).or_insert_with(|| LoginAttempt::new(now))
+        self.entries
+            .entry(key)
+            .or_insert_with(|| LoginAttempt::new(now))
     }
 }
 
@@ -1142,12 +1147,15 @@ impl TotpAttempts {
         }
 
         let max = max_account_attempts.max(1);
-        let attempt = self.accounts.entry(username.to_string()).or_insert(LoginAttempt {
-            failures: 0,
-            in_flight: 0,
-            window_start: now,
-            blocked_until: None,
-        });
+        let attempt = self
+            .accounts
+            .entry(username.to_string())
+            .or_insert(LoginAttempt {
+                failures: 0,
+                in_flight: 0,
+                window_start: now,
+                blocked_until: None,
+            });
         attempt.failures += 1;
         if attempt.failures >= max {
             attempt.blocked_until = Some(now + reset);
@@ -1157,7 +1165,8 @@ impl TotpAttempts {
     }
 
     pub fn is_account_blocked(&mut self, username: &str, reset: Duration, now: Instant) -> bool {
-        self.accounts.retain(|_, attempt| attempt.is_active(reset, now));
+        self.accounts
+            .retain(|_, attempt| attempt.is_active(reset, now));
         self.accounts
             .get(username)
             .and_then(|attempt| attempt.blocked_until)
@@ -1349,11 +1358,17 @@ mod tests {
         );
 
         // Cross-origin with different port -> rejected
-        headers.insert(axum::http::header::ORIGIN, "http://localhost:3000".parse().unwrap());
+        headers.insert(
+            axum::http::header::ORIGIN,
+            "http://localhost:3000".parse().unwrap(),
+        );
         assert!(verify_origin(&headers, None).is_err());
 
         // Same-origin with exact port -> allowed
-        headers.insert(axum::http::header::ORIGIN, "http://localhost:46492".parse().unwrap());
+        headers.insert(
+            axum::http::header::ORIGIN,
+            "http://localhost:46492".parse().unwrap(),
+        );
         assert!(verify_origin(&headers, None).is_ok());
 
         // Sec-fetch-site same-site -> rejected
@@ -1404,28 +1419,45 @@ mod tests {
         // 2. Loopback with trusted proto http -> false
         let mut headers_http = axum::http::HeaderMap::new();
         headers_http.insert("x-forwarded-proto", "http".parse().unwrap());
-        assert!(!is_secure_request(&trusted_proxies, &loopback, &headers_http));
+        assert!(!is_secure_request(
+            &trusted_proxies,
+            &loopback,
+            &headers_http
+        ));
 
         // 3. Loopback with trusted proto https -> true
         let mut headers_https = axum::http::HeaderMap::new();
         headers_https.insert("x-forwarded-proto", "https".parse().unwrap());
-        assert!(is_secure_request(&trusted_proxies, &loopback, &headers_https));
+        assert!(is_secure_request(
+            &trusted_proxies,
+            &loopback,
+            &headers_https
+        ));
 
         // 4. Remote connection -> always true
         assert!(is_secure_request(&trusted_proxies, &remote, &headers));
 
         // 5. Untrusted client sending x-forwarded-proto is ignored
         let empty_trusted: Vec<ipnet::IpNet> = Vec::new();
-        assert!(!is_secure_request(&empty_trusted, &loopback, &headers_https));
+        assert!(!is_secure_request(
+            &empty_trusted,
+            &loopback,
+            &headers_https
+        ));
     }
 
     #[tokio::test]
     async fn sanitize_audit_username_prevents_password_and_invalid_leakage() {
-        let temp_dir = std::env::temp_dir().join(format!("r3-auth-test-{}", r3v3rs3_api::id::ShortId::new()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("r3-auth-test-{}", r3v3rs3_api::id::ShortId::new()));
         let _ = std::fs::create_dir_all(&temp_dir);
-        let _ = crate::log::open_database(&temp_dir.join("log.db")).await.unwrap();
+        let _ = crate::log::open_database(&temp_dir.join("log.db"))
+            .await
+            .unwrap();
         let app_info = crate::config::new_appinfo(&temp_dir, &temp_dir);
-        let data = Arc::new(tokio::sync::Mutex::new(crate::admin::Data::new(app_info).await.unwrap()));
+        let data = Arc::new(tokio::sync::Mutex::new(
+            crate::admin::Data::new(app_info).await.unwrap(),
+        ));
         let (sender, _) = tokio::sync::mpsc::channel(1);
         let (event, _) = tokio::sync::broadcast::channel(1);
         let mut accounts_map = HashMap::new();
@@ -1447,11 +1479,20 @@ mod tests {
         assert_eq!(sanitize_audit_username(&state, "admin"), "admin");
 
         // 2. Unknown account (valid format, but not in directory) is redacted
-        assert_eq!(sanitize_audit_username(&state, "secretpass123"), "[unknown-account]");
+        assert_eq!(
+            sanitize_audit_username(&state, "secretpass123"),
+            "[unknown-account]"
+        );
 
         // 3. Invalid username format (contains invalid characters or spaces) is redacted
-        assert_eq!(sanitize_audit_username(&state, "secret:password"), "[invalid-username]");
-        assert_eq!(sanitize_audit_username(&state, "secret password"), "[invalid-username]");
+        assert_eq!(
+            sanitize_audit_username(&state, "secret:password"),
+            "[invalid-username]"
+        );
+        assert_eq!(
+            sanitize_audit_username(&state, "secret password"),
+            "[invalid-username]"
+        );
         assert_eq!(sanitize_audit_username(&state, ""), "[invalid-username]");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -1459,9 +1500,12 @@ mod tests {
 
     #[tokio::test]
     async fn extract_rp_id_prioritizes_public_url_over_forwarded_host() {
-        let temp_dir = std::env::temp_dir().join(format!("r3-rpid-test-{}", r3v3rs3_api::id::ShortId::new()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("r3-rpid-test-{}", r3v3rs3_api::id::ShortId::new()));
         let _ = std::fs::create_dir_all(&temp_dir);
-        let _ = crate::log::open_database(&temp_dir.join("log.db")).await.unwrap();
+        let _ = crate::log::open_database(&temp_dir.join("log.db"))
+            .await
+            .unwrap();
         let app_info = crate::config::new_appinfo(&temp_dir, &temp_dir);
         let mut app_data = crate::admin::Data::new(app_info).await.unwrap();
         app_data.config.public_url = "https://panel.example.com".parse().ok();

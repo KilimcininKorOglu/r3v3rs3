@@ -264,10 +264,7 @@ async fn load_server_state(app_state: &AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn rate_limit_error_response(
-    base: impl IntoResponse,
-    error: GovernorError,
-) -> Response {
+fn rate_limit_error_response(base: impl IntoResponse, error: GovernorError) -> Response {
     match error {
         GovernorError::TooManyRequests { wait_time, headers } => {
             let mut res = base.into_response();
@@ -314,9 +311,8 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid mcp register rate limit config"))?;
     let reg_limiter = register_governor.limiter().clone();
-    let register_limit =
-        GovernorLayer::new(Arc::new(register_governor))
-            .error_handler(|error| rate_limit_error_response(StatusCode::TOO_MANY_REQUESTS, error));
+    let register_limit = GovernorLayer::new(Arc::new(register_governor))
+        .error_handler(|error| rate_limit_error_response(StatusCode::TOO_MANY_REQUESTS, error));
     let token_governor = GovernorConfigBuilder::default()
         .per_second(5)
         .burst_size(10)
@@ -324,9 +320,8 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .finish()
         .ok_or_else(|| anyhow::anyhow!("invalid mcp token rate limit config"))?;
     let tok_limiter = token_governor.limiter().clone();
-    let token_limit =
-        GovernorLayer::new(Arc::new(token_governor))
-            .error_handler(|error| rate_limit_error_response(StatusCode::TOO_MANY_REQUESTS, error));
+    let token_limit = GovernorLayer::new(Arc::new(token_governor))
+        .error_handler(|error| rate_limit_error_response(StatusCode::TOO_MANY_REQUESTS, error));
     let mut pruners: Vec<RateLimiterPruner> = vec![
         Box::new(move || reg_limiter.retain_recent()),
         Box::new(move || tok_limiter.retain_recent()),
@@ -354,8 +349,8 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .merge(health_routes())
         .split_for_parts();
     spawn_rate_limiter_pruner(pruners);
-    let docs: Router<AppState> = Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi))
-        .route_layer(verify);
+    let docs: Router<AppState> =
+        Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi)).route_layer(verify);
     let mcp_verify = middleware::from_fn_with_state(app_state.clone(), oauth2::verify_bearer);
     let mcp_service = mcp::StreamableHttpService::new(
         {
@@ -510,11 +505,7 @@ fn sanitize_payload_rejection(text: &str, lower: &str, status: StatusCode) -> St
 fn extract_missing_field(text: &str) -> Option<&str> {
     let pos = text.find("missing field `")?;
     let field = text[pos + 15..].split('`').next()?;
-    if field.is_empty() {
-        None
-    } else {
-        Some(field)
-    }
+    if field.is_empty() { None } else { Some(field) }
 }
 
 async fn no_store(mut res: Response) -> Response {
@@ -1152,7 +1143,9 @@ struct StreamWrapper {
 fn send_broadcast_toggle(sender: Sender<ServerCommand>, enabled: bool) {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         handle.spawn(async move {
-            let _ = sender.send(ServerCommand::SetBroadcastEvents { enabled }).await;
+            let _ = sender
+                .send(ServerCommand::SetBroadcastEvents { enabled })
+                .await;
         });
     }
 }
@@ -1353,7 +1346,10 @@ fn is_safe_filename_char(c: char) -> bool {
 /// Builds a sanitized Content-Disposition attachment header value, stripping quotes, semicolons,
 /// backslashes, and control characters to prevent header and parameter injection.
 pub fn content_disposition_attachment(filename: &str, default_fallback: &str) -> String {
-    let base = filename.rsplit(['/', '\\']).next().unwrap_or(default_fallback);
+    let base = filename
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(default_fallback);
     let sanitized: String = base.chars().filter(|&c| is_safe_filename_char(c)).collect();
     let trimmed = sanitized.trim();
     let safe_name = if trimmed.is_empty() {
@@ -1557,7 +1553,8 @@ mod tests {
 
     #[tokio::test]
     async fn app_error_anyhow_masks_internal_details_in_500_response() {
-        let sensitive_err = anyhow::anyhow!("sqlite3 /var/data/r3v3rs3.db disk I/O error table users");
+        let sensitive_err =
+            anyhow::anyhow!("sqlite3 /var/data/r3v3rs3.db disk I/O error table users");
         let response = AppError::Anyhow(sensitive_err).into_response();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)

@@ -2,8 +2,8 @@
 
 use crate::error::Error;
 use serde_derive::{Deserialize, Serialize};
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use utoipa::{IntoParams, ToSchema};
 
 /// The alert/investigation status of a Certificate Transparency log entry.
@@ -158,7 +158,8 @@ fn validate_public_https_target(parsed: &url::Url) -> Result<(), Error> {
     })?;
     if crate::webhook::is_restricted_host(&host) {
         return Err(Error::InvalidCtConfig {
-            reason: "CT API URL cannot target private, loopback, or restricted addresses".to_string(),
+            reason: "CT API URL cannot target private, loopback, or restricted addresses"
+                .to_string(),
         });
     }
     Ok(())

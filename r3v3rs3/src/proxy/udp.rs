@@ -1,10 +1,10 @@
 use super::dns::DnsResolver;
 use super::health::{self, GroupRegistry, Probe, UpstreamGroup};
 use super::{PortContextEvent, PortStatus, SocketState};
+use dashmap::DashMap;
 use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing};
 use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind};
 use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry};
-use dashmap::DashMap;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -281,7 +281,8 @@ async fn resolve(
     deadline: Instant,
 ) -> Option<SocketAddr> {
     let host = server.name.to_str();
-    match tokio::time::timeout_at(deadline.into(), resolver.resolve_addr(&host, server.port)).await {
+    match tokio::time::timeout_at(deadline.into(), resolver.resolve_addr(&host, server.port)).await
+    {
         Ok(Ok(addr)) => Some(addr),
         Ok(Err(e)) => {
             span.in_scope(|| {

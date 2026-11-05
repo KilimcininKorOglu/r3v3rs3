@@ -6,7 +6,17 @@ use serde_derive::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Compresses upstream responses with an encoding that the client accepts.
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct Compression {
     /// Encodings in the order of preference. Empty disables compression.
     #[serde(default)]
@@ -184,7 +194,9 @@ pub fn smart_min_size_for_mime(mime: &str, base_min_size: u64) -> u64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub enum CompressionAlgorithm {
     #[serde(rename = "br")]
     Brotli,

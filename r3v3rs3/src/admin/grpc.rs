@@ -49,7 +49,8 @@ fn resolve_proxy_grpc_target(
             Ok(target)
         } else {
             Err(Error::GrpcError {
-                reason: "target_url must match an upstream server configured for this proxy".to_string(),
+                reason: "target_url must match an upstream server configured for this proxy"
+                    .to_string(),
             })
         }
     } else {

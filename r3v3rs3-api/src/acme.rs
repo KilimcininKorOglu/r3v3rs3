@@ -70,8 +70,7 @@ impl Acme {
         };
         if self.challenge_type != DNS_01 {
             return Err(Error::AcmeDnsAliasInvalid {
-                reason: "DNS alias is only supported with the dns-01 challenge type"
-                    .to_string(),
+                reason: "DNS alias is only supported with the dns-01 challenge type".to_string(),
             });
         }
         let alias = alias.trim();
@@ -210,7 +209,9 @@ impl TokenProvider {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TokenApi {
     Cloudflare,
@@ -264,7 +265,9 @@ pub enum KeyedProvider {
 }
 
 /// The API endpoint of an OVHcloud account, by its name in the OVH API clients.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum OvhEndpoint {
     OvhEu,
@@ -513,7 +516,18 @@ pub enum LocalProvider {
 }
 
 /// The HMAC algorithm of a TSIG key.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum TsigKeyAlgorithm {
     #[default]
@@ -676,7 +690,17 @@ impl fmt::Debug for DnsProvider {
     }
 }
 
-#[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    DefaultFromSerde,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 pub struct AcmeConfig {
     #[serde(default = "default_active", skip_serializing_if = "is_true")]
     pub active: bool,

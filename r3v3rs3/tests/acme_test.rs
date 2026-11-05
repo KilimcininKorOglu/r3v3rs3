@@ -119,7 +119,11 @@ async fn adding_acme_with_invalid_renewal_days_is_rejected() -> anyhow::Result<(
     let result = add_acme(req).await?;
     assert!(matches!(
         result,
-        Err(Error::AcmeRenewalDaysInvalid { min: 1, max: 89, days: 0 })
+        Err(Error::AcmeRenewalDaysInvalid {
+            min: 1,
+            max: 89,
+            days: 0
+        })
     ));
 
     let mut req_overflow = request(vec!["example.com".parse()?], HTTP_01, None);
@@ -127,7 +131,11 @@ async fn adding_acme_with_invalid_renewal_days_is_rejected() -> anyhow::Result<(
     let result_overflow = add_acme(req_overflow).await?;
     assert!(matches!(
         result_overflow,
-        Err(Error::AcmeRenewalDaysInvalid { min: 1, max: 89, days: 90 })
+        Err(Error::AcmeRenewalDaysInvalid {
+            min: 1,
+            max: 89,
+            days: 90
+        })
     ));
     Ok(())
 }

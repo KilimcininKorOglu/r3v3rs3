@@ -106,13 +106,22 @@ fn setup_panic_handler() {
 }
 
 fn render_panic_overlay() {
-    let Some(window) = web_sys::window() else { return };
-    let Some(document) = window.document() else { return };
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
     let Some(body) = document.body() else { return };
-    if document.get_element_by_id("r3v3rs3-panic-overlay").is_some() {
+    if document
+        .get_element_by_id("r3v3rs3-panic-overlay")
+        .is_some()
+    {
         return;
     }
-    let Ok(overlay) = document.create_element("div") else { return };
+    let Ok(overlay) = document.create_element("div") else {
+        return;
+    };
     overlay.set_id("r3v3rs3-panic-overlay");
     let _ = overlay.set_attribute(
         "class",

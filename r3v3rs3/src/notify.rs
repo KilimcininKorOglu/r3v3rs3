@@ -306,7 +306,8 @@ impl Notifier {
                         "notification queue full; dispatching critical alert in background task"
                     );
                     tokio::spawn(async move {
-                        deliver_with_retry(&task.webhook, &task.notification, task.on_success).await;
+                        deliver_with_retry(&task.webhook, &task.notification, task.on_success)
+                            .await;
                     });
                 } else {
                     error!(
@@ -517,9 +518,15 @@ mod tests {
             ..Default::default()
         };
         // Fill the 1-slot channel
-        notifier.send(&webhook, Notification::new(NotificationEvent::AppAlert, "node-1"));
+        notifier.send(
+            &webhook,
+            Notification::new(NotificationEvent::AppAlert, "node-1"),
+        );
 
         // Sending a critical notification when channel is full dispatches directly without panicking
-        notifier.send(&webhook, Notification::new(NotificationEvent::CertificateExpired, "node-1"));
+        notifier.send(
+            &webhook,
+            Notification::new(NotificationEvent::CertificateExpired, "node-1"),
+        );
     }
 }

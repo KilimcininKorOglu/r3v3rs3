@@ -206,12 +206,9 @@ pub async fn restore(
     caller.authorize_platform(Permission::Admin)?;
     let config_dir = state.data.lock().await.app_info.config_path.clone();
     let id_clone = id.clone();
-    let restored = execute_restore_and_reconnect(
-        &state,
-        async move {
-            restore_dr_backup(&config_dir, &id_clone, request.passphrase.as_deref()).await
-        },
-    )
+    let restored = execute_restore_and_reconnect(&state, async move {
+        restore_dr_backup(&config_dir, &id_clone, request.passphrase.as_deref()).await
+    })
     .await?;
 
     let record = AuditRecord::new(AuditAction::RestoreDisasterRecoveryBackup)
@@ -244,12 +241,9 @@ pub async fn restore_upload(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
     let config_dir = state.data.lock().await.app_info.config_path.clone();
-    let restored = execute_restore_and_reconnect(
-        &state,
-        async move {
-            restore_dr_bytes(&config_dir, &body, passphrase.as_deref()).await
-        },
-    )
+    let restored = execute_restore_and_reconnect(&state, async move {
+        restore_dr_bytes(&config_dir, &body, passphrase.as_deref()).await
+    })
     .await?;
 
     let record = AuditRecord::new(AuditAction::RestoreDisasterRecoveryBackup)

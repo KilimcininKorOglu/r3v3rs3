@@ -22,7 +22,9 @@ pub const MAX_RETRY_ATTEMPTS: u8 = 10;
 pub const DEFAULT_STICKY_COOKIE_NAME: &str = "r3v3rs3_affinity";
 
 /// Timeouts of the requests that an HTTP proxy sends to its upstream servers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct UpstreamTimeouts {
     /// Time limit for the DNS lookup, the TCP connection and the TLS handshake of a new upstream
     /// connection.
@@ -103,7 +105,9 @@ impl RetryPolicy {
 }
 
 /// A failure of one try that a [`RetryPolicy`] can retry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub enum RetryOn {
     /// The connection fails or the connect timeout expires. The server received nothing.
     #[serde(rename = "connect")]
@@ -141,7 +145,18 @@ impl RetryOn {
 
 /// Selects the upstream server of each new request, connection or UDP session. A server with weight
 /// 0 gets no new traffic.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum LoadBalancing {
     /// Uses the servers in turn, each server as often as its weight.
@@ -300,7 +315,9 @@ impl HealthCheck {
 
 /// Stops the traffic to a failing server of an HTTP or TCP proxy for a time. Each server of each
 /// route has its own circuit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
 pub struct CircuitBreaker {
     #[serde(default)]
     pub enabled: bool,
@@ -417,7 +434,18 @@ fn is_cookie_token(name: &str) -> bool {
 }
 
 /// The circuit of an upstream server.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CircuitState {
     /// The server gets traffic.

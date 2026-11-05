@@ -75,15 +75,15 @@ fn parse_origin_host(origin_str: &str) -> Option<String> {
         return None;
     }
     let host = parsed.host_str()?;
-    Some(host.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase())
+    Some(
+        host.trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_ascii_lowercase(),
+    )
 }
 
 /// Checks if an origin is permitted by the route's virtual hosts or request host.
-pub fn is_allowed_origin(
-    origin_str: &str,
-    vhosts: &[VirtualHost],
-    req_host: Option<&str>,
-) -> bool {
+pub fn is_allowed_origin(origin_str: &str, vhosts: &[VirtualHost], req_host: Option<&str>) -> bool {
     let Some(origin_clean) = parse_origin_host(origin_str) else {
         return false;
     };

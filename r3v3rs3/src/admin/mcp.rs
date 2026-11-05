@@ -1708,13 +1708,7 @@ impl McpServer {
         let id: ShortId = parse_id(&params.proxy_id)?;
         let audit = self
             .state
-            .call(
-                &caller,
-                ApplyProxySecurityHeadersProfile {
-                    id,
-                    profile,
-                },
-            )
+            .call(&caller, ApplyProxySecurityHeadersProfile { id, profile })
             .await
             .map_err(tool_error)?;
         json_result(*audit)

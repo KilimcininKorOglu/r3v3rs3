@@ -194,8 +194,16 @@ fn basic_auth_user_file_rejects_absolute_and_traversal_paths() {
     assert!(proxy_with_path("auth/htpasswd").validate_upstream().is_ok());
 
     assert!(proxy_with_path("/etc/passwd").validate_upstream().is_err());
-    assert!(proxy_with_path("../secret.txt").validate_upstream().is_err());
-    assert!(proxy_with_path("dir/../../etc/shadow").validate_upstream().is_err());
+    assert!(
+        proxy_with_path("../secret.txt")
+            .validate_upstream()
+            .is_err()
+    );
+    assert!(
+        proxy_with_path("dir/../../etc/shadow")
+            .validate_upstream()
+            .is_err()
+    );
     assert!(proxy_with_path("~/users.txt").validate_upstream().is_err());
     assert!(proxy_with_path("").validate_upstream().is_err());
 }

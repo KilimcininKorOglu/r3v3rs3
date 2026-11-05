@@ -272,7 +272,8 @@ async fn only_the_accounts_that_see_the_proxy_keep_a_session() -> anyhow::Result
 }
 
 #[tokio::test]
-async fn session_cookie_scoped_to_base_path_and_stripped_on_unprotected_route() -> anyhow::Result<()> {
+async fn session_cookie_scoped_to_base_path_and_stripped_on_unprotected_route() -> anyhow::Result<()>
+{
     let port = alloc_tcp_port().await?;
     let mut upstream = mockito::Server::new_async().await;
 
@@ -319,7 +320,10 @@ async fn session_cookie_scoped_to_base_path_and_stripped_on_unprotected_route() 
             .await?;
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         let set_cookie = resp.headers()[SET_COOKIE].to_str()?;
-        assert!(set_cookie.contains("Path=/admin"), "expected Path=/admin, got: {set_cookie}");
+        assert!(
+            set_cookie.contains("Path=/admin"),
+            "expected Path=/admin, got: {set_cookie}"
+        );
 
         let session = set_cookie.split(';').next().unwrap_or_default();
 

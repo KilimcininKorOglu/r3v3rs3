@@ -165,9 +165,7 @@ pub(crate) fn sanitize_sftp_path_component(component: &str) -> anyhow::Result<&s
     Ok(trimmed)
 }
 
-pub(crate) fn validate_sftp_config(
-    sftp: &r3v3rs3_api::platform::SftpConfig,
-) -> anyhow::Result<()> {
+pub(crate) fn validate_sftp_config(sftp: &r3v3rs3_api::platform::SftpConfig) -> anyhow::Result<()> {
     if !sftp.path.is_empty() {
         sanitize_sftp_path_component(&sftp.path)?;
     }
@@ -248,7 +246,9 @@ fn is_plain_sql(bytes: &[u8]) -> bool {
     match std::str::from_utf8(sample) {
         Ok(text) => {
             let trimmed = text.trim_start();
-            SQL_PREFIXES.iter().any(|prefix| trimmed.starts_with(prefix))
+            SQL_PREFIXES
+                .iter()
+                .any(|prefix| trimmed.starts_with(prefix))
         }
         Err(_) => false,
     }
@@ -336,7 +336,9 @@ impl Platform {
         match (s3.is_some(), secret.is_empty()) {
             (true, false) => {
                 let sealed = hex::encode(self.keys().seal(S3_SECRET_AAD, secret.as_bytes())?);
-                self.store.set_setting_tx(tx, S3_SECRET, Some(&sealed)).await
+                self.store
+                    .set_setting_tx(tx, S3_SECRET, Some(&sealed))
+                    .await
             }
             (true, true) => Ok(()),
             (false, _) => self.store.set_setting_tx(tx, S3_SECRET, None).await,
@@ -515,8 +517,7 @@ impl Platform {
         let id = backup_id();
         let dump_path = dir.join(format!("{id}.dump.gz"));
         let res = async {
-            let (app, engine, size, sha256) =
-                self.capture_database_dump(db_id, &dump_path).await?;
+            let (app, engine, size, sha256) = self.capture_database_dump(db_id, &dump_path).await?;
 
             let entry = BackupEntry {
                 id,
@@ -646,11 +647,7 @@ impl Platform {
         Ok(tokio::fs::read(dir.join(format!("{}.dump.gz", entry.id))).await?)
     }
 
-    async fn restore_dump_bytes(
-        &self,
-        db_id: ShortId,
-        backup_id: &str,
-    ) -> anyhow::Result<Vec<u8>> {
+    async fn restore_dump_bytes(&self, db_id: ShortId, backup_id: &str) -> anyhow::Result<Vec<u8>> {
         let raw = self.download_backup(db_id, backup_id).await?;
         Ok(ungzip(&raw).await?)
     }
@@ -662,9 +659,8 @@ impl Platform {
         engine: &str,
         backup_id: &str,
     ) {
-        let summary = format!(
-            "Backup '{backup_id}' restored successfully into database '{app_name}'"
-        );
+        let summary =
+            format!("Backup '{backup_id}' restored successfully into database '{app_name}'");
         let data = serde_json::json!({
             "backup_id": backup_id,
             "db_id": db_id.to_string(),
@@ -732,7 +728,8 @@ impl Platform {
             &info.data_path,
         )
         .await?;
-        self.dispatch_backup_restored(db_id, app.name.as_str(), &engine, backup_id).await;
+        self.dispatch_backup_restored(db_id, app.name.as_str(), &engine, backup_id)
+            .await;
         Ok(())
     }
 
@@ -898,18 +895,18 @@ impl Platform {
         }
     }
 
-fn validate_target_engine(actual: &str, requested: Option<&str>) -> anyhow::Result<()> {
-    if let Some(req_engine) = requested {
-        if !req_engine.eq_ignore_ascii_case(actual) {
-            bail!(Error::RestoreFailed {
-                reason: format!(
-                    "requested engine '{req_engine}' does not match target database engine '{actual}'"
-                ),
-            });
+    fn validate_target_engine(actual: &str, requested: Option<&str>) -> anyhow::Result<()> {
+        if let Some(req_engine) = requested {
+            if !req_engine.eq_ignore_ascii_case(actual) {
+                bail!(Error::RestoreFailed {
+                    reason: format!(
+                        "requested engine '{req_engine}' does not match target database engine '{actual}'"
+                    ),
+                });
+            }
         }
+        Ok(())
     }
-    Ok(())
-}
 
     async fn restore_s3_into_existing(
         &self,
@@ -946,8 +943,10 @@ fn validate_target_engine(actual: &str, requested: Option<&str>) -> anyhow::Resu
         dump_bytes: Vec<u8>,
     ) -> anyhow::Result<RestoreFromS3Response> {
         let (app_req, engine_key, info) = resolve_s3_restore_app(self, &req).await?;
-        validate_backup_engine_format(&engine_key, &dump_bytes).map_err(|err| Error::RestoreFailed {
-            reason: format!("{err:#}"),
+        validate_backup_engine_format(&engine_key, &dump_bytes).map_err(|err| {
+            Error::RestoreFailed {
+                reason: format!("{err:#}"),
+            }
         })?;
         let app = self.add_app(app_req, unix_ms()).await?;
         let password = self.init_db_password(app.id, &info).await?;
@@ -1374,10 +1373,9 @@ impl Platform {
         let key_path = std::env::temp_dir().join(format!("sftp-key-{}", backup_id()));
         let mut options = tokio::fs::OpenOptions::new();
         options.write(true).create_new(true).mode(0o600);
-        let mut file = options
-            .open(&key_path)
-            .await
-            .with_context(|| format!("failed to create temporary key file {}", key_path.display()))?;
+        let mut file = options.open(&key_path).await.with_context(|| {
+            format!("failed to create temporary key file {}", key_path.display())
+        })?;
         file.write_all(secret.as_bytes()).await?;
         file.flush().await?;
         Ok(Some(key_path))
@@ -1532,9 +1530,9 @@ impl Platform {
             self.save_verification_result(dir, entry, false, &msg, None)
                 .await?;
             self.dispatch_verification_failed(db_id, entry, &msg).await;
-            return Ok(Some(self.build_verify_report(
-                &entry.id, false, 0, "unknown", msg, None,
-            )));
+            return Ok(Some(
+                self.build_verify_report(&entry.id, false, 0, "unknown", msg, None),
+            ));
         }
         Ok(None)
     }
@@ -2123,7 +2121,9 @@ fn restore_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Resu
             command: vec![
                 "sh".into(),
                 "-c".into(),
-                format!("mongorestore --uri=\"$MONGO_URI\" --archive={RESTORE_DIR}/dump.archive --drop"),
+                format!(
+                    "mongorestore --uri=\"$MONGO_URI\" --archive={RESTORE_DIR}/dump.archive --drop"
+                ),
             ],
             env: vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password))],
         },
@@ -2804,8 +2804,7 @@ async fn stream_analyze_sql<R: tokio::io::AsyncRead + Unpin>(
         }
     }
 
-    let integrity_check_passed =
-        is_sql_integrity_valid(&scan, total_bytes as usize, engine_hint);
+    let integrity_check_passed = is_sql_integrity_valid(&scan, total_bytes as usize, engine_hint);
 
     let summary = format!(
         "verified {} uncompressed bytes, {} tables found, {} schema objects, data: {}",
@@ -3336,10 +3335,9 @@ mod tests {
         assert_eq!(sha256, file_sha);
 
         let started = std::time::Instant::now();
-        let (drill, uncompressed_size) =
-            stream_verify_drill("postgres", &dump_path, started)
-                .await
-                .unwrap();
+        let (drill, uncompressed_size) = stream_verify_drill("postgres", &dump_path, started)
+            .await
+            .unwrap();
 
         assert!(drill.integrity_check_passed);
         assert_eq!(drill.drill_mode, "postgres_schema_drill");
@@ -3361,7 +3359,10 @@ mod tests {
             "-4 -p 2222 -q",
         ];
         for opt in valid {
-            assert!(validate_rsync_ssh_options(opt).is_ok(), "should be valid: {opt}");
+            assert!(
+                validate_rsync_ssh_options(opt).is_ok(),
+                "should be valid: {opt}"
+            );
         }
         assert_eq!(format_rsync_rsh("-p 2222").unwrap(), "ssh -p 2222");
         assert_eq!(format_rsync_rsh("ssh -p 2222").unwrap(), "ssh -p 2222");
@@ -3385,20 +3386,21 @@ mod tests {
             "ssh $(whoami)",
         ];
         for opt in invalid {
-            assert!(validate_rsync_ssh_options(opt).is_err(), "should be rejected: {opt}");
+            assert!(
+                validate_rsync_ssh_options(opt).is_err(),
+                "should be rejected: {opt}"
+            );
         }
     }
 
     #[test]
     fn test_sanitize_sftp_path_valid() {
-        let valid = [
-            "/var/backups",
-            "backups/db",
-            "my_backup-1",
-            "backups.prod",
-        ];
+        let valid = ["/var/backups", "backups/db", "my_backup-1", "backups.prod"];
         for path in valid {
-            assert!(sanitize_sftp_path_component(path).is_ok(), "should be valid: {path}");
+            assert!(
+                sanitize_sftp_path_component(path).is_ok(),
+                "should be valid: {path}"
+            );
         }
         let batch = Platform::build_sftp_batch(
             "/backups",
@@ -3425,29 +3427,49 @@ mod tests {
             "backup$var",
         ];
         for path in invalid {
-            assert!(sanitize_sftp_path_component(path).is_err(), "should be rejected: {path}");
+            assert!(
+                sanitize_sftp_path_component(path).is_err(),
+                "should be rejected: {path}"
+            );
         }
     }
 
     #[test]
     fn test_validate_backup_engine_format_redis() {
-        assert!(validate_backup_engine_format("redis", b"REDIS0009\xfa\tredis-ver\x057.0.0").is_ok());
-        assert!(validate_backup_engine_format("redis", b"-- PostgreSQL dump\nCREATE TABLE foo;").is_err());
+        assert!(
+            validate_backup_engine_format("redis", b"REDIS0009\xfa\tredis-ver\x057.0.0").is_ok()
+        );
+        assert!(
+            validate_backup_engine_format("redis", b"-- PostgreSQL dump\nCREATE TABLE foo;")
+                .is_err()
+        );
         assert!(validate_backup_engine_format("redis", b"").is_err());
         assert!(validate_backup_engine_format("redis", b"\x00\x01\x02\x03").is_err());
     }
 
     #[test]
     fn test_validate_backup_engine_format_postgres() {
-        assert!(validate_backup_engine_format("postgres", b"-- PostgreSQL database dump\nSET statement_timeout = 0;").is_ok());
+        assert!(
+            validate_backup_engine_format(
+                "postgres",
+                b"-- PostgreSQL database dump\nSET statement_timeout = 0;"
+            )
+            .is_ok()
+        );
         assert!(validate_backup_engine_format("postgres", b"PGDMP\x01\x02").is_ok());
         assert!(validate_backup_engine_format("postgres", b"REDIS0009\xfa").is_err());
-        assert!(validate_backup_engine_format("postgres", b"-- MySQL dump 10.13\n/*!40101 SET").is_err());
+        assert!(
+            validate_backup_engine_format("postgres", b"-- MySQL dump 10.13\n/*!40101 SET")
+                .is_err()
+        );
     }
 
     #[test]
     fn test_validate_backup_engine_format_mysql_mongodb() {
-        assert!(validate_backup_engine_format("mysql", b"-- MySQL dump 10.13\nCREATE DATABASE foo;").is_ok());
+        assert!(
+            validate_backup_engine_format("mysql", b"-- MySQL dump 10.13\nCREATE DATABASE foo;")
+                .is_ok()
+        );
         assert!(validate_backup_engine_format("mysql", b"REDIS0009\xfa").is_err());
         assert!(validate_backup_engine_format("mysql", b"PGDMP\x01").is_err());
         assert!(validate_backup_engine_format("mysql", b"-- PostgreSQL database dump\n").is_err());
@@ -3459,8 +3481,12 @@ mod tests {
     #[tokio::test]
     async fn test_prepare_sftp_key_mode_0600() {
         use std::os::unix::fs::PermissionsExt;
-        let dummy_key = "-----BEGIN OPENSSH PRIVATE KEY-----\ndummy\n-----END OPENSSH PRIVATE KEY-----";
-        let key_path = Platform::prepare_sftp_key(dummy_key).await.unwrap().unwrap();
+        let dummy_key =
+            "-----BEGIN OPENSSH PRIVATE KEY-----\ndummy\n-----END OPENSSH PRIVATE KEY-----";
+        let key_path = Platform::prepare_sftp_key(dummy_key)
+            .await
+            .unwrap()
+            .unwrap();
         let meta = std::fs::metadata(&key_path).unwrap();
         assert_eq!(meta.permissions().mode() & 0o777, 0o600);
         let _ = tokio::fs::remove_file(key_path).await;

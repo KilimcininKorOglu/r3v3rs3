@@ -357,8 +357,11 @@ mod tests {
         Ok(())
     }
 
-    async fn setup_app_with_connection(
-    ) -> anyhow::Result<(std::sync::Arc<Platform>, ShortId, super::super::tests::TempDir)> {
+    async fn setup_app_with_connection() -> anyhow::Result<(
+        std::sync::Arc<Platform>,
+        ShortId,
+        super::super::tests::TempDir,
+    )> {
         let (platform, dir) = platform().await?;
         let entry = platform
             .add_git_connection(request("team", Some("s3cr3t")), 1)
@@ -402,7 +405,9 @@ mod tests {
         let entry = platform.git_connection(connection).await?;
         let mut renamed = request("renamed", Some("new-secret"));
         renamed.url = Some(entry.url);
-        let updated = platform.update_git_connection(connection, renamed, 3).await?;
+        let updated = platform
+            .update_git_connection(connection, renamed, 3)
+            .await?;
         assert_eq!(updated.name.as_str(), "renamed");
         Ok(())
     }

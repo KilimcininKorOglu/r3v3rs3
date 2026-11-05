@@ -544,15 +544,8 @@ async fn a_dynamically_registered_client_runs_the_flow() -> anyhow::Result<()> {
         let cookie = session(&client, &addr).await?;
         let (verifier, challenge) = pkce();
         let redirect_uri = "http://127.0.0.1:49153/callback";
-        let code = approve_dcr_client(
-            &client,
-            addr,
-            &cookie,
-            &client_id,
-            redirect_uri,
-            &challenge,
-        )
-        .await?;
+        let code = approve_dcr_client(&client, addr, &cookie, &client_id, redirect_uri, &challenge)
+            .await?;
 
         // The code trades for tokens under the dynamic client id.
         let tokens: Value = client
@@ -598,10 +591,7 @@ async fn access_token(addr: &SocketAddr) -> anyhow::Result<String> {
     access_token_for(addr, "admin", "password").await
 }
 
-async fn access_token_with_scope(
-    addr: &SocketAddr,
-    scope: &str,
-) -> anyhow::Result<String> {
+async fn access_token_with_scope(addr: &SocketAddr, scope: &str) -> anyhow::Result<String> {
     access_token_for_scope(addr, "admin", "password", scope).await
 }
 
@@ -796,7 +786,10 @@ async fn assert_mcp_read_tools(
     assert!(text.contains("workers"), "{text}");
 
     let metrics_text = mcp_call(client, "get_system_metrics", json!({})).await?;
-    assert!(metrics_text.contains("event_loop_lag_seconds"), "{metrics_text}");
+    assert!(
+        metrics_text.contains("event_loop_lag_seconds"),
+        "{metrics_text}"
+    );
 
     let store_text = mcp_call(client, "get_store", json!({})).await?;
     assert!(store_text.contains("catalog"), "{store_text}");
@@ -953,11 +946,9 @@ async fn run_client(
         .arg("--token")
         .arg(token);
     command.args(args);
-    tokio::task::spawn_blocking(move || {
-        command.output().context("failed to run the client binary")
-    })
-    .await
-    .map_err(|err| anyhow::anyhow!("the client task failed: {err}"))?
+    tokio::task::spawn_blocking(move || command.output().context("failed to run the client binary"))
+        .await
+        .map_err(|err| anyhow::anyhow!("the client task failed: {err}"))?
 }
 
 async fn assert_cli_port_mutations(
@@ -1355,7 +1346,10 @@ async fn dynamic_registration_rate_limit_throttles_rapid_requests() -> anyhow::R
                 break;
             }
         }
-        assert!(got_429, "expected at least one 429 Too Many Requests response during burst");
+        assert!(
+            got_429,
+            "expected at least one 429 Too Many Requests response during burst"
+        );
         Ok(())
     })
     .await
@@ -1384,7 +1378,10 @@ async fn token_rate_limit_throttles_rapid_requests() -> anyhow::Result<()> {
                 break;
             }
         }
-        assert!(got_429, "expected at least one 429 Too Many Requests response during burst");
+        assert!(
+            got_429,
+            "expected at least one 429 Too Many Requests response during burst"
+        );
         Ok(())
     })
     .await
