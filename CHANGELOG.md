@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-11-06
+
+### Added
+- Unauthenticated `/healthz` and `/readyz` endpoints for orchestrator probes.
+- Proxy and route labels on the Prometheus request, error and latency metrics.
+- W3C `traceparent` propagation, and a request id header plus `request_id` in every admin API error response.
+- A cancellation endpoint for running deployments.
+- A setting that disables or hides the software branding of the default error pages, and secure defaults or guidance for `frame-ancestors` and `X-Frame-Options` in the proxy security headers.
+- A `pids_limit` resource limit for app containers.
+- Response compression for the admin API.
+
+### Changed
+- The proxy returns 523 for an unreachable upstream and 526 for an upstream with an untrusted certificate; server and upstream failures map to specific 5xx status codes.
+- One SQLite connection pool serves the storage, the platform and OAuth; configuration writes use granular upserts and deletes instead of table rewrites. The unused TOML `FileStorage` was removed.
+- `ShortId` accepts only letters, digits and `-`.
+- The CLI uses the `r3v3rs3-api` types, and the API types derive `JsonSchema` for the MCP tool parameters.
+- Updated rustls, zstd, zip, utoipa 6.0 and utoipa-swagger-ui 10.0; replaced the deprecated `serde_yaml`.
+- The server also stops gracefully on SIGTERM.
+- Release CI pins every action to a commit SHA, scopes the tokens and write permissions per job, and shreds the minisign key after signing.
+
+### Fixed
+- Admin API: extractor rejections are mapped before compression, so a malformed JSON body returns its real error message and request id; cross-origin state-changing requests, framing of the WebUI and Swagger UI, and WebSocket upgrades without a valid `Origin` are rejected; logout requires POST and CSRF protection; internal error details stay out of 500 responses.
+- Authentication: constant-time comparison for the PKCE challenge and the OIDC CSRF state; OIDC ID token signature and claim checks against JWKS; refresh token reuse detection; encrypted OAuth tokens in the database; TOTP replay and wrong-code limits; rate limits and in-flight tracking for sign-in, passkey and token endpoints; sign-in lockouts keyed on the peer address and the IPv6 /64 prefix; stricter passkey registration checks; `Max-Age=0` and security flags on the logout cookie.
+- Proxy: hop-by-hop headers are removed; the `Forwarded` header is joined and quoted correctly; IPv6 literals in `Host` parse; dot segments are normalized before route matching; only WebSocket upgrades are tunneled; idle and header read timeouts apply to proxied connections; the session cookie never reaches an upstream; HTTP/3 request streams run in their own tasks; upgraded connections keep their permits and guards.
+- Cache: the key includes the scheme; concurrent misses coalesce; truncated, `Set-Cookie` and cookie-authenticated responses are not stored; a successful unsafe request invalidates the stored response; `PURGE` needs an authenticated admin or a trusted client.
+- Platform: app locks guard updates, deployments, webhook queueing, backups and restores; host ports are reserved atomically; containers run with no-new-privileges and dropped capabilities; MongoDB credentials pass through the authentication environment; backups stream and record failures; disaster recovery uses an atomic SQLite checkpoint, rejects unsafe archive entries, enforces size limits and requires a passphrase; Compose deployments roll back after a failed health check; preview environments do not copy parent secrets.
+- Validation and SSRF: webhook, forward auth and CT monitor URLs reject loopback, private and cloud metadata addresses; SFTP paths, rsync options, cache paths, scheduled commands and header rules are validated; upload, archive and restore routes have body limits; archive restoration bounds unpacked size and entry count.
+- Webhooks and notifications: retries, concurrent delivery, deduplication, replay protection and `Retry-After` handling; no head-of-line blocking or silent queue drops.
+- Logs and audit: access logs redact sensitive headers and bodies; audit CSV export escapes formula triggers; unreadable audit rows are skipped; log cleanup runs off the server loop; failed log writes are reported.
+- WebUI: localized error messages for failed saves and actions; terminal listeners are dropped on unmount; App Store website links and CNAME dialog fields are validated and escaped.
+- Install scripts and CLI: Docker installs through verified repository keys; the initial admin password is passed by environment or stdin; stored CLI tokens are written with mode 0600; the install directory and checksums are validated.
+
 ## [3.0.1] - 2026-10-28
 
 ### Fixed
