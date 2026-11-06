@@ -35,7 +35,6 @@ pub use session::SessionService;
 pub(crate) fn remove_auth_cookies(headers: &mut HeaderMap) {
     oidc::remove_oidc_cookie(headers);
     session::remove_session_cookie(headers);
-    super::cookie::remove_cookie(headers, crate::admin::auth::ADMIN_SESSION_COOKIE);
 }
 
 /// Authenticates the requests of a route.
@@ -158,24 +157,16 @@ mod tests {
     use hyper::header::{COOKIE, HeaderValue};
 
     #[test]
-    fn strips_admin_session_cookie_from_headers() {
+    fn strips_internal_session_cookie_while_preserving_app_cookies() {
         let mut headers = HeaderMap::new();
         headers.insert(
             COOKIE,
-            HeaderValue::from_static("token=admin_secret; user_pref=dark"),
+            HeaderValue::from_static("r3v3rs3_session=internal; token=user_jwt; user_pref=dark"),
         );
         remove_auth_cookies(&mut headers);
         assert_eq!(
             headers.get(COOKIE).map(|v| v.to_str().unwrap()),
-            Some("user_pref=dark")
+            Some("token=user_jwt; user_pref=dark")
         );
-    }
-
-    #[test]
-    fn removes_cookie_header_when_only_admin_cookie_present() {
-        let mut headers = HeaderMap::new();
-        headers.insert(COOKIE, HeaderValue::from_static("token=admin_secret"));
-        remove_auth_cookies(&mut headers);
-        assert!(!headers.contains_key(COOKIE));
     }
 }

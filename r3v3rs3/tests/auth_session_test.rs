@@ -342,13 +342,13 @@ async fn session_cookie_scoped_to_base_path_and_stripped_on_unprotected_route() 
 }
 
 #[tokio::test]
-async fn admin_session_cookie_stripped_from_proxied_requests() -> anyhow::Result<()> {
+async fn app_cookies_preserved_on_proxied_requests() -> anyhow::Result<()> {
     let port = alloc_tcp_port().await?;
     let mut upstream = mockito::Server::new_async().await;
 
     let mock_upstream = upstream
         .mock("GET", "/data")
-        .match_header("cookie", "user_pref=1")
+        .match_header("cookie", "token=user-jwt-token; user_pref=1")
         .with_body("ok")
         .expect(1)
         .create_async()
@@ -371,7 +371,10 @@ async fn admin_session_cookie_stripped_from_proxied_requests() -> anyhow::Result
         let client = reqwest::Client::new();
         let resp = client
             .get(port.http_url("/api/data"))
-            .header(COOKIE, "token=admin-secret-token; user_pref=1")
+            .header(
+                COOKIE,
+                "r3v3rs3_session=internal-session; token=user-jwt-token; user_pref=1",
+            )
             .send()
             .await?;
         assert_eq!(resp.status(), StatusCode::OK);

@@ -73,6 +73,7 @@ async fn verify_totp_preconditions(
 async fn verify_pre_login_conditions(
     state: &AppState,
     jar: &CookieJar,
+    headers: &axum::http::HeaderMap,
     request: &LoginRequest,
     attempt_key: &LoginAttemptKey,
 ) -> Result<Option<SessionRecord>, Error> {
@@ -86,7 +87,7 @@ async fn verify_pre_login_conditions(
         ref client_data_json,
         ..
     } = request.method
-        && !verify_and_consume_challenge(state, client_data_json, "webauthn.get").await
+        && !verify_and_consume_challenge(state, headers, client_data_json, "webauthn.get").await
     {
         return Err(Error::InvalidLoginCredentials);
     }
@@ -173,7 +174,9 @@ fn is_secure_request(
     peer: &SocketAddr,
     headers: &axum::http::HeaderMap,
 ) -> bool {
-    if trusted_proxies.iter().any(|net| net.contains(&peer.ip()))
+    let is_trusted =
+        peer.ip().is_loopback() || trusted_proxies.iter().any(|net| net.contains(&peer.ip()));
+    if is_trusted
         && let Some(proto) = headers
             .get("x-forwarded-proto")
             .or_else(|| headers.get("x-forwarded-scheme"))
@@ -220,14 +223,14 @@ pub async fn login(
     let is_totp = matches!(request.method, LoginMethod::Totp { .. });
     let login_cookie_token = jar.get(ADMIN_SESSION_COOKIE).map(|c| c.value().to_string());
 
-    let login_record = match verify_pre_login_conditions(&state, &jar, &request, &attempt_key).await
-    {
-        Ok(rec) => rec,
-        Err(err) => {
-            record_login_failure(&state, attempt_key).await;
-            return Err(err.into());
-        }
-    };
+    let login_record =
+        match verify_pre_login_conditions(&state, &jar, &headers, &request, &attempt_key).await {
+            Ok(rec) => rec,
+            Err(err) => {
+                record_login_failure(&state, attempt_key).await;
+                return Err(err.into());
+            }
+        };
 
     let start_record = SessionRecord::new(&username);
     let is_secure = is_secure_connection(&state, &peer, &headers).await;
@@ -501,6 +504,7 @@ pub async fn get_passkey_challenge(
 )]
 pub async fn register_passkey(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Extension(caller): Extension<Caller>,
     Json(request): Json<PasskeyRegisterRequest>,
 ) -> Result<Json<()>, AppError> {
@@ -513,7 +517,7 @@ pub async fn register_passkey(
     let Some(client_data) = &request.client_data_json else {
         return Err(Error::InvalidPasskey.into());
     };
-    if !verify_and_consume_challenge(&state, client_data, "webauthn.create").await {
+    if !verify_and_consume_challenge(&state, &headers, client_data, "webauthn.create").await {
         return Err(Error::InvalidPasskey.into());
     }
 
@@ -673,23 +677,27 @@ fn sanitize_rp_domain(raw: &str) -> String {
     }
 }
 
+fn header_domain(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
+    let val = headers.get(name)?.to_str().ok()?;
+    let domain = val.split(',').next()?.trim();
+    if domain.is_empty() {
+        None
+    } else {
+        Some(sanitize_rp_domain(domain))
+    }
+}
+
 fn domain_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
-    if let Some(host) = headers.get("host").and_then(|h| h.to_str().ok()) {
-        let domain = host.split(',').next().unwrap_or("").trim();
-        if !domain.is_empty() {
-            return Some(sanitize_rp_domain(domain));
-        }
-    }
-    if let Some(fwd) = headers
-        .get("x-forwarded-host")
-        .and_then(|h| h.to_str().ok())
+    let host_domain = header_domain(headers, "host");
+    if let Some(domain) = host_domain.as_deref()
+        && domain != "localhost"
     {
-        let host = fwd.split(',').next().unwrap_or("").trim();
-        if !host.is_empty() {
-            return Some(sanitize_rp_domain(host));
-        }
+        return host_domain;
     }
-    None
+    if let Some(fwd) = header_domain(headers, "x-forwarded-host") {
+        return Some(fwd);
+    }
+    host_domain
 }
 
 async fn extract_rp_id(state: &AppState, headers: &axum::http::HeaderMap) -> String {
@@ -819,6 +827,7 @@ pub(crate) fn verify_origin(
 
 pub async fn verify_and_consume_challenge(
     state: &AppState,
+    headers: &axum::http::HeaderMap,
     client_data_b64: &str,
     expected_type: &str,
 ) -> bool {
@@ -834,7 +843,7 @@ pub async fn verify_and_consume_challenge(
     let Some(origin) = client_data.get("origin").and_then(|v| v.as_str()) else {
         return false;
     };
-    let rp_id = extract_rp_id(state, &axum::http::HeaderMap::new()).await;
+    let rp_id = extract_rp_id(state, headers).await;
     if !is_valid_origin(origin, &rp_id) {
         return false;
     }
@@ -1535,6 +1544,12 @@ mod tests {
         state.data.lock().await.config.public_url = None;
         let rp_id = extract_rp_id(&state, &headers).await;
         assert_eq!(rp_id, "another-attacker.com");
+
+        // 3. When host is loopback/localhost (reverse-proxied), x-forwarded-host is used
+        headers.insert("host", "127.0.0.1:46492".parse().unwrap());
+        headers.insert("x-forwarded-host", "panel.keremgok.tr".parse().unwrap());
+        let rp_id = extract_rp_id(&state, &headers).await;
+        assert_eq!(rp_id, "panel.keremgok.tr");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
