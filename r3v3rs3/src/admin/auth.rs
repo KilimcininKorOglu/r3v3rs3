@@ -174,9 +174,7 @@ fn is_secure_request(
     peer: &SocketAddr,
     headers: &axum::http::HeaderMap,
 ) -> bool {
-    let is_trusted =
-        peer.ip().is_loopback() || trusted_proxies.iter().any(|net| net.contains(&peer.ip()));
-    if is_trusted
+    if trusted_proxies.iter().any(|net| net.contains(&peer.ip()))
         && let Some(proto) = headers
             .get("x-forwarded-proto")
             .or_else(|| headers.get("x-forwarded-scheme"))
