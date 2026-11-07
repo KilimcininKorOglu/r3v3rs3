@@ -1331,9 +1331,9 @@ fn filters_toolbar_view(
                 value={selected_country.as_deref().unwrap_or("all").to_string()}
                 class="text-xs sm:text-sm px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-                <option value="all" selected={selected_country.is_none()}>{locale.t("traffic.filter_all_countries")}</option>
+                <option key="all" value="all" selected={selected_country.is_none()}>{locale.t("traffic.filter_all_countries")}</option>
                 { for available_countries.iter().map(|code| html! {
-                    <option value={code.clone()} selected={selected_country.as_deref() == Some(code)}>{code}</option>
+                    <option key={code.clone()} value={code.clone()} selected={selected_country.as_deref() == Some(code)}>{code}</option>
                 }) }
             </select>
         </div>

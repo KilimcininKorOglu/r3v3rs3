@@ -490,7 +490,7 @@ fn service_method_view(
                     </label>
                     <select onchange={on_service_change} class={INPUT_CLASS}>
                         { services.iter().map(|s| html! {
-                            <option value={s.name.clone()} selected={selected_service.as_ref().is_some_and(|cur| cur == &s.name)}>
+                            <option key={s.name.clone()} value={s.name.clone()} selected={selected_service.as_ref().is_some_and(|cur| cur == &s.name)}>
                                 {&s.name}
                             </option>
                         }).collect::<Html>() }
@@ -503,7 +503,7 @@ fn service_method_view(
                     <select onchange={on_method_change} class={INPUT_CLASS}>
                         if let Some(svc) = current_service_obj {
                             { svc.methods.iter().map(|m| html! {
-                                <option value={m.name.clone()} selected={selected_method.as_ref().is_some_and(|cur| cur == &m.name)}>
+                                <option key={m.name.clone()} value={m.name.clone()} selected={selected_method.as_ref().is_some_and(|cur| cur == &m.name)}>
                                     {&m.name}
                                 </option>
                             }).collect::<Html>() }

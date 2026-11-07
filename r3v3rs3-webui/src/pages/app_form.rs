@@ -1101,7 +1101,7 @@ fn database_select(
         .map(|(id, name)| {
             let value = id.to_string();
             let selected = form.uses_database == Some(*id);
-            html! { <option {value} {selected}>{name.clone()}</option> }
+            html! { <option key={value.clone()} {value} {selected}>{name.clone()}</option> }
         })
         .collect::<Html>();
     html! {
@@ -1120,7 +1120,7 @@ fn database_select(
                     })
                 }}
             >
-                <option value="" selected={form.uses_database.is_none()}>
+                <option key="" value="" selected={form.uses_database.is_none()}>
                     {locale.t("apps.database_none")}
                 </option>
                 { options }

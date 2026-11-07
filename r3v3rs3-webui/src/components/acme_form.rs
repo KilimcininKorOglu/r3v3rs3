@@ -440,9 +440,9 @@ fn dns_provider_view(
         <>
             <label class={LABEL_CLASS}>{locale.t("acme.dns_credential")}</label>
             <select onchange={setter(fields, "dns_credential", |f, v| f.dns_credential = v)} class={INPUT_CLASS}>
-                <option selected={manual} value="">{locale.t("acme.dns_credential_manual")}</option>
+                <option key="" selected={manual} value="">{locale.t("acme.dns_credential_manual")}</option>
                 { credentials.iter().map(|credential| html! {
-                    <option selected={fields.dns_credential == credential.id.to_string()} value={credential.id.to_string()}>
+                    <option key={credential.id.to_string()} selected={fields.dns_credential == credential.id.to_string()} value={credential.id.to_string()}>
                         {format!("{} ({})", credential.name, dns_provider_label(&credential.provider))}
                     </option>
                 }).collect::<Html>() }

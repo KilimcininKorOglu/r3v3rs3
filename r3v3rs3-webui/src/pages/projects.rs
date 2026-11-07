@@ -898,9 +898,10 @@ fn render_compare_controls(
                     class="select text-xs py-1 px-2 border rounded dark:bg-neutral-800 dark:border-neutral-700"
                     onchange={on_source_change}
                 >
+                    <option key="" value="" selected={source_id.is_none()}>{locale.t("projects.select_environment")}</option>
                     {state.environments.iter().map(|env| {
                         let selected = Some(env.id) == source_id;
-                        html! { <option value={env.id.to_string()} selected={selected}>{&env.name}</option> }
+                        html! { <option key={env.id.to_string()} value={env.id.to_string()} selected={selected}>{&env.name}</option> }
                     }).collect::<Html>()}
                 </select>
             </div>
@@ -915,9 +916,10 @@ fn render_compare_controls(
                     class="select text-xs py-1 px-2 border rounded dark:bg-neutral-800 dark:border-neutral-700"
                     onchange={on_target_change}
                 >
+                    <option key="" value="" selected={target_id.is_none()}>{locale.t("projects.select_environment")}</option>
                     {state.environments.iter().map(|env| {
                         let selected = Some(env.id) == target_id;
-                        html! { <option value={env.id.to_string()} selected={selected}>{&env.name}</option> }
+                        html! { <option key={env.id.to_string()} value={env.id.to_string()} selected={selected}>{&env.name}</option> }
                     }).collect::<Html>()}
                 </select>
             </div>

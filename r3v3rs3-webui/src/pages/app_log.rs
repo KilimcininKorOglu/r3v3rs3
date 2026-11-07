@@ -357,9 +357,9 @@ fn toolbar_view(props: ToolbarProps<'_>) -> Html {
                             onchange={service_select}
                             class="text-xs sm:text-sm px-2.5 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
-                            <option value="" selected={selected_service.is_none()}>{locale.t("apps.service_select_all")}</option>
+                            <option key="" value="" selected={selected_service.is_none()}>{locale.t("apps.service_select_all")}</option>
                             { for services.iter().map(|s| html! {
-                                <option value={s.clone()} selected={selected_service.as_deref() == Some(s.as_str())}>{s}</option>
+                                <option key={s.clone()} value={s.clone()} selected={selected_service.as_deref() == Some(s.as_str())}>{s}</option>
                             }) }
                         </select>
                     </div>

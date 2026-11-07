@@ -743,9 +743,9 @@ fn client_cert_select(
     });
     html! {
         <select {onchange} class={INPUT_CLASS}>
-            <option value="" selected={selected.is_none()}>{none_label}</option>
+            <option key="" value="" selected={selected.is_none()}>{none_label}</option>
             { for certs.iter().map(|cert| html! {
-                <option value={cert.id.to_string()} selected={selected == Some(cert.id)}>{client_cert_label(cert)}</option>
+                <option key={cert.id.to_string()} value={cert.id.to_string()} selected={selected == Some(cert.id)}>{client_cert_label(cert)}</option>
             }) }
         </select>
     }

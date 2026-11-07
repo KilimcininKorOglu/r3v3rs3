@@ -569,6 +569,10 @@ fn add_form(props: &AddFormProps) -> Html {
     let selected = (*engine)
         .as_deref()
         .and_then(|key| engines.iter().find(|info| info.engine == key).cloned());
+    let versions: &[String] = selected
+        .as_ref()
+        .map(|info| info.versions.as_slice())
+        .unwrap_or(&[]);
     let version = use_state(String::new);
     let name = use_state(String::new);
     let host_port = use_state(String::new);
@@ -577,6 +581,29 @@ fn add_form(props: &AddFormProps) -> Html {
     let cpus = use_state(String::new);
     let notice = use_state(|| Option::<String>::None);
     let busy = use_state(|| false);
+
+    let engine_ref = use_node_ref();
+    {
+        let engine_ref = engine_ref.clone();
+        let current_engine = engine.as_deref().unwrap_or_default().to_string();
+        let engines_len = engines.len();
+        use_effect_with((current_engine, engines_len), move |(val, _)| {
+            if let Some(el) = engine_ref.cast::<web_sys::HtmlSelectElement>() {
+                el.set_value(val);
+            }
+        });
+    }
+    let version_ref = use_node_ref();
+    {
+        let version_ref = version_ref.clone();
+        let current_version = (*version).clone();
+        let versions_len = versions.len();
+        use_effect_with((current_version, versions_len), move |(val, _)| {
+            if let Some(el) = version_ref.cast::<web_sys::HtmlSelectElement>() {
+                el.set_value(val);
+            }
+        });
+    }
 
     let pick_engine = {
         let engine = engine.clone();
@@ -626,10 +653,6 @@ fn add_form(props: &AddFormProps) -> Html {
             spawn_local(send_create(request, notice, busy, saved, created));
         })
     };
-    let versions: &[String] = selected
-        .as_ref()
-        .map(|info| info.versions.as_slice())
-        .unwrap_or(&[]);
     html! {
         <form onsubmit={submit} class="rounded border border-neutral-700 p-4 mb-4">
             <p class="font-medium mb-3">{locale.t("databases.add")}</p>
@@ -639,20 +662,19 @@ fn add_form(props: &AddFormProps) -> Html {
             <div class="grid gap-3 md:grid-cols-4">
                 <label class="block">
                     <span class="text-sm text-neutral-400">{locale.t("databases.engine")}</span>
-                    <select class={INPUT_CLASS} onchange={pick_engine}>
-                        <option value="">{locale.t("databases.pick_engine")}</option>
+                    <select ref={engine_ref} class={INPUT_CLASS} onchange={pick_engine}>
+                        <option key="" value="" selected={engine.is_none()}>{locale.t("databases.pick_engine")}</option>
                         { for engines.iter().map(|info| {
                             let value = info.engine.clone();
                             let is_selected =
-                                selected.as_ref().map(|s| s.engine.clone()) == Some(value.clone());
-                            html! { <option {value} selected={is_selected}>{info.label.clone()}</option> }
+                                selected.as_ref().map(|s| &s.engine) == Some(&value);
+                            html! { <option key={value.clone()} {value} selected={is_selected}>{info.label.clone()}</option> }
                         }) }
                     </select>
                 </label>
                 <label class="block">
                     <span class="text-sm text-neutral-400">{locale.t("databases.version")}</span>
-                    <select class={INPUT_CLASS}
-                        value={(*version).clone()}
+                    <select ref={version_ref} class={INPUT_CLASS}
                         onchange={{
                             let version = version.clone();
                             Callback::from(move |event: Event| {
@@ -661,11 +683,11 @@ fn add_form(props: &AddFormProps) -> Html {
                             })
                         }}
                     >
-                        <option value="">{locale.t("databases.pick_version")}</option>
+                        <option key="" value="" selected={version.is_empty()}>{locale.t("databases.pick_version")}</option>
                         { for versions.iter().map(|tag| {
                             let value = tag.clone();
                             let is_selected = *version == value;
-                            html! { <option {value} selected={is_selected}>{tag.clone()}</option> }
+                            html! { <option key={value.clone()} {value} selected={is_selected}>{tag.clone()}</option> }
                         }) }
                     </select>
                 </label>

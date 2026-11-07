@@ -137,12 +137,12 @@ fn connection_select(
     connections: &[GitConnectionEntry],
 ) -> Html {
     let mut options = vec![html! {
-        <option value="" selected={form.connection.is_empty()}>{locale.t("apps.connection_none")}</option>
+        <option key="" value="" selected={form.connection.is_empty()}>{locale.t("apps.connection_none")}</option>
     }];
     options.extend(connections.iter().map(|entry| {
         let id = entry.id.to_string();
         let label = format!("{} ({})", entry.name, provider_name(entry.provider));
-        html! { <option value={id.clone()} selected={id == form.connection}>{label}</option> }
+        html! { <option key={id.clone()} value={id.clone()} selected={id == form.connection}>{label}</option> }
     }));
     // A connection that the list does not hold still shows its id.
     let known = connections
@@ -150,7 +150,9 @@ fn connection_select(
         .any(|entry| entry.id.to_string() == form.connection);
     if !form.connection.is_empty() && !known {
         let id = form.connection.clone();
-        options.push(html! { <option value={id.clone()} selected=true>{id}</option> });
+        options.push(
+            html! { <option key={id.clone()} value={id.clone()} selected=true>{id}</option> },
+        );
     }
     let state = form.clone();
     let apply = move |value: String| update(&state, move |f| f.connection = value.clone())();

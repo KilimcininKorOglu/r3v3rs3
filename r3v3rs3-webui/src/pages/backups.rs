@@ -849,11 +849,12 @@ fn render_take_modal(
                     <label class="block space-y-1">
                         <span class="text-xs font-medium text-neutral-300">{locale.t("backups.select_database")}</span>
                         <select class={INPUT_CLASS} {onchange}>
+                            <option key="" value="" selected={current_selected.is_none()}>{locale.t("backups.select_database_placeholder")}</option>
                             { for dbs.iter().map(|d| {
                                 let id = d.id;
                                 let is_sel = Some(id) == current_selected;
                                 html! {
-                                    <option value={id.to_string()} selected={is_sel}>
+                                    <option key={id.to_string()} value={id.to_string()} selected={is_sel}>
                                         {format!("{} ({})", d.name, d.spec.database.as_deref().unwrap_or("db"))}
                                     </option>
                                 }
