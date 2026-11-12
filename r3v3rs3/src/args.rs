@@ -188,6 +188,20 @@ pub struct StartArgs {
     )]
     pub no_webui: bool,
 
+    /// Binds the WebUI address as a TCP listener. When false, only a proxy of this process whose
+    /// route points at the WebUI address serves the panel, in process.
+    #[clap(
+        long,
+        env = "R3V3RS3_WEBUI_LISTEN",
+        value_name = "BOOL",
+        value_parser = parse_boolish,
+        num_args = 0..=1,
+        default_value = "true",
+        default_missing_value = "true",
+        action = clap::ArgAction::Set,
+    )]
+    pub webui_listen: bool,
+
     #[clap(long, short, value_name = "DIR", env = "R3V3RS3_CONFIG_DIR")]
     pub config_dir: Option<PathBuf>,
 
@@ -295,6 +309,21 @@ mod tests {
         } else {
             panic!("expected Start command");
         }
+    }
+
+    fn start_args(args: &[&str]) -> StartArgs {
+        match Cli::try_parse_from(args).unwrap().command {
+            Command::Start(args) => args,
+            _ => panic!("expected Start command"),
+        }
+    }
+
+    #[test]
+    fn the_webui_listener_is_on_unless_turned_off() {
+        assert!(start_args(&["r3-server", "start"]).webui_listen);
+        assert!(start_args(&["r3-server", "start", "--webui-listen"]).webui_listen);
+        assert!(!start_args(&["r3-server", "start", "--webui-listen=false"]).webui_listen);
+        assert!(!start_args(&["r3-server", "start", "--webui-listen", "0"]).webui_listen);
     }
 
     #[test]

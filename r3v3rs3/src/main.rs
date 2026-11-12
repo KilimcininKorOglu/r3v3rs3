@@ -174,7 +174,7 @@ async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()>
     let manifest = if local.worker_mode == r3v3rs3_api::app::WorkerMode::Workers {
         None
     } else {
-        Some(manifest_with_webui(&server, webui_listener.as_ref())?)
+        Some(manifest_with_webui(&server, webui_listener.listener())?)
     };
     let server_task = tokio::spawn(server.start());
     let event_send = channels.event.clone();
@@ -219,8 +219,8 @@ fn manifest_with_webui(
     Ok(manifest)
 }
 
-/// The logging, the directories, the config and the server of a fresh start. Also returns the
-/// listener of the WebUI: the one that an upgrade inherited, or a fresh bind.
+/// The logging, the directories, the config and the server of a fresh start. Also returns how
+/// the admin API serves the panel.
 async fn prepare(
     args: &mut StartArgs,
 ) -> anyhow::Result<(
@@ -228,7 +228,7 @@ async fn prepare(
     r3v3rs3_api::app::AppConfig,
     r3v3rs3::server::Server,
     ServerChannels,
-    Option<tokio::net::TcpListener>,
+    AdminServe,
 )> {
     let log_dir = get_log_dir(args.log_dir.take())?;
     fs::create_dir_all(&log_dir)?;
@@ -240,27 +240,57 @@ async fn prepare(
     let app_info = new_appinfo(&config_dir, &log_dir);
     let local = read_local_config(&config_dir).await?;
     let (listeners, inherited_webui) = inherit_listeners(args.webui).await?;
-    let webui_listener = webui_listener(args, inherited_webui).await?;
+    let webui_listener = admin_serve(args, &local, inherited_webui).await?;
 
     let (server, channels) =
         new_server(app_info.clone(), local.clone(), &config_dir, listeners).await?;
     Ok((app_info, local, server, channels, webui_listener))
 }
 
-/// The listener of the WebUI: the one that an upgrade inherited, or a fresh bind.
-async fn webui_listener(
+/// How the admin API serves the panel.
+enum AdminServe {
+    /// On a TCP listener, and in process for the proxies of this process.
+    Listener(tokio::net::TcpListener),
+    /// Only in process, for the proxy routes that point at the address.
+    InProcess(SocketAddr),
+    /// Not at all.
+    Off,
+}
+
+impl AdminServe {
+    fn listener(&self) -> Option<&tokio::net::TcpListener> {
+        match self {
+            Self::Listener(listener) => Some(listener),
+            _ => None,
+        }
+    }
+}
+
+/// The listener of the WebUI: the one that an upgrade inherited, or a fresh bind. Without the
+/// listener the panel is served in process only, which the workers mode cannot do, because its
+/// proxies run in other processes.
+async fn admin_serve(
     args: &StartArgs,
+    local: &AppConfig,
     inherited: Option<tokio::net::TcpListener>,
-) -> anyhow::Result<Option<tokio::net::TcpListener>> {
+) -> anyhow::Result<AdminServe> {
+    if !args.webui_listen && !args.no_webui {
+        anyhow::ensure!(
+            local.worker_mode != r3v3rs3_api::app::WorkerMode::Workers,
+            "R3V3RS3_WEBUI_LISTEN=false needs the single process mode: the workers reach the \
+             panel over TCP"
+        );
+        return Ok(AdminServe::InProcess(args.webui));
+    }
     match inherited {
-        Some(listener) => Ok(Some(listener)),
+        Some(listener) => Ok(AdminServe::Listener(listener)),
         None if !args.no_webui => {
             let listener = tokio::net::TcpListener::bind(args.webui)
                 .await
                 .with_context(|| format!("failed to bind the admin address on {}", args.webui))?;
-            Ok(Some(listener))
+            Ok(AdminServe::Listener(listener))
         }
-        None => Ok(None),
+        None => Ok(AdminServe::Off),
     }
 }
 
@@ -323,16 +353,16 @@ async fn spawn_supervisor(
     Ok(())
 }
 
-/// Runs the admin API on the listener that `start` bound, until it fails or the process gets
-/// SIGINT, or hands the listeners to a new process. The endpoint that installs a release asks
-/// for the handover over `upgrade_receiver`; SIGUSR2 asks for the same handover. Without the
-/// listener of the panel it waits for a signal only.
+/// Runs the admin API as `start` chose, until it fails or the process gets SIGINT, or hands the
+/// listeners to a new process. The endpoint that installs a release asks for the handover over
+/// `upgrade_receiver`; SIGUSR2 asks for the same handover. Without the admin API it waits for a
+/// signal only.
 async fn serve_admin(
     app_info: AppInfo,
     channels: ServerChannels,
     exe_args: Vec<String>,
     manifest: Option<Vec<r3v3rs3::server::fdmanifest::ListenerFd>>,
-    webui_listener: Option<tokio::net::TcpListener>,
+    admin: AdminServe,
     upgrade_sender: tokio::sync::mpsc::Sender<()>,
     mut upgrade_receiver: tokio::sync::mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
@@ -369,26 +399,68 @@ async fn serve_admin(
         }
     };
     tokio::pin!(signals);
-    match webui_listener {
-        Some(listener) => {
-            let addr = listener.local_addr().ok();
-            tokio::select! {
-                r = r3v3rs3::admin::start_admin_on(app_info, listener, channels.command, channels.callback, channels.event, channels.accounts, upgrade_sender) => {
-                    if let Err(err) = r {
-                        error!(?addr, %err, "admin API stopped with an error");
-                        let msg = match addr {
-                            Some(a) => format!("admin API failed on {a}"),
-                            None => "admin API failed".to_string(),
-                        };
-                        return Err(err).context(msg);
-                    }
-                }
-                _ = &mut signals => {}
+    let addr = match &admin {
+        AdminServe::Listener(listener) => listener.local_addr().ok(),
+        AdminServe::InProcess(addr) => Some(*addr),
+        AdminServe::Off => None,
+    };
+    let Some(api) = admin_api(app_info, channels, admin, upgrade_sender) else {
+        (&mut signals).await;
+        return Ok(());
+    };
+    tokio::select! {
+        r = api => {
+            if let Err(err) = r {
+                error!(?addr, %err, "admin API stopped with an error");
+                let msg = match addr {
+                    Some(a) => format!("admin API failed on {a}"),
+                    None => "admin API failed".to_string(),
+                };
+                return Err(err).context(msg);
             }
         }
-        None => (&mut signals).await,
+        _ = &mut signals => {}
     }
     Ok(())
+}
+
+type AdminApi = std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>;
+
+/// The admin API that `serve_admin` runs, or `None` when the admin API is off.
+fn admin_api(
+    app_info: AppInfo,
+    channels: ServerChannels,
+    admin: AdminServe,
+    upgrade_sender: tokio::sync::mpsc::Sender<()>,
+) -> Option<AdminApi> {
+    let ServerChannels {
+        command,
+        callback,
+        event,
+        accounts,
+        ..
+    } = channels;
+    match admin {
+        AdminServe::Listener(listener) => Some(Box::pin(r3v3rs3::admin::start_admin_on(
+            app_info,
+            listener,
+            command,
+            callback,
+            event,
+            accounts,
+            upgrade_sender,
+        ))),
+        AdminServe::InProcess(addr) => Some(Box::pin(r3v3rs3::admin::start_admin_in_process(
+            app_info,
+            addr,
+            command,
+            callback,
+            event,
+            accounts,
+            upgrade_sender,
+        ))),
+        AdminServe::Off => None,
+    }
 }
 
 /// Hands the listeners to a new process. Returns `false` when the handover failed and this

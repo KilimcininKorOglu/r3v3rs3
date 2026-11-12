@@ -128,7 +128,7 @@ pub async fn start_admin_on(
     accounts: watch::Receiver<Arc<AccountDirectory>>,
     upgrade: mpsc::Sender<()>,
 ) -> anyhow::Result<()> {
-    let mut event_recv = event.subscribe();
+    let event_recv = event.subscribe();
     let app = build_admin(app_info, command, callback, event, accounts, upgrade).await?;
     let addr = listener.local_addr()?;
     panel::install(addr, app.clone());
@@ -138,23 +138,41 @@ pub async fn start_admin_on(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .with_graceful_shutdown(async move {
-        loop {
-            let event = event_recv.recv().await;
-            trace!("received server event: {:?}", event);
-            match event {
-                Ok(ServerEvent::Shutdown) => {
-                    break;
-                }
-                Err(RecvError::Lagged(n)) => {
-                    warn!("event stream lagged: {}", n);
-                }
-                _ => {}
-            }
-        }
-    })
+    .with_graceful_shutdown(shutdown(event_recv))
     .await?;
     Ok(())
+}
+
+/// The admin API without a TCP listener: only the proxy of this process serves it, in process,
+/// for the routes that point at `addr`. Returns when the server shuts down.
+pub async fn start_admin_in_process(
+    app_info: AppInfo,
+    addr: SocketAddr,
+    command: mpsc::Sender<ServerCommand>,
+    callback: mpsc::Receiver<RpcCallback>,
+    event: broadcast::Sender<ServerEvent>,
+    accounts: watch::Receiver<Arc<AccountDirectory>>,
+    upgrade: mpsc::Sender<()>,
+) -> anyhow::Result<()> {
+    let event_recv = event.subscribe();
+    let app = build_admin(app_info, command, callback, event, accounts, upgrade).await?;
+    panel::install(addr, app);
+    let _registered = PanelGuard(addr);
+    shutdown(event_recv).await;
+    Ok(())
+}
+
+/// Waits for the shutdown of the server.
+async fn shutdown(mut event_recv: broadcast::Receiver<ServerEvent>) {
+    loop {
+        let event = event_recv.recv().await;
+        trace!("received server event: {:?}", event);
+        match event {
+            Ok(ServerEvent::Shutdown) | Err(RecvError::Closed) => break,
+            Err(RecvError::Lagged(n)) => warn!("event stream lagged: {}", n),
+            Ok(_) => {}
+        }
+    }
 }
 
 /// Removes the panel from the registry when the admin API stops, also on an error.

@@ -45,7 +45,7 @@ The admin WebUI listens on [http://localhost:46492/](http://localhost:46492/). S
 > $ ssh -L 46492:127.0.0.1:46492 user@your-server
 > ```
 >
-> To serve the WebUI over HTTPS, add a proxy with the **Target** `http://127.0.0.1:46492` on an HTTPS port after Step 5.
+> To serve the WebUI over HTTPS, add a proxy with the **Target** `http://127.0.0.1:46492` on an HTTPS port after Step 5. The proxy hands these requests to the panel in process, so the audit log shows the real client address without further settings, and `R3V3RS3_WEBUI_LISTEN=false` can then close the admin port itself (see [WebUI](@/configuration.md#webui)).
 
 ## Step 3: Bind a Port
 

@@ -2138,6 +2138,8 @@ Bu dosyaları elle de düzenleyebilirsiniz. Ancak r3v3rs3 yapılandırma dosyala
 
 r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak `127.0.0.1:46492` adresinde çalışır. Başka bir dinleme adresini, örneğin `0.0.0.0:46492`, `R3V3RS3_WEBUI` ortam değişkeni veya `--webui` komut satırı seçeneğiyle ayarlayın. `R3V3RS3_NO_WEBUI=1` ortam değişkeni veya `--no-webui` komut satırı seçeneği WebUI'ı ve yönetim API'sini kapatır.
 
+Route'u WebUI adresine, örneğin `http://127.0.0.1:46492` adresine giden bir r3v3rs3 proxy'si paneli process içinde servis eder (bkz. [Panel oturumu](#panel-oturumu)). Bu durumda `R3V3RS3_WEBUI_LISTEN=false` ortam değişkeni veya `--webui-listen=false` komut satırı seçeneği TCP listener'ı kapatır. WebUI adresinde hiçbir şey yanıt vermez. Host'taki başka bir process proxy'nin korumalarını atlayıp yönetim API'sine ulaşamaz, paneli yalnız o proxy servis eder. Listener'ı kapatmadan önce panele başka bir giriş yolu bırakın, çünkü bozuk bir proxy sizi panelin dışında da bırakır. Worker modu (`worker_mode = "workers"`) listener olmadan başlamaz, çünkü onun proxy'leri başka process'lerde çalışır ve panele TCP ile bağlanır.
+
 WebUI menüsü soldaki kenar çubuğundadır ve üç gruptan oluşur:
 
 - **Proxy**: **Portlar**, **Proxy'ler**, **Erişim Listeleri** ve **Sertifikalar**.

@@ -2138,6 +2138,8 @@ These files can be edited manually, but r3v3rs3 does not detect the change. Rest
 
 r3v3rs3 includes a built-in WebUI. By default, it is served on `127.0.0.1:46492`. Set another listening address, for example `0.0.0.0:46492`, with the `R3V3RS3_WEBUI` environment variable or the `--webui` command-line option. The `R3V3RS3_NO_WEBUI=1` environment variable or the `--no-webui` command-line option turns off the WebUI and the admin API.
 
+A proxy of r3v3rs3 whose route points at the WebUI address, for example `http://127.0.0.1:46492`, serves the panel in process (see [Admin Session](#admin-session)). The `R3V3RS3_WEBUI_LISTEN=false` environment variable or the `--webui-listen=false` command-line option then closes the TCP listener: nothing answers on the WebUI address, so no other process of the host reaches the admin API around the protections of the proxy, and only that proxy serves the panel. Keep a way in before you turn the listener off, because a broken proxy then also locks you out of the panel. The workers mode (`worker_mode = "workers"`) refuses to start without the listener, because its proxies run in other processes and reach the panel over TCP.
+
 The menu of the WebUI is a sidebar on the left with three groups:
 
 - **Proxy**: **Ports**, **Proxies**, **Access Lists** and **Certificates**.

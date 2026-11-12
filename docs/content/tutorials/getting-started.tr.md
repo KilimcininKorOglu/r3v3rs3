@@ -45,7 +45,7 @@ Yönetim paneli [http://localhost:46492/](http://localhost:46492/) adresinde din
 > $ ssh -L 46492:127.0.0.1:46492 kullanici@sunucunuz
 > ```
 >
-> Paneli HTTPS ile sunmak için Adım 5'ten sonra bir HTTPS portunda **Hedef** değeri `http://127.0.0.1:46492` olan bir proxy ekleyin.
+> Paneli HTTPS ile sunmak için Adım 5'ten sonra bir HTTPS portunda **Hedef** değeri `http://127.0.0.1:46492` olan bir proxy ekleyin. Proxy bu istekleri panele process içinde verir. Bu yüzden audit log başka bir ayar gerekmeden gerçek istemci adresini gösterir. Bundan sonra `R3V3RS3_WEBUI_LISTEN=false` yönetim port'unun kendisini kapatabilir (bkz. [WebUI](@/configuration.tr.md#webui)).
 
 ## Adım 3: Port bağlayın
 

@@ -11,7 +11,11 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ipnet::IpNet;
 use r3v3rs3::certs::Cert;
 use r3v3rs3::server::Server;
-use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
+use r3v3rs3::{
+    admin::{start_admin, start_admin_in_process},
+    config::new_appinfo,
+    log::DatabaseLayer,
+};
 use r3v3rs3_api::{
     app::{AppConfig, McpConfig},
     auth::Role,
@@ -124,6 +128,20 @@ where
     F: FnOnce(Panel) -> O,
     O: Future<Output = anyhow::Result<()>>,
 {
+    with_panel_listening(true, admin_trusted_proxies, username, func).await
+}
+
+/// [`with_panel`], with the TCP listener of the admin API on or off.
+async fn with_panel_listening<F, O>(
+    listen: bool,
+    admin_trusted_proxies: Vec<IpNet>,
+    username: &str,
+    func: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(Panel) -> O,
+    O: Future<Output = anyhow::Result<()>>,
+{
     let unique = hex::encode(rand::random::<[u8; 8]>());
     let dir = TempDir(std::env::temp_dir().join(format!("r3v3rs3-panel-proxy-{unique}")));
     std::fs::create_dir_all(&dir.0)?;
@@ -163,14 +181,28 @@ where
     let (server, channels) = Server::new(new_appinfo(&dir.0, &dir.0), storage).await;
     let event = channels.event.clone();
     let task = tokio::spawn(server.start());
-    tokio::spawn(start_admin(
-        new_appinfo(&dir.0, &dir.0),
-        admin,
-        channels.command,
-        channels.callback,
-        channels.event.clone(),
-        channels.accounts.clone(),
-    ));
+    let app_info = new_appinfo(&dir.0, &dir.0);
+    if listen {
+        tokio::spawn(start_admin(
+            app_info,
+            admin,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+            channels.accounts.clone(),
+        ));
+    } else {
+        let (upgrade, _) = tokio::sync::mpsc::channel(1);
+        tokio::spawn(start_admin_in_process(
+            app_info,
+            admin,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+            channels.accounts.clone(),
+            upgrade,
+        ));
+    }
     let panel = Panel {
         admin,
         public,
@@ -497,6 +529,20 @@ async fn a_direct_loopback_request_cannot_forge_the_client_address() -> anyhow::
 async fn a_session_works_through_the_proxy_without_a_trusted_proxy_list() -> anyhow::Result<()> {
     with_panel(Vec::new(), "target-session", |panel| {
         the_session_works_through_the_proxy(panel, "target-session")
+    })
+    .await
+}
+
+/// Without the TCP listener nothing answers on the admin address, and the proxy still serves the
+/// whole panel in process.
+#[tokio::test]
+async fn the_panel_works_without_its_tcp_listener() -> anyhow::Result<()> {
+    with_panel_listening(false, Vec::new(), "no-listener", |panel| async move {
+        assert!(
+            tokio::net::TcpStream::connect(panel.admin).await.is_err(),
+            "the admin address must not accept connections"
+        );
+        the_session_works_through_the_proxy(panel, "no-listener").await
     })
     .await
 }
