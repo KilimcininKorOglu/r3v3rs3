@@ -169,16 +169,6 @@ async fn db_delete_client(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn db_purge_expired_clients(pool: &SqlitePool, cutoff: i64) -> anyhow::Result<()> {
-    sqlx::query(
-        "DELETE FROM mcp_clients WHERE created_at <= ? AND id NOT IN (SELECT DISTINCT client_id FROM mcp_tokens)",
-    )
-    .bind(cutoff)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
 async fn db_purge_expired(pool: &SqlitePool, now: i64) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM mcp_tokens WHERE refresh_expires_at <= ?")
         .bind(now)
@@ -187,18 +177,10 @@ async fn db_purge_expired(pool: &SqlitePool, now: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn db_load_clients(
-    pool: &SqlitePool,
-    now: i64,
-) -> anyhow::Result<HashMap<String, DynamicClientEntry>> {
-    let cutoff = now.saturating_sub(UNAUTH_CLIENT_TTL.as_secs() as i64);
-    let rows = sqlx::query(
-        "SELECT id, name, redirect_uris, created_at FROM mcp_clients \
-         WHERE created_at > ? OR id IN (SELECT DISTINCT client_id FROM mcp_tokens)",
-    )
-    .bind(cutoff)
-    .fetch_all(pool)
-    .await?;
+async fn db_load_clients(pool: &SqlitePool) -> anyhow::Result<HashMap<String, DynamicClientEntry>> {
+    let rows = sqlx::query("SELECT id, name, redirect_uris, created_at FROM mcp_clients")
+        .fetch_all(pool)
+        .await?;
     let mut clients = HashMap::new();
     for row in rows {
         let id: String = row.try_get("id")?;
@@ -287,8 +269,6 @@ async fn db_load_tokens(pool: &SqlitePool, now: i64) -> anyhow::Result<LoadedTok
 }
 
 const CONSENT_CSRF_LIFETIME: Duration = Duration::from_secs(600);
-const DYNAMIC_CLIENT_TTL: Duration = Duration::from_secs(7 * 86400);
-const UNAUTH_CLIENT_TTL: Duration = Duration::from_secs(86400);
 
 #[derive(Debug, Clone)]
 pub struct DynamicClientEntry {
@@ -341,9 +321,7 @@ impl McpAuthorizations {
         sqlx::query(SCHEMA_TOKENS).execute(&pool).await?;
         let now = unix_now() as i64;
         let _ = db_purge_expired(&pool, now).await;
-        let client_cutoff = now.saturating_sub(UNAUTH_CLIENT_TTL.as_secs() as i64);
-        let _ = db_purge_expired_clients(&pool, client_cutoff).await;
-        let clients = db_load_clients(&pool, now).await.unwrap_or_default();
+        let clients = db_load_clients(&pool).await.unwrap_or_default();
         let client_seq = clients.len() as u64;
         let (tokens, refresh, by_id) = db_load_tokens(&pool, now).await.unwrap_or_default();
         Ok(Self {
@@ -419,8 +397,11 @@ impl McpAuthorizations {
 
     /// Registers a client of the dynamic registration and returns its `client_id`.
     /// Evicts the oldest idle client if the client table has reached MAX_CLIENTS.
+    ///
+    /// A registration never expires by age: an MCP client such as Claude Code stores its
+    /// `client_id` and reuses it for every later sign-in, and RFC 7591 gives a public client no
+    /// way to learn that the server dropped it.
     pub async fn register_client(&mut self, mut client: McpClientConfig) -> Option<String> {
-        self.cleanup_clients().await;
         if self.clients.len() >= MAX_CLIENTS {
             let evict_id = self.find_eviction_candidate()?;
             self.evict_client(&evict_id).await;
@@ -503,26 +484,6 @@ impl McpAuthorizations {
                     let _ = db_delete_token(pool, &hash).await;
                 }
             }
-        }
-    }
-
-    async fn cleanup_clients(&mut self) {
-        let now = unix_now();
-        let unauth_cutoff = now.saturating_sub(UNAUTH_CLIENT_TTL.as_secs());
-        let dynamic_cutoff = now.saturating_sub(DYNAMIC_CLIENT_TTL.as_secs());
-        let active = self.active_clients(now);
-        let expired: Vec<String> = self
-            .clients
-            .iter()
-            .filter(|(id, entry)| {
-                let has_grants = active.contains(*id);
-                (!has_grants && entry.created_at <= unauth_cutoff)
-                    || entry.created_at <= dynamic_cutoff
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
-        for id in expired {
-            self.evict_client(&id).await;
         }
     }
 
@@ -714,19 +675,11 @@ impl McpAuthorizations {
         true
     }
 
-    /// Drops the expired codes, tokens, and dynamic clients.
+    /// Drops the expired codes and tokens.
     fn cleanup(&mut self) {
         let now = unix_now();
         self.csrf_tokens.retain(|_, csrf| csrf.expires_at > now);
         self.rotated_refresh.retain(|_, (_, exp)| *exp > now);
-        let unauth_cutoff = now.saturating_sub(UNAUTH_CLIENT_TTL.as_secs());
-        let dynamic_cutoff = now.saturating_sub(DYNAMIC_CLIENT_TTL.as_secs());
-        let active = self.active_clients(now);
-        self.clients.retain(|id, entry| {
-            let has_grants = active.contains(id);
-            (has_grants && entry.created_at > dynamic_cutoff)
-                || (!has_grants && entry.created_at > unauth_cutoff)
-        });
         if self.codes.len() + self.tokens.len() < MAX_GRANTS {
             return;
         }
@@ -747,7 +700,6 @@ impl McpAuthorizations {
             let pool = pool.clone();
             tokio::spawn(async move {
                 let _ = db_purge_expired(&pool, now as i64).await;
-                let _ = db_purge_expired_clients(&pool, unauth_cutoff as i64).await;
             });
         }
     }
@@ -1588,8 +1540,8 @@ fn validate_client_metadata(body: &RegistrationBody) -> Result<(), (&'static str
     Ok(())
 }
 
-/// Registers an MCP client dynamically, per RFC 7591. The registration lives in memory, so a
-/// restart removes it and the client signs in again through a fresh registration.
+/// Registers an MCP client dynamically, per RFC 7591. The registration is stored in SQLite and
+/// survives restarts; only the `MAX_CLIENTS` limit evicts it.
 #[utoipa::path(
     post,
     path = "/register",
@@ -2069,6 +2021,39 @@ mod tests {
         assert!(auth.dynamic_client(&extra_id).is_some());
         assert!(auth.dynamic_client(&c0_id).is_some());
         assert!(auth.dynamic_client(&c1_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn an_old_registration_survives_a_restart_and_cleanup() -> anyhow::Result<()> {
+        let dir = TempDir(std::env::temp_dir().join(format!("mcp-old-{}", rand::random::<u64>())));
+        std::fs::create_dir_all(&dir.0)?;
+        let db_path = dir.0.join("clients.db");
+        let mut auth = McpAuthorizations::open(&db_path).await?;
+        let client = McpClientConfig {
+            id: String::new(),
+            name: "Claude Code".to_string(),
+            redirect_uris: vec!["http://localhost:62647/callback".to_string()],
+        };
+        let id = auth.register_client(client).await.expect("registration");
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_path.display())).await?;
+        sqlx::query("UPDATE mcp_clients SET created_at = created_at - ?")
+            .bind(30 * 86400_i64)
+            .execute(&pool)
+            .await?;
+        drop(auth);
+
+        // A client that registered a month ago and was never used since still signs in.
+        let mut auth = McpAuthorizations::open(&db_path).await?;
+        assert!(auth.dynamic_client(&id).is_some());
+        auth.issue_consent_csrf("admin", "session");
+        let other = McpClientConfig {
+            id: String::new(),
+            name: "Other".to_string(),
+            redirect_uris: vec!["http://localhost:1/cb".to_string()],
+        };
+        auth.register_client(other).await.expect("registration");
+        assert!(auth.dynamic_client(&id).is_some());
+        Ok(())
     }
 
     #[tokio::test]
