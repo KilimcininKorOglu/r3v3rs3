@@ -568,6 +568,128 @@ async fn a_dynamically_registered_client_runs_the_flow() -> anyhow::Result<()> {
     .await
 }
 
+/// Runs the consent of a request without a scope parameter, as Claude Code sends it, with the
+/// given scope checkboxes, and returns the scope of the issued token.
+async fn scope_after_consent(addr: SocketAddr, checked: &[&str]) -> anyhow::Result<Value> {
+    let client = Client::new();
+    let cookie = session(&client, &addr).await?;
+    let (verifier, challenge) = pkce();
+    let page = client
+        .get(format!(
+            "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
+             &redirect_uri={REDIRECT_URI}&state=ns&code_challenge={challenge}\
+             &code_challenge_method=S256"
+        ))
+        .header("cookie", &cookie)
+        .send()
+        .await?
+        .text()
+        .await?;
+    // Both scopes are offered and checked, so the account can grant edit.
+    assert!(
+        page.contains("name=\"grant_read\" value=\"1\" checked"),
+        "{page}"
+    );
+    assert!(
+        page.contains("name=\"grant_edit\" value=\"1\" checked"),
+        "{page}"
+    );
+    assert!(
+        page.contains("name=\"scope\" value=\"read edit\""),
+        "{page}"
+    );
+    let csrf_token = extract_csrf_token(&page)?;
+
+    let mut form = vec![
+        ("client_id", CLIENT_ID.to_string()),
+        ("redirect_uri", REDIRECT_URI.to_string()),
+        ("state", "ns".to_string()),
+        ("code_challenge", challenge.clone()),
+        ("scope", "read edit".to_string()),
+        ("scope_choice", "1".to_string()),
+        ("decision", "approve".to_string()),
+        ("csrf_token", csrf_token),
+    ];
+    for scope in checked {
+        form.push((
+            if *scope == "read" {
+                "grant_read"
+            } else {
+                "grant_edit"
+            },
+            "1".to_string(),
+        ));
+    }
+    let consent = no_redirect()
+        .post(format!("http://{addr}/oauth/authorize"))
+        .header("cookie", &cookie)
+        .header("origin", format!("http://{addr}"))
+        .form(&form)
+        .send()
+        .await?;
+    let location = consent.headers().get("location").unwrap().to_str()?;
+    match location
+        .split("code=")
+        .nth(1)
+        .and_then(|rest| rest.split('&').next())
+    {
+        Some(code) => token_scope(&client, addr, code, &verifier).await,
+        None => Ok(json!(location.contains("error=access_denied"))),
+    }
+}
+
+/// Trades a code of the default client for tokens and returns their scope.
+async fn token_scope(
+    client: &Client,
+    addr: SocketAddr,
+    code: &str,
+    verifier: &str,
+) -> anyhow::Result<Value> {
+    let tokens: Value = client
+        .post(format!("http://{addr}/oauth/token"))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", REDIRECT_URI),
+            ("client_id", CLIENT_ID),
+            ("code_verifier", verifier),
+        ])
+        .send()
+        .await?
+        .json()
+        .await?;
+    Ok(tokens["scope"].clone())
+}
+
+#[tokio::test]
+async fn a_request_without_a_scope_lets_the_account_pick_the_scopes() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-noscope")?;
+    with_admin(&dir.0, |addr| async move {
+        assert_eq!(
+            scope_after_consent(addr, &["read", "edit"]).await?,
+            json!("read edit")
+        );
+        assert_eq!(scope_after_consent(addr, &["read"]).await?, json!("read"));
+        // Unchecking every scope refuses the client like the Cancel button.
+        assert_eq!(scope_after_consent(addr, &[]).await?, json!(true));
+
+        // The 401 challenge names the scopes, so a client can request them itself.
+        let challenge = Client::new()
+            .post(format!("http://{addr}/api/mcp"))
+            .send()
+            .await?;
+        let header = challenge
+            .headers()
+            .get("www-authenticate")
+            .unwrap()
+            .to_str()?
+            .to_string();
+        assert!(header.contains("scope=\"read edit\""), "{header}");
+        Ok(())
+    })
+    .await
+}
+
 #[tokio::test]
 async fn a_registration_without_a_redirect_uri_is_refused() -> anyhow::Result<()> {
     let dir = TempDir::new("mcp-dcr-invalid")?;

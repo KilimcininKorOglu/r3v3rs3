@@ -744,6 +744,36 @@ pub struct ConsentForm {
     /// The anti-CSRF token generated on consent page render.
     #[serde(default)]
     pub csrf_token: String,
+    /// Set by the consent page: the `grant_*` checkboxes then pick the granted scopes out of
+    /// `scope`. A form without it grants `scope` as it is.
+    #[serde(default)]
+    pub scope_choice: Option<String>,
+    /// The checkbox of the `read` scope.
+    #[serde(default)]
+    pub grant_read: Option<String>,
+    /// The checkbox of the `edit` scope.
+    #[serde(default)]
+    pub grant_edit: Option<String>,
+}
+
+impl ConsentForm {
+    /// The scopes that the account granted: the requested scopes, narrowed to the checked boxes
+    /// when the consent page offered the choice.
+    fn granted_scope(&self) -> String {
+        let requested = scopes_of(&Some(self.scope.clone()));
+        if self.scope_choice.is_none() {
+            return requested.join(" ");
+        }
+        requested
+            .into_iter()
+            .filter(|scope| match scope.as_str() {
+                "read" => self.grant_read.is_some(),
+                "edit" => self.grant_edit.is_some(),
+                _ => false,
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 /// The form of the token request.
@@ -862,16 +892,18 @@ fn find_client(
     }
 }
 
-/// The normalized scope list of a request.
+/// The normalized scope list of a request. A request without scopes asks for every scope; the
+/// consent page lets the account uncheck the ones it does not grant, and the role of the account
+/// still limits what the token can do.
 fn scopes_of(scope: &Option<String>) -> Vec<String> {
     let scopes: Vec<String> = scope
         .as_deref()
-        .unwrap_or("read")
+        .unwrap_or_default()
         .split_whitespace()
         .map(str::to_string)
         .collect();
     if scopes.is_empty() {
-        vec!["read".to_string()]
+        SCOPES.iter().map(|scope| scope.to_string()).collect()
     } else {
         scopes
     }
@@ -1006,13 +1038,14 @@ fn render_scopes_list(scopes: &[String]) -> String {
             ),
         };
         html.push_str(&format!(
-            "<div class=\"scope-item\">\
-             <svg class=\"scope-icon\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z\"/></svg>\
+            "<label class=\"scope-item\">\
+             <input type=\"checkbox\" class=\"scope-check\" name=\"grant_{name}\" value=\"1\" checked>\
              <div>\
              <span class=\"scope-badge\">{label}</span>\
              <div class=\"scope-desc\">{desc}</div>\
              </div>\
-             </div>",
+             </label>",
+            name = html_escape(scope),
             label = html_escape(label),
             desc = html_escape(desc),
         ));
@@ -1132,7 +1165,8 @@ fn render_consent_css() -> &'static str {
         margin-bottom: 0.5rem;\
         background: #ffffff;\
     }\
-    .scope-icon { color: #2563eb; flex-shrink: 0; margin-top: 2px; }\
+    .scope-item { cursor: pointer; }\
+    .scope-check { width: 18px; height: 18px; flex-shrink: 0; margin-top: 2px; accent-color: #2563eb; cursor: pointer; }\
     .scope-badge {\
         font-size: 0.725rem;\
         font-family: ui-monospace, SFMono-Regular, monospace;\
@@ -1204,7 +1238,7 @@ fn render_consent_css() -> &'static str {
         .scope-item { background: #1f1f23; border-color: #27272a; }\
         .scope-badge { background: #1e3a8a; color: #bfdbfe; }\
         .scope-desc { color: #d4d4d8; }\
-        .scope-icon { color: #60a5fa; }\
+        .scope-check { accent-color: #60a5fa; }\
         .security-notice { color: #a1a1aa; }\
         .btn-secondary {\
             background: #27272a;\
@@ -1273,6 +1307,7 @@ fn render_consent_page(
          <input type=\"hidden\" name=\"state\" value=\"{state_value}\">\
          <input type=\"hidden\" name=\"code_challenge\" value=\"{challenge}\">\
          <input type=\"hidden\" name=\"scope\" value=\"{scope}\">\
+         <input type=\"hidden\" name=\"scope_choice\" value=\"1\">\
          <div class=\"form-actions\">\
          <button type=\"submit\" name=\"decision\" value=\"deny\" class=\"btn btn-secondary\">Cancel</button>\
          <button type=\"submit\" name=\"decision\" value=\"approve\" class=\"btn btn-primary\">Approve</button>\
@@ -1373,7 +1408,8 @@ pub async fn consent(
         },
     )?;
     drop(data);
-    if form.decision != "approve" {
+    let scope = form.granted_scope();
+    if form.decision != "approve" || scope.is_empty() {
         return Ok(Redirect::to(&consent_redirect_uri(
             &form.redirect_uri,
             &form.state,
@@ -1387,7 +1423,7 @@ pub async fn consent(
         client_id: client.id.clone(),
         redirect_uri: form.redirect_uri.clone(),
         code_challenge: form.code_challenge.clone(),
-        scope: form.scope.clone(),
+        scope: scope.clone(),
         username: caller.username.clone(),
     });
     state
@@ -1396,7 +1432,7 @@ pub async fn consent(
             caller.client,
             AuditRecord::new(AuditAction::AuthorizeMcpClient)
                 .id(client.id.clone())
-                .summary(format!("{} ({})", client.name, form.scope)),
+                .summary(format!("{} ({scope})", client.name)),
         )
         .await;
     info!(client = %client.id, "an MCP client was approved");
@@ -1751,7 +1787,8 @@ fn unauthorized(origin: &str) -> Response {
     response.headers_mut().insert(
         header::WWW_AUTHENTICATE,
         HeaderValue::from_str(&format!(
-            "Bearer resource_metadata=\"{escaped_origin}/.well-known/oauth-protected-resource\""
+            "Bearer resource_metadata=\"{escaped_origin}/.well-known/oauth-protected-resource\", scope=\"{}\"",
+            SCOPES.join(" ")
         ))
         .unwrap_or(HeaderValue::from_static("Bearer")),
     );
