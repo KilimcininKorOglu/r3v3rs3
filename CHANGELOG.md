@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-11-13
+
+### Added
+- Serve the panel in process. A proxy whose route points at the admin address hands the request to the admin API without the loopback TCP connection, so the panel gets the client address, the HTTPS state and the `Host` that the proxy resolved, WebSocket and event streams included. The built-in proxy needs no trusted proxy list any more.
+- `R3V3RS3_WEBUI_LISTEN=false` (`--webui-listen=false`) turns off the TCP listener of the admin API, so only the in-process proxy path serves the panel and no other process of the host reaches the admin API around the proxy. The workers mode refuses it.
+
+### Fixed
+- Prefer the client that the proxy resolved for the audit log, the sign-in limit, the MCP token ban and the rate limits of the panel, and take the `Secure` cookie flag from the TLS state of the proxy. A loopback peer is no longer trusted for forwarded headers without the trusted proxy list. In the workers mode, add `127.0.0.1/32` to **Trusted Proxies**.
+
+### Changed
+- Build the admin router apart from its listener.
+
 ## [3.1.9] - 2026-11-12
 
 ### Fixed
