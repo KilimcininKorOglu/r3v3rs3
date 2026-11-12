@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.1] - 2026-11-13
+
+### Fixed
+- Accept the public host of the panel on the MCP endpoint. In 3.2.0 the in-process panel kept the `Host` that the client sent, and the MCP transport accepted only loopback hosts, so every MCP request answered `403 Forbidden: Host header is not allowed`. The endpoint requires a bearer token, so the host list is off.
+
 ## [3.2.0] - 2026-11-13
 
 ### Added
