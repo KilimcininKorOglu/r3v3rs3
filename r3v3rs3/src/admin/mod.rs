@@ -598,10 +598,9 @@ struct ResolvedClientIpKeyExtractor {
 }
 
 impl ResolvedClientIpKeyExtractor {
+    /// Whether the peer is a trusted proxy of the admin API. A loopback peer is not trusted on
+    /// its own, because any process of the host can send forged headers from there.
     fn is_peer_trusted(&self, peer_ip: &IpAddr) -> bool {
-        if peer_ip.is_loopback() {
-            return true;
-        }
         self.state
             .data
             .try_lock()
@@ -620,6 +619,12 @@ impl tower_governor::key_extractor::KeyExtractor for ResolvedClientIpKeyExtracto
     type Key = IpAddr;
 
     fn extract<T>(&self, req: &axum::http::Request<T>) -> Result<Self::Key, GovernorError> {
+        if let Some(client) = req
+            .extensions()
+            .get::<crate::proxy::http::client_ip::ProxiedClient>()
+        {
+            return Ok(r3v3rs3_api::client_ip::canonical_client_ip(client.ip));
+        }
         let peer_ip = tower_governor::key_extractor::PeerIpKeyExtractor.extract(req)?;
         let trusted = self.is_peer_trusted(&peer_ip);
         let ip = if trusted {
@@ -1543,11 +1548,39 @@ mod tests {
             data,
         };
 
-        let extractor = ResolvedClientIpKeyExtractor { state };
+        let extractor = ResolvedClientIpKeyExtractor {
+            state: state.clone(),
+        };
+        let loopback = || ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345)));
 
+        // A loopback peer is not a trusted proxy on its own.
+        let req = Request::builder()
+            .header("x-forwarded-for", "203.0.113.195")
+            .extension(loopback())
+            .body(())
+            .unwrap();
+        let key = extractor.extract(&req).unwrap();
+        assert_eq!(key, IpAddr::V4(Ipv4Addr::LOCALHOST));
+
+        // The client that the proxy of this process resolved wins over every header.
+        let req = Request::builder()
+            .header("x-forwarded-for", "198.51.100.99")
+            .extension(loopback())
+            .extension(crate::proxy::http::client_ip::ProxiedClient {
+                ip: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)),
+                secure: true,
+                host: None,
+            })
+            .body(())
+            .unwrap();
+        let key = extractor.extract(&req).unwrap();
+        assert_eq!(key, IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)));
+
+        state.data.lock().await.config.admin.trusted_proxies =
+            vec!["127.0.0.1/32".parse().unwrap()];
         let req = Request::builder()
             .header("x-forwarded-for", "203.0.113.195, 10.0.0.1")
-            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .extension(loopback())
             .body(())
             .unwrap();
         let key = extractor.extract(&req).unwrap();

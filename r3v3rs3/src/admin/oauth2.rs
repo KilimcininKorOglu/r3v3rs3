@@ -11,9 +11,10 @@ use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
 use crate::accounts::Caller;
 use crate::audit::AuditRecord;
+use crate::proxy::http::client_ip::ProxiedClient;
 use crate::server::rpc::auth::GetPlatform;
 use axum::{
-    Json,
+    Extension, Json,
     extract::{ConnectInfo, Form, Query, RawQuery, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Redirect, Response},
@@ -1641,11 +1642,12 @@ pub async fn register(
 pub async fn token(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    proxied: Option<Extension<ProxiedClient>>,
     headers: HeaderMap,
     Form(form): Form<TokenForm>,
 ) -> Response {
     let ip = r3v3rs3_api::client_ip::canonical_client_ip(
-        super::auth::resolve_client_ip(&state, &peer, &headers).await,
+        super::auth::resolve_client_ip(&state, &peer, &headers, proxied.as_deref()).await,
     );
     let now = Instant::now();
     {
@@ -1846,7 +1848,8 @@ pub async fn verify_bearer(
     let Some(mut caller) = state.accounts.borrow().caller(&record) else {
         return unauthorized(&origin);
     };
-    caller.client = Some(super::auth::resolve_client_ip(&state, &addr, &headers).await);
+    let proxied = request.extensions().get::<ProxiedClient>();
+    caller.client = Some(super::auth::resolve_client_ip(&state, &addr, &headers, proxied).await);
     request.extensions_mut().insert(caller);
     request.extensions_mut().insert(super::McpScope(scope));
     next.run(request).await

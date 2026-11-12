@@ -1300,7 +1300,7 @@
   "settings.display_timezone": "Display Time Zone",
   "settings.display_timezone_hint": "The panel renders the stored times in this time zone. The times stay stored as UTC.",
   "settings.trusted_proxies": "Trusted Proxies",
-  "settings.trusted_proxies_hint": "Addresses or CIDR blocks of the reverse proxies in front of the panel, separated by commas. The panel takes the client address and the HTTPS state from the X-Forwarded-For and X-Forwarded-Proto headers of these proxies only. Enter 127.0.0.1/32 when r3v3rs3 serves the panel through its own proxy on a loopback address.",
+  "settings.trusted_proxies_hint": "Addresses or CIDR blocks of other reverse proxies in front of the panel, separated by commas. The panel takes the client address and the HTTPS state from the X-Forwarded-For and X-Forwarded-Proto headers of these proxies only. A proxy of r3v3rs3 serves the panel in process and needs no entry here, except in the workers mode, which needs 127.0.0.1/32.",
   "settings.invalid_display_timezone": "Pick a display time zone from the list.",
   "settings.session_expiry": "Session Expiry",
   "settings.tls_alpn_challenge_addr": "TLS-ALPN Challenge Address",

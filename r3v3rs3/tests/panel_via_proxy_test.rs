@@ -30,7 +30,10 @@ use std::sync::Arc;
 use tracing_subscriber::filter::LevelFilter;
 
 mod common;
-use common::{TestPort, TestStorage, alloc_tcp_port, http_proxy_entry, http_route, wait_until};
+use common::{
+    TestPort, TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route,
+    wait_until,
+};
 
 const PASSWORD: &str = "correct-horse-battery";
 const REDIRECT_URI: &str = "http://127.0.0.1:49170/callback";
@@ -49,6 +52,8 @@ struct Panel {
     admin: SocketAddr,
     /// The public URL of the panel: the address of the HTTPS port.
     public: String,
+    /// The address of the plain HTTP port of the same proxy.
+    plain: String,
     root: Arc<Cert>,
 }
 
@@ -125,8 +130,10 @@ where
     DatabaseLayer::new(&dir.0.join("log.db"), LevelFilter::INFO).await?;
 
     let https = alloc_tcp_port().await?;
+    let http = alloc_tcp_port().await?;
     let admin = alloc_tcp_port().await?.socket_addr();
     let public = format!("https://localhost:{}", https.socket_addr().port());
+    let plain = format!("http://localhost:{}", http.socket_addr().port());
     let root = Arc::new(Cert::new_ca()?);
     let cert = Arc::new(Cert::new_self_signed(&["localhost".parse()?], &root)?);
 
@@ -139,11 +146,13 @@ where
         ..Default::default()
     };
     config.admin.trusted_proxies = admin_trusted_proxies;
+    let mut proxy = http_proxy_entry("panel", "https", panel_proxy(admin));
+    proxy.proxy.ports.push("http".parse()?);
     let storage = TestStorage::builder()
         .config(config)
         .account(username, PASSWORD, Role::Admin, None)
-        .ports(vec![https_port(&https)])
-        .proxies(vec![http_proxy_entry("panel", "https", panel_proxy(admin))])
+        .ports(vec![https_port(&https), http_port_entry("http", &http)])
+        .proxies(vec![proxy])
         .certs(
             [(root.id, root.clone()), (cert.id, cert.clone())]
                 .into_iter()
@@ -165,6 +174,7 @@ where
     let panel = Panel {
         admin,
         public,
+        plain,
         root,
     };
     wait_for_panel(&panel).await?;
@@ -479,12 +489,11 @@ async fn a_direct_loopback_request_cannot_forge_the_client_address() -> anyhow::
     .await
 }
 
-// The target of serving the panel inside the proxy: the panel learns the client from the
-// proxy itself, so the production behavior needs no trusted proxy list and no forwarded
-// header that another process could forge.
+// The proxy serves the panel in process: the panel learns the client from the proxy itself,
+// so the production behavior needs no trusted proxy list and no forwarded header that another
+// process could forge.
 
 #[tokio::test]
-#[ignore = "fails until the proxy serves the panel without the loopback hop"]
 async fn a_session_works_through_the_proxy_without_a_trusted_proxy_list() -> anyhow::Result<()> {
     with_panel(Vec::new(), "target-session", |panel| {
         the_session_works_through_the_proxy(panel, "target-session")
@@ -492,8 +501,37 @@ async fn a_session_works_through_the_proxy_without_a_trusted_proxy_list() -> any
     .await
 }
 
+/// A sign-in over plain HTTP gets no `Secure` cookie: the browser would drop it, and the panel
+/// must take the TLS state from the proxy, not from the client address.
 #[tokio::test]
-#[ignore = "fails until the proxy serves the panel without the loopback hop"]
+async fn a_sign_in_over_plain_http_sets_no_secure_cookie() -> anyhow::Result<()> {
+    with_panel(Vec::new(), "plain-session", |panel| async move {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.53"));
+        headers.insert("origin", HeaderValue::from_str(&panel.plain)?);
+        let browser = Client::builder().default_headers(headers).build()?;
+        let response = browser
+            .post(format!("{}/api/login", panel.plain))
+            .json(&json!({"username": "plain-session", "method": "password", "password": PASSWORD}))
+            .send()
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let set_cookie = response
+            .headers()
+            .get(reqwest::header::SET_COOKIE)
+            .ok_or_else(|| anyhow::anyhow!("the sign-in set no cookie"))?
+            .to_str()?
+            .to_string();
+        assert!(
+            !set_cookie.contains("Secure"),
+            "a sign-in over plain HTTP must not set a Secure cookie: {set_cookie}"
+        );
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
 async fn an_mcp_client_signs_in_through_the_proxy_without_a_trusted_proxy_list()
 -> anyhow::Result<()> {
     with_panel(Vec::new(), "target-mcp", |panel| {

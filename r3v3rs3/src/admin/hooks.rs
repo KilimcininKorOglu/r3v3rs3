@@ -4,6 +4,7 @@
 use super::platform::platform_error;
 use super::{AppError, AppState};
 use crate::audit::AuditRecord;
+use crate::proxy::http::client_ip::ProxiedClient;
 use axum::{
     Json,
     body::Bytes,
@@ -58,6 +59,7 @@ pub struct WebhookQuery {
 pub async fn app_hook(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    proxied: Option<axum::Extension<ProxiedClient>>,
     Path(id): Path<ShortId>,
     Query(query): Query<WebhookQuery>,
     headers: HeaderMap,
@@ -94,7 +96,8 @@ pub async fn app_hook(
             .id(id)
             .summary(format!("{} ({}): {started}", app.name, provider.as_str()));
         // A webhook request has no account.
-        let client_ip = super::auth::resolve_client_ip(&state, &peer, &headers).await;
+        let client_ip =
+            super::auth::resolve_client_ip(&state, &peer, &headers, proxied.as_deref()).await;
         state.record_audit("", Some(client_ip), record).await;
     }
     Ok((status, Json(response)).into_response())

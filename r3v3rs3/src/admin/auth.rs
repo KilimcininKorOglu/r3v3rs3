@@ -2,6 +2,7 @@ use super::openapi::ErrorResponses;
 use super::{AppError, AppState};
 use crate::accounts::Caller;
 use crate::audit::AuditRecord;
+use crate::proxy::http::client_ip::ProxiedClient;
 use crate::server::rpc::auth::VerifyAccount;
 use crate::sessions::{self, SessionBackend, SessionRecord, SessionScope};
 use axum::{
@@ -140,14 +141,19 @@ pub(crate) fn header_ip(headers: &axum::http::HeaderMap, name: &'static str) -> 
         .and_then(|s| s.trim().parse::<IpAddr>().ok())
 }
 
-/// The address of the client: the forwarded address when the peer is a trusted proxy of the
-/// admin API, else the peer address. Every audit record, ban and rate limit of the admin API
-/// takes the client address from here.
+/// The address of the client. A request that the proxy of this process handed over carries the
+/// client that the proxy resolved. Any other request gives the forwarded address when the peer is
+/// a trusted proxy of the admin API, else the peer address. Every audit record, ban and rate
+/// limit of the admin API takes the client address from here.
 pub(crate) async fn resolve_client_ip(
     state: &AppState,
     peer: &SocketAddr,
     headers: &axum::http::HeaderMap,
+    proxied: Option<&ProxiedClient>,
 ) -> IpAddr {
+    if let Some(client) = proxied {
+        return client.ip;
+    }
     let trusted = {
         let data = state.data.lock().await;
         data.config.admin.trusted_proxies.clone()
@@ -160,11 +166,17 @@ pub(crate) async fn resolve_client_ip(
         .unwrap_or_else(|| peer.ip())
 }
 
+/// Whether the client reached the panel over TLS. A request that the proxy of this process handed
+/// over carries the answer; any other request follows the trusted proxy list.
 async fn is_secure_connection(
     state: &AppState,
     peer: &SocketAddr,
     headers: &axum::http::HeaderMap,
+    proxied: Option<&ProxiedClient>,
 ) -> bool {
+    if let Some(client) = proxied {
+        return client.secure;
+    }
     let trusted = {
         let data = state.data.lock().await;
         data.config.admin.trusted_proxies.clone()
@@ -211,11 +223,13 @@ fn is_secure_request(
 pub async fn login(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    proxied: Option<Extension<ProxiedClient>>,
     headers: axum::http::HeaderMap,
     jar: CookieJar,
     Json(mut request): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let client_ip = resolve_client_ip(&state, &peer, &headers).await;
+    let proxied = proxied.as_deref();
+    let client_ip = resolve_client_ip(&state, &peer, &headers, proxied).await;
     resolve_login_username(&state, &mut request);
     let username = request.username.clone();
     let attempt_key = (canonical_client_ip(client_ip), username.clone());
@@ -234,7 +248,7 @@ pub async fn login(
         };
 
     let start_record = SessionRecord::new(&username);
-    let is_secure = is_secure_connection(&state, &peer, &headers).await;
+    let is_secure = is_secure_connection(&state, &peer, &headers, proxied).await;
     let result = match state.call_system(VerifyAccount { request }).await {
         Ok(result) => result,
         Err(err) => {
@@ -376,9 +390,11 @@ async fn verify_login_session(
 pub async fn logout(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    proxied: Option<Extension<ProxiedClient>>,
     headers: axum::http::HeaderMap,
     jar: CookieJar,
 ) -> Result<impl IntoResponse, AppError> {
+    let proxied = proxied.as_deref();
     let public_url = {
         let data = state.data.lock().await;
         data.config.public_url.as_ref().map(|u| u.to_string())
@@ -387,7 +403,7 @@ pub async fn logout(
 
     if let Some(token) = jar.get(ADMIN_SESSION_COOKIE) {
         let (backend, _) = session_backend(&state).await;
-        let client_ip = resolve_client_ip(&state, &peer, &headers).await;
+        let client_ip = resolve_client_ip(&state, &peer, &headers, proxied).await;
         record_logout(&state, backend.as_ref(), token.value(), client_ip).await;
         for scope in [SessionScope::Admin, SessionScope::Login] {
             if let Err(err) = backend.remove(scope, token.value()).await {
@@ -395,7 +411,7 @@ pub async fn logout(
             }
         }
     }
-    let is_secure = is_secure_connection(&state, &peer, &headers).await;
+    let is_secure = is_secure_connection(&state, &peer, &headers, proxied).await;
     let cookie = Cookie::build((ADMIN_SESSION_COOKIE, ""))
         .http_only(true)
         .same_site(SameSite::Lax)
@@ -926,9 +942,12 @@ pub async fn verify(
                 .extensions()
                 .get::<ConnectInfo<SocketAddr>>()
                 .map(|info| info.0);
+            let proxied = request.extensions().get::<ProxiedClient>();
             caller.client = match peer {
-                Some(peer) => Some(resolve_client_ip(&state, &peer, request.headers()).await),
-                None => None,
+                Some(peer) => {
+                    Some(resolve_client_ip(&state, &peer, request.headers(), proxied).await)
+                }
+                None => proxied.map(|client| client.ip),
             };
             request.extensions_mut().insert(caller);
             if let Some(token) = session_token {
