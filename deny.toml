@@ -16,6 +16,12 @@ ignore = [
     # dev-dependency of r3v3rs3 that generates RSA test keys, so the released binary does not
     # carry it.
     "RUSTSEC-2023-0071",
+    # libsqlite3-sys < 0.39 (bundled SQLite < 3.54): a crafted database and -wal pair with
+    # mismatched page sizes can leak page-cache memory. sqlx-sqlite 0.9.0 caps libsqlite3-sys
+    # below 0.38 and no newer sqlx exists. r3v3rs3 opens only the databases in its own config
+    # directory (mode 0700, owned by the service account), so an attacker who can plant the pair
+    # already has that account. Remove this entry when a sqlx release allows 0.39.
+    "RUSTSEC-2026-0459",
     # The crates below have no maintained release. Each one is a transitive dependency. Check
     # for a new release of the crate that pulls it in before every release.
     "RUSTSEC-2025-0141", # bincode 1.x, through gloo-worker of yew (WebUI)
