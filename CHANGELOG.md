@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.9] - 2026-11-12
+
+### Fixed
+- Take the OAuth issuer and the consent `Origin` check from the `public_url` setting. With the deployment platform off, the issuer became the loopback address of the admin API behind the built-in proxy, and MCP sign-in failed.
+
+### Changed
+- End-to-end tests run the panel behind the built-in HTTPS proxy: sign-in, the `Secure` cookie, the `Origin` check, the audit client address and the MCP OAuth flow.
+
 ## [3.1.8] - 2026-11-12
 
 ### Fixed
