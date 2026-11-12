@@ -804,13 +804,10 @@ fn challenge_of(verifier: &str) -> String {
 /// headers when it is not set. The headers are a weak fallback, because the proxy of the
 /// server rewrites the `Host` header of the upstream request to the upstream address.
 async fn origin_of(state: &AppState, headers: &HeaderMap) -> String {
-    if let Ok(platform) = state.call_system(GetPlatform).await
-        && let Ok(platform) = platform.get()
-        && let Some(url) = platform.public_url()
-    {
-        return url.to_string().trim_end_matches('/').to_string();
+    match public_url(state).await {
+        Some(url) => url.trim_end_matches('/').to_string(),
+        None => base_origin(headers),
     }
-    base_origin(headers)
 }
 
 /// The origin of the admin API, from the forwarded headers or from the host of the request.
@@ -1335,7 +1332,13 @@ fn html_escape(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-async fn get_platform_public_url(state: &AppState) -> Option<String> {
+/// The public URL of the server: the `public_url` setting, or the legacy value that the platform
+/// store still holds on an install that has not saved the setting yet. It works with the
+/// platform off, like the `Origin` check of the session middleware.
+async fn public_url(state: &AppState) -> Option<String> {
+    if let Some(url) = state.data.lock().await.config.public_url.as_ref() {
+        return Some(url.to_string());
+    }
     if let Ok(platform) = state.call_system(GetPlatform).await
         && let Ok(platform) = platform.get()
     {
@@ -1378,7 +1381,7 @@ pub async fn consent(
     axum::Extension(caller): axum::Extension<Caller>,
     Form(form): Form<ConsentForm>,
 ) -> Result<Response, AppError> {
-    let public_url = get_platform_public_url(&state).await;
+    let public_url = public_url(&state).await;
     super::auth::verify_origin(&headers, public_url.as_deref())?;
 
     let session_token = jar
