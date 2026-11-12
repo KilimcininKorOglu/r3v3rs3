@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.6] - 2026-11-12
+
+### Fixed
+- Offer both `read` and `edit` when an MCP client starts the authorization without a `scope` parameter, as Claude Code does. The consent form now shows a checked box per scope so the account can drop `edit`, and the `WWW-Authenticate` header of a `401` response names the scopes. Before, such a client always received a read-only token.
+
 ## [3.1.5] - 2026-11-12
 
 ### Fixed
