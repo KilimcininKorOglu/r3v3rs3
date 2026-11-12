@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.5] - 2026-11-12
+
+### Fixed
+- Keep dynamically registered MCP OAuth clients instead of expiring them after one or seven days. MCP hosts such as Claude Code reuse their stored client ID, so a later sign-in failed with `mcp_client_unknown` after the login form. The 3.1.4 tag carries this fix but was never published.
+
+### Security
+- Update `rmcp` to 3.9.0 for RUSTSEC-2026-0457, RUSTSEC-2026-0461 and RUSTSEC-2026-0462.
+
 ## [3.1.4] - 2026-11-12
 
 ### Fixed
