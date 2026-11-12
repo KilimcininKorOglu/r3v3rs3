@@ -16,6 +16,7 @@ use r3v3rs3_api::{
     },
     cdn::{CdnRangesSource, CdnStatus},
     cert::CertInfo,
+    cidr::{format_cidr_list, parse_cidr_list},
     discovery::{DiscoveryConfig, DockerDiscoveryConfig, Endpoint, EtcdDiscoveryConfig},
     error::ErrorMessage,
     error_page_theme::ErrorPageTheme,
@@ -47,6 +48,8 @@ struct Fields {
     max_login_attempts: String,
     login_attempts_reset: String,
     display_timezone: String,
+    /// Comma-separated addresses or CIDR blocks.
+    trusted_proxies: String,
     database_log_retention: String,
     audit_log_retention: String,
     cert_expiry_warning: String,
@@ -147,6 +150,7 @@ impl Fields {
             max_login_attempts: text("/admin/max_login_attempts"),
             login_attempts_reset: text("/admin/login_attempts_reset"),
             display_timezone: text("/admin/display_timezone"),
+            trusted_proxies: format_cidr_list(&config.admin.trusted_proxies),
             database_log_retention: text("/log/database_log_retention"),
             audit_log_retention: text("/log/audit_log_retention"),
             cert_expiry_warning: text("/notifications/cert_expiry_warning"),
@@ -302,6 +306,8 @@ pub fn settings() -> Html {
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.login_attempts_reset_hint")}</p>
             { select_field(&fields, &errors, locale.t("settings.display_timezone"), "display_timezone", &DISPLAY_TIMEZONES, |f| &mut f.display_timezone) }
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.display_timezone_hint")}</p>
+            { text_field(&fields, &errors, locale.t("settings.trusted_proxies"), "trusted_proxies", "127.0.0.1/32", |f| &mut f.trusted_proxies) }
+            <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.trusted_proxies_hint")}</p>
 
             <h2 class="mt-6 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.server")}</h2>
             { text_field(&fields, &errors, locale.t("settings.background_task_interval"), "background_task_interval", "1h", |f| &mut f.background_task_interval) }
@@ -1008,6 +1014,10 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
             locale.t("settings.invalid_display_timezone").into(),
         );
     }
+    let trusted_proxies = parse_cidr_list(&fields.trusted_proxies).unwrap_or_else(|err| {
+        errors.insert("trusted_proxies".into(), locale.error_message(&err));
+        Vec::new()
+    });
     let log = parse_durations::<LogConfig>(
         &mut errors,
         invalid_duration,
@@ -1093,7 +1103,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 max_login_attempts,
                 login_attempts_reset: admin[1].login_attempts_reset,
                 display_timezone,
-                trusted_proxies: Vec::new(),
+                trusted_proxies,
             },
             log: LogConfig {
                 database_log_retention: log[0].database_log_retention,
@@ -1835,6 +1845,25 @@ mod tests {
             errors.get("upgrade_check_interval").map(String::as_str),
             Some(Locale::En.t("settings.invalid_duration"))
         );
+    }
+
+    #[test]
+    fn the_trusted_proxies_survive_a_save_and_an_invalid_entry_is_refused() {
+        let mut config = AppConfig::default();
+        config.admin.trusted_proxies = vec![
+            "127.0.0.1/32".parse().unwrap(),
+            "10.0.0.0/8".parse().unwrap(),
+        ];
+        // Saving the page without touching the field keeps the list.
+        let fields = Fields::from_config(&config);
+        assert_eq!(parse_fields(Locale::En, &fields), Ok(config));
+
+        let invalid = Fields {
+            trusted_proxies: "127.0.0.1/32, proxy.example".into(),
+            ..fields
+        };
+        let errors = parse_fields(Locale::En, &invalid).unwrap_err();
+        assert!(errors.contains_key("trusted_proxies"), "{errors:?}");
     }
 
     #[test]

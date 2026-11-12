@@ -956,6 +956,8 @@ The `[admin]` settings in `config.toml` apply to these sessions too:
 - `session_expiry`: The lifetime of a session. The minimum is 5 minutes.
 - `max_login_attempts` and `login_attempts_reset`: The limit of failed sign-ins for each client IP address and username. A blocked client receives `429 Too Many Requests` until the reset time passes.
 
+The `trusted_proxies` setting of `[admin]` (**Trusted Proxies** on the **Settings** page) lists the addresses or CIDR blocks of the reverse proxies in front of the panel. The panel takes the client address of the audit log, of the sign-in limit and of the MCP token ban from the `X-Forwarded-For` header, and the HTTPS state of the session cookie from the `X-Forwarded-Proto` header, only when the request comes from one of these addresses. Otherwise it records the address of the connection. When r3v3rs3 serves the panel through its own proxy on a loopback address, enter `127.0.0.1/32`; without it every request shows `127.0.0.1` and the session cookie lacks the `Secure` attribute. The list of CDN address ranges is a separate setting of each proxy and does not apply to the panel.
+
 r3v3rs3 keeps the sessions in memory, so a restart signs every client out. To add a sign-out button to your application:
 
 ```html

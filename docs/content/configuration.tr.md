@@ -956,6 +956,8 @@ Yalnız proxy'yi görebilen hesaplar giriş yapar. Proxy listesi olan bir hesap 
 - `session_expiry`: Oturumun geçerlilik süresi. En az 5 dakika olabilir.
 - `max_login_attempts` ve `login_attempts_reset`: Her istemci IP adresi ve kullanıcı adı için başarısız giriş limiti. Engellenen istemci, sıfırlama süresi geçene kadar `429 Too Many Requests` alır.
 
+`[admin]` bölümündeki `trusted_proxies` ayarı (**Ayarlar** sayfasında **Güvenilen Proxy'ler**) panelin önündeki reverse proxy'lerin adreslerini veya CIDR bloklarını listeler. Panel, audit log'un, giriş limitinin ve MCP token ban'ının istemci adresini `X-Forwarded-For` header'ından, oturum cookie'sinin HTTPS durumunu `X-Forwarded-Proto` header'ından yalnız istek bu adreslerden birinden gelirse alır. Aksi hâlde bağlantının adresini kaydeder. r3v3rs3 paneli kendi proxy'si üzerinden bir loopback adresine yönlendiriyorsa `127.0.0.1/32` girin. Bu ayar olmadan her istek `127.0.0.1` görünür ve oturum cookie'si `Secure` özelliğini almaz. CDN adres blokları listesi her proxy'nin ayrı bir ayarıdır ve panele uygulanmaz.
+
 r3v3rs3 oturumları bellekte tutar. Sunucu yeniden başladığında bütün oturumlar sona erer. Uygulamanıza çıkış butonu eklemek için şu formu kullanabilirsiniz:
 
 ```html

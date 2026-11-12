@@ -1299,6 +1299,8 @@
   "settings.server": "Sunucu",
   "settings.display_timezone": "Görüntüleme Saat Dilimi",
   "settings.display_timezone_hint": "Panel, saklanan zamanları bu saat diliminde gösterir. Zamanlar UTC olarak saklanmaya devam eder.",
+  "settings.trusted_proxies": "Güvenilen Proxy'ler",
+  "settings.trusted_proxies_hint": "Panelin önündeki reverse proxy'lerin adresleri veya CIDR blokları, virgülle ayrılır. Panel istemci adresini ve HTTPS durumunu yalnız bu proxy'lerin X-Forwarded-For ve X-Forwarded-Proto header'larından alır. r3v3rs3 paneli kendi proxy'si üzerinden bir loopback adresine yönlendiriyorsa 127.0.0.1/32 girin.",
   "settings.invalid_display_timezone": "Görüntüleme saat dilimini listeden seçin.",
   "settings.session_expiry": "Oturum Süresi",
   "settings.tls_alpn_challenge_addr": "TLS-ALPN Challenge Adresi",
