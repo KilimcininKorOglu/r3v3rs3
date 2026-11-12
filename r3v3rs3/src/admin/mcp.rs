@@ -46,7 +46,9 @@ use rmcp::{tool, tool_handler, tool_router};
 use serde_json::json;
 
 pub use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
-pub use rmcp::transport::streamable_http_server::tower::StreamableHttpService;
+pub use rmcp::transport::streamable_http_server::tower::{
+    StreamableHttpServerConfig, StreamableHttpService,
+};
 
 /// The tools that the MCP endpoint serves.
 #[derive(Clone)]

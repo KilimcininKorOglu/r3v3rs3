@@ -402,7 +402,10 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
             move || Ok(mcp::McpServer::new(state.clone()))
         },
         mcp::LocalSessionManager::default().into(),
-        Default::default(),
+        // The allowed host list of rmcp guards a local server against DNS rebinding, which
+        // rides on ambient browser credentials. The endpoint takes a bearer token only, and the
+        // panel answers under its public host, so the list would refuse every remote client.
+        mcp::StreamableHttpServerConfig::default().disable_allowed_hosts(),
     );
     let mcp_router: Router<AppState> = Router::new()
         .nest_service("/api/mcp", mcp_service)

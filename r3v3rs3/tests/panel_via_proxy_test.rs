@@ -69,18 +69,29 @@ impl Panel {
     /// A browser on the internet with the address `client`: it trusts the certificate of the
     /// port, sends the `Origin` of the panel and does not follow redirects.
     fn browser(&self, client: &str) -> anyhow::Result<Client> {
+        self.browser_from(client, &self.public)
+    }
+
+    /// A browser on the internet that sends the `Origin` `origin`. It reaches the public host
+    /// of the panel on the loopback address.
+    fn browser_from(&self, client: &str, origin: &str) -> anyhow::Result<Client> {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", HeaderValue::from_str(client)?);
-        headers.insert("origin", HeaderValue::from_str(&self.public)?);
+        headers.insert("origin", HeaderValue::from_str(origin)?);
         Ok(Client::builder()
             .add_root_certificate(reqwest::Certificate::from_pem(&self.root.pem_chain)?)
+            .resolve(PANEL_HOST, SocketAddr::from(([127, 0, 0, 1], 0)))
             .default_headers(headers)
             .redirect(Policy::none())
             .build()?)
     }
 }
 
-/// The HTTPS port with a certificate for `localhost`.
+/// The public host of the panel. It is no loopback name, as in production, so every check of
+/// the `Host` header sees what a remote client sends.
+const PANEL_HOST: &str = "panel.test";
+
+/// The HTTPS port with a certificate for the panel host.
 fn https_port(https: &TestPort) -> PortEntry {
     PortEntry {
         id: "https".parse().unwrap(),
@@ -90,7 +101,7 @@ fn https_port(https: &TestPort) -> PortEntry {
             listen: https.multiaddr_https(),
             opts: PortOptions {
                 tls_termination: Some(TlsTermination {
-                    server_names: vec!["localhost".into()],
+                    server_names: vec![PANEL_HOST.into()],
                     ..Default::default()
                 }),
                 proxy_protocol: None,
@@ -106,7 +117,7 @@ fn https_port(https: &TestPort) -> PortEntry {
 /// The proxy of the panel host. Its trusted proxy list stands for the edge in front of the port.
 fn panel_proxy(admin: SocketAddr) -> HttpProxy {
     HttpProxy {
-        vhosts: vec!["localhost".parse().unwrap()],
+        vhosts: vec![PANEL_HOST.parse().unwrap()],
         routes: vec![http_route("/", &format!("http://{admin}/"), None)],
         upgrade_insecure: false,
         client_ip: ClientIpConfig {
@@ -150,10 +161,10 @@ where
     let https = alloc_tcp_port().await?;
     let http = alloc_tcp_port().await?;
     let admin = alloc_tcp_port().await?.socket_addr();
-    let public = format!("https://localhost:{}", https.socket_addr().port());
-    let plain = format!("http://localhost:{}", http.socket_addr().port());
+    let public = format!("https://{PANEL_HOST}:{}", https.socket_addr().port());
+    let plain = format!("http://{PANEL_HOST}:{}", http.socket_addr().port());
     let root = Arc::new(Cert::new_ca()?);
-    let cert = Arc::new(Cert::new_self_signed(&["localhost".parse()?], &root)?);
+    let cert = Arc::new(Cert::new_self_signed(&[PANEL_HOST.parse()?], &root)?);
 
     let mut config = AppConfig {
         public_url: Some(public.parse()?),
@@ -552,10 +563,7 @@ async fn the_panel_works_without_its_tcp_listener() -> anyhow::Result<()> {
 #[tokio::test]
 async fn a_sign_in_over_plain_http_sets_no_secure_cookie() -> anyhow::Result<()> {
     with_panel(Vec::new(), "plain-session", |panel| async move {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.53"));
-        headers.insert("origin", HeaderValue::from_str(&panel.plain)?);
-        let browser = Client::builder().default_headers(headers).build()?;
+        let browser = panel.browser_from("203.0.113.53", &panel.plain)?;
         let response = browser
             .post(format!("{}/api/login", panel.plain))
             .json(&json!({"username": "plain-session", "method": "password", "password": PASSWORD}))
