@@ -598,28 +598,15 @@ async fn scope_after_consent(addr: SocketAddr, checked: &[&str]) -> anyhow::Resu
         page.contains("name=\"scope\" value=\"read edit\""),
         "{page}"
     );
-    let csrf_token = extract_csrf_token(&page)?;
-
-    let mut form = vec![
-        ("client_id", CLIENT_ID.to_string()),
-        ("redirect_uri", REDIRECT_URI.to_string()),
-        ("state", "ns".to_string()),
-        ("code_challenge", challenge.clone()),
-        ("scope", "read edit".to_string()),
-        ("scope_choice", "1".to_string()),
-        ("decision", "approve".to_string()),
-        ("csrf_token", csrf_token),
-    ];
-    for scope in checked {
-        form.push((
-            if *scope == "read" {
-                "grant_read"
-            } else {
-                "grant_edit"
-            },
-            "1".to_string(),
-        ));
-    }
+    // Submit what a browser submits: the fields inside the form, without the unchecked boxes.
+    let mut form: Vec<(String, String)> = browser_form_fields(&page)
+        .into_iter()
+        .filter(|(name, _)| {
+            name.strip_prefix("grant_")
+                .is_none_or(|scope| checked.contains(&scope))
+        })
+        .collect();
+    form.push(("decision".to_string(), "approve".to_string()));
     let consent = no_redirect()
         .post(format!("http://{addr}/oauth/authorize"))
         .header("cookie", &cookie)
@@ -636,6 +623,25 @@ async fn scope_after_consent(addr: SocketAddr, checked: &[&str]) -> anyhow::Resu
         Some(code) => token_scope(&client, addr, code, &verifier).await,
         None => Ok(json!(location.contains("error=access_denied"))),
     }
+}
+
+/// The `name` and `value` of every `<input>` between `<form` and `</form>`, the fields that a
+/// browser submits. An input outside the form element is not submitted.
+fn browser_form_fields(page: &str) -> Vec<(String, String)> {
+    let start = page.find("<form").unwrap_or(page.len());
+    let end = page.find("</form>").unwrap_or(page.len());
+    page[start..end]
+        .split("<input ")
+        .skip(1)
+        .filter_map(|tag| Some((attribute(tag, "name")?, attribute(tag, "value")?)))
+        .collect()
+}
+
+/// The value of an HTML attribute at the start of a tag, without entity decoding.
+fn attribute(tag: &str, name: &str) -> Option<String> {
+    let tag = &tag[..tag.find('>')?];
+    let rest = tag.split(&format!("{name}=\"")).nth(1)?;
+    Some(rest[..rest.find('"')?].to_string())
 }
 
 /// Trades a code of the default client for tokens and returns their scope.
