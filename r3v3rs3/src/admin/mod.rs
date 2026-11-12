@@ -127,28 +127,8 @@ pub async fn start_admin_on(
     accounts: watch::Receiver<Arc<AccountDirectory>>,
     upgrade: mpsc::Sender<()>,
 ) -> anyhow::Result<()> {
-    let data = Data::new(app_info).await?;
-    let data = Arc::new(Mutex::new(data));
-    let app_state = AppState {
-        sender: command,
-        event: event.clone(),
-        event_listener_counter: Arc::new(AtomicUsize::new(0)),
-        accounts,
-        upgrade,
-        upgrade_stage: Arc::new(std::sync::Mutex::new(None)),
-        data: data.clone(),
-    };
-
-    spawn_rpc_callbacks(callback, data.clone());
-    load_server_state(&app_state).await?;
-    spawn_config_events(event.clone(), data.clone());
-    spawn_login_attempts_pruner(data);
-
     let mut event_recv = event.subscribe();
-    let config_dir = app_state.data.lock().await.app_info.config_path.clone();
-    anomaly::ensure_anomaly_monitor_running(app_state.clone(), config_dir.clone());
-    crate::certs::ct::ensure_ct_monitor_running(app_state.clone(), config_dir);
-    let app = admin_router(app_state)?;
+    let app = build_admin(app_info, command, callback, event, accounts, upgrade).await?;
 
     axum::serve(
         listener,
@@ -171,6 +151,39 @@ pub async fn start_admin_on(
     })
     .await?;
     Ok(())
+}
+
+/// Loads the state of the admin API, starts its background tasks and builds its router, apart
+/// from any listener.
+async fn build_admin(
+    app_info: AppInfo,
+    command: mpsc::Sender<ServerCommand>,
+    callback: mpsc::Receiver<RpcCallback>,
+    event: broadcast::Sender<ServerEvent>,
+    accounts: watch::Receiver<Arc<AccountDirectory>>,
+    upgrade: mpsc::Sender<()>,
+) -> anyhow::Result<Router> {
+    let data = Data::new(app_info).await?;
+    let data = Arc::new(Mutex::new(data));
+    let app_state = AppState {
+        sender: command,
+        event: event.clone(),
+        event_listener_counter: Arc::new(AtomicUsize::new(0)),
+        accounts,
+        upgrade,
+        upgrade_stage: Arc::new(std::sync::Mutex::new(None)),
+        data: data.clone(),
+    };
+
+    spawn_rpc_callbacks(callback, data.clone());
+    load_server_state(&app_state).await?;
+    spawn_config_events(event, data.clone());
+    spawn_login_attempts_pruner(data);
+
+    let config_dir = app_state.data.lock().await.app_info.config_path.clone();
+    anomaly::ensure_anomaly_monitor_running(app_state.clone(), config_dir.clone());
+    crate::certs::ct::ensure_ct_monitor_running(app_state.clone(), config_dir);
+    admin_router(app_state)
 }
 
 fn spawn_rpc_callbacks(mut callback: mpsc::Receiver<RpcCallback>, data: Arc<Mutex<Data>>) {
