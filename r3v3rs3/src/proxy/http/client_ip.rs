@@ -19,6 +19,19 @@ pub const CLIENT_IP_HEADERS: &[&str] = &[
     "incap-client-ip",
 ];
 
+/// The client of a proxied request as the proxy resolved it. It travels as a request extension,
+/// so it never reaches an upstream server over the network and no client can forge it. The panel
+/// that the proxy serves in process reads it instead of the forwarding headers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxiedClient {
+    /// The resolved client address.
+    pub ip: IpAddr,
+    /// True when the client reached the proxy over TLS or QUIC.
+    pub secure: bool,
+    /// The `Host` of the client request, before the proxy pointed it at the upstream server.
+    pub host: Option<hyper::header::HeaderValue>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientAddr {
     /// The address of the TCP or QUIC peer.

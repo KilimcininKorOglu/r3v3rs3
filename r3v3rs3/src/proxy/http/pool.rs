@@ -20,7 +20,7 @@ use r3v3rs3_api::upstream::{RetryOn, RetryPolicy};
 use r3v3rs3_api::{error::Error, id::ShortId, proxy::Server};
 use std::collections::HashMap;
 use std::future::Future;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::{Arc, PoisonError};
@@ -33,6 +33,7 @@ use url::Url;
 
 use super::affinity::{Affinity, CookieSlot};
 use super::body_limit::BodyLimit;
+use super::client_ip::ProxiedClient;
 use super::mirror::Mirror;
 use super::rewrite::Rewrite;
 
@@ -165,6 +166,9 @@ impl ConnectionPool {
         mut req: Request<ProxyBody>,
         request_timeout: Duration,
     ) -> Result<Response<ProxyBody>, SendError> {
+        if let Some(panel) = req.uri().authority().and_then(crate::admin::panel::matches) {
+            return panel_send(panel, req, request_timeout).await;
+        }
         let is_ws = is_websocket_upgrade_request(&req);
         let upgrading_req = if is_ws {
             let mut cloned_req = Request::builder()
@@ -219,6 +223,85 @@ impl ConnectionPool {
             }
             _ => Ok(res),
         }
+    }
+}
+
+/// Hands the request to the router of a panel that this process serves, without a TCP
+/// connection. The panel sees the client that the proxy resolved as the peer address and the
+/// `Host` that the client sent. An upgrade request keeps the upgrade of the client connection,
+/// which the panel takes over itself.
+async fn panel_send(
+    mut panel: axum::Router,
+    mut req: Request<ProxyBody>,
+    request_timeout: Duration,
+) -> Result<Response<ProxyBody>, SendError> {
+    let client = req.extensions().get::<ProxiedClient>().cloned();
+    let ip = client
+        .as_ref()
+        .map_or(IpAddr::V4(Ipv4Addr::LOCALHOST), |client| client.ip);
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::new(ip, 0)));
+    if let Some(host) = client.and_then(|client| client.host) {
+        req.headers_mut().insert(HOST, host);
+    }
+    // The panel saw HTTP/1.1 over the loopback connection, and an upgrade needs it.
+    *req.version_mut() = hyper::Version::HTTP_11;
+    let sending = async move {
+        let Ok(()) = std::future::poll_fn(|cx| {
+            tower_service::Service::<Request<ProxyBody>>::poll_ready(&mut panel, cx)
+        })
+        .await;
+        let Ok(res) = tower_service::Service::call(&mut panel, req).await;
+        res
+    };
+    let res = if request_timeout.is_zero() {
+        sending.await
+    } else {
+        tokio::time::timeout(request_timeout, sending)
+            .await
+            .map_err(|_| SendError::other(ProxyError::UpstreamTimeout))?
+    };
+    Ok(res.map(|body| BoxBody::new(SyncBody::new(body).map_err(anyhow::Error::from))))
+}
+
+/// A body that is `Send` but not `Sync`, made usable as a [`ProxyBody`]. The body is polled
+/// through `&mut self`, so polling never locks the mutex.
+struct SyncBody<B>(std::sync::Mutex<B>);
+
+impl<B> SyncBody<B> {
+    fn new(body: B) -> Self {
+        Self(std::sync::Mutex::new(body))
+    }
+}
+
+impl<B: Body + Unpin> Body for SyncBody<B> {
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+        let body = self
+            .get_mut()
+            .0
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner);
+        Pin::new(body).poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .size_hint()
     }
 }
 

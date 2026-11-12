@@ -81,6 +81,7 @@ mod metrics;
 mod oauth;
 pub(crate) mod oauth2;
 mod openapi;
+pub mod panel;
 mod platform;
 mod ports;
 mod proxies;
@@ -129,6 +130,9 @@ pub async fn start_admin_on(
 ) -> anyhow::Result<()> {
     let mut event_recv = event.subscribe();
     let app = build_admin(app_info, command, callback, event, accounts, upgrade).await?;
+    let addr = listener.local_addr()?;
+    panel::install(addr, app.clone());
+    let _registered = PanelGuard(addr);
 
     axum::serve(
         listener,
@@ -151,6 +155,15 @@ pub async fn start_admin_on(
     })
     .await?;
     Ok(())
+}
+
+/// Removes the panel from the registry when the admin API stops, also on an error.
+struct PanelGuard(SocketAddr);
+
+impl Drop for PanelGuard {
+    fn drop(&mut self) {
+        panel::clear(self.0);
+    }
 }
 
 /// Loads the state of the admin API, starts its background tasks and builds its router, apart

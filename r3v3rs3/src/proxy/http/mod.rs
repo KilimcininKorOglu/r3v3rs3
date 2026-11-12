@@ -1539,6 +1539,20 @@ struct PreparedRequest<'a> {
     concurrency_guard: Option<concurrency_limit::ConcurrencyGuard>,
 }
 
+/// The client of the request with the `Host` it sent, an HTTP/2 client in the URI authority.
+fn proxied_client<B>(
+    req: &Request<B>,
+    ip: std::net::IpAddr,
+    secure: bool,
+) -> client_ip::ProxiedClient {
+    let host = req.headers().get(hyper::header::HOST).cloned().or_else(|| {
+        req.uri()
+            .authority()
+            .and_then(|authority| hyper::header::HeaderValue::from_str(authority.as_str()).ok())
+    });
+    client_ip::ProxiedClient { ip, secure, host }
+}
+
 /// Selects the upstream server, applies the header rules and builds the cache request. The route
 /// accepted the request already.
 fn prepare_upstream_request<B>(
@@ -1572,6 +1586,8 @@ where
     let resource_id = route.resource_id;
     let route_path = route.route_path.clone();
     let secure = info.proto != "http";
+    let proxied = proxied_client(&req, client.ip, secure);
+    req.extensions_mut().insert(proxied);
     let sticky_cookie = match upstream.select(&mut req, res.path_segments, client.ip, secure) {
         Ok(sticky_cookie) => sticky_cookie,
         Err(err) => {
