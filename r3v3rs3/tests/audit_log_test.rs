@@ -7,6 +7,7 @@ use r3v3rs3::{
     server::Server,
 };
 use r3v3rs3_api::{
+    app::AppConfig,
     audit::{AuditAction, AuditEntry},
     auth::{LoginMethod, LoginRequest, Role},
     event::ServerEvent,
@@ -162,6 +163,92 @@ async fn the_audit_log_records_the_changes_and_the_sign_ins_of_an_account() -> a
     );
     let viewer = login_when_allowed(addr, "viewer", "viewer-secret").await?;
     assert_eq!(audit("", &viewer).await?.status(), 403);
+
+    event.send(ServerEvent::Shutdown)?;
+    task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_audit_log_records_the_forwarded_client_of_a_trusted_proxy() -> anyhow::Result<()> {
+    let dir = std::env::temp_dir().join(format!("r3v3rs3-audit-proxy-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
+    let started = unix_ms();
+
+    // The panel sits behind r3v3rs3's own proxy on loopback, as on a production host.
+    let mut config = AppConfig::default();
+    config.admin.trusted_proxies = vec!["127.0.0.1/32".parse()?];
+    let storage = TestStorage::builder()
+        .config(config)
+        .account("admin", "secret", Role::Admin, None)
+        .build();
+    let (server, channels) = Server::new(new_appinfo(&dir, &dir), storage).await;
+    let event = channels.event.clone();
+    let task = tokio::spawn(server.start());
+    let addr = alloc_tcp_port().await?.socket_addr();
+    tokio::spawn(start_admin(
+        new_appinfo(&dir, &dir),
+        addr,
+        channels.command,
+        channels.callback,
+        channels.event.clone(),
+        channels.accounts.clone(),
+    ));
+    wait_for_listener(addr).await?;
+
+    let client = Client::new();
+    let cookie = session_cookie(addr, "admin", "secret").await?;
+    let account = json!({"username": "viewer", "password": "viewer-secret", "role": "viewer"});
+    client
+        .post(format!("http://{addr}/api/accounts"))
+        .header(COOKIE, &cookie)
+        .header("x-forwarded-for", "203.0.113.8")
+        .json(&account)
+        .send()
+        .await?
+        .error_for_status()?;
+    client
+        .post(format!("http://{addr}/api/logout"))
+        .header(COOKIE, &cookie)
+        .header("x-forwarded-for", "203.0.113.9")
+        .send()
+        .await?
+        .error_for_status()?;
+
+    let store = SqliteAuditStore::new(dir.join("log.db"));
+    let filter = AuditFilter {
+        since: started,
+        until: u64::MAX,
+        username: None,
+        resource_id: None,
+        action: None,
+        search: None,
+        limit: 100,
+    };
+    let (store, filter) = (&store, &filter);
+    wait_until(
+        move || async move { Ok(store.query(filter).await?.len() >= 3) },
+        "the audit log does not hold three entries",
+    )
+    .await?;
+    let entries = store.query(filter).await?;
+    let client_of = |action: AuditAction| {
+        entries
+            .iter()
+            .find(|entry| entry.action == action)
+            .and_then(|entry| entry.client)
+            .map(|ip| ip.to_string())
+    };
+    // A session request and the sign-out record the address that the proxy forwarded.
+    assert_eq!(
+        client_of(AuditAction::AddAccount).as_deref(),
+        Some("203.0.113.8")
+    );
+    assert_eq!(
+        client_of(AuditAction::Logout).as_deref(),
+        Some("203.0.113.9")
+    );
 
     event.send(ServerEvent::Shutdown)?;
     task.await??;

@@ -140,7 +140,10 @@ pub(crate) fn header_ip(headers: &axum::http::HeaderMap, name: &'static str) -> 
         .and_then(|s| s.trim().parse::<IpAddr>().ok())
 }
 
-async fn resolve_client_ip(
+/// The address of the client: the forwarded address when the peer is a trusted proxy of the
+/// admin API, else the peer address. Every audit record, ban and rate limit of the admin API
+/// takes the client address from here.
+pub(crate) async fn resolve_client_ip(
     state: &AppState,
     peer: &SocketAddr,
     headers: &axum::http::HeaderMap,
@@ -384,7 +387,8 @@ pub async fn logout(
 
     if let Some(token) = jar.get(ADMIN_SESSION_COOKIE) {
         let (backend, _) = session_backend(&state).await;
-        record_logout(&state, backend.as_ref(), token.value(), peer).await;
+        let client_ip = resolve_client_ip(&state, &peer, &headers).await;
+        record_logout(&state, backend.as_ref(), token.value(), client_ip).await;
         for scope in [SessionScope::Admin, SessionScope::Login] {
             if let Err(err) = backend.remove(scope, token.value()).await {
                 warn!(%err, "failed to end the session");
@@ -407,13 +411,13 @@ async fn record_logout(
     state: &AppState,
     backend: &dyn SessionBackend,
     token: &str,
-    peer: SocketAddr,
+    client_ip: IpAddr,
 ) {
     match backend.get(SessionScope::Admin, token).await {
         Ok(Some(record)) => {
             let audit = AuditRecord::new(AuditAction::Logout);
             state
-                .record_audit(&record.subject, Some(peer.ip()), audit)
+                .record_audit(&record.subject, Some(client_ip), audit)
                 .await;
         }
         Ok(None) => {}
@@ -918,10 +922,14 @@ pub async fn verify(
                     return AppError::R3v3rs3(err).into_response();
                 }
             }
-            caller.client = request
+            let peer = request
                 .extensions()
                 .get::<ConnectInfo<SocketAddr>>()
-                .map(|info| info.0.ip());
+                .map(|info| info.0);
+            caller.client = match peer {
+                Some(peer) => Some(resolve_client_ip(&state, &peer, request.headers()).await),
+                None => None,
+            };
             request.extensions_mut().insert(caller);
             if let Some(token) = session_token {
                 request.extensions_mut().insert(AuthSessionToken(token));

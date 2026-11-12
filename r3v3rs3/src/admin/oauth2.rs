@@ -1638,9 +1638,12 @@ pub async fn register(
 pub async fn token(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Form(form): Form<TokenForm>,
 ) -> Response {
-    let ip = r3v3rs3_api::client_ip::canonical_client_ip(peer.ip());
+    let ip = r3v3rs3_api::client_ip::canonical_client_ip(
+        super::auth::resolve_client_ip(&state, &peer, &headers).await,
+    );
     let now = Instant::now();
     {
         let mut data = state.data.lock().await;
@@ -1840,7 +1843,7 @@ pub async fn verify_bearer(
     let Some(mut caller) = state.accounts.borrow().caller(&record) else {
         return unauthorized(&origin);
     };
-    caller.client = Some(addr.ip());
+    caller.client = Some(super::auth::resolve_client_ip(&state, &addr, &headers).await);
     request.extensions_mut().insert(caller);
     request.extensions_mut().insert(super::McpScope(scope));
     next.run(request).await

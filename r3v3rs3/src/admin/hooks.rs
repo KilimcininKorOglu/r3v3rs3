@@ -94,7 +94,8 @@ pub async fn app_hook(
             .id(id)
             .summary(format!("{} ({}): {started}", app.name, provider.as_str()));
         // A webhook request has no account.
-        state.record_audit("", Some(peer.ip()), record).await;
+        let client_ip = super::auth::resolve_client_ip(&state, &peer, &headers).await;
+        state.record_audit("", Some(client_ip), record).await;
     }
     Ok((status, Json(response)).into_response())
 }
