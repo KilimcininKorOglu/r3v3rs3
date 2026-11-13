@@ -283,6 +283,7 @@ async fn send_pitr_restore(
 }
 
 fn archive_wal_action(
+    locale: Locale,
     id: ShortId,
     notice: UseStateHandle<Option<Notice<&'static str>>>,
     reload: Callback<()>,
@@ -292,19 +293,17 @@ fn archive_wal_action(
         let notice = notice.clone();
         let reload = reload.clone();
         spawn_local(async move {
-            let req = Request::post(&format!("{API_ENDPOINT}/databases/{id}/wal/archive"))
-                .send()
-                .await;
-            match req {
-                Ok(res) if res.ok() => {
+            let path = format!("{API_ENDPOINT}/databases/{id}/wal/archive");
+            let sent = match Request::post(&path).build() {
+                Ok(request) => send_request(locale, request).await.map(|_| ()),
+                Err(err) => Err(err.to_string()),
+            };
+            match sent {
+                Ok(()) => {
                     notice.set(Some(Notice::Saved("databases.wal_archived")));
                     reload.emit(());
                 }
-                Ok(res) => {
-                    let msg = res.text().await.unwrap_or_default();
-                    notice.set(Some(Notice::Failed(msg)));
-                }
-                Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
+                Err(message) => notice.set(Some(Notice::Failed(message))),
             }
         });
     })
@@ -347,7 +346,7 @@ fn pitr_banner_view(
         </Button>
     };
     let wal_btn = can_edit.then(|| {
-        let onclick = archive_wal_action(id, notice.clone(), reload.clone());
+        let onclick = archive_wal_action(locale, id, notice.clone(), reload.clone());
         html! {
             <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} {onclick}>
                 {locale.t("databases.wal_archive")}
