@@ -254,10 +254,9 @@ async fn route_paths_are_rewritten_before_the_server_path() -> anyhow::Result<()
     .await
 }
 
-#[tokio::test]
-async fn redirect_rules_answer_after_the_ip_filter() -> anyhow::Result<()> {
-    let app = start_named_upstream("app").await?;
-    let port = alloc_tcp_port().await?;
+/// Builds the `open.test` proxy with redirect rules and the `closed.test` proxy with the same
+/// rules behind an IP filter that denies loopback.
+fn redirect_proxies(app: &Url) -> anyhow::Result<(HttpProxy, HttpProxy)> {
     let redirects = [
         r"301 ^open\.test/old/(.*)$ https://new.test/${1}",
         r"308 ^open\.test/old/.*$ https://unused.test/",
@@ -281,6 +280,35 @@ async fn redirect_rules_answer_after_the_ip_filter() -> anyhow::Result<()> {
             vec![http_route("/", app.as_str(), Some(local))],
         )
     };
+    Ok((open, closed))
+}
+
+/// Sends a request without following redirects and returns the status and the `Location`
+/// header.
+async fn get_redirect(
+    client: &reqwest::Client,
+    port: &TestPort,
+    host: &'static str,
+    path: &str,
+) -> anyhow::Result<(u16, Option<String>)> {
+    let res = client
+        .get(port.http_url(path))
+        .header("host", host)
+        .send()
+        .await?;
+    let location = res
+        .headers()
+        .get("location")
+        .map(|value| value.to_str().map(str::to_string))
+        .transpose()?;
+    Ok((res.status().as_u16(), location))
+}
+
+#[tokio::test]
+async fn redirect_rules_answer_after_the_ip_filter() -> anyhow::Result<()> {
+    let app = start_named_upstream("app").await?;
+    let port = alloc_tcp_port().await?;
+    let (open, closed) = redirect_proxies(&app)?;
     let config = TestStorage::builder()
         .ports(vec![http_port_entry("redirect", &port)])
         .proxies(vec![
@@ -293,18 +321,7 @@ async fn redirect_rules_answer_after_the_ip_filter() -> anyhow::Result<()> {
         let client = reqwest::Client::builder()
             .redirect(Policy::none())
             .build()?;
-        let get = |host: &'static str, path: &str| {
-            let request = client.get(port.http_url(path)).header("host", host);
-            async move {
-                let res = request.send().await?;
-                let location = res
-                    .headers()
-                    .get("location")
-                    .map(|value| value.to_str().map(str::to_string))
-                    .transpose()?;
-                anyhow::Ok((res.status().as_u16(), location))
-            }
-        };
+        let get = |host: &'static str, path: &'static str| get_redirect(&client, &port, host, path);
         let moved = Some("https://new.test/a/b?x=1".to_string());
         assert_eq!(get("open.test", "/old/a/b?x=1").await?, (301, moved));
         let temporary = Some("/elsewhere".to_string());
