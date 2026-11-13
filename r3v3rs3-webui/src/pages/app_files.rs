@@ -811,11 +811,13 @@ fn restore_snapshot(
         "apps.volume_backup_confirm_restore",
         &[("volume", volume), ("id", backup_id)],
     );
-    let Ok(request) = Request::post(&format!(
+    let request = match Request::post(&format!(
         "{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/backups/{backup_id}/restore"
     ))
-    .build() else {
-        return;
+    .build()
+    {
+        Ok(request) => request,
+        Err(err) => return notice.set(Some(err.to_string())),
     };
     let dir = dir.clone();
     let entries = entries.clone();
@@ -839,11 +841,13 @@ fn delete_snapshot(
     notice: &UseStateHandle<Option<String>>,
 ) {
     let question = locale.tf("apps.volume_backup_confirm_delete", &[("id", backup_id)]);
-    let Ok(request) = Request::delete(&format!(
+    let request = match Request::delete(&format!(
         "{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/backups/{backup_id}"
     ))
-    .build() else {
-        return;
+    .build()
+    {
+        Ok(request) => request,
+        Err(err) => return notice.set(Some(err.to_string())),
     };
     let backups = backups.clone();
     let notice = notice.clone();
