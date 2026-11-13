@@ -730,21 +730,8 @@ async fn register_passkey_request(
     locale: Locale,
     req: &PasskeyRegisterRequest,
 ) -> Result<(), String> {
-    let post_res = Request::post(&format!("{API_ENDPOINT}/auth/passkey/register"))
-        .json(req)
-        .map_err(|err| err.to_string())?
-        .send()
-        .await
-        .map_err(|err| err.to_string())?;
-    if post_res.ok() {
-        Ok(())
-    } else {
-        let msg = post_res
-            .text()
-            .await
-            .unwrap_or_else(|_| locale.t("error.invalid_passkey").to_string());
-        Err(msg)
-    }
+    let path = format!("{API_ENDPOINT}/auth/passkey/register");
+    send_json(locale, Request::post(&path), req).await
 }
 
 async fn add_passkey_flow(locale: Locale, form: UseStateHandle<Form>, accounts: AccountList) {
