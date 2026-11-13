@@ -1,10 +1,12 @@
 use r3v3rs3::config::storage::Storage;
+use r3v3rs3::server::ServerChannels;
 use r3v3rs3::server::rpc::config::{GetConfig, SetConfig};
 use r3v3rs3::server::rpc::ports::{DeletePort, GetPortList};
 use r3v3rs3::server::rpc::proxies::{DeleteProxy, GetProxyList, UpdateProxy};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::error::Error;
-use r3v3rs3_api::proxy::HttpProxy;
+use r3v3rs3_api::port::PortEntry;
+use r3v3rs3_api::proxy::{HttpProxy, ProxyEntry};
 use std::time::Duration;
 
 mod common;
@@ -86,42 +88,9 @@ async fn a_change_is_not_applied_when_the_storage_cannot_save() -> anyhow::Resul
             .set_save_error(Some(Error::FailedToSaveConfig))
             .await;
 
-        let update = UpdateProxy {
-            entry: renamed.clone(),
-        };
-        let updated = call(&mut channels, update).await?;
-        assert!(
-            matches!(updated, Err(Error::FailedToSaveConfig)),
-            "{updated:?}"
-        );
-        let deleted = call(&mut channels, DeleteProxy { id: manual.id }).await?;
-        assert!(
-            matches!(deleted, Err(Error::FailedToSaveConfig)),
-            "{deleted:?}"
-        );
-        let proxies = call(&mut channels, GetProxyList).await??;
-        assert_eq!(proxies.len(), 1);
-        assert_eq!(proxies[0].id, manual.id);
-        assert_eq!(proxies[0].proxy, manual.proxy);
-
-        let deleted = call(&mut channels, DeletePort { id: port.id }).await?;
-        assert!(
-            matches!(deleted, Err(Error::FailedToSaveConfig)),
-            "{deleted:?}"
-        );
-        let ports = call(&mut channels, GetPortList).await??;
-        assert_eq!(ports.len(), 1);
-        assert_eq!(ports[0].id, port.id);
-        assert_eq!(ports[0].port, port.port);
-
-        let config = AppConfig {
-            background_task_interval: Duration::from_secs(600),
-            ..Default::default()
-        };
-        let set = call(&mut channels, SetConfig { config }).await?;
-        assert!(matches!(set, Err(Error::FailedToSaveConfig)), "{set:?}");
-        let current = call(&mut channels, GetConfig).await??;
-        assert_eq!(current.background_task_interval, Duration::from_secs(3600));
+        check_proxy_changes_not_applied(&mut channels, &manual, &renamed).await?;
+        check_port_delete_not_applied(&mut channels, &port).await?;
+        check_config_change_not_applied(&mut channels).await?;
 
         server_storage.set_save_error(None).await;
         call(&mut channels, UpdateProxy { entry: renamed }).await??;
@@ -130,6 +99,63 @@ async fn a_change_is_not_applied_when_the_storage_cannot_save() -> anyhow::Resul
     .await?;
 
     assert_eq!(storage.load_proxies().await, expected);
+    Ok(())
+}
+
+/// Checks that a failed save rejects the update and the delete of a proxy and keeps the old
+/// proxy.
+async fn check_proxy_changes_not_applied(
+    channels: &mut ServerChannels,
+    manual: &ProxyEntry,
+    renamed: &ProxyEntry,
+) -> anyhow::Result<()> {
+    let update = UpdateProxy {
+        entry: renamed.clone(),
+    };
+    let updated = call(channels, update).await?;
+    assert!(
+        matches!(updated, Err(Error::FailedToSaveConfig)),
+        "{updated:?}"
+    );
+    let deleted = call(channels, DeleteProxy { id: manual.id }).await?;
+    assert!(
+        matches!(deleted, Err(Error::FailedToSaveConfig)),
+        "{deleted:?}"
+    );
+    let proxies = call(channels, GetProxyList).await??;
+    assert_eq!(proxies.len(), 1);
+    assert_eq!(proxies[0].id, manual.id);
+    assert_eq!(proxies[0].proxy, manual.proxy);
+    Ok(())
+}
+
+/// Checks that a failed save rejects the delete of a port and keeps the port.
+async fn check_port_delete_not_applied(
+    channels: &mut ServerChannels,
+    port: &PortEntry,
+) -> anyhow::Result<()> {
+    let deleted = call(channels, DeletePort { id: port.id }).await?;
+    assert!(
+        matches!(deleted, Err(Error::FailedToSaveConfig)),
+        "{deleted:?}"
+    );
+    let ports = call(channels, GetPortList).await??;
+    assert_eq!(ports.len(), 1);
+    assert_eq!(ports[0].id, port.id);
+    assert_eq!(ports[0].port, port.port);
+    Ok(())
+}
+
+/// Checks that a failed save rejects a config change and keeps the old config.
+async fn check_config_change_not_applied(channels: &mut ServerChannels) -> anyhow::Result<()> {
+    let config = AppConfig {
+        background_task_interval: Duration::from_secs(600),
+        ..Default::default()
+    };
+    let set = call(channels, SetConfig { config }).await?;
+    assert!(matches!(set, Err(Error::FailedToSaveConfig)), "{set:?}");
+    let current = call(channels, GetConfig).await??;
+    assert_eq!(current.background_task_interval, Duration::from_secs(3600));
     Ok(())
 }
 
