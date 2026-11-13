@@ -2,7 +2,7 @@
 
 use super::accounts::{INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{FormCard, add_button, form_modal};
-use super::settings::send_json;
+use super::settings::{fetch_json, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -289,7 +289,7 @@ fn render_project_row(
         let p_id = p.id;
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
-            open_env_modal(p_id, env_modal.clone());
+            open_env_modal(locale, p_id, env_modal.clone());
         })
     };
 
@@ -338,60 +338,74 @@ fn render_project_row(
     }
 }
 
-fn open_env_modal(project_id: ShortId, modal: UseStateHandle<Option<EnvModalState>>) {
+/// The variables of one environment. A failed read is an error, never an empty list: saving an
+/// empty list would delete every variable of the environment.
+async fn load_env_vars(
+    locale: Locale,
+    project_id: ShortId,
+    env_id: ShortId,
+) -> Result<Vec<EnvVarRow>, String> {
+    let url = format!("{API_ENDPOINT}{PATH}/{project_id}/environments/{env_id}/env");
+    let entries = fetch_json::<Vec<EnvEntry>>(locale, Request::get(&url)).await?;
+    Ok(entries.into_iter().map(EnvVarRow::from_entry).collect())
+}
+
+async fn load_env_modal(
+    locale: Locale,
+    project_id: ShortId,
+) -> Result<Option<EnvModalState>, String> {
+    let url = format!("{API_ENDPOINT}{PATH}/{project_id}");
+    let p = fetch_json::<Project>(locale, Request::get(&url)).await?;
+    let Some(first_env) = p.environments.first() else {
+        return Ok(None);
+    };
+    let variables = load_env_vars(locale, project_id, first_env.id).await?;
+    Ok(Some(EnvModalState {
+        project_id,
+        project_name: p.name.clone(),
+        selected_env_id: first_env.id,
+        diff_source_id: Some(first_env.id),
+        diff_target_id: p.environments.get(1).map(|e| e.id),
+        environments: p.environments,
+        active_tab: EnvModalTab::Variables,
+        variables,
+        diff_report: None,
+        sync_status_msg: None,
+    }))
+}
+
+fn open_env_modal(
+    locale: Locale,
+    project_id: ShortId,
+    modal: UseStateHandle<Option<EnvModalState>>,
+) {
     spawn_local(async move {
-        let url = format!("{API_ENDPOINT}{PATH}/{project_id}");
-        let Ok(res) = Request::get(&url).send().await else {
-            return;
-        };
-        let Ok(p) = res.json::<Project>().await else {
-            return;
-        };
-        if let Some(first_env) = p.environments.first() {
-            let env_url = format!(
-                "{API_ENDPOINT}{PATH}/{project_id}/environments/{}/env",
-                first_env.id
-            );
-            let vars = if let Ok(v_res) = Request::get(&env_url).send().await {
-                v_res.json::<Vec<EnvEntry>>().await.unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            let diff_source_id = Some(first_env.id);
-            let diff_target_id = p.environments.get(1).map(|e| e.id);
-            modal.set(Some(EnvModalState {
-                project_id,
-                project_name: p.name,
-                selected_env_id: first_env.id,
-                environments: p.environments,
-                active_tab: EnvModalTab::Variables,
-                variables: vars.into_iter().map(EnvVarRow::from_entry).collect(),
-                diff_source_id,
-                diff_target_id,
-                diff_report: None,
-                sync_status_msg: None,
-            }));
+        match load_env_modal(locale, project_id).await {
+            Ok(Some(state)) => modal.set(Some(state)),
+            Ok(None) => {}
+            Err(message) => dialog::message(locale, &message, dialog::Icon::Error).await,
         }
     });
 }
 
 fn switch_env_tab(
+    locale: Locale,
     modal: UseStateHandle<Option<EnvModalState>>,
     project_id: ShortId,
     env_id: ShortId,
 ) {
     spawn_local(async move {
-        let env_url = format!("{API_ENDPOINT}{PATH}/{project_id}/environments/{env_id}/env");
-        let vars = if let Ok(v_res) = Request::get(&env_url).send().await {
-            v_res.json::<Vec<EnvEntry>>().await.unwrap_or_default()
-        } else {
-            Vec::new()
+        let variables = match load_env_vars(locale, project_id, env_id).await {
+            Ok(variables) => variables,
+            Err(message) => {
+                return dialog::message(locale, &message, dialog::Icon::Error).await;
+            }
         };
         modal.set(modal.as_ref().map(|st| {
             let mut updated = st.clone();
             updated.selected_env_id = env_id;
             updated.active_tab = EnvModalTab::Variables;
-            updated.variables = vars.into_iter().map(EnvVarRow::from_entry).collect();
+            updated.variables = variables;
             updated.sync_status_msg = None;
             updated
         }));
@@ -716,7 +730,7 @@ fn render_env_modal_tabs(
             let modal_ref = env_modal.clone();
             let on_tab = Callback::from(move |e: MouseEvent| {
                 e.prevent_default();
-                switch_env_tab(modal_ref.clone(), project_id, env_id);
+                switch_env_tab(locale, modal_ref.clone(), project_id, env_id);
             });
             TabItem::click(env.name.clone(), on_tab, is_selected)
         })
