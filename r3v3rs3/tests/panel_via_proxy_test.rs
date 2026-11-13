@@ -270,7 +270,8 @@ fn cookie_pair(set_cookie: &str) -> String {
     set_cookie.split(';').next().unwrap_or_default().to_string()
 }
 
-/// The client address of the newest audit entry of `username` with `action`.
+/// The client address of the newest audit entry of `username` with `action`. The server writes
+/// an audit entry in the background after it answers, so this waits until the entry appears.
 async fn audit_client(
     panel: &Panel,
     browser: &Client,
@@ -278,19 +279,35 @@ async fn audit_client(
     username: &str,
     action: &str,
 ) -> anyhow::Result<Option<String>> {
-    let entries: Vec<Value> = browser
-        .get(panel.url(&format!("/api/audit?username={username}&limit=50")))
-        .header("cookie", cookie)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-    Ok(entries
-        .iter()
-        .find(|entry| entry["action"] == action)
-        .and_then(|entry| entry["client"].as_str())
-        .map(str::to_string))
+    audit_client_at(&panel.public, browser, cookie, username, action).await
+}
+
+/// [`audit_client`] through the admin API at `base`.
+async fn audit_client_at(
+    base: &str,
+    browser: &Client,
+    cookie: &str,
+    username: &str,
+    action: &str,
+) -> anyhow::Result<Option<String>> {
+    let found = std::sync::Mutex::new(None);
+    let entry = || async {
+        let entries: Vec<Value> = browser
+            .get(format!("{base}/api/audit?username={username}&limit=50"))
+            .header("cookie", cookie)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let entry = entries.into_iter().find(|entry| entry["action"] == action);
+        let ready = entry.is_some();
+        *found.lock().unwrap() = entry;
+        Ok(ready)
+    };
+    wait_until(entry, &format!("no audit entry {action} of {username}")).await?;
+    let entry = found.lock().unwrap().take();
+    Ok(entry.and_then(|entry| entry["client"].as_str().map(str::to_string)))
 }
 
 /// A signed-in account changes the state through the proxy: the cookie is `Secure`, the
@@ -513,17 +530,10 @@ async fn a_direct_loopback_request_cannot_forge_the_client_address() -> anyhow::
             "a forged X-Forwarded-Proto must not mark the cookie Secure: {set_cookie}"
         );
         let cookie = cookie_pair(&set_cookie);
-        let entries: Vec<Value> = Client::new()
-            .get(format!("http://{}/api/audit?username=direct", panel.admin))
-            .header("cookie", &cookie)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        let login = entries.iter().find(|entry| entry["action"] == "login");
+        let base = format!("http://{}", panel.admin);
+        let login = audit_client_at(&base, &Client::new(), &cookie, "direct", "login").await?;
         assert_eq!(
-            login.and_then(|entry| entry["client"].as_str()),
+            login.as_deref(),
             Some("127.0.0.1"),
             "a forged X-Forwarded-For must not reach the audit log"
         );
