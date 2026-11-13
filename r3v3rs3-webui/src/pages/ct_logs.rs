@@ -3,7 +3,6 @@ use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::format::format_duration;
 use crate::i18n::use_locale;
-use crate::pages::Route;
 use gloo_net::http::Request;
 use r3v3rs3_api::ct::{
     CtAlertStatus, CtLogEntry, CtMonitorConfig, CtMonitorStatus, DismissCtAlertRequest,
@@ -12,7 +11,6 @@ use r3v3rs3_api::ct::{
 use r3v3rs3_api::i18n::Locale;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
-use yew_router::prelude::*;
 
 #[derive(Clone)]
 struct CtFormHandles {
@@ -195,43 +193,11 @@ pub fn ct_logs() -> Html {
 
     html! {
         <div class="space-y-6">
-            { render_tabs(locale) }
             { render_header(locale, *checking, check_now_onclick, toggle_settings) }
             { drawer }
             { summary }
             { render_filter_bar(locale, &rogue_only, &search_filter) }
             { render_entries_table(locale, &filtered, load_data) }
-        </div>
-    }
-}
-
-fn render_tabs(locale: Locale) -> Html {
-    let tabs = [
-        (Route::Certs, "certs.tab_server"),
-        (Route::AcmeCerts, "certs.tab_acme"),
-        (Route::CtLogs, "certs.tab_ct_logs"),
-        (Route::ClientCerts, "certs.tab_client"),
-        (Route::RootCerts, "certs.tab_root"),
-        (Route::DnsCredentials, "certs.tab_dns_credentials"),
-    ];
-
-    html! {
-        <div class="border-b border-neutral-200 dark:border-neutral-800">
-            <nav class="flex space-x-6">
-                { for tabs.into_iter().map(|(route, label)| {
-                    let is_active = route == Route::CtLogs;
-                    let active_cls = if is_active {
-                        "border-primary-500 text-primary-600 dark:text-primary-400 font-semibold border-b-2"
-                    } else {
-                        "border-transparent text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
-                    };
-                    html! {
-                        <Link<Route> to={route} classes={classes!("py-3", "px-1", "text-sm", active_cls)}>
-                            { locale.t(label) }
-                        </Link<Route>>
-                    }
-                }) }
-            </nav>
         </div>
     }
 }
