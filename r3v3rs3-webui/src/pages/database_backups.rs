@@ -133,10 +133,10 @@ pub fn database_backups(props: &Props) -> Html {
 fn load_app(locale: Locale, id: ShortId, app: &UseStateHandle<Option<AppEntry>>) {
     let app = app.clone();
     spawn_local(async move {
-        if let Ok(entry) =
-            fetch_json::<AppEntry>(locale, Request::get(&format!("{API_ENDPOINT}/apps/{id}"))).await
-        {
-            app.set(Some(entry));
+        let request = Request::get(&format!("{API_ENDPOINT}/apps/{id}"));
+        match fetch_json::<AppEntry>(locale, request).await {
+            Ok(entry) => app.set(Some(entry)),
+            Err(message) => dialog::message(locale, &message, Icon::Error).await,
         }
     });
 }
