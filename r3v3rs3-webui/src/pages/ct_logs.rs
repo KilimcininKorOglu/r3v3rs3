@@ -141,11 +141,14 @@ fn create_check_callback(
 fn create_save_callback(
     locale: Locale,
     form: CtFormHandles,
+    config: UseStateHandle<Option<CtMonitorConfig>>,
     show_settings: UseStateHandle<bool>,
     reload: Callback<()>,
 ) -> Callback<SubmitEvent> {
     Callback::from(move |event: SubmitEvent| {
         event.prevent_default();
+        // The form has no field for the API URL, and the server stores the whole object, so
+        // the loaded URL goes back unchanged.
         let req = build_update_config_request(
             *form.enabled,
             *form.auto_discover,
@@ -153,6 +156,7 @@ fn create_save_callback(
             *form.interval_hours,
             &form.domains,
             &form.issuers,
+            config.as_ref().and_then(|config| config.ct_api_url.clone()),
         );
         let show = show_settings.clone();
         let rel = reload.clone();
@@ -276,6 +280,7 @@ pub fn ct_logs() -> Html {
     let save_settings = create_save_callback(
         locale,
         form_handles.clone(),
+        data_handles.config.clone(),
         show_settings.clone(),
         load_data.clone(),
     );
@@ -653,6 +658,7 @@ fn build_update_config_request(
     interval_hours: u64,
     domains_str: &str,
     issuers_str: &str,
+    ct_api_url: Option<String>,
 ) -> UpdateCtConfigRequest {
     let monitored_domains = domains_str
         .split(',')
@@ -674,7 +680,7 @@ fn build_update_config_request(
             auto_discover_domains: auto_discover,
             allowed_issuers,
             alert_on_unknown_issuer: alert_unknown,
-            ct_api_url: None,
+            ct_api_url,
         },
     }
 }
@@ -702,6 +708,26 @@ mod tests {
         assert!(filter_entry_view(&entry, false, "example"));
         assert!(!filter_entry_view(&entry, false, "google"));
         assert!(!filter_entry_view(&entry, true, ""));
+    }
+
+    #[test]
+    fn a_saved_config_keeps_the_api_url_that_the_form_does_not_show() {
+        let url = "https://ct.example.test/?q={domain}".to_string();
+        let req = build_update_config_request(
+            true,
+            false,
+            true,
+            0,
+            " a.example.test, ,b.example.test ",
+            "Issuer One",
+            Some(url.clone()),
+        );
+        assert_eq!(req.config.ct_api_url, Some(url));
+        assert_eq!(
+            req.config.monitored_domains,
+            ["a.example.test", "b.example.test"]
+        );
+        assert_eq!(req.config.check_interval_secs, 3600);
     }
 
     #[test]
