@@ -78,11 +78,11 @@ pub fn app_files(props: &Props) -> Html {
         .map(|a| current_volume(a, &dir))
         .unwrap_or_default();
     {
-        let backups = backups.clone();
+        let (backups, notice) = (backups.clone(), notice.clone());
         let vol_name = vol_name.clone();
         use_effect_with((signed_in, vol_name), move |(signed_in, vol)| {
             if *signed_in && !vol.is_empty() {
-                load_volume_backups(locale, app_id, vol, &backups);
+                load_volume_backups(locale, app_id, vol, &backups, &notice);
             }
         });
     }
@@ -758,15 +758,17 @@ fn load_volume_backups(
     app_id: ShortId,
     volume: &str,
     backups: &UseStateHandle<Vec<VolumeBackupEntry>>,
+    notice: &UseStateHandle<Option<String>>,
 ) {
-    let backups = backups.clone();
+    let (backups, notice) = (backups.clone(), notice.clone());
     let volume = volume.to_string();
     wasm_bindgen_futures::spawn_local(async move {
         let request = Request::get(&format!(
             "{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/backups"
         ));
-        if let Ok(entries) = fetch_json::<Vec<VolumeBackupEntry>>(locale, request).await {
-            backups.set(entries);
+        match fetch_json::<Vec<VolumeBackupEntry>>(locale, request).await {
+            Ok(entries) => backups.set(entries),
+            Err(message) => notice.set(Some(message)),
         }
     });
 }
