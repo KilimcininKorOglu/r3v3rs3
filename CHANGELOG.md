@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.5] - 2026-11-13
+
+### Added
+- Shared database servers. A database without a project is a shared server that an app of any project can use. Each project environment that connects gets its own database and user on the server (`p_<project>_<environment>`, or `a_<app>` for an app without a project), so one project cannot read the data of another. On Redis each tenant is an ACL user limited to the keys and channels under its prefix, which the app receives as `REDIS_PREFIX`. The tenants stay when an app leaves the server or its project is deleted.
+- Database credentials for Admin accounts: `GET /api/databases/{id}/credentials` returns the root account and every tenant with password and connection string, and every read is audited without the passwords. `POST /api/databases/{id}/password` gives the root account or a tenant a new password and redeploys the apps that connect with it; a root password that the database refuses keeps the stored one. `GET /api/databases/{id}/tenants` lists the tenants with their apps, and `DELETE /api/databases/{id}/tenants/{tenant}` removes a tenant that no app uses.
+- MCP tools `get_database_credentials`, `list_database_tenants`, `reset_database_password` and `delete_database_tenant`.
+- CLI commands `r3 db credentials`, `r3 db tenants`, `r3 db reset-password` and `r3 db delete-tenant`.
+- The Databases page marks shared servers and gives Admin accounts a credentials panel with password reset and tenant deletion; the app form names a shared database as such.
+
+### Fixed
+- Redis databases get a password for their `default` user (`REDIS_PASSWORD`). Without it every client, even one with a wrong tenant password, fell back to the passwordless default user and reached the keys of every project. A Redis created before this release keeps running without a password until an Admin account gives it a root password.
+- Update quinn-proto to 0.11.19 and quinn-udp to 0.5.16 for RUSTSEC-2026-0523, RUSTSEC-2026-0524 and RUSTSEC-2026-0538.
+- Return an error instead of panicking when a MongoDB connection URI cannot be built for a backup.
+- `r3 db get` and `r3 db logs` read through the app routes, and `r3 db replica` posts to the `replicas` route; all three requested routes that do not exist.
+- `r3 db create` without `--version` takes the first version of the server's engine catalog instead of a tag that the server refuses, and the unused `--password` flag is gone.
+
+### Changed
+- Docker tests check tenant isolation, password changes, tenant deletion and backups on the real PostgreSQL, MySQL, MariaDB, MongoDB and Redis images.
+
 ## [3.2.4] - 2026-11-13
 
 ### Fixed
