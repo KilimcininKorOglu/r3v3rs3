@@ -1,6 +1,7 @@
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::data_list::{
     Column, LINK_CLASS, Row, SelectionProps, selectable_list_card, status_badge,
 };
@@ -253,20 +254,12 @@ fn build_selection(
 
     let bulk_actions = Some(html! {
         <>
-            <button
-                type="button"
-                onclick={bulk_deploy}
-                class="inline-flex items-center text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-xs px-2.5 py-1.5 dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800"
-            >
+            <Button kind={ButtonKind::Success} size={ButtonSize::Sm} onclick={bulk_deploy}>
                 {locale.t("apps.bulk_deploy")}
-            </button>
-            <button
-                type="button"
-                onclick={bulk_delete}
-                class="inline-flex items-center text-red-600 dark:text-red-400 bg-white dark:bg-neutral-800 border border-red-300 dark:border-red-700 focus:outline-none hover:bg-red-50 hover:dark:bg-red-950 focus:ring-4 focus:ring-red-200 dark:focus:ring-red-900 font-medium rounded-lg text-xs px-2.5 py-1.5"
-            >
+            </Button>
+            <Button kind={ButtonKind::Danger} size={ButtonSize::Sm} onclick={bulk_delete}>
                 {locale.t("common.bulk_delete")}
-            </button>
+            </Button>
         </>
     });
 
@@ -328,16 +321,7 @@ fn upgrade_callback(
 }
 
 fn add_button(locale: Locale, navigator: &Navigator) -> Html {
-    let navigator = navigator.clone();
-    let onclick = Callback::from(move |_: MouseEvent| navigator.push(&Route::NewApp));
-    html! {
-        <div class="flex items-center justify-end my-4">
-            <button {onclick} type="button" class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                <img src="/assets/icons/add.svg" class="w-4 h-4 mr-1" />
-                {locale.t("common.add")}
-            </button>
-        </div>
-    }
+    super::resource_page::add_button(locale, link(navigator, Route::NewApp))
 }
 
 fn name_cell(locale: Locale, app: &AppEntry) -> Html {
