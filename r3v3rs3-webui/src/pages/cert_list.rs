@@ -11,7 +11,9 @@ use crate::format::{format_duration, unix_now};
 use crate::i18n::use_locale;
 use crate::pages::Route;
 use crate::pages::self_sign::SelfSignQuery;
-use crate::pages::settings::{failure_box, format_network_error, send_request, success_box};
+use crate::pages::settings::{
+    failure_box, fetch_json, format_network_error, send_request, success_box,
+};
 use crate::store::{AcmeStore, CertStore, SessionStore};
 use gloo_net::http::Request;
 use r3v3rs3_api::acme::{AcmeInfo, DnsCredentialInfo};
@@ -116,7 +118,7 @@ pub fn cert_list(props: &CertListProps) -> Html {
     let notice = use_state(|| Option::<Result<String, String>>::None);
     let credentials = use_dns_credentials();
 
-    use_cert_lists(certs_dispatcher, acme_dispatcher);
+    use_cert_lists(locale, certs_dispatcher, acme_dispatcher);
 
     let Some(navigator) = use_navigator() else {
         return html!();
@@ -210,22 +212,29 @@ pub fn cert_list(props: &CertListProps) -> Html {
     }
 }
 
-/// Loads the certificates and the ACME requests into the stores.
+/// Loads the certificates and the ACME requests into the stores. A failed load shows its error.
 #[hook]
-fn use_cert_lists(certs: Dispatch<CertStore>, acme: Dispatch<AcmeStore>) {
+fn use_cert_lists(locale: Locale, certs: Dispatch<CertStore>, acme: Dispatch<AcmeStore>) {
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(res) = get_cert_list().await {
-                certs.set(CertStore {
-                    entries: res,
-                    loaded: true,
+            let loaded = fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/certs")))
+                .await
+                .map(|entries| {
+                    certs.set(CertStore {
+                        entries,
+                        loaded: true,
+                    })
                 });
-            }
-            if let Ok(res) = get_acme_list().await {
-                acme.set(AcmeStore {
-                    entries: res,
-                    loaded: true,
+            let acme_loaded = fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/acme")))
+                .await
+                .map(|entries| {
+                    acme.set(AcmeStore {
+                        entries,
+                        loaded: true,
+                    })
                 });
+            if let Err(err) = loaded.and(acme_loaded) {
+                dialog::message(locale, &err, dialog::Icon::Error).await;
             }
         });
     });
@@ -736,14 +745,6 @@ fn acme_provider_text(entry: &AcmeInfo, credentials: &[DnsCredentialInfo]) -> St
 
 pub async fn get_cert_list() -> Result<Vec<CertInfo>, gloo_net::Error> {
     Request::get(&format!("{API_ENDPOINT}/certs"))
-        .send()
-        .await?
-        .json()
-        .await
-}
-
-async fn get_acme_list() -> Result<Vec<AcmeInfo>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/acme"))
         .send()
         .await?
         .json()
