@@ -1522,28 +1522,12 @@ fn render_dr_row(
         })
     };
 
-    let on_delete = {
-        let id = entry.id.clone();
-        let load_backups = load_backups.clone();
-        Callback::from(move |_: MouseEvent| {
-            let id = id.clone();
-            let load_backups = load_backups.clone();
-            let question = locale.tf("backups.delete_question", &[("name", &id)]);
-            dialog::confirm_then(locale, question, async move {
-                let req =
-                    Request::delete(&format!("{API_ENDPOINT}/disaster-recovery/backups/{id}"));
-                let Ok(built) = req.build() else {
-                    return;
-                };
-                match send_request(locale, built).await {
-                    Ok(_) => load_backups.emit(()),
-                    Err(err) => {
-                        dialog::message(locale, &err, Icon::Error).await;
-                    }
-                }
-            });
-        })
-    };
+    let on_delete = delete_on_click(
+        locale,
+        locale.tf("backups.delete_question", &[("name", &entry.id)]),
+        format!("/disaster-recovery/backups/{}", entry.id),
+        load_backups.clone(),
+    );
 
     let status_badge = if entry.s3_replicated {
         html! { <span class={classes!(BADGE, BADGE_OK)}>{locale.t("settings.dr_s3_badge")}</span> }
