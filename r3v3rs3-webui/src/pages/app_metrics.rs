@@ -18,7 +18,7 @@ use yew::prelude::*;
 const POLL_MS: u32 = 10_000;
 
 type Loaded = Option<Result<Vec<AppMetricsPoint>, String>>;
-type DiagLoaded = Option<AppResourceDiagnostics>;
+type DiagLoaded = Option<Result<AppResourceDiagnostics, String>>;
 
 #[derive(Properties, PartialEq)]
 pub struct Props {
@@ -43,18 +43,15 @@ pub fn app_metrics(props: &Props) -> Html {
                         locale,
                         Request::get(&format!("{API_ENDPOINT}/apps/{id}/metrics")),
                     )
-                    .await
-                    .map_err(|err| err.to_string());
+                    .await;
                     points.set(Some(result));
 
-                    if let Ok(diag) = fetch_json::<AppResourceDiagnostics>(
+                    let diag = fetch_json::<AppResourceDiagnostics>(
                         locale,
                         Request::get(&format!("{API_ENDPOINT}/apps/{id}/diagnostics")),
                     )
-                    .await
-                    {
-                        diagnostics.set(Some(diag));
-                    }
+                    .await;
+                    diagnostics.set(Some(diag));
                 });
             };
             load();
@@ -83,7 +80,7 @@ pub fn app_metrics(props: &Props) -> Html {
 fn card_body(
     locale: Locale,
     samples: &[AppMetricsPoint],
-    diag: Option<&AppResourceDiagnostics>,
+    diag: Option<&Result<AppResourceDiagnostics, String>>,
 ) -> Html {
     let Some(latest) = samples.last() else {
         return html! { <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-2">
@@ -111,11 +108,19 @@ fn card_body(
     }
 }
 
-fn diag_section_html(locale: Locale, diag: Option<&AppResourceDiagnostics>) -> Html {
-    let Some(diag) = diag else {
-        return html! {};
-    };
-    diagnostics_section(locale, diag)
+fn diag_section_html(
+    locale: Locale,
+    diag: Option<&Result<AppResourceDiagnostics, String>>,
+) -> Html {
+    match diag {
+        None => html! {},
+        Some(Ok(diag)) => diagnostics_section(locale, diag),
+        Some(Err(message)) => html! {
+            <p class="mt-5 pt-4 border-t border-neutral-200 dark:border-neutral-700 text-sm text-red-600 dark:text-red-500">
+                {message.clone()}
+            </p>
+        },
+    }
 }
 
 fn status_badge(locale: Locale, status: ResourceHealthStatus) -> Html {
