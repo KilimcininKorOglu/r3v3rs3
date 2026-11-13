@@ -1,6 +1,6 @@
 //! The files of an app: the volumes of its running container.
 
-use super::settings::{failure_box, fetch_json, send_request};
+use super::settings::{failure_box, fetch_json, format_network_error, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -422,9 +422,12 @@ fn open_editor(ctx: &Ctx, path: &str) {
 async fn read_text(locale: Locale, app_id: ShortId, path: &str) -> Result<String, String> {
     let request = Request::get(&download_url(app_id, path))
         .build()
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| format_network_error(locale, &err))?;
     let response = send_request(locale, request).await?;
-    let bytes = response.binary().await.map_err(|err| err.to_string())?;
+    let bytes = response
+        .binary()
+        .await
+        .map_err(|err| format_network_error(locale, &err))?;
     if bytes.len() > MAX_EDIT_SIZE {
         return Err(locale.t("apps.files_too_large").to_string());
     }
@@ -495,7 +498,7 @@ fn save_file(ctx: &Ctx, file: Editing) {
                 .header("content-type", "application/octet-stream")
                 .query([("path", file.path.as_str())])
                 .body(js_sys::Uint8Array::from(file.text.as_bytes()))
-                .map_err(|err| err.to_string())?;
+                .map_err(|err| format_network_error(ctx.locale, &err))?;
             send_ok(ctx.locale, request).await
         };
         match sent.await {
@@ -520,7 +523,7 @@ fn confirm_delete(ctx: &Ctx, path: String) {
         .build()
     {
         Ok(request) => request,
-        Err(err) => return ctx.notice.set(Some(err.to_string())),
+        Err(err) => return ctx.notice.set(Some(format_network_error(locale, &err))),
     };
     let ctx = ctx.clone();
     dialog::confirm_then(locale, question, async move {
@@ -558,7 +561,7 @@ fn upload(ctx: &Ctx, event: Event) {
                 .header("content-type", "application/octet-stream")
                 .query([("path", target.as_str())])
                 .body(js_sys::Uint8Array::new(&buffer))
-                .map_err(|err| err.to_string())?;
+                .map_err(|err| format_network_error(ctx.locale, &err))?;
             send_ok(ctx.locale, request).await
         };
         if let Err(message) = sent.await {
@@ -721,7 +724,7 @@ fn restore_snapshot(ctx: &Ctx, volume: &str, backup_id: &str) {
     .build()
     {
         Ok(request) => request,
-        Err(err) => return ctx.notice.set(Some(err.to_string())),
+        Err(err) => return ctx.notice.set(Some(format_network_error(locale, &err))),
     };
     let ctx = ctx.clone();
     dialog::confirm_then(locale, question, async move {
@@ -743,7 +746,7 @@ fn delete_snapshot(ctx: &Ctx, volume: &str, backup_id: &str) {
     .build()
     {
         Ok(request) => request,
-        Err(err) => return ctx.notice.set(Some(err.to_string())),
+        Err(err) => return ctx.notice.set(Some(format_network_error(locale, &err))),
     };
     let (backups, notice) = (ctx.backups.clone(), ctx.notice.clone());
     let backup_id = backup_id.to_string();
@@ -781,7 +784,7 @@ fn import_archive(ctx: &Ctx, volume: &str, event: Event) {
             ))
             .header("content-type", "application/gzip")
             .body(js_sys::Uint8Array::new(&buffer))
-            .map_err(|err| err.to_string())?;
+            .map_err(|err| format_network_error(ctx.locale, &err))?;
             send_ok(ctx.locale, request).await
         };
         if let Err(message) = sent.await {
