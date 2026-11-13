@@ -197,7 +197,7 @@ fn service_row(locale: Locale, app_id: ShortId, s: &ComposeServiceStatus) -> Htm
                     to={Route::AppLog { id: app_id }}
                     classes="text-xs text-blue-600 dark:text-blue-400 hover:underline"
                 >
-                    {locale.t("apps.log_title").replace(" {name}", "")}
+                    {locale.t("apps.tabs_logs")}
                 </Link<Route>>
             </td>
         </tr>
