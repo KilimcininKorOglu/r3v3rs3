@@ -1503,24 +1503,20 @@ fn render_dr_row(
                 let body = RestoreDisasterRecoveryRequest {
                     passphrase: if pass.is_empty() { None } else { Some(pass) },
                 };
-                let req = Request::post(&format!(
+                let builder = Request::post(&format!(
                     "{API_ENDPOINT}/disaster-recovery/backups/{id}/restore"
-                ))
-                .header("content-type", "application/json")
-                .json(&body);
-                if let Ok(built) = req {
-                    match send_request(locale, built).await {
-                        Ok(_) => {
-                            dialog::message(
-                                locale,
-                                locale.t("settings.dr_restore_success"),
-                                Icon::Success,
-                            )
-                            .await;
-                            load_backups.emit(());
-                        }
-                        Err(err) => dialog::message(locale, &err, Icon::Error).await,
+                ));
+                match send_json(locale, builder, &body).await {
+                    Ok(()) => {
+                        dialog::message(
+                            locale,
+                            locale.t("settings.dr_restore_success"),
+                            Icon::Success,
+                        )
+                        .await;
+                        load_backups.emit(());
                     }
+                    Err(err) => dialog::message(locale, &err, Icon::Error).await,
                 }
             });
         })
