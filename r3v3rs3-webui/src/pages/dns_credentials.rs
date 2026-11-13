@@ -2,8 +2,9 @@
 
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{
-    FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback, row_actions,
-    save_result, set_on_click, submit_callback, text_input,
+    FormCard, Notice, add_button, close_callback, delete_on_click, form_modal, load, notice_view,
+    open_on_click, reload_callback, row_actions, save_result, submit_callback, text_input,
+    then_close, use_form_modal,
 };
 use super::settings::send_json;
 use crate::API_ENDPOINT;
@@ -127,7 +128,7 @@ pub fn dns_credentials() -> Html {
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
     let credentials = use_state(|| Option::<Vec<DnsCredentialInfo>>::None);
-    let form = use_state(Form::default);
+    let (form, open) = use_form_modal::<Form>();
     let notice = use_state(|| Option::<Notice<()>>::None);
 
     let list_cloned = credentials.clone();
@@ -138,13 +139,17 @@ pub fn dns_credentials() -> Html {
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(|entry| list_row(locale, entry, can_edit, &form, &credentials))
+        .map(|entry| list_row(locale, entry, can_edit, (&form, &open), &credentials))
         .collect::<Vec<_>>();
     html! {
         <>
+            { notice_view(&notice, |()| html! { <p>{locale.t("dns_credentials.saved")}</p> }) }
             { list_card(locale, credentials.is_some(), "dns_credentials.empty", &COLUMNS, &rows) }
             if can_edit {
-                { form_view(locale, &form, &notice, &credentials) }
+                { add_button(locale, open_on_click(&form, &open, Form::default())) }
+                if *open {
+                    { form_view(locale, (&form, &open), &notice, &credentials) }
+                }
             }
         </>
     }
@@ -154,14 +159,18 @@ fn list_row(
     locale: Locale,
     entry: &DnsCredentialInfo,
     can_edit: bool,
-    form: &UseStateHandle<Form>,
+    (form, open): (&UseStateHandle<Form>, &UseStateHandle<bool>),
     credentials: &Credentials,
 ) -> Row {
     let actions = if can_edit {
         let question = locale.tf("dns_credentials.confirm_delete", &[("name", &entry.name)]);
         let path = format!("{PATH}/{}", entry.id);
         let delete = delete_on_click(locale, question, path, reload_callback(credentials, PATH));
-        row_actions(locale, set_on_click(form, Form::edit(entry)), Some(delete))
+        row_actions(
+            locale,
+            open_on_click(form, open, Form::edit(entry)),
+            Some(delete),
+        )
     } else {
         html! {}
     };
@@ -177,7 +186,7 @@ fn list_row(
 
 fn form_view(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): (&UseStateHandle<Form>, &UseStateHandle<bool>),
     notice: &UseStateHandle<Option<Notice<()>>>,
     credentials: &Credentials,
 ) -> Html {
@@ -209,20 +218,19 @@ fn form_view(
     };
     let card = FormCard {
         title,
-        notice: notice_view(
-            notice,
-            |()| html! { <p>{locale.t("dns_credentials.saved")}</p> },
-        ),
+        notice: html! {},
         fields,
         error: parsed.as_ref().err().filter(|_| touched).cloned(),
-        cancel: form
-            .editing
-            .is_some()
-            .then(|| set_on_click(form, Form::default())),
+        cancel: None,
         save_label: "dns_credentials.save",
         can_save: parsed.is_ok(),
     };
-    form_card(locale, card, submit(locale, form, notice, credentials))
+    form_modal(
+        locale,
+        card,
+        submit(locale, (form, open), notice, credentials),
+        close_callback(form, open),
+    )
 }
 
 /// The credential fields of the selected provider.
@@ -272,11 +280,12 @@ fn fields_of(locale: Locale, form: &UseStateHandle<Form>) -> Html {
 
 fn submit(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): (&UseStateHandle<Form>, &UseStateHandle<bool>),
     notice: &UseStateHandle<Option<Notice<()>>>,
     credentials: &Credentials,
 ) -> Callback<SubmitEvent> {
-    let done = save_result(form, notice, reload_callback(credentials, PATH));
+    let saved = then_close(reload_callback(credentials, PATH), open);
+    let done = save_result(form, notice, saved);
     let form = form.clone();
     submit_callback(
         move || {
