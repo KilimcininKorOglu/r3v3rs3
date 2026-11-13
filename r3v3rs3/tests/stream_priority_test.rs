@@ -155,7 +155,55 @@ async fn test_proxy_injects_priority_header() -> anyhow::Result<()> {
         .await;
 
     let proxy_port = alloc_tcp_port().await?;
-    let config = TestStorage::builder()
+    let config = priority_storage(&proxy_port, &server.url())?;
+
+    with_server(config, |_| async move {
+        wait_for_listener(proxy_port.socket_addr()).await?;
+        let client = reqwest::Client::new();
+        let base_url = proxy_port.http_url("");
+
+        // 1. Request to HTML document -> should receive Priority: u=0
+        let resp_html = fetch_text(&client, format!("{base_url}/page.html"), None).await?;
+        assert_eq!(resp_html, "html-ok");
+        mock_html.assert_async().await;
+
+        // 2. Request to CSS -> should receive Priority: u=1
+        let resp_css = fetch_text(&client, format!("{base_url}/style.css"), None).await?;
+        assert_eq!(resp_css, "css-ok");
+        mock_css.assert_async().await;
+
+        // 3. Request to image -> should receive Priority: u=5, i
+        let resp_img = fetch_text(&client, format!("{base_url}/picture.webp"), None).await?;
+        assert_eq!(resp_img, "img-ok");
+        mock_img.assert_async().await;
+
+        // 4. Request with explicit client Priority header -> preserved!
+        let resp_custom =
+            fetch_text(&client, format!("{base_url}/custom.webp"), Some("u=2")).await?;
+        assert_eq!(resp_custom, "custom-ok");
+        mock_client.assert_async().await;
+
+        Ok(())
+    })
+    .await
+}
+
+/// Sends a GET, with the client `Priority` header when one is given, and returns the body.
+async fn fetch_text(
+    client: &reqwest::Client,
+    url: String,
+    priority: Option<&str>,
+) -> anyhow::Result<String> {
+    let mut request = client.get(url);
+    if let Some(priority) = priority {
+        request = request.header("priority", priority);
+    }
+    Ok(request.send().await?.text().await?)
+}
+
+/// Builds the storage with an HTTP proxy to the upstream that injects the `Priority` header.
+fn priority_storage(proxy_port: &common::TestPort, upstream: &str) -> anyhow::Result<TestStorage> {
+    Ok(TestStorage::builder()
         .ports(vec![PortEntry {
             id: "port1".parse().unwrap(),
             port: Port {
@@ -177,7 +225,7 @@ async fn test_proxy_injects_priority_header() -> anyhow::Result<()> {
                 kind: ProxyKind::Http(Box::new(HttpProxy {
                     routes: vec![Route {
                         path: "/".into(),
-                        servers: vec![Server::new(server.url().parse()?)],
+                        servers: vec![Server::new(upstream.parse()?)],
                         ..Default::default()
                     }],
                     stream_priority: StreamPriorityConfig {
@@ -190,55 +238,5 @@ async fn test_proxy_injects_priority_header() -> anyhow::Result<()> {
                 })),
             },
         }])
-        .build();
-
-    with_server(config, |_| async move {
-        wait_for_listener(proxy_port.socket_addr()).await?;
-        let client = reqwest::Client::new();
-        let base_url = proxy_port.http_url("");
-
-        // 1. Request to HTML document -> should receive Priority: u=0
-        let resp_html = client
-            .get(format!("{base_url}/page.html"))
-            .send()
-            .await?
-            .text()
-            .await?;
-        assert_eq!(resp_html, "html-ok");
-        mock_html.assert_async().await;
-
-        // 2. Request to CSS -> should receive Priority: u=1
-        let resp_css = client
-            .get(format!("{base_url}/style.css"))
-            .send()
-            .await?
-            .text()
-            .await?;
-        assert_eq!(resp_css, "css-ok");
-        mock_css.assert_async().await;
-
-        // 3. Request to image -> should receive Priority: u=5, i
-        let resp_img = client
-            .get(format!("{base_url}/picture.webp"))
-            .send()
-            .await?
-            .text()
-            .await?;
-        assert_eq!(resp_img, "img-ok");
-        mock_img.assert_async().await;
-
-        // 4. Request with explicit client Priority header -> preserved!
-        let resp_custom = client
-            .get(format!("{base_url}/custom.webp"))
-            .header("priority", "u=2")
-            .send()
-            .await?
-            .text()
-            .await?;
-        assert_eq!(resp_custom, "custom-ok");
-        mock_client.assert_async().await;
-
-        Ok(())
-    })
-    .await
+        .build())
 }
