@@ -1015,6 +1015,8 @@
   "proxies.enter_maintenance": "Bakıma al",
   "proxies.exit_maintenance": "Bakımdan çıkar",
   "proxies.healthy_servers": "{healthy}/{total} sağlıklı",
+  "proxies.server_healthy": "Sağlıklı",
+  "proxies.server_unhealthy": "Sağlıksız",
   "proxies.purge": "Temizle",
   "proxies.purge_failed": "Cache temizlenemedi: {error}",
   "proxies.purged": "Cache temizlendi.",

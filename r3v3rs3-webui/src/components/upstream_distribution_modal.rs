@@ -72,7 +72,7 @@ pub fn upstream_distribution_modal(props: &UpstreamDistributionModalProps) -> Ht
             <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl max-w-2xl w-full p-6 flex flex-col gap-5 max-h-[90vh] overflow-y-auto" onclick={on_card_click}>
                 { render_header(props.locale, &props.proxy_name, total_reqs, &props.onclose) }
                 { render_summary_cards(props.locale, total_reqs, total_active, total_errors, total_bytes) }
-                { render_distribution_bar(&props.upstreams, total_reqs) }
+                { render_distribution_bar(props.locale, &props.upstreams, total_reqs) }
                 { render_upstreams_table(props.locale, &props.upstreams, total_reqs, total_weight) }
             </div>
         </div>
@@ -152,7 +152,7 @@ fn render_summary_cards(
     }
 }
 
-fn render_distribution_bar(upstreams: &[UpstreamHealth], total_reqs: u64) -> Html {
+fn render_distribution_bar(locale: Locale, upstreams: &[UpstreamHealth], total_reqs: u64) -> Html {
     if upstreams.is_empty() {
         return html! {};
     }
@@ -168,7 +168,13 @@ fn render_distribution_bar(upstreams: &[UpstreamHealth], total_reqs: u64) -> Htm
                     };
                     let (bg_color, _, _) = color_for_index(idx);
                     let style = format!("width: {:.1}%", pct);
-                    let title = format!("{}: {:.1}% ({} reqs)", u.addr, pct, u.total_requests);
+                    let title = format!(
+                        "{}: {:.1}% ({} {})",
+                        u.addr,
+                        pct,
+                        u.total_requests,
+                        locale.t("proxies.dist_requests")
+                    );
                     html! {
                         <div class={classes!("h-full", bg_color, "transition-all")} {style} {title} />
                     }
@@ -275,13 +281,13 @@ fn render_server_badge(locale: Locale, u: &UpstreamHealth) -> Html {
             if u.healthy {
                 html! {
                     <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-950/60 dark:text-green-300">
-                        { locale.t("proxies.healthy_servers").split(' ').next_back().unwrap_or("healthy") }
+                        { locale.t("proxies.server_healthy") }
                     </span>
                 }
             } else {
                 html! {
                     <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300">
-                        { u.last_error.as_deref().unwrap_or("unhealthy") }
+                        { u.last_error.as_deref().unwrap_or(locale.t("proxies.server_unhealthy")) }
                     </span>
                 }
             }

@@ -1015,6 +1015,8 @@
   "proxies.enter_maintenance": "Enter maintenance",
   "proxies.exit_maintenance": "Exit maintenance",
   "proxies.healthy_servers": "{healthy}/{total} healthy",
+  "proxies.server_healthy": "Healthy",
+  "proxies.server_unhealthy": "Unhealthy",
   "proxies.purge": "Purge",
   "proxies.purge_failed": "Failed to purge the cache: {error}",
   "proxies.purged": "The cache is purged.",
