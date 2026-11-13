@@ -18,11 +18,12 @@ pub fn worker_status_card() -> Html {
             if *signed_in {
                 let report = report.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    match get_workers().await {
+                    let request = Request::get(&format!("{API_ENDPOINT}/workers"));
+                    match crate::pages::settings::fetch_json(locale, request).await {
                         Ok(new_report) => report.set(Some(new_report)),
-                        Err(err) => web_sys::console::error_1(
-                            &format!("the worker status is not readable: {err}").into(),
-                        ),
+                        Err(err) => {
+                            crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await
+                        }
                     }
                 });
             }
@@ -73,14 +74,6 @@ fn worker_row(locale: &r3v3rs3_api::i18n::Locale, worker: &r3v3rs3_api::app::Wor
             </li>
         },
     }
-}
-
-async fn get_workers() -> Result<WorkerStatusReport, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/workers"))
-        .send()
-        .await?
-        .json()
-        .await
 }
 
 #[cfg(test)]
