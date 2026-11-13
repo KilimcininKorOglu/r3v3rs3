@@ -1,8 +1,10 @@
 //! GeoIP database status inspection and configuration component in Security Center.
 
 use crate::API_ENDPOINT;
+use crate::components::button::{Button, ButtonKind};
 use crate::format::{format_bytes, format_unix_time};
 use crate::i18n::use_locale;
+use crate::pages::settings::{fetch_json, send_json};
 use gloo_net::http::Request;
 use r3v3rs3_api::geoip::{GeoIpStatus, UpdateGeoIpConfigRequest};
 use r3v3rs3_api::i18n::Locale;
@@ -13,8 +15,6 @@ use yew::prelude::*;
 
 const INPUT_CLASS: &str = "bg-neutral-50 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-neutral-700 dark:border-neutral-600 dark:placeholder-neutral-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500";
 const HINT_CLASS: &str = "mt-1.5 text-xs text-neutral-500 dark:text-neutral-400";
-const BUTTON_CLASS: &str = "inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2";
-const PRIMARY_BUTTON_CLASS: &str = "inline-flex justify-center items-center text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 dark:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none dark:focus:ring-blue-800";
 
 #[derive(Clone, Default, PartialEq)]
 struct GeoIpFormData {
@@ -41,14 +41,13 @@ pub fn geoip_card() -> Html {
     let status_handle = status.clone();
     let form_data_handle = form_data.clone();
     let form_init_handle = form_initialized.clone();
+    let notice_handle = notice.clone();
     use_effect_with(reload_val, move |_| {
         spawn_local(async move {
             let url = format!("{API_ENDPOINT}/security/geoip/status");
-            let Ok(res) = Request::get(&url).send().await else {
-                return;
-            };
-            let Ok(st) = res.json::<GeoIpStatus>().await else {
-                return;
+            let st = match fetch_json::<GeoIpStatus>(locale, Request::get(&url)).await {
+                Ok(st) => st,
+                Err(err) => return notice_handle.set(Some((false, err))),
             };
             if !*form_init_handle {
                 form_data_handle.set(GeoIpFormData {
@@ -108,23 +107,19 @@ fn make_update_callback(
         let is_updating = is_updating.clone();
         spawn_local(async move {
             let url = format!("{API_ENDPOINT}/security/geoip/update");
-            match Request::post(&url).send().await {
-                Ok(res) if res.ok() => {
-                    if let Ok(st) = res.json::<GeoIpStatus>().await {
-                        status.set(Some(st));
-                    }
+            match fetch_json::<GeoIpStatus>(locale, Request::post(&url)).await {
+                Ok(st) => {
+                    status.set(Some(st));
                     notice.set(Some((
                         true,
                         locale.t("settings.geoip_update_success").to_string(),
                     )));
                     reload.set(*reload + 1);
                 }
-                _ => {
-                    notice.set(Some((
-                        false,
-                        locale.t("security.geoip_update_failed").to_string(),
-                    )));
-                }
+                Err(err) => notice.set(Some((
+                    false,
+                    format!("{}: {err}", locale.t("security.geoip_update_failed")),
+                ))),
             }
             is_updating.set(false);
         });
@@ -150,29 +145,18 @@ fn make_save_callback(
         spawn_local(async move {
             let req_body = build_update_request(&form_data);
             let url = format!("{API_ENDPOINT}/security/geoip/config");
-            let req = Request::put(&url).json(&req_body);
-            match req {
-                Ok(req) => match req.send().await {
-                    Ok(res) if res.ok() => {
-                        notice.set(Some((
-                            true,
-                            locale.t("security.geoip_save_success").to_string(),
-                        )));
-                        reload.set(*reload + 1);
-                    }
-                    _ => {
-                        notice.set(Some((
-                            false,
-                            locale.t("security.geoip_save_failed").to_string(),
-                        )));
-                    }
-                },
-                Err(_) => {
+            match send_json(locale, Request::put(&url), &req_body).await {
+                Ok(()) => {
                     notice.set(Some((
-                        false,
-                        locale.t("security.geoip_save_failed").to_string(),
+                        true,
+                        locale.t("security.geoip_save_success").to_string(),
                     )));
+                    reload.set(*reload + 1);
                 }
+                Err(err) => notice.set(Some((
+                    false,
+                    format!("{}: {err}", locale.t("security.geoip_save_failed")),
+                ))),
             }
             is_saving.set(false);
         });
@@ -233,18 +217,13 @@ fn render_status_card(
                 { render_details_grid(locale, st) }
             }
             <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
-                <button
-                    type="button"
-                    onclick={on_update_click.clone()}
-                    disabled={is_updating}
-                    class={BUTTON_CLASS}
-                >
+                <Button kind={ButtonKind::Secondary} onclick={on_update_click.clone()} disabled={is_updating}>
                     if is_updating {
                         {locale.t("settings.geoip_updating")}
                     } else {
                         {locale.t("settings.geoip_update_now")}
                     }
-                </button>
+                </Button>
             </div>
         </div>
     }
@@ -311,14 +290,9 @@ fn render_config_card(
             <div class="space-y-4">
                 { render_input_fields(locale, form_data, &form) }
                 <div class="flex flex-col pt-3 sm:flex-row sm:items-center sm:justify-end border-t border-neutral-200 dark:border-neutral-700">
-                    <button
-                        type="button"
-                        onclick={on_save_click.clone()}
-                        disabled={is_saving}
-                        class={PRIMARY_BUTTON_CLASS}
-                    >
+                    <Button kind={ButtonKind::Primary} onclick={on_save_click.clone()} disabled={is_saving}>
                         {locale.t("security.geoip_save")}
-                    </button>
+                    </Button>
                 </div>
             </div>
         </div>
