@@ -277,17 +277,29 @@ pub fn use_client_certs() -> UseStateHandle<Vec<CertInfo>> {
 pub fn security_grade_badge(grade: SecurityGrade, score: u8) -> Html {
     let (bg, label) = match grade {
         SecurityGrade::APlus => (
-            "bg-emerald-500/10 border-emerald-500/30 text-emerald-400",
+            "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400",
             "A+",
         ),
         SecurityGrade::A => (
-            "bg-emerald-500/10 border-emerald-500/30 text-emerald-400",
+            "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400",
             "A",
         ),
-        SecurityGrade::B => ("bg-lime-500/10 border-lime-500/30 text-lime-400", "B"),
-        SecurityGrade::C => ("bg-amber-500/10 border-amber-500/30 text-amber-400", "C"),
-        SecurityGrade::D => ("bg-orange-500/10 border-orange-500/30 text-orange-400", "D"),
-        SecurityGrade::F => ("bg-rose-500/10 border-rose-500/30 text-rose-400", "F"),
+        SecurityGrade::B => (
+            "bg-lime-500/10 border-lime-500/30 text-lime-700 dark:text-lime-400",
+            "B",
+        ),
+        SecurityGrade::C => (
+            "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400",
+            "C",
+        ),
+        SecurityGrade::D => (
+            "bg-orange-500/10 border-orange-500/30 text-orange-700 dark:text-orange-400",
+            "D",
+        ),
+        SecurityGrade::F => (
+            "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400",
+            "F",
+        ),
     };
 
     html! {
@@ -330,17 +342,17 @@ pub fn security_profile_buttons(locale: Locale, on_apply: Callback<SecurityProfi
 pub fn security_audit_item_badge(locale: Locale, item: &HeaderAuditItem) -> Html {
     let (color, icon, status_text) = match item.status {
         HeaderAuditStatus::Present => (
-            "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+            "text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
             "✓",
             locale.t("http_form.audit_present"),
         ),
         HeaderAuditStatus::Weak => (
-            "text-amber-400 bg-amber-500/10 border-amber-500/20",
+            "text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/20",
             "⚠",
             locale.t("http_form.audit_weak"),
         ),
         HeaderAuditStatus::Missing => (
-            "text-rose-400 bg-rose-500/10 border-rose-500/20",
+            "text-rose-700 dark:text-rose-400 bg-rose-500/10 border-rose-500/20",
             "✕",
             locale.t("http_form.audit_missing"),
         ),
@@ -366,10 +378,10 @@ pub fn security_wizard_panel(
     let audit = analyze_response_rules(&parsed_rules);
 
     html! {
-        <div class="mb-3 p-3 rounded-lg border border-neutral-800 bg-neutral-900/60 flex flex-col gap-2.5">
+        <div class="mb-3 p-3 rounded-lg border border-neutral-300 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/60 flex flex-col gap-2.5">
             <div class="flex items-center justify-between flex-wrap gap-2">
                 <div class="flex items-center gap-2">
-                    <span class="text-sm font-semibold text-neutral-200">
+                    <span class="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
                         {locale.t("http_form.security_headers_wizard")}
                     </span>
                     { security_grade_badge(audit.grade, audit.score) }
