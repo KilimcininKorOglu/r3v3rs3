@@ -3,8 +3,9 @@
 use super::Route;
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{
-    FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback, row_actions,
-    save_result, set_on_click, submit_callback, text_input,
+    FormCard, Notice, add_button, close_callback, delete_on_click, form_modal, load, notice_view,
+    open_on_click, reload_callback, row_actions, save_result, submit_callback, text_input,
+    then_close, use_form_modal,
 };
 use super::settings::send_json;
 use crate::API_ENDPOINT;
@@ -34,6 +35,7 @@ const COLUMNS: [Column; 2] = [
 ];
 
 type RegistriesList = UseStateHandle<Option<Vec<RegistryEntry>>>;
+type FormState<'a> = (&'a UseStateHandle<Form>, &'a UseStateHandle<bool>);
 
 #[derive(Clone, PartialEq, Default)]
 struct Form {
@@ -85,7 +87,7 @@ pub fn registries() -> Html {
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
     let registries = use_state(|| Option::<Vec<RegistryEntry>>::None);
-    let form = use_state(Form::default);
+    let (form, open) = use_form_modal::<Form>();
     let notice = use_state(|| Option::<Notice<()>>::None);
 
     let signed_in = session.info.is_some();
@@ -105,14 +107,18 @@ pub fn registries() -> Html {
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(|entry| list_row(locale, entry, can_edit, &form, &registries))
+        .map(|entry| list_row(locale, entry, can_edit, (&form, &open), &registries))
         .collect::<Vec<_>>();
 
     html! {
         <>
+            { notice_view(&notice, |()| html! { <p>{locale.t("registries.saved")}</p> }) }
             { list_card(locale, registries.is_some(), "registries.no_registries", &COLUMNS, &rows) }
             if can_edit {
-                { form_view(locale, &form, &notice, &registries) }
+                { add_button(locale, open_on_click(&form, &open, Form::default())) }
+                if *open {
+                    { form_view(locale, (&form, &open), &notice, &registries) }
+                }
             }
         </>
     }
@@ -122,14 +128,18 @@ fn list_row(
     locale: Locale,
     entry: &RegistryEntry,
     can_edit: bool,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState,
     registries: &RegistriesList,
 ) -> Row {
     let actions = if can_edit {
         let question = locale.tf("registries.delete_confirm", &[("server", &entry.server)]);
         let path = format!("{PATH}/{}", entry.id);
         let delete = delete_on_click(locale, question, path, reload_callback(registries, PATH));
-        row_actions(locale, set_on_click(form, Form::edit(entry)), Some(delete))
+        row_actions(
+            locale,
+            open_on_click(form, open, Form::edit(entry)),
+            Some(delete),
+        )
     } else {
         html! {}
     };
@@ -145,7 +155,7 @@ fn list_row(
 
 fn form_view(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState,
     notice: &UseStateHandle<Option<Notice<()>>>,
     registries: &RegistriesList,
 ) -> Html {
@@ -192,17 +202,12 @@ fn form_view(
         </>
     };
 
-    let oncancel = form
-        .editing
-        .is_some()
-        .then(|| set_on_click(form, Form::default()));
-
     let card = FormCard {
         title,
-        notice: notice_view(notice, |()| html! { <p>{locale.t("registries.saved")}</p> }),
+        notice: html! {},
         fields,
         error: parsed.as_ref().err().filter(|_| touched).cloned(),
-        cancel: oncancel,
+        cancel: None,
         save_label: if is_editing {
             "common.update"
         } else {
@@ -211,17 +216,18 @@ fn form_view(
         can_save: parsed.is_ok(),
     };
 
-    let onsubmit = submit(locale, form, notice, registries);
-    form_card(locale, card, onsubmit)
+    let onsubmit = submit(locale, (form, open), notice, registries);
+    form_modal(locale, card, onsubmit, close_callback(form, open))
 }
 
 fn submit(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState,
     notice: &UseStateHandle<Option<Notice<()>>>,
     registries: &RegistriesList,
 ) -> Callback<SubmitEvent> {
-    let done = save_result(form, notice, reload_callback(registries, PATH));
+    let saved = then_close(reload_callback(registries, PATH), open);
+    let done = save_result(form, notice, saved);
     let form = form.clone();
     submit_callback(
         move || {
