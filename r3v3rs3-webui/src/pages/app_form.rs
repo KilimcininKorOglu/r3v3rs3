@@ -5,6 +5,7 @@ use super::app_repository::RepositoryPicker;
 use super::resource_page::text_input;
 use crate::components::compose_editor::ComposeEditor;
 use crate::components::domain_ssl_status::DomainCertCoverage;
+use crate::components::tabs::{TabItem, Tabs};
 use r3v3rs3_api::container::{ResourceLimits, RestartPolicy, VolumeMount};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
@@ -1250,28 +1251,15 @@ fn compose_mode_switch(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
         form_git.set(updated);
     });
 
-    let inline_btn = if form.compose_inline {
-        "px-3 py-1.5 text-xs font-semibold rounded-md bg-primary-600 text-white shadow-sm"
-    } else {
-        "px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-200"
-    };
-
-    let git_btn = if !form.compose_inline {
-        "px-3 py-1.5 text-xs font-semibold rounded-md bg-primary-600 text-white shadow-sm"
-    } else {
-        "px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-200"
-    };
-
-    html! {
-        <div class="inline-flex rounded-lg p-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700">
-            <button type="button" class={inline_btn} onclick={on_inline}>
-                {locale.t("compose.mode_inline")}
-            </button>
-            <button type="button" class={git_btn} onclick={on_git}>
-                {locale.t("compose.mode_git")}
-            </button>
-        </div>
-    }
+    let tabs = vec![
+        TabItem::click(
+            locale.t("compose.mode_inline"),
+            on_inline,
+            form.compose_inline,
+        ),
+        TabItem::click(locale.t("compose.mode_git"), on_git, !form.compose_inline),
+    ];
+    html! { <Tabs {tabs} /> }
 }
 
 fn compose_inline_view(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {

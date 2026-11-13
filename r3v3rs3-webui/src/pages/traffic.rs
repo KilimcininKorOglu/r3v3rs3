@@ -1,6 +1,7 @@
 use super::app_log::download_text_file;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::button::{Button, ButtonKind, ButtonSize};
+use crate::components::tabs::{TabItem, Tabs};
 use crate::components::traffic_inspector::TrafficInspector;
 use crate::dialog::confirm;
 use crate::format::{format_bytes, format_instant, format_uptime};
@@ -309,52 +310,33 @@ fn tab_bar_view(
         Callback::from(move |_: MouseEvent| active_tab.set(TrafficTab::StreamPriority))
     };
 
-    let logs_active = **active_tab == TrafficTab::AccessLogs;
-    let conns_active = **active_tab == TrafficTab::ActiveConnections;
-    let priority_active = **active_tab == TrafficTab::StreamPriority;
-
-    let base_btn =
-        "px-4 py-2 font-medium text-sm rounded-lg transition-colors flex items-center gap-2";
-    let active_style = "bg-primary-600 text-white shadow-sm";
-    let inactive_style =
-        "text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800";
-
-    html! {
-        <div class="flex items-center gap-2 border-b dark:border-neutral-700 pb-3">
-            <button
-                class={classes!(base_btn, if logs_active { active_style } else { inactive_style })}
-                onclick={on_select_logs}
-            >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-                </svg>
-                { locale.t("traffic.tab_logs") }
-            </button>
-            <button
-                class={classes!(base_btn, if conns_active { active_style } else { inactive_style })}
-                onclick={on_select_conns}
-            >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                { locale.t("traffic.tab_connections") }
-                if connections_count > 0 {
-                    <span class="ml-1 px-2 py-0.5 text-xs rounded-full bg-white/20 text-current font-bold">
-                        { connections_count }
-                    </span>
-                }
-            </button>
-            <button
-                class={classes!(base_btn, if priority_active { active_style } else { inactive_style })}
-                onclick={on_select_priority}
-            >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
-                </svg>
-                { locale.t("traffic.stream_priority") }
-            </button>
-        </div>
-    }
+    let active = **active_tab;
+    let mut connections = TabItem::click(
+        locale.t("traffic.tab_connections"),
+        on_select_conns,
+        active == TrafficTab::ActiveConnections,
+    );
+    connections.trailing = (connections_count > 0).then(|| {
+        html! {
+            <span class="px-2 py-0.5 text-xs rounded-full bg-neutral-200 dark:bg-neutral-700 font-bold">
+                { connections_count }
+            </span>
+        }
+    });
+    let tabs = vec![
+        TabItem::click(
+            locale.t("traffic.tab_logs"),
+            on_select_logs,
+            active == TrafficTab::AccessLogs,
+        ),
+        connections,
+        TabItem::click(
+            locale.t("traffic.stream_priority"),
+            on_select_priority,
+            active == TrafficTab::StreamPriority,
+        ),
+    ];
+    html! { <Tabs {tabs} /> }
 }
 
 #[hook]

@@ -2,6 +2,7 @@
 
 use crate::API_ENDPOINT;
 use crate::components::http_proxy_config::{HINT_CLASS, INPUT_CLASS};
+use crate::components::tabs::{TabItem, Tabs};
 use crate::format::format_instant;
 use crate::i18n::use_locale;
 use crate::pages::traffic::{
@@ -229,29 +230,20 @@ fn render_tab_bar(
         (InspectorTab::Replay, locale.t("traffic.tab_replay")),
     ];
 
+    let tabs: Vec<TabItem> = tabs
+        .into_iter()
+        .map(|(t, label)| {
+            let on_select = on_select.clone();
+            TabItem::click(
+                label,
+                Callback::from(move |_| on_select.emit(t)),
+                active == t,
+            )
+        })
+        .collect();
     html! {
-        <div class="flex border-b border-neutral-200 dark:border-neutral-700 px-5 bg-white dark:bg-neutral-800">
-            { for tabs.into_iter().map(|(t, label)| {
-                let is_active = active == t;
-                let on_click = {
-                    let on_select = on_select.clone();
-                    Callback::from(move |_| on_select.emit(t))
-                };
-                let cls = if is_active {
-                    "border-primary-500 text-primary-600 dark:text-primary-400 font-semibold"
-                } else {
-                    "border-transparent text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
-                };
-                html! {
-                    <button
-                        type="button"
-                        onclick={on_click}
-                        class={classes!("py-3", "px-3", "text-xs", "sm:text-sm", "border-b-2", "transition", cls)}
-                    >
-                        {label}
-                    </button>
-                }
-            }) }
+        <div class="px-5 bg-white dark:bg-neutral-800">
+            <Tabs {tabs} />
         </div>
     }
 }
