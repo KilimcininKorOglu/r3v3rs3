@@ -47,26 +47,30 @@ const COLUMNS: [Column; 5] = [
 
 static PORTS_LOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-fn load_ports(dispatcher: Dispatch<PortStore>) {
+/// Loads the ports into the store. A failed load shows its error in a dialog.
+fn load_ports(locale: Locale, dispatcher: Dispatch<PortStore>) {
     if PORTS_LOADING.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
     }
     wasm_bindgen_futures::spawn_local(async move {
-        let res = get_list().await;
+        let res = get_list(locale).await;
         PORTS_LOADING.store(false, std::sync::atomic::Ordering::SeqCst);
-        if let Ok(res) = res {
-            let mut statuses = HashMap::new();
-            for entry in &res {
-                if let Some(status) = &entry.status {
-                    statuses.insert(entry.id, *status);
-                }
+        let res = match res {
+            Ok(res) => res,
+            Err(err) => {
+                dialog::message(locale, &err, dialog::Icon::Error).await;
+                return;
             }
-            dispatcher.set(PortStore {
-                entries: res,
-                statuses,
-                loaded: true,
-            });
-        }
+        };
+        let statuses = res
+            .iter()
+            .filter_map(|entry| entry.status.map(|status| (entry.id, status)))
+            .collect::<HashMap<_, _>>();
+        dispatcher.set(PortStore {
+            entries: res,
+            statuses,
+            loaded: true,
+        });
     });
 }
 
@@ -82,7 +86,7 @@ pub fn post_list() -> Html {
 
     let dispatcher_cloned = dispatcher.clone();
     use_effect_with((), move |_| {
-        load_ports(dispatcher_cloned);
+        load_ports(locale, dispatcher_cloned);
     });
 
     let Some(navigator) = use_navigator() else {
@@ -137,7 +141,7 @@ fn bulk_delete_callback(
                 dialog::message(locale, err, dialog::Icon::Error).await;
             }
             selected.set(HashSet::new());
-            load_ports(dispatcher);
+            load_ports(locale, dispatcher);
         });
     })
 }
@@ -259,7 +263,7 @@ fn port_row(
             dialog::confirm_then(locale, question, async move {
                 match delete_port(locale, id).await {
                     Ok(()) => {
-                        load_ports(dispatcher);
+                        load_ports(locale, dispatcher);
                     }
                     Err(err) => {
                         dialog::message(locale, &err, dialog::Icon::Error).await;
@@ -337,12 +341,8 @@ fn socket_state(state: &SocketState) -> (&'static str, &'static str) {
     }
 }
 
-async fn get_list() -> Result<Vec<PortEntry>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/ports"))
-        .send()
-        .await?
-        .json()
-        .await
+async fn get_list(locale: Locale) -> Result<Vec<PortEntry>, String> {
+    crate::pages::settings::fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/ports"))).await
 }
 
 async fn delete_port(locale: Locale, id: ShortId) -> Result<(), String> {
