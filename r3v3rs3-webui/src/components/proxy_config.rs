@@ -192,14 +192,16 @@ impl KindStates {
 fn use_ports() -> std::rc::Rc<PortStore> {
     let (ports, dispatcher) = use_store::<PortStore>();
     let ports_cloned = ports.clone();
+    let locale = crate::i18n::use_locale();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(res) = get_ports().await {
-                dispatcher.set(PortStore {
+            match get_ports(locale).await {
+                Ok(res) => dispatcher.set(PortStore {
                     entries: res,
                     loaded: true,
                     ..(*ports_cloned).clone()
-                });
+                }),
+                Err(err) => crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await,
             }
         });
     });
@@ -309,10 +311,6 @@ fn get_site(
     }
 }
 
-async fn get_ports() -> Result<Vec<PortEntry>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/ports"))
-        .send()
-        .await?
-        .json()
-        .await
+async fn get_ports(locale: r3v3rs3_api::i18n::Locale) -> Result<Vec<PortEntry>, String> {
+    crate::pages::settings::fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/ports"))).await
 }
