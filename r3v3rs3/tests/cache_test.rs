@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod common;
 use common::{
-    TestStorage, alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route,
+    TestPort, TestStorage, alloc_tcp_port, call, http_port_entry, http_proxy_entry, http_route,
     serve_http_upstream, with_server,
 };
 
@@ -31,7 +31,144 @@ fn x_cache(resp: &reqwest::Response) -> Option<&str> {
 async fn cache_serves_fresh_responses_and_revalidates_stale_ones() -> anyhow::Result<()> {
     let port = alloc_tcp_port().await?;
     let mut upstream = mockito::Server::new_async().await;
+    let mocks = cache_mocks(&mut upstream).await;
 
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![http_route("/", &upstream.url(), None)],
+        upgrade_insecure: false,
+        cache: CacheConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("cache", &port)])
+        .proxies(vec![http_proxy_entry("proxy1", "cache", proxy)])
+        .build();
+
+    with_server(config, |mut channels| async move {
+        let client = reqwest::Client::new();
+        check_fresh_responses(&client, &port).await?;
+        check_uncacheable_responses(&client, &port).await?;
+        check_vary_responses(&client, &port).await?;
+        check_stale_responses(&client, &port).await?;
+        purge_the_proxy_cache(&mut channels).await?;
+        check_purged_response(&client, &port).await
+    })
+    .await?;
+
+    for mock in mocks {
+        mock.assert_async().await;
+    }
+    Ok(())
+}
+
+/// A GET request to the path on the proxy port.
+fn get_path(client: &reqwest::Client, port: &TestPort, path: &str) -> reqwest::RequestBuilder {
+    client.get(port.http_url(path))
+}
+
+/// Checks that the purged response is fetched from the upstream server again.
+async fn check_purged_response(client: &reqwest::Client, port: &TestPort) -> anyhow::Result<()> {
+    let resp = get_path(client, port, "/fresh").send().await?;
+    assert_eq!(x_cache(&resp), Some("MISS"));
+    assert_eq!(resp.text().await?, "fresh");
+    Ok(())
+}
+
+/// Checks that a fresh response is stored and served to GET and HEAD requests.
+async fn check_fresh_responses(client: &reqwest::Client, port: &TestPort) -> anyhow::Result<()> {
+    let resp = get_path(client, port, "/fresh").send().await?;
+    assert_eq!(x_cache(&resp), Some("MISS"));
+    assert_eq!(resp.text().await?, "fresh");
+    let resp = get_path(client, port, "/fresh").send().await?;
+    assert_eq!(x_cache(&resp), Some("HIT"));
+    assert!(resp.headers().contains_key(AGE));
+    assert_eq!(resp.text().await?, "fresh");
+    let resp = client.head(port.http_url("/fresh")).send().await?;
+    assert_eq!(x_cache(&resp), Some("HIT"));
+    assert!(resp.bytes().await?.is_empty());
+    Ok(())
+}
+
+/// Checks that `no-store` responses and responses with a cookie are not stored.
+async fn check_uncacheable_responses(
+    client: &reqwest::Client,
+    port: &TestPort,
+) -> anyhow::Result<()> {
+    for path in ["/no-store", "/cookie", "/no-store", "/cookie"] {
+        let resp = get_path(client, port, path).send().await?;
+        assert_eq!(x_cache(&resp), Some("MISS"), "{path}");
+    }
+    Ok(())
+}
+
+/// Checks that the `Vary` header keeps a stored response for each header value.
+async fn check_vary_responses(client: &reqwest::Client, port: &TestPort) -> anyhow::Result<()> {
+    let resp = get_path(client, port, "/vary")
+        .header("x-lang", "en")
+        .send()
+        .await?;
+    assert_eq!(x_cache(&resp), Some("MISS"));
+    let resp = get_path(client, port, "/vary")
+        .header("x-lang", "en")
+        .send()
+        .await?;
+    assert_eq!(x_cache(&resp), Some("HIT"));
+    assert_eq!(resp.text().await?, "en");
+    let resp = get_path(client, port, "/vary")
+        .header("x-lang", "tr")
+        .send()
+        .await?;
+    assert_eq!(x_cache(&resp), Some("MISS"));
+    assert_eq!(resp.text().await?, "tr");
+    Ok(())
+}
+
+/// Checks that a stale response is revalidated and answers a conditional request with 304.
+async fn check_stale_responses(client: &reqwest::Client, port: &TestPort) -> anyhow::Result<()> {
+    let resp = get_path(client, port, "/stale").send().await?;
+    assert_eq!(x_cache(&resp), Some("MISS"));
+    assert_eq!(resp.text().await?, "stale body");
+    let resp = get_path(client, port, "/stale").send().await?;
+    assert_eq!(x_cache(&resp), Some("HIT"));
+    assert_eq!(resp.text().await?, "stale body");
+    let resp = get_path(client, port, "/stale")
+        .header(IF_NONE_MATCH, "\"v1\"")
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
+    assert_eq!(x_cache(&resp), Some("HIT"));
+    Ok(())
+}
+
+/// Purges the whole cache of the proxy through the server command channel.
+async fn purge_the_proxy_cache(channels: &mut ServerChannels) -> anyhow::Result<()> {
+    let arg = Box::new(RpcWrapper::new(PurgeProxyCache {
+        id: "proxy1".parse()?,
+        path: None,
+    })) as Box<dyn ErasedRpcMethod>;
+    channels
+        .command
+        .send(ServerCommand::CallMethod {
+            id: 1,
+            arg,
+            caller: r3v3rs3::accounts::Caller::system(),
+        })
+        .await?;
+    let callback = channels
+        .callback
+        .recv()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("callback channel closed"))?;
+    assert!(callback.result.is_ok());
+    Ok(())
+}
+
+/// The upstream mocks of the cache test, in the order the test asserts them.
+async fn cache_mocks(upstream: &mut mockito::ServerGuard) -> Vec<mockito::Mock> {
     let mock_fresh = upstream
         .mock("GET", "/fresh")
         .match_header("accept-encoding", Matcher::Missing)
@@ -92,89 +229,7 @@ async fn cache_serves_fresh_responses_and_revalidates_stale_ones() -> anyhow::Re
         .expect(2)
         .create_async()
         .await;
-
-    let proxy = HttpProxy {
-        vhosts: vec!["localhost".parse().unwrap()],
-        routes: vec![http_route("/", &upstream.url(), None)],
-        upgrade_insecure: false,
-        cache: CacheConfig {
-            enabled: true,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let config = TestStorage::builder()
-        .ports(vec![http_port_entry("cache", &port)])
-        .proxies(vec![http_proxy_entry("proxy1", "cache", proxy)])
-        .build();
-
-    with_server(config, |mut channels| async move {
-        let client = reqwest::Client::new();
-        let get = |path: &'static str| client.get(port.http_url(path));
-
-        let resp = get("/fresh").send().await?;
-        assert_eq!(x_cache(&resp), Some("MISS"));
-        assert_eq!(resp.text().await?, "fresh");
-        let resp = get("/fresh").send().await?;
-        assert_eq!(x_cache(&resp), Some("HIT"));
-        assert!(resp.headers().contains_key(AGE));
-        assert_eq!(resp.text().await?, "fresh");
-        let resp = client.head(port.http_url("/fresh")).send().await?;
-        assert_eq!(x_cache(&resp), Some("HIT"));
-        assert!(resp.bytes().await?.is_empty());
-
-        for path in ["/no-store", "/cookie", "/no-store", "/cookie"] {
-            let resp = get(path).send().await?;
-            assert_eq!(x_cache(&resp), Some("MISS"), "{path}");
-        }
-
-        let resp = get("/vary").header("x-lang", "en").send().await?;
-        assert_eq!(x_cache(&resp), Some("MISS"));
-        let resp = get("/vary").header("x-lang", "en").send().await?;
-        assert_eq!(x_cache(&resp), Some("HIT"));
-        assert_eq!(resp.text().await?, "en");
-        let resp = get("/vary").header("x-lang", "tr").send().await?;
-        assert_eq!(x_cache(&resp), Some("MISS"));
-        assert_eq!(resp.text().await?, "tr");
-
-        let resp = get("/stale").send().await?;
-        assert_eq!(x_cache(&resp), Some("MISS"));
-        assert_eq!(resp.text().await?, "stale body");
-        let resp = get("/stale").send().await?;
-        assert_eq!(x_cache(&resp), Some("HIT"));
-        assert_eq!(resp.text().await?, "stale body");
-        let resp = get("/stale").header(IF_NONE_MATCH, "\"v1\"").send().await?;
-        assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
-        assert_eq!(x_cache(&resp), Some("HIT"));
-
-        let arg = Box::new(RpcWrapper::new(PurgeProxyCache {
-            id: "proxy1".parse()?,
-            path: None,
-        })) as Box<dyn ErasedRpcMethod>;
-        channels
-            .command
-            .send(ServerCommand::CallMethod {
-                id: 1,
-                arg,
-                caller: r3v3rs3::accounts::Caller::system(),
-            })
-            .await?;
-        let callback = channels
-            .callback
-            .recv()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("callback channel closed"))?;
-        assert!(callback.result.is_ok());
-
-        let resp = get("/fresh").send().await?;
-        assert_eq!(x_cache(&resp), Some("MISS"));
-        assert_eq!(resp.text().await?, "fresh");
-
-        Ok(())
-    })
-    .await?;
-
-    for mock in [
+    vec![
         mock_fresh,
         mock_no_store,
         mock_cookie,
@@ -182,10 +237,7 @@ async fn cache_serves_fresh_responses_and_revalidates_stale_ones() -> anyhow::Re
         mock_tr,
         mock_stale,
         mock_revalidate,
-    ] {
-        mock.assert_async().await;
-    }
-    Ok(())
+    ]
 }
 
 async fn check_swr(client: &reqwest::Client, base_url: &url::Url) -> anyhow::Result<()> {
