@@ -73,36 +73,51 @@ async fn the_proxy_serves_a_registered_panel_in_process() -> anyhow::Result<()> 
 
     let port = proxy_port.socket_addr().port();
     let result = common::with_server(config, |_| async move {
-        let whoami = reqwest::get(format!("http://localhost:{port}/whoami"))
-            .await?
-            .error_for_status()?
-            .text()
-            .await?;
-        assert_eq!(whoami, format!("127.0.0.1 localhost:{port}"));
-
-        let url = Uri::try_from(format!("ws://localhost:{port}/ws"))?;
-        let (mut socket, _) = connect_async(url).await?;
-        socket.send(Message::Text("over the proxy".into())).await?;
-        let echoed = socket
-            .next()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("the socket closed"))??;
-        assert_eq!(echoed.into_text()?.as_str(), "over the proxy");
-
-        let mut events = reqwest::get(format!("http://localhost:{port}/events"))
-            .await?
-            .error_for_status()?
-            .bytes_stream();
-        let first = tokio::time::timeout(Duration::from_secs(5), events.next())
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("the event stream ended"))??;
-        assert!(
-            String::from_utf8_lossy(&first).contains("data: ready"),
-            "the first event must arrive while the stream stays open"
-        );
-        Ok(())
+        check_whoami(port).await?;
+        check_websocket_echo(port).await?;
+        check_event_stream(port).await
     })
     .await;
     panel::clear(panel_addr);
     result
+}
+
+/// Checks that the panel sees the loopback peer and the `Host` of the client.
+async fn check_whoami(port: u16) -> anyhow::Result<()> {
+    let whoami = reqwest::get(format!("http://localhost:{port}/whoami"))
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    assert_eq!(whoami, format!("127.0.0.1 localhost:{port}"));
+    Ok(())
+}
+
+/// Checks that a WebSocket message comes back from the panel through the proxy.
+async fn check_websocket_echo(port: u16) -> anyhow::Result<()> {
+    let url = Uri::try_from(format!("ws://localhost:{port}/ws"))?;
+    let (mut socket, _) = connect_async(url).await?;
+    socket.send(Message::Text("over the proxy".into())).await?;
+    let echoed = socket
+        .next()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("the socket closed"))??;
+    assert_eq!(echoed.into_text()?.as_str(), "over the proxy");
+    Ok(())
+}
+
+/// Checks that the first event of an open event stream arrives through the proxy.
+async fn check_event_stream(port: u16) -> anyhow::Result<()> {
+    let mut events = reqwest::get(format!("http://localhost:{port}/events"))
+        .await?
+        .error_for_status()?
+        .bytes_stream();
+    let first = tokio::time::timeout(Duration::from_secs(5), events.next())
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("the event stream ended"))??;
+    assert!(
+        String::from_utf8_lossy(&first).contains("data: ready"),
+        "the first event must arrive while the stream stays open"
+    );
+    Ok(())
 }
