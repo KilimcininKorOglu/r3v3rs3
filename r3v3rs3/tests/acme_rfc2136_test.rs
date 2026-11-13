@@ -64,13 +64,32 @@ async fn serve(
     mode: Mode,
     log: &Received,
 ) -> anyhow::Result<()> {
+    let (request_mac, request) = read_request(&mut stream, key).await?;
+    log.lock().unwrap().push(describe(&request));
+
+    let mut response = answer(&request, mode)?;
+    let signing_key = match mode {
+        Mode::WrongKey => b"another key".to_vec(),
+        _ => key.to_vec(),
+    };
+    sign_response(&mut response, &request_mac, signing_key)?;
+    write_response(&mut stream, &response).await
+}
+
+/// Reads one length-prefixed request, verifies its TSIG with `key`, and returns its MAC and the
+/// message.
+async fn read_request(stream: &mut TcpStream, key: &[u8]) -> anyhow::Result<(Vec<u8>, Message)> {
     let length = stream.read_u16().await?;
     let mut bytes = vec![0; usize::from(length)];
     stream.read_exact(&mut bytes).await?;
     let (request_mac, _, _) = signer(key.to_vec())?.verify_message_byte(&bytes, None, true)?;
     let request = Message::from_vec(&bytes)?;
-    log.lock().unwrap().push(describe(&request));
+    Ok((request_mac, request))
+}
 
+/// The unsigned response to a request: NXDOMAIN with the zone SOA for a query, REFUSED for an
+/// update in the refusing mode, and an empty success otherwise.
+fn answer(request: &Message, mode: Mode) -> anyhow::Result<Message> {
     let mut response = Message::new(
         request.metadata.id,
         MessageType::Response,
@@ -79,32 +98,34 @@ async fn serve(
     response.queries.clone_from(&request.queries);
     match (request.metadata.op_code, mode) {
         (OpCode::Query, _) => {
-            let soa = SOA::new(
-                Name::from_ascii("ns1.example.test.")?,
-                Name::from_ascii("admin.example.test.")?,
-                1,
-                3600,
-                600,
-                86400,
-                60,
-            );
-            let zone = Name::from_ascii("example.test.")?;
             response.metadata.response_code = ResponseCode::NXDomain;
-            response
-                .authorities
-                .push(Record::from_rdata(zone, 60, RData::SOA(soa)));
+            response.authorities.push(zone_soa()?);
         }
         (_, Mode::RefuseUpdates) => {
             response.metadata.response_code = ResponseCode::Refused;
         }
         _ => {}
     }
-    let signing_key = match mode {
-        Mode::WrongKey => b"another key".to_vec(),
-        _ => key.to_vec(),
-    };
-    sign_response(&mut response, &request_mac, signing_key)?;
+    Ok(response)
+}
 
+/// The SOA record of the `example.test.` zone.
+fn zone_soa() -> anyhow::Result<Record> {
+    let soa = SOA::new(
+        Name::from_ascii("ns1.example.test.")?,
+        Name::from_ascii("admin.example.test.")?,
+        1,
+        3600,
+        600,
+        86400,
+        60,
+    );
+    let zone = Name::from_ascii("example.test.")?;
+    Ok(Record::from_rdata(zone, 60, RData::SOA(soa)))
+}
+
+/// Writes the response with its length prefix.
+async fn write_response(stream: &mut TcpStream, response: &Message) -> anyhow::Result<()> {
     let bytes = response.to_vec()?;
     stream
         .write_all(&u16::try_from(bytes.len())?.to_be_bytes())
