@@ -326,8 +326,9 @@ struct PasskeyAssertion {
     signature: String,
 }
 
+/// The message of a browser passkey error. An error without a message gets the translated one.
 #[cfg(target_arch = "wasm32")]
-fn js_error_message(err: wasm_bindgen::JsValue) -> String {
+fn js_error_message(locale: Locale, err: wasm_bindgen::JsValue) -> String {
     if let Some(s) = err.as_string() {
         return s;
     }
@@ -336,7 +337,7 @@ fn js_error_message(err: wasm_bindgen::JsValue) -> String {
     {
         return s;
     }
-    "Passkey authentication failed".to_string()
+    locale.t("accounts.passkey_failed").to_string()
 }
 
 async fn fetch_passkey_challenge(
@@ -356,11 +357,10 @@ async fn passkey_login(
         let promise = get_passkey(&challenge.challenge, &challenge.rp_id);
         let js_val = wasm_bindgen_futures::JsFuture::from(promise)
             .await
-            .map_err(|err| format_passkey_error(locale, &js_error_message(err)))?;
-        let json_str = js_val
-            .as_string()
-            .ok_or_else(|| "Invalid passkey response".to_string())?;
-        serde_json::from_str::<PasskeyAssertion>(&json_str).map_err(|e| e.to_string())?
+            .map_err(|err| format_passkey_error(locale, &js_error_message(locale, err)))?;
+        let failed = || locale.t("accounts.passkey_failed").to_string();
+        let json_str = js_val.as_string().ok_or_else(failed)?;
+        serde_json::from_str::<PasskeyAssertion>(&json_str).map_err(|_| failed())?
     };
     #[cfg(not(target_arch = "wasm32"))]
     let assertion = {
