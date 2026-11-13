@@ -2,7 +2,7 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::post;
+use axum::routing::{MethodRouter, post};
 use r3v3rs3::admin::start_admin;
 use r3v3rs3::config::new_appinfo;
 use r3v3rs3::grpc::health::check_grpc_health;
@@ -113,6 +113,18 @@ async fn test_grpc_health_check_statuses() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Builds a `Health/Check` handler that answers with grpc-status 0 and the serving status
+/// `status` (1 SERVING, 2 NOT_SERVING).
+fn grpc_health_check(status: u8) -> MethodRouter {
+    post(move |_headers: HeaderMap, _body: Bytes| async move {
+        let mut res_headers = HeaderMap::new();
+        res_headers.insert("content-type", HeaderValue::from_static("application/grpc"));
+        res_headers.insert("grpc-status", HeaderValue::from_static("0"));
+        let body = make_grpc_frame(&[0x08, status]);
+        (res_headers, body).into_response()
+    })
+}
+
 #[tokio::test]
 async fn test_admin_api_grpc_health_endpoints() -> anyhow::Result<()> {
     init_crypto_provider();
@@ -120,16 +132,7 @@ async fn test_admin_api_grpc_health_endpoints() -> anyhow::Result<()> {
     let _ = std::fs::create_dir_all(&dir);
     DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
 
-    let app_serving = Router::new().route(
-        "/grpc.health.v1.Health/Check",
-        post(|_headers: HeaderMap, _body: Bytes| async move {
-            let mut res_headers = HeaderMap::new();
-            res_headers.insert("content-type", HeaderValue::from_static("application/grpc"));
-            res_headers.insert("grpc-status", HeaderValue::from_static("0"));
-            let body = make_grpc_frame(&[0x08, 0x01]);
-            (res_headers, body).into_response()
-        }),
-    );
+    let app_serving = Router::new().route("/grpc.health.v1.Health/Check", grpc_health_check(0x01));
 
     let upstream = serve_http_upstream(app_serving).await?;
     let proxy_port = alloc_tcp_port().await?;
@@ -168,41 +171,57 @@ async fn test_admin_api_grpc_health_endpoints() -> anyhow::Result<()> {
         let client = reqwest::Client::new();
         let base_url = format!("http://{admin_addr}");
 
-        // Test POST /api/grpc/health (standalone)
-        let standalone_req = GrpcHealthCheckRequest {
-            target_url: Some(upstream.to_string()),
-            service: Some("helloworld.Greeter".to_string()),
-        };
-        let res = client
-            .post(format!("{base_url}/api/grpc/health"))
-            .header("Cookie", &cookie)
-            .json(&standalone_req)
-            .send()
-            .await?;
-
-        assert_eq!(res.status(), StatusCode::OK);
-        let check_res: GrpcHealthCheckResponse = res.json().await?;
-        assert!(check_res.healthy);
-        assert_eq!(check_res.status, GrpcServingStatus::Serving);
-
-        // Test POST /api/proxies/{id}/grpc/health (proxy level)
-        let res_proxy = client
-            .post(format!("{base_url}/api/proxies/grpcprox/grpc/health"))
-            .header("Cookie", &cookie)
-            .json(&serde_json::json!({}))
-            .send()
-            .await?;
-
-        assert_eq!(res_proxy.status(), StatusCode::OK);
-        let proxy_check_res: GrpcHealthCheckResponse = res_proxy.json().await?;
-        assert!(proxy_check_res.healthy);
-        assert_eq!(proxy_check_res.status, GrpcServingStatus::Serving);
-
-        Ok(())
+        check_standalone_grpc_health(&client, &base_url, &cookie, &upstream).await?;
+        check_proxy_grpc_health(&client, &base_url, &cookie).await
     })
     .await?;
 
     let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+/// Checks that POST /api/grpc/health reports the upstream as serving.
+async fn check_standalone_grpc_health(
+    client: &reqwest::Client,
+    base_url: &str,
+    cookie: &str,
+    upstream: &url::Url,
+) -> anyhow::Result<()> {
+    let standalone_req = GrpcHealthCheckRequest {
+        target_url: Some(upstream.to_string()),
+        service: Some("helloworld.Greeter".to_string()),
+    };
+    let res = client
+        .post(format!("{base_url}/api/grpc/health"))
+        .header("Cookie", cookie)
+        .json(&standalone_req)
+        .send()
+        .await?;
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let check_res: GrpcHealthCheckResponse = res.json().await?;
+    assert!(check_res.healthy);
+    assert_eq!(check_res.status, GrpcServingStatus::Serving);
+    Ok(())
+}
+
+/// Checks that POST /api/proxies/{id}/grpc/health reports the proxy upstream as serving.
+async fn check_proxy_grpc_health(
+    client: &reqwest::Client,
+    base_url: &str,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    let res_proxy = client
+        .post(format!("{base_url}/api/proxies/grpcprox/grpc/health"))
+        .header("Cookie", cookie)
+        .json(&serde_json::json!({}))
+        .send()
+        .await?;
+
+    assert_eq!(res_proxy.status(), StatusCode::OK);
+    let proxy_check_res: GrpcHealthCheckResponse = res_proxy.json().await?;
+    assert!(proxy_check_res.healthy);
+    assert_eq!(proxy_check_res.status, GrpcServingStatus::Serving);
     Ok(())
 }
 
@@ -212,36 +231,36 @@ async fn test_proxy_grpc_active_health_check_failover() -> anyhow::Result<()> {
 
     // Server 1 (first in list): Returns NOT_SERVING (2)
     let app_sick = Router::new()
-        .route(
-            "/grpc.health.v1.Health/Check",
-            post(|_headers: HeaderMap, _body: Bytes| async move {
-                let mut res_headers = HeaderMap::new();
-                res_headers.insert("content-type", HeaderValue::from_static("application/grpc"));
-                res_headers.insert("grpc-status", HeaderValue::from_static("0"));
-                let body = make_grpc_frame(&[0x08, 0x02]);
-                (res_headers, body).into_response()
-            }),
-        )
+        .route("/grpc.health.v1.Health/Check", grpc_health_check(0x02))
         .route("/", axum::routing::get(|| async { "sick" }));
 
     // Server 2: Returns SERVING (1)
     let app_live = Router::new()
-        .route(
-            "/grpc.health.v1.Health/Check",
-            post(|_headers: HeaderMap, _body: Bytes| async move {
-                let mut res_headers = HeaderMap::new();
-                res_headers.insert("content-type", HeaderValue::from_static("application/grpc"));
-                res_headers.insert("grpc-status", HeaderValue::from_static("0"));
-                let body = make_grpc_frame(&[0x08, 0x01]);
-                (res_headers, body).into_response()
-            }),
-        )
+        .route("/grpc.health.v1.Health/Check", grpc_health_check(0x01))
         .route("/", axum::routing::get(|| async { "live" }));
 
     let upstream_sick = serve_http_upstream(app_sick).await?;
     let upstream_live = serve_http_upstream(app_live).await?;
     let proxy_port = alloc_tcp_port().await?;
 
+    let proxy = failover_proxy(&upstream_sick, &upstream_live)?;
+
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &proxy_port)])
+        .proxies(vec![http_proxy_entry("grpc-fo", "http", proxy)])
+        .build();
+
+    with_server(storage, |_channels| async move {
+        let body = wait_for_live_body(proxy_port.http_url("/")).await;
+        assert_eq!(body, "live");
+        Ok(())
+    })
+    .await
+}
+
+/// Builds a proxy with the sick server first and the live server second, with the `First`
+/// load balancing and an active gRPC health check every 150 ms.
+fn failover_proxy(upstream_sick: &url::Url, upstream_live: &url::Url) -> anyhow::Result<HttpProxy> {
     use r3v3rs3_api::upstream::LoadBalancing;
 
     let servers = vec![
@@ -252,7 +271,7 @@ async fn test_proxy_grpc_active_health_check_failover() -> anyhow::Result<()> {
     let mut route = http_route("/", upstream_sick.as_str(), None);
     route.servers = servers;
 
-    let proxy = HttpProxy {
+    Ok(HttpProxy {
         vhosts: vec!["localhost".parse().unwrap()],
         routes: vec![route],
         load_balancing: LoadBalancing::First,
@@ -265,39 +284,32 @@ async fn test_proxy_grpc_active_health_check_failover() -> anyhow::Result<()> {
             ..Default::default()
         },
         ..Default::default()
-    };
-
-    let storage = TestStorage::builder()
-        .ports(vec![http_port_entry("http", &proxy_port)])
-        .proxies(vec![http_proxy_entry("grpc-fo", "http", proxy)])
-        .build();
-
-    with_server(storage, |_channels| async move {
-        let client = reqwest::Client::new();
-        let url = proxy_port.http_url("/");
-
-        let mut body = String::new();
-        for _ in 0..50 {
-            let req = async {
-                let res = client
-                    .get(url.clone())
-                    .header("Host", "localhost")
-                    .send()
-                    .await
-                    .ok()?;
-                res.text().await.ok()
-            };
-            if let Some(text) = req.await {
-                body = text;
-                if body == "live" {
-                    break;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-
-        assert_eq!(body, "live");
-        Ok(())
     })
-    .await
+}
+
+/// Sends up to 50 requests, 100 ms apart, until the proxy answers "live". Returns the last body.
+async fn wait_for_live_body(url: url::Url) -> String {
+    let client = reqwest::Client::new();
+    let mut body = String::new();
+    for _ in 0..50 {
+        if let Some(text) = fetch_text(&client, &url).await {
+            body = text;
+            if body == "live" {
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    body
+}
+
+/// Sends a GET with `Host: localhost` and returns the body, or `None` when the request fails.
+async fn fetch_text(client: &reqwest::Client, url: &url::Url) -> Option<String> {
+    let res = client
+        .get(url.clone())
+        .header("Host", "localhost")
+        .send()
+        .await
+        .ok()?;
+    res.text().await.ok()
 }
