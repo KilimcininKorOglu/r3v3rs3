@@ -9,6 +9,7 @@ use crate::components::button::{Button, ButtonKind, ButtonSize, button_class};
 use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
 use crate::components::modal::{Modal, ModalSize};
 use crate::dialog;
+use crate::format::format_bytes;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -665,8 +666,6 @@ fn backup_row(ctx: &Ctx, volume: &str, writable: bool, backup: &VolumeBackupEntr
     }
 }
 
-pub(crate) use crate::format::format_bytes;
-
 fn load_volume_backups(ctx: &Ctx, volume: &str) {
     let (backups, notice, locale, app_id) = (
         ctx.backups.clone(),
@@ -803,13 +802,6 @@ fn volume_backup_download_url(app_id: ShortId, volume: &str, backup_id: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn format_bytes_scales_units() {
-        assert_eq!(format_bytes(500), "500 B");
-        assert_eq!(format_bytes(2048), "2.0 KB");
-        assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MB");
-    }
 
     #[test]
     fn volume_urls_format_correctly() {

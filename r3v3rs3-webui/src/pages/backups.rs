@@ -1,6 +1,5 @@
 //! Centralized database backups, automated schedules, and disaster recovery center.
 
-use super::app_files::format_bytes;
 use super::resource_page::{FormCard, Notice, delete_on_click, form_modal, notice_view};
 use super::settings::{
     failure_box, fetch_json, format_network_error, post_empty, send_json, send_request,
@@ -14,7 +13,7 @@ use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_v
 use crate::components::modal::{Modal, ModalSize};
 use crate::components::tabs::{TabItem, Tabs};
 use crate::dialog::{self, Icon};
-use crate::format::{format_rfc3339, format_time, format_unix_time};
+use crate::format::{format_bytes, format_rfc3339, format_time, format_unix_time};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
