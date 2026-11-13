@@ -730,11 +730,7 @@ async fn purge_cache(id: ShortId) -> Result<(), gloo_net::Error> {
 }
 
 async fn delete_site(locale: Locale, id: ShortId) -> Result<(), String> {
-    let req = Request::delete(&format!("{API_ENDPOINT}/proxies/{id}"))
-        .build()
-        .map_err(|err| err.to_string())?;
-    crate::pages::settings::send_request(locale, req).await?;
-    Ok(())
+    crate::pages::resource_page::delete(locale, &format!("/proxies/{id}")).await
 }
 
 async fn toggle_proxy(locale: Locale, id: ShortId) -> Result<(), String> {
