@@ -1,6 +1,7 @@
 use super::app_log::download_text_file;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::button::{Button, ButtonKind, ButtonSize};
+use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_card, list_view};
 use crate::components::tabs::{TabItem, Tabs};
 use crate::components::traffic_inspector::TrafficInspector;
 use crate::dialog::confirm;
@@ -446,47 +447,69 @@ fn connection_row(
     locale: Locale,
     conn: &ActiveConnectionInfo,
     trigger: &UseStateHandle<u32>,
-) -> Html {
+) -> Row {
     let speed = format!("{}/s", format_bytes(conn.current_rate_bps));
-    html! {
-        <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/60 transition-colors">
-            <td class="px-4 py-3 font-semibold text-neutral-800 dark:text-neutral-200">
-                { conn.id.to_string() }
-            </td>
-            <td class="px-4 py-3">
-                { protocol_badge(conn.protocol) }
-            </td>
-            <td class="px-4 py-3 font-sans text-neutral-700 dark:text-neutral-300">
-                { &conn.proxy_name }
-            </td>
-            <td class="px-4 py-3 text-neutral-600 dark:text-neutral-400">
-                { &conn.client_addr }
-            </td>
-            <td class="px-4 py-3 text-neutral-600 dark:text-neutral-400">
-                { &conn.upstream_addr }
-            </td>
-            <td class="px-4 py-3 font-sans text-neutral-700 dark:text-neutral-300">
-                { format_uptime(conn.uptime_secs) }
-            </td>
-            <td class="px-4 py-3 text-right text-neutral-700 dark:text-neutral-300">
-                { format_bytes(conn.bytes_sent) }
-            </td>
-            <td class="px-4 py-3 text-right text-neutral-700 dark:text-neutral-300">
-                { format_bytes(conn.bytes_received) }
-            </td>
-            <td class="px-4 py-3 text-right font-semibold text-primary-600 dark:text-primary-400">
-                { speed }
-            </td>
-            <td class="px-4 py-3 text-center">
-                <ActionIconButton
-                    variant={ActionVariant::Delete}
-                    title={locale.t("traffic.terminate").to_string()}
-                    onclick={terminate_connection_onclick(locale, conn.id, (*trigger).clone())}
-                />
-            </td>
-        </tr>
+    Row {
+        key: conn.id.to_string(),
+        cells: vec![
+            html! { <span class="font-mono font-semibold">{ conn.id.to_string() }</span> },
+            protocol_badge(conn.protocol),
+            html! { &conn.proxy_name },
+            html! { <span class="font-mono text-xs">{ &conn.client_addr }</span> },
+            html! { <span class="font-mono text-xs">{ &conn.upstream_addr }</span> },
+            html! { format_uptime(conn.uptime_secs) },
+            html! { format_bytes(conn.bytes_sent) },
+            html! { format_bytes(conn.bytes_received) },
+            html! { <span class="font-semibold text-primary-600 dark:text-primary-400">{ speed }</span> },
+        ],
+        actions: html! {
+            <ActionIconButton
+                variant={ActionVariant::Delete}
+                title={locale.t("traffic.terminate").to_string()}
+                onclick={terminate_connection_onclick(locale, conn.id, (*trigger).clone())}
+            />
+        },
     }
 }
+
+const CONNECTION_COLUMNS: [Column; 9] = [
+    Column {
+        label: "traffic.connection_id",
+        class: "",
+    },
+    Column {
+        label: "traffic.protocol",
+        class: "",
+    },
+    Column {
+        label: "traffic.col_proxy",
+        class: "",
+    },
+    Column {
+        label: "traffic.client_address",
+        class: "",
+    },
+    Column {
+        label: "traffic.target_upstream",
+        class: "",
+    },
+    Column {
+        label: "traffic.uptime",
+        class: "",
+    },
+    Column {
+        label: "traffic.bytes_sent",
+        class: "text-right",
+    },
+    Column {
+        label: "traffic.bytes_received",
+        class: "text-right",
+    },
+    Column {
+        label: "traffic.transfer_rate",
+        class: "text-right",
+    },
+];
 
 fn active_connections_view(
     locale: Locale,
@@ -497,6 +520,10 @@ fn active_connections_view(
         let trigger = trigger.clone();
         Callback::from(move |_: MouseEvent| trigger.set(*trigger + 1))
     };
+    let rows: Vec<Row> = connections
+        .iter()
+        .map(|c| connection_row(locale, c, trigger))
+        .collect();
 
     html! {
         <div class="space-y-4">
@@ -515,36 +542,7 @@ fn active_connections_view(
                 </Button>
             </div>
 
-            if connections.is_empty() {
-                <div class="p-8 text-center text-neutral-500 dark:text-neutral-400 bg-white dark:bg-neutral-800/40 border dark:border-neutral-700 rounded-xl">
-                    <svg class="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                    <p class="font-medium">{ locale.t("traffic.connections_empty") }</p>
-                </div>
-            } else {
-                <div class="overflow-x-auto bg-white dark:bg-neutral-800/40 border dark:border-neutral-700 rounded-xl shadow-sm">
-                    <table class="min-w-full divide-y divide-neutral-200 dark:divide-neutral-700 text-sm">
-                        <thead class="bg-neutral-50 dark:bg-neutral-800/80 font-medium text-neutral-600 dark:text-neutral-300">
-                            <tr>
-                                <th class="px-4 py-3 text-left">{ locale.t("traffic.connection_id") }</th>
-                                <th class="px-4 py-3 text-left">{ locale.t("traffic.protocol") }</th>
-                                <th class="px-4 py-3 text-left">{ locale.t("traffic.col_proxy") }</th>
-                                <th class="px-4 py-3 text-left">{ locale.t("traffic.client_address") }</th>
-                                <th class="px-4 py-3 text-left">{ locale.t("traffic.target_upstream") }</th>
-                                <th class="px-4 py-3 text-left">{ locale.t("traffic.uptime") }</th>
-                                <th class="px-4 py-3 text-right">{ locale.t("traffic.bytes_sent") }</th>
-                                <th class="px-4 py-3 text-right">{ locale.t("traffic.bytes_received") }</th>
-                                <th class="px-4 py-3 text-right">{ locale.t("traffic.transfer_rate") }</th>
-                                <th class="px-4 py-3 text-center">{ locale.t("common.actions") }</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-neutral-200 dark:divide-neutral-700 font-mono text-xs">
-                            { for connections.iter().map(|c| connection_row(locale, c, trigger)) }
-                        </tbody>
-                    </table>
-                </div>
-            }
+            { list_card(locale, true, "traffic.connections_empty", &CONNECTION_COLUMNS, &rows) }
         </div>
     }
 }
@@ -1319,6 +1317,26 @@ fn table_view(
             </div>
         };
     }
+    let rows: Vec<Row> = filtered.iter().map(render_entry_row).collect();
+    let content = ListContent {
+        loaded: true,
+        empty: "traffic.no_matches",
+        columns: &ENTRY_COLUMNS,
+        rows: &rows,
+    };
+    let entries = filtered.to_vec();
+    let options = ListOptions {
+        compact: true,
+        no_actions: true,
+        max_height: Some("max-h-[65vh]"),
+        on_row_click: Some(Callback::from(move |key: String| {
+            if let Some(entry) = entries.iter().find(|e| e.id.to_string() == key) {
+                on_select.emit(entry.clone());
+            }
+        })),
+        selected_key: selected_id.map(|id| id.to_string()),
+        ..ListOptions::default()
+    };
 
     html! {
         <div class="space-y-1.5">
@@ -1331,34 +1349,49 @@ fn table_view(
                 </span>
                 <span class="font-mono">{format!("{} items", filtered.len())}</span>
             </div>
-            <div ref={table_ref.clone()} class="overflow-x-auto overflow-y-auto max-h-[65vh] bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm">
-                <table class="w-full text-left text-xs sm:text-sm">
-                    <thead class="bg-neutral-50 dark:bg-neutral-900/60 border-b dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 font-semibold sticky top-0 z-10">
-                        <tr>
-                            <th class="px-3 py-2">{locale.t("traffic.col_time")}</th>
-                            <th class="px-3 py-2">{locale.t("traffic.col_status")}</th>
-                            <th class="px-3 py-2">{locale.t("traffic.col_method")}</th>
-                            <th class="px-3 py-2">{locale.t("traffic.col_path")}</th>
-                            <th class="px-3 py-2">{locale.t("traffic.col_client")}</th>
-                            <th class="px-3 py-2">{locale.t("traffic.col_country")}</th>
-                            <th class="px-3 py-2">{locale.t("traffic.col_latency")}</th>
-                            <th class="px-3 py-2">{locale.t("traffic.col_proxy")}</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-neutral-200 dark:divide-neutral-700 font-mono">
-                        { for filtered.iter().map(|entry| render_entry_row(entry, selected_id == Some(entry.id), on_select.clone())) }
-                    </tbody>
-                </table>
+            <div ref={table_ref.clone()}>
+                { list_view(locale, content, None, &options) }
             </div>
         </div>
     }
 }
 
-fn render_entry_row(
-    entry: &AccessLogEntry,
-    is_selected: bool,
-    on_select: Callback<AccessLogEntry>,
-) -> Html {
+const ENTRY_COLUMNS: [Column; 8] = [
+    Column {
+        label: "traffic.col_time",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "traffic.col_status",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "traffic.col_method",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "traffic.col_path",
+        class: "break-all",
+    },
+    Column {
+        label: "traffic.col_client",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "traffic.col_country",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "traffic.col_latency",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "traffic.col_proxy",
+        class: "whitespace-nowrap",
+    },
+];
+
+fn render_entry_row(entry: &AccessLogEntry) -> Row {
     let time_str = format_instant(&entry.timestamp);
     let time_part = time_str.split('T').nth(1).unwrap_or(&time_str);
     let status_class = status_badge_class(entry.status);
@@ -1370,53 +1403,39 @@ fn render_entry_row(
         .map(|id| id.to_string())
         .unwrap_or_else(|| "-".to_string());
     let country_display = entry.country.as_deref().unwrap_or("-");
-    let on_click = {
-        let entry = entry.clone();
-        Callback::from(move |_| on_select.emit(entry.clone()))
-    };
-    let row_cls = if is_selected {
-        "bg-blue-50 dark:bg-blue-950/40 ring-1 ring-blue-500/50 cursor-pointer"
-    } else {
-        "hover:bg-neutral-100 dark:hover:bg-neutral-700/40 cursor-pointer transition-colors"
-    };
-
-    html! {
-        <tr onclick={on_click} class={row_cls}>
-            <td class="px-3 py-2 whitespace-nowrap text-xs text-neutral-500 dark:text-neutral-400">
-                {time_part}
-            </td>
-            <td class="px-3 py-2 whitespace-nowrap">
+    Row {
+        key: entry.id.to_string(),
+        cells: vec![
+            html! { <span class="font-mono text-neutral-500 dark:text-neutral-400">{time_part}</span> },
+            html! {
                 <span class={classes!("px-2", "py-0.5", "rounded", "font-bold", "text-xs", status_class)}>
                     {entry.status}
                 </span>
-            </td>
-            <td class="px-3 py-2 whitespace-nowrap">
+            },
+            html! {
                 <span class={classes!("px-1.5", "py-0.5", "rounded", "border", "font-bold", "text-xs", method_class)}>
                     {&entry.method}
                 </span>
-            </td>
-            <td class="px-3 py-2 break-all font-sans text-xs sm:text-sm">
-                <span class="font-medium text-neutral-900 dark:text-neutral-100">{&entry.host}</span>
-                <span class="text-neutral-600 dark:text-neutral-300">{&entry.uri}</span>
-                if let Some(err) = &entry.error {
-                    <div class="text-xs text-red-600 dark:text-red-400 mt-0.5 font-mono">{err}</div>
-                }
-            </td>
-            <td class="px-3 py-2 whitespace-nowrap text-xs text-neutral-600 dark:text-neutral-400">
-                {&entry.client_ip}
-            </td>
-            <td class="px-3 py-2 whitespace-nowrap text-xs">
+            },
+            html! {
+                <>
+                    <span class="font-medium text-neutral-900 dark:text-neutral-100">{&entry.host}</span>
+                    <span class="text-neutral-600 dark:text-neutral-300">{&entry.uri}</span>
+                    if let Some(err) = &entry.error {
+                        <div class="text-xs text-red-600 dark:text-red-400 mt-0.5 font-mono">{err}</div>
+                    }
+                </>
+            },
+            html! { <span class="font-mono">{&entry.client_ip}</span> },
+            html! {
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-neutral-100 dark:bg-neutral-700/80 text-neutral-800 dark:text-neutral-200 font-mono">
                     {country_display}
                 </span>
-            </td>
-            <td class="px-3 py-2 whitespace-nowrap">
-                <span class={latency_cls}>{latency_str}</span>
-            </td>
-            <td class="px-3 py-2 whitespace-nowrap text-xs text-neutral-500 dark:text-neutral-400">
-                {proxy_name}
-            </td>
-        </tr>
+            },
+            html! { <span class={latency_cls}>{latency_str}</span> },
+            html! { <span class="font-mono">{proxy_name}</span> },
+        ],
+        actions: html! {},
     }
 }
 
@@ -1703,8 +1722,13 @@ fn use_traffic_auto_scroll(
     let table_ref = table_ref.clone();
     let auto_scroll = auto_scroll.clone();
     use_effect_with((**entries).len(), move |_| {
-        if *auto_scroll && let Some(elem) = table_ref.cast::<web_sys::Element>() {
-            elem.set_scroll_top(0);
+        // The shared list scrolls inside its own frame, the first child of the ref.
+        if *auto_scroll
+            && let Some(frame) = table_ref
+                .cast::<web_sys::Element>()
+                .and_then(|elem| elem.first_element_child())
+        {
+            frame.set_scroll_top(0);
         }
     });
 }

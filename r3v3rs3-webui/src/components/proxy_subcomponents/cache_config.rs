@@ -1,6 +1,7 @@
 use super::common::*;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::button::{Button, ButtonKind, ButtonSize};
+use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
 use crate::components::error_pages_editor::ErrorPagesEditor;
 use r3v3rs3_api::cache::CacheConfig;
 use r3v3rs3_api::compression::{
@@ -274,54 +275,98 @@ pub fn compression_view(
                 }
 
                 if !dicts.is_empty() {
-                    <div class="overflow-x-auto rounded border border-neutral-200 dark:border-neutral-700">
-                        <table class="w-full text-xs text-left">
-                            <thead class="bg-neutral-50 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-700">
-                                <tr>
-                                    <th class="px-3 py-2 font-medium">{locale.t("http_form.dictionary_name")}</th>
-                                    <th class="px-3 py-2 font-medium">{locale.t("http_form.dictionary_match")}</th>
-                                    <th class="px-3 py-2 font-medium">{locale.t("http_form.dictionary_path")}</th>
-                                    <th class="px-3 py-2 font-medium">{"SHA-256"}</th>
-                                    <th class="px-3 py-2 text-right font-medium">{locale.t("common.delete")}</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-neutral-200 dark:divide-neutral-700">
-                                { for dicts.into_iter().enumerate().map(|(idx, dict)| {
-                                    let on_delete = {
-                                        let (form, onchange) = (form.clone(), onchange.clone());
-                                        Callback::from(move |_| {
-                                            let mut next = form.clone();
-                                            if idx < next.dictionaries.len() {
-                                                next.dictionaries.remove(idx);
-                                                onchange.emit(next);
-                                            }
-                                        })
-                                    };
-                                    html! {
-                                        <tr class="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/50">
-                                            <td class="px-3 py-2 font-medium text-neutral-900 dark:text-neutral-100">{dict.name}</td>
-                                            <td class="px-3 py-2 font-mono text-neutral-600 dark:text-neutral-300">{dict.match_pattern}</td>
-                                            <td class="px-3 py-2 font-mono text-neutral-600 dark:text-neutral-300">{dict.path}</td>
-                                            <td class="px-3 py-2 font-mono text-neutral-500 text-[10px] truncate max-w-[160px]" title={dict.sha256_sf.clone()}>
-                                                {dict.sha256_sf}
-                                            </td>
-                                            <td class="px-3 py-2 text-right">
-                                                <ActionIconButton
-                                                    variant={ActionVariant::Delete}
-                                                    title={locale.t("common.delete").to_string()}
-                                                    onclick={on_delete}
-                                                />
-                                            </td>
-                                        </tr>
-                                    }
-                                }) }
-                            </tbody>
-                        </table>
+                    <div class="rounded border border-neutral-200 dark:border-neutral-700">
+                        { dictionary_list(locale, form, &onchange, dicts) }
                     </div>
                 }
             </div>
         </>
     }
+}
+
+const DICTIONARY_COLUMNS: [Column; 4] = [
+    Column {
+        label: "http_form.dictionary_name",
+        class: "",
+    },
+    Column {
+        label: "http_form.dictionary_match",
+        class: "font-mono",
+    },
+    Column {
+        label: "http_form.dictionary_path",
+        class: "font-mono",
+    },
+    Column {
+        label: "",
+        class: "font-mono",
+    },
+];
+
+/// The compression dictionaries of the form, each with a delete action.
+fn dictionary_list(
+    locale: Locale,
+    form: &CompressionForm,
+    onchange: &Callback<CompressionForm>,
+    dicts: Vec<CompressionDictionary>,
+) -> Html {
+    let rows: Vec<Row> = dicts
+        .into_iter()
+        .enumerate()
+        .map(|(idx, dict)| {
+            let on_delete = {
+                let (form, onchange) = (form.clone(), onchange.clone());
+                Callback::from(move |_| {
+                    let mut next = form.clone();
+                    if idx < next.dictionaries.len() {
+                        next.dictionaries.remove(idx);
+                        onchange.emit(next);
+                    }
+                })
+            };
+            Row {
+                key: idx.to_string(),
+                cells: vec![
+                    html! { <span class="font-medium">{dict.name}</span> },
+                    html! { dict.match_pattern },
+                    html! { dict.path },
+                    html! {
+                        <span class="block text-[10px] truncate max-w-[160px]" title={dict.sha256_sf.clone()}>
+                            {dict.sha256_sf}
+                        </span>
+                    },
+                ],
+                actions: html! {
+                    <ActionIconButton
+                        variant={ActionVariant::Delete}
+                        title={locale.t("common.delete").to_string()}
+                        onclick={on_delete}
+                    />
+                },
+            }
+        })
+        .collect();
+    let headings = DICTIONARY_COLUMNS
+        .iter()
+        .map(|column| match column.label {
+            "" => "SHA-256".to_string(),
+            key => locale.t(key).to_string(),
+        })
+        .collect();
+    let options = ListOptions {
+        embedded: true,
+        compact: true,
+        headings: Some(headings),
+        ..ListOptions::default()
+    };
+    // The caller draws the list only when it has rows, so the empty message never shows.
+    let content = ListContent {
+        loaded: true,
+        empty: "http_form.dictionary_name",
+        columns: &DICTIONARY_COLUMNS,
+        rows: &rows,
+    };
+    list_view(locale, content, None, &options)
 }
 
 pub fn add_dictionary_card(
