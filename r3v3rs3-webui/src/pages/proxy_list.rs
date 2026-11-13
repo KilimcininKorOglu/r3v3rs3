@@ -107,7 +107,7 @@ pub fn proxy_list() -> Html {
 
     let proxies_dispatcher_for_effect = proxies_dispatcher.clone();
     use_effect_with((), move |_| {
-        let load = move || load_proxies(proxies_dispatcher_for_effect.clone());
+        let load = move || load_proxies(locale, proxies_dispatcher_for_effect.clone());
         load();
         let interval = Interval::new(STATUS_REFRESH_INTERVAL_MS, load);
         move || drop(interval)
@@ -158,18 +158,11 @@ pub fn proxy_list() -> Html {
                 ProxyTab::Proxies => html! {
                     <>
                         <DiscoveryStatusCard />
-                        { selectable_list_card(locale, proxies.loaded, "proxies.empty", &COLUMNS, &rows, selection.as_ref()) }
-                        if let Some((proxy_name, upstreams)) = (*active_distribution).clone() {
-                            <crate::components::upstream_distribution_modal::UpstreamDistributionModal
-                                {locale}
-                                {proxy_name}
-                                {upstreams}
-                                onclose={{
-                                    let active = active_distribution.clone();
-                                    Callback::from(move |()| active.set(None))
-                                }}
-                            />
+                        if let Some(error) = &proxies.error {
+                            { crate::pages::settings::failure_box(error) }
                         }
+                        { selectable_list_card(locale, proxies.loaded, "proxies.empty", &COLUMNS, &rows, selection.as_ref()) }
+                        { distribution_modal(locale, &active_distribution) }
                         if can_edit {
                             { add_button(locale, new_proxy_onclick) }
                         }
@@ -180,6 +173,26 @@ pub fn proxy_list() -> Html {
                 },
             } }
         </div>
+    }
+}
+
+/// The upstream distribution of the selected proxy, or nothing when no proxy is selected.
+fn distribution_modal(
+    locale: Locale,
+    active_distribution: &UseStateHandle<Option<(String, Vec<UpstreamHealth>)>>,
+) -> Html {
+    let Some((proxy_name, upstreams)) = (**active_distribution).clone() else {
+        return html!();
+    };
+    let active = active_distribution.clone();
+    let onclose = Callback::from(move |()| active.set(None));
+    html! {
+        <crate::components::upstream_distribution_modal::UpstreamDistributionModal
+            {locale}
+            {proxy_name}
+            {upstreams}
+            {onclose}
+        />
     }
 }
 
@@ -210,7 +223,7 @@ fn bulk_delete_callback(
                 dialog::message(locale, err, Icon::Error).await;
             }
             selected.set(HashSet::new());
-            load_proxies(proxies_dispatcher);
+            load_proxies(locale, proxies_dispatcher);
         });
     })
 }
@@ -460,7 +473,7 @@ fn delete_onclick(
         dialog::confirm_then(locale, question, async move {
             match delete_site(locale, id).await {
                 Ok(()) => {
-                    load_proxies(proxies_dispatcher);
+                    load_proxies(locale, proxies_dispatcher);
                 }
                 Err(err) => {
                     dialog::message(locale, &err, Icon::Error).await;
@@ -674,27 +687,31 @@ fn unhealthy_line(locale: Locale, server: &UpstreamHealth) -> String {
 
 static PROXIES_LOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Loads the proxies and their statuses into the store.
-fn load_proxies(dispatcher: Dispatch<ProxyStore>) {
+/// Loads the proxies and their statuses into the store. A failed load keeps the last entries and
+/// stores its error, which the list shows.
+fn load_proxies(locale: Locale, dispatcher: Dispatch<ProxyStore>) {
     if PROXIES_LOADING.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
     }
     wasm_bindgen_futures::spawn_local(async move {
-        let res = get_list().await;
+        let res = get_list(locale).await;
         PROXIES_LOADING.store(false, std::sync::atomic::Ordering::SeqCst);
-        let Ok(entries) = res else {
-            return;
-        };
-        let mut statuses = HashMap::new();
-        for entry in &entries {
-            if let Some(status) = &entry.status {
-                statuses.insert(entry.id, status.clone());
+        let entries = match res {
+            Ok(entries) => entries,
+            Err(err) => {
+                dispatcher.reduce_mut(|state| state.error = Some(err));
+                return;
             }
-        }
+        };
+        let statuses = entries
+            .iter()
+            .filter_map(|entry| entry.status.clone().map(|status| (entry.id, status)))
+            .collect::<HashMap<_, _>>();
         dispatcher.set(ProxyStore {
             entries,
             statuses,
             loaded: true,
+            error: None,
         });
     });
 }
@@ -707,11 +724,8 @@ async fn get_ports() -> Result<Vec<PortEntry>, gloo_net::Error> {
         .await
 }
 
-async fn get_list() -> Result<Vec<ProxyEntry>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/proxies"))
-        .send()
-        .await?
-        .json()
+async fn get_list(locale: Locale) -> Result<Vec<ProxyEntry>, String> {
+    crate::pages::settings::fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/proxies")))
         .await
 }
 
@@ -754,7 +768,7 @@ fn maintenance_onclick(
             if let Err(err) = toggle_maintenance(locale, id, enabled).await {
                 dialog::message(locale, &err, Icon::Error).await;
             }
-            load_proxies(proxies_dispatcher);
+            load_proxies(locale, proxies_dispatcher);
         });
     })
 }

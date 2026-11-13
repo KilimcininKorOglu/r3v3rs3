@@ -22,6 +22,8 @@ pub struct ProxyStore {
     pub entries: Vec<ProxyEntry>,
     pub statuses: HashMap<ShortId, ProxyStatus>,
     pub loaded: bool,
+    /// The error of the last failed load. The list keeps the entries of the last good load.
+    pub error: Option<String>,
 }
 
 #[derive(Default, Clone, PartialEq, Store)]
