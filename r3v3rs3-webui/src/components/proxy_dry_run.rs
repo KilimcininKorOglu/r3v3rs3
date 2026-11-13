@@ -1,4 +1,5 @@
 use crate::API_ENDPOINT;
+use crate::components::button::{Button, ButtonKind};
 use crate::components::http_proxy_config::{HINT_CLASS, INPUT_CLASS};
 use crate::i18n::use_locale;
 use gloo_net::http::Request;
@@ -84,7 +85,7 @@ pub fn proxy_dry_run(props: &Props) -> Html {
 
             is_loading.set(true);
             wasm_bindgen_futures::spawn_local(async move {
-                execute_dry_run_request(req_body, is_loading, result).await;
+                execute_dry_run_request(locale, req_body, is_loading, result).await;
             });
         })
     };
@@ -153,17 +154,12 @@ pub fn proxy_dry_run(props: &Props) -> Html {
                     </div>
 
                     <div class="mt-4 flex items-center gap-3">
-                        <button
-                            type="button"
-                            onclick={on_test}
-                            disabled={*is_loading}
-                            class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
-                        >
+                        <Button kind={ButtonKind::Primary} onclick={on_test} disabled={*is_loading}>
                             if *is_loading {
                                 <span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
                             }
                             {locale.t("http_form.dry_run_button")}
-                        </button>
+                        </Button>
                     </div>
 
                     if let Some(res) = &*result {
@@ -176,25 +172,14 @@ pub fn proxy_dry_run(props: &Props) -> Html {
 }
 
 async fn execute_dry_run_request(
+    locale: Locale,
     req_body: ProxyDryRunRequest,
     is_loading: UseStateHandle<bool>,
     result: UseStateHandle<Option<Result<ProxyDryRunResult, String>>>,
 ) {
-    let res = Request::post(&format!("{API_ENDPOINT}/proxies/dry-run")).json(&req_body);
-    match res {
-        Ok(req) => match req.send().await {
-            Ok(resp) if resp.ok() => match resp.json::<ProxyDryRunResult>().await {
-                Ok(data) => result.set(Some(Ok(data))),
-                Err(e) => result.set(Some(Err(e.to_string()))),
-            },
-            Ok(resp) => {
-                let text = resp.text().await.unwrap_or_else(|_| "Error".to_string());
-                result.set(Some(Err(text)));
-            }
-            Err(e) => result.set(Some(Err(e.to_string()))),
-        },
-        Err(e) => result.set(Some(Err(e.to_string()))),
-    }
+    let request = Request::post(&format!("{API_ENDPOINT}/proxies/dry-run"));
+    let sent = crate::pages::settings::post_json(locale, request, &req_body).await;
+    result.set(Some(sent));
     is_loading.set(false);
 }
 
