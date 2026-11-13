@@ -322,128 +322,132 @@ async fn openapi_document_and_swagger_ui_require_a_session() -> anyhow::Result<(
             channels.accounts.clone(),
         ));
         wait_for_listener(addr).await?;
-        let client = Client::new();
-
-        let unauth_res = client
-            .get(format!("http://{addr}/api/openapi.json"))
-            .send()
-            .await?;
-        assert_eq!(unauth_res.status(), StatusCode::UNAUTHORIZED);
-        let req_id_header = unauth_res
-            .headers()
-            .get("x-request-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
-        assert!(req_id_header.is_some());
-        let err_json: ErrorMessage = unauth_res.json().await?;
-        assert_eq!(err_json.request_id, req_id_header);
-
-        assert_eq!(status(&client, addr, "/api/docs/", None).await?, 401);
-
-        let cookie = admin_session_cookie(addr).await?;
-        let raw_client = Client::builder().no_gzip().no_brotli().no_zstd().build()?;
-        let compressed_openapi = raw_client
-            .get(format!("http://{addr}/api/openapi.json"))
-            .header(COOKIE, &cookie)
-            .header("accept-encoding", "gzip")
-            .send()
-            .await?;
-        assert_eq!(compressed_openapi.status(), StatusCode::OK);
-        assert_eq!(
-            compressed_openapi
-                .headers()
-                .get("content-encoding")
-                .and_then(|v| v.to_str().ok()),
-            Some("gzip")
-        );
-
-        let compressed_br = raw_client
-            .get(format!("http://{addr}/api/openapi.json"))
-            .header(COOKIE, &cookie)
-            .header("accept-encoding", "br")
-            .send()
-            .await?;
-        assert_eq!(compressed_br.status(), StatusCode::OK);
-        assert_eq!(
-            compressed_br
-                .headers()
-                .get("content-encoding")
-                .and_then(|v| v.to_str().ok()),
-            Some("br")
-        );
-
-        let compressed_zstd = raw_client
-            .get(format!("http://{addr}/api/openapi.json"))
-            .header(COOKIE, &cookie)
-            .header("accept-encoding", "zstd")
-            .send()
-            .await?;
-        assert_eq!(compressed_zstd.status(), StatusCode::OK);
-        assert_eq!(
-            compressed_zstd
-                .headers()
-                .get("content-encoding")
-                .and_then(|v| v.to_str().ok()),
-            Some("zstd")
-        );
-
-        let document: Value = client
-            .get(format!("http://{addr}/api/openapi.json"))
-            .header(COOKIE, &cookie)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        check_document(&document);
-
-        let docs = client
-            .get(format!("http://{addr}/api/docs/"))
-            .header(COOKIE, &cookie)
-            .send()
-            .await?;
-        assert_eq!(docs.status(), StatusCode::OK);
-        assert!(content_type(&docs).starts_with("text/html"));
-        assert_eq!(
-            docs.headers()
-                .get("x-frame-options")
-                .and_then(|v| v.to_str().ok()),
-            Some("DENY")
-        );
-        assert_eq!(
-            docs.headers()
-                .get("content-security-policy")
-                .and_then(|v| v.to_str().ok()),
-            Some("frame-ancestors 'none'")
-        );
-
-        let healthz = client.get(format!("http://{addr}/healthz")).send().await?;
-        assert_eq!(healthz.status(), StatusCode::OK);
-        let healthz_body: Value = healthz.json().await?;
-        assert_eq!(healthz_body["status"], "ok");
-
-        let readyz = client.get(format!("http://{addr}/readyz")).send().await?;
-        assert_eq!(readyz.status(), StatusCode::OK);
-        let readyz_body: Value = readyz.json().await?;
-        assert_eq!(readyz_body["status"], "ready");
-
-        // The routes still answer after the router records them in the document.
-        assert_eq!(
-            status(&client, addr, "/api/ports", Some(&cookie)).await?,
-            200
-        );
-        let events = client
-            .get(format!("http://{addr}/api/events"))
-            .header(COOKIE, &cookie)
-            .send()
-            .await?;
-        assert_eq!(events.status(), StatusCode::OK);
-        assert!(content_type(&events).starts_with("text/event-stream"));
-        Ok(())
+        check_the_admin_routes(addr).await
     })
     .await?;
 
     std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// Runs every check of the document, the docs page and the health routes in order.
+async fn check_the_admin_routes(addr: SocketAddr) -> anyhow::Result<()> {
+    let client = Client::new();
+    check_unauthenticated_requests(&client, addr).await?;
+
+    let cookie = admin_session_cookie(addr).await?;
+    let raw_client = Client::builder().no_gzip().no_brotli().no_zstd().build()?;
+    for encoding in ["gzip", "br", "zstd"] {
+        check_compressed_document(&raw_client, addr, &cookie, encoding).await?;
+    }
+
+    check_document(&fetch_document(&client, addr, &cookie).await?);
+    check_docs_page(&client, addr, &cookie).await?;
+    check_health_routes(&client, addr).await?;
+    check_routes_still_answer(&client, addr, &cookie).await
+}
+
+/// Reads the OpenAPI document with the session cookie.
+async fn fetch_document(client: &Client, addr: SocketAddr, cookie: &str) -> anyhow::Result<Value> {
+    Ok(client
+        .get(format!("http://{addr}/api/openapi.json"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
+}
+
+/// The value of a response header as a string, if it is present and valid.
+fn header_value<'a>(response: &'a reqwest::Response, name: &str) -> Option<&'a str> {
+    response.headers().get(name).and_then(|v| v.to_str().ok())
+}
+
+/// Checks that the document and the docs page need a session, and that the error carries the
+/// request id of the response header.
+async fn check_unauthenticated_requests(client: &Client, addr: SocketAddr) -> anyhow::Result<()> {
+    let unauth_res = client
+        .get(format!("http://{addr}/api/openapi.json"))
+        .send()
+        .await?;
+    assert_eq!(unauth_res.status(), StatusCode::UNAUTHORIZED);
+    let req_id_header = header_value(&unauth_res, "x-request-id").map(|s| s.to_string());
+    assert!(req_id_header.is_some());
+    let err_json: ErrorMessage = unauth_res.json().await?;
+    assert_eq!(err_json.request_id, req_id_header);
+
+    assert_eq!(status(client, addr, "/api/docs/", None).await?, 401);
+    Ok(())
+}
+
+/// Checks that the document is sent with the requested content encoding.
+async fn check_compressed_document(
+    raw_client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    encoding: &str,
+) -> anyhow::Result<()> {
+    let compressed = raw_client
+        .get(format!("http://{addr}/api/openapi.json"))
+        .header(COOKIE, cookie)
+        .header("accept-encoding", encoding)
+        .send()
+        .await?;
+    assert_eq!(compressed.status(), StatusCode::OK);
+    assert_eq!(
+        header_value(&compressed, "content-encoding"),
+        Some(encoding)
+    );
+    Ok(())
+}
+
+/// Checks that the docs page is HTML and cannot be framed.
+async fn check_docs_page(client: &Client, addr: SocketAddr, cookie: &str) -> anyhow::Result<()> {
+    let docs = client
+        .get(format!("http://{addr}/api/docs/"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(docs.status(), StatusCode::OK);
+    assert!(content_type(&docs).starts_with("text/html"));
+    assert_eq!(header_value(&docs, "x-frame-options"), Some("DENY"));
+    assert_eq!(
+        header_value(&docs, "content-security-policy"),
+        Some("frame-ancestors 'none'")
+    );
+    Ok(())
+}
+
+/// Checks that the health and readiness routes answer without a session.
+async fn check_health_routes(client: &Client, addr: SocketAddr) -> anyhow::Result<()> {
+    let healthz = client.get(format!("http://{addr}/healthz")).send().await?;
+    assert_eq!(healthz.status(), StatusCode::OK);
+    let healthz_body: Value = healthz.json().await?;
+    assert_eq!(healthz_body["status"], "ok");
+
+    let readyz = client.get(format!("http://{addr}/readyz")).send().await?;
+    assert_eq!(readyz.status(), StatusCode::OK);
+    let readyz_body: Value = readyz.json().await?;
+    assert_eq!(readyz_body["status"], "ready");
+    Ok(())
+}
+
+/// Checks that the routes still answer after the router records them in the document.
+async fn check_routes_still_answer(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    // The routes still answer after the router records them in the document.
+    assert_eq!(status(client, addr, "/api/ports", Some(cookie)).await?, 200);
+    let events = client
+        .get(format!("http://{addr}/api/events"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(events.status(), StatusCode::OK);
+    assert!(content_type(&events).starts_with("text/event-stream"));
     Ok(())
 }
 
