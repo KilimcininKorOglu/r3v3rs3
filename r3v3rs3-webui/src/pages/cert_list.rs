@@ -744,11 +744,7 @@ async fn get_acme_list() -> Result<Vec<AcmeInfo>, gloo_net::Error> {
 }
 
 async fn delete_server_cert(locale: Locale, id: ShortId) -> Result<(), String> {
-    let req = Request::delete(&format!("{API_ENDPOINT}/certs/{id}"))
-        .build()
-        .map_err(|err| err.to_string())?;
-    send_request(locale, req).await?;
-    Ok(())
+    super::resource_page::delete(locale, &format!("/certs/{id}")).await
 }
 
 async fn delete_acme(locale: Locale, id: ShortId) -> Result<(), String> {
