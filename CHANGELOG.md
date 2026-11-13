@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.7] - 2026-11-13
+
+### Fixed
+- The TLS-ALPN Pebble test installs the rustls crypto provider itself; it panicked when it ran alone, because only the server installed the provider and the test built its HTTP client first.
+- The Docker runtime tests wait up to 30 seconds until a new container answers. They sent one request right after the start, so a server that did not listen yet failed the Compose test with an empty message.
+
+### Changed
+- Every integration test function is split to a cyclomatic complexity of ten or less, and the CI complexity job now checks `r3v3rs3/tests` and `r3v3rs3-cli/src` too. `make complexity` runs the same check, and `make check` includes it.
+
 ## [3.2.6] - 2026-11-13
 
 ### Fixed
