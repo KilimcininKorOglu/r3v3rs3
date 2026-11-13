@@ -1,8 +1,8 @@
 //! Security center consolidating Access Lists, Banned IPs, Quarantined IPs, and Anomaly Detection Rules.
 
 use super::access_lists::AccessLists;
-use super::resource_page::{FormCard, add_button, form_modal};
-use super::settings::{Notice, fetch_json, notice_view, send_json, send_request};
+use super::resource_page::{FormCard, add_button, delete, form_modal};
+use super::settings::{Notice, fetch_json, notice_view, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -161,29 +161,16 @@ fn banned_ips_card() -> Html {
         });
     });
 
-    let unban = {
-        let reload = reload.clone();
-        let notice = notice.clone();
-        Callback::from(move |ip: String| {
-            let reload = reload.clone();
-            let notice = notice.clone();
-            let question = locale.tf("settings.unban_confirm", &[("ip", &ip)]);
-            dialog::confirm_then(locale, question, async move {
-                let req = Request::delete(&format!("{API_ENDPOINT}/banned-ips/{ip}"));
-                if let Ok(built) = req.build() {
-                    match send_request(locale, built).await {
-                        Ok(_) => {
-                            notice.set(Some(Notice::Success(
-                                locale.t("settings.unbanned").to_string(),
-                            )));
-                            reload.set(*reload + 1);
-                        }
-                        Err(err) => notice.set(Some(Notice::Failed(err))),
-                    }
-                }
-            });
-        })
-    };
+    let unban = release_callback(
+        locale,
+        &notice,
+        &reload,
+        Release {
+            question: "settings.unban_confirm",
+            path: "banned-ips",
+            done: "settings.unbanned",
+        },
+    );
 
     html! {
         <div class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
@@ -235,6 +222,39 @@ fn banned_table_view(locale: Locale, list: &[BannedIpEntry], unban: Callback<Str
     list_view(locale, content, None, &table_options())
 }
 
+/// The translation keys and the admin API path of a release of a blocked address.
+struct Release {
+    question: &'static str,
+    path: &'static str,
+    done: &'static str,
+}
+
+/// Returns a callback that asks the question for an address, deletes the address under the
+/// path and shows the result in the notice.
+fn release_callback(
+    locale: Locale,
+    notice: &UseStateHandle<Option<Notice>>,
+    reload: &UseStateHandle<usize>,
+    release: Release,
+) -> Callback<String> {
+    let (notice, reload) = (notice.clone(), reload.clone());
+    Callback::from(move |ip: String| {
+        let (notice, reload) = (notice.clone(), reload.clone());
+        let question = locale.tf(release.question, &[("ip", &ip)]);
+        let path = format!("/{}/{ip}", release.path);
+        let done = release.done;
+        dialog::confirm_then(locale, question, async move {
+            match delete(locale, &path).await {
+                Ok(()) => {
+                    notice.set(Some(Notice::Success(locale.t(done).to_string())));
+                    reload.set(*reload + 1);
+                }
+                Err(err) => notice.set(Some(Notice::Failed(err))),
+            }
+        });
+    })
+}
+
 /// The options of the tables inside the cards: the address column keeps its untranslated name.
 fn table_options() -> ListOptions {
     ListOptions {
@@ -267,29 +287,16 @@ fn quarantined_ips_card() -> Html {
         });
     });
 
-    let unquarantine = {
-        let reload = reload.clone();
-        let notice = notice.clone();
-        Callback::from(move |ip: String| {
-            let reload = reload.clone();
-            let notice = notice.clone();
-            let question = locale.tf("settings.unquarantine_confirm", &[("ip", &ip)]);
-            dialog::confirm_then(locale, question, async move {
-                let req = Request::delete(&format!("{API_ENDPOINT}/security/quarantine/{ip}"));
-                if let Ok(built) = req.build() {
-                    match send_request(locale, built).await {
-                        Ok(_) => {
-                            notice.set(Some(Notice::Success(
-                                locale.t("settings.unquarantined").to_string(),
-                            )));
-                            reload.set(*reload + 1);
-                        }
-                        Err(err) => notice.set(Some(Notice::Failed(err))),
-                    }
-                }
-            });
-        })
-    };
+    let unquarantine = release_callback(
+        locale,
+        &notice,
+        &reload,
+        Release {
+            question: "settings.unquarantine_confirm",
+            path: "security/quarantine",
+            done: "settings.unquarantined",
+        },
+    );
 
     let on_manual_submit = {
         let reload = reload.clone();

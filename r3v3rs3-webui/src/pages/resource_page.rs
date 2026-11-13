@@ -286,7 +286,9 @@ pub fn delete_on_click(
     })
 }
 
-async fn delete(locale: Locale, path: &str) -> Result<(), String> {
+/// Deletes the resource at `path` of the admin API. The error is the message of the failure in
+/// the selected language.
+pub(super) async fn delete(locale: Locale, path: &str) -> Result<(), String> {
     let request = Request::delete(&format!("{API_ENDPOINT}{path}"))
         .build()
         .map_err(|err| format_network_error(locale, &err))?;
