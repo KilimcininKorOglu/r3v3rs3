@@ -92,6 +92,8 @@ fn write_command(info: &EngineInfo, login: &Login<'_>, database: &str) -> String
         "mongodb" => format!(
             "mongosh \"mongodb://{user}:{password}@$H/{database}?authSource={auth}\" --quiet --eval 'db.t.insertOne({{x: 1}})'"
         ),
+        // An empty user signs in as nobody: the default user without a password.
+        _ if user.is_empty() => format!("redis-cli -h $H set {database}:k 1 | grep -qx OK"),
         _ => format!(
             "redis-cli -h $H --no-auth-warning --user {user} --pass {password} set {database}:k 1 | grep -qx OK"
         ),
@@ -123,17 +125,14 @@ async fn can_write(
 
 /// The command that succeeds once the server takes connections over TCP, which the images
 /// open only after their initialization.
-fn ready_command(info: &EngineInfo) -> String {
+fn ready_command(info: &EngineInfo, root: &str) -> String {
     match info.engine.as_str() {
         "postgres" => "pg_isready -h 127.0.0.1 -U postgres".to_string(),
-        "mysql" | "mariadb" => format!(
-            "{} -h127.0.0.1 -uroot -p{ROOT_PASSWORD} -e 'SELECT 1'",
-            info.engine
-        ),
+        "mysql" | "mariadb" => format!("{} -h127.0.0.1 -uroot -p{root} -e 'SELECT 1'", info.engine),
         "mongodb" => format!(
-            "mongosh 'mongodb://root:{ROOT_PASSWORD}@127.0.0.1/admin' --quiet --eval 'db.runCommand({{ping: 1}})'"
+            "mongosh 'mongodb://root:{root}@127.0.0.1/admin' --quiet --eval 'db.runCommand({{ping: 1}})'"
         ),
-        _ => format!("REDISCLI_AUTH={ROOT_PASSWORD} redis-cli ping | grep -qx PONG"),
+        _ => format!("REDISCLI_AUTH={root} redis-cli ping | grep -qx PONG"),
     }
 }
 
@@ -141,8 +140,13 @@ async fn wait_ready(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
     info: &EngineInfo,
+    root: &str,
 ) -> anyhow::Result<()> {
-    let command = vec!["sh".to_string(), "-c".to_string(), ready_command(info)];
+    let command = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        ready_command(info, root),
+    ];
     for _ in 0..120 {
         if runtime
             .exec_capture(container, command.clone(), Vec::new())
@@ -292,6 +296,40 @@ async fn check_root_password(
     Ok(())
 }
 
+/// After a restart of the container, the tenant and the new root password still sign in, the
+/// old root password does not, and Redis still refuses a client without an account.
+async fn check_restart(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    info: &EngineInfo,
+) -> anyhow::Result<()> {
+    runtime
+        .stop_container(container, Duration::from_secs(10))
+        .await?;
+    runtime.start_container(container).await?;
+    wait_ready(runtime, container, info, "rootpw9876").await?;
+    let one = tenant("p_one", "pwone2");
+    ensure!(
+        can_write(runtime, container, info, &one, "p_one").await,
+        "the {} tenant was lost on a restart",
+        info.engine
+    );
+    let root = |password| Login {
+        user: &info.user,
+        password,
+        auth: "admin",
+    };
+    ensure!(can_write(runtime, container, info, &root("rootpw9876"), "p_one").await);
+    ensure!(!can_write(runtime, container, info, &root(ROOT_PASSWORD), "p_one").await);
+    if info.engine == "redis" {
+        ensure!(
+            !can_write(runtime, container, info, &tenant("", ""), "p_one").await,
+            "Redis opened its default user without a password after a restart"
+        );
+    }
+    Ok(())
+}
+
 /// Starts the server and runs every check on it.
 async fn run_checks(
     runtime: &Arc<dyn ContainerRuntime>,
@@ -299,10 +337,11 @@ async fn run_checks(
     info: &EngineInfo,
 ) -> anyhow::Result<()> {
     runtime.start_container(name).await?;
-    wait_ready(runtime, name, info).await?;
+    wait_ready(runtime, name, info, ROOT_PASSWORD).await?;
     check_isolation(runtime, name, info).await?;
     check_reset_and_drop(runtime, name, info).await?;
-    check_root_password(runtime, name, info).await
+    check_root_password(runtime, name, info).await?;
+    check_restart(runtime, name, info).await
 }
 
 /// Runs every check on a fresh container of the image and removes it again.

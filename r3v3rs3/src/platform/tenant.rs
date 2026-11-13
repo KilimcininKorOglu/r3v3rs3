@@ -12,7 +12,7 @@ use r3v3rs3_api::container::ContainerName;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, EngineInfo};
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, warn};
 
 /// The prefix of the `app_secrets` rows that hold the passwords of the tenants.
 pub(crate) const TENANT_SECRET_PREFIX: &str = "tenant:";
@@ -22,6 +22,14 @@ const SCRIPT_PATH: &str = "/tmp/r3v3rs3-tenant";
 
 /// The longest tenant name; PostgreSQL cuts identifiers at 63 bytes.
 const MAX_TENANT_NAME: usize = 63;
+
+/// The command that writes the users of a Redis server into its ACL file, so they survive a
+/// restart of the container.
+const REDIS_SAVE: &str = "ACL SAVE\n";
+
+/// The answer of `ACL SAVE` on a Redis that started without an ACL file: a container from
+/// before the file, until its next deployment.
+const REDIS_NO_ACL_FILE: &str = "not configured to use an ACL file";
 
 /// One tenant script at a time, so two deployments of one project environment cannot create
 /// its user with two passwords.
@@ -152,7 +160,7 @@ pub fn drop_script(
         "mongodb" => format!(
             "const d = db.getSiblingDB('{tenant}');\nif (d.getUser('{tenant}')) {{ d.dropUser('{tenant}'); }}\nd.dropDatabase();\n"
         ),
-        "redis" => format!("ACL DELUSER {tenant}\n"),
+        "redis" => format!("ACL DELUSER {tenant}\n{REDIS_SAVE}"),
         other => bail!("the engine {other} has no tenants"),
     };
     script(info, root_password, content)
@@ -179,9 +187,8 @@ pub(crate) fn root_password_script(
         "mongodb" => {
             format!("db.getSiblingDB('admin').changeUserPassword('{user}', '{password}');\n")
         }
-        // The server takes the password of its default user from the start command, so the
-        // next deployment keeps the new one.
-        "redis" => format!("CONFIG SET requirepass {password}\n"),
+        // The ACL file keeps the new password of the default user across a restart.
+        "redis" => format!("CONFIG SET requirepass {password}\n{REDIS_SAVE}"),
         other => bail!("the engine {other} has no root password"),
     };
     script(info, root_password, content)
@@ -230,7 +237,7 @@ fn mongodb_create(tenant: &str, password: &str) -> String {
 /// the administration of the server.
 fn redis_create(tenant: &str, password: &str) -> String {
     format!(
-        "ACL SETUSER {tenant} reset on >{password} ~{tenant}:* &{tenant}:* +@all -@admin -@dangerous\n"
+        "ACL SETUSER {tenant} reset on >{password} ~{tenant}:* &{tenant}:* +@all -@admin -@dangerous\n{REDIS_SAVE}"
     )
 }
 
@@ -296,9 +303,25 @@ pub(super) async fn run_script(
         error!(%container, "failed to remove the tenant script: {err:#}");
     }
     let output = outcome?;
-    let text = String::from_utf8_lossy(&output);
-    if script.errors_in_output && text.lines().any(|line| line.starts_with("ERR")) {
+    if script.errors_in_output {
+        check_redis_output(container, &String::from_utf8_lossy(&output))?;
+    }
+    Ok(())
+}
+
+/// Fails on an error line of `redis-cli`. A Redis that started without an ACL file cannot
+/// save its users; the users still work until the container restarts, and the next
+/// deployment of the database starts it with the file.
+fn check_redis_output(container: &ContainerName, text: &str) -> anyhow::Result<()> {
+    let mut errors = text.lines().filter(|line| line.starts_with("ERR"));
+    if errors.clone().any(|line| !line.contains(REDIS_NO_ACL_FILE)) {
         bail!("the tenant script failed: {}", text.trim());
+    }
+    if errors.next().is_some() {
+        warn!(
+            %container,
+            "the Redis server has no ACL file and loses its users on a restart; deploy the database again"
+        );
     }
     Ok(())
 }
@@ -496,7 +519,7 @@ mod tests {
         let script = create_script(&info("redis"), "", "p_shop", "pw1").unwrap();
         assert_eq!(
             script.content,
-            "ACL SETUSER p_shop reset on >pw1 ~p_shop:* &p_shop:* +@all -@admin -@dangerous\n"
+            "ACL SETUSER p_shop reset on >pw1 ~p_shop:* &p_shop:* +@all -@admin -@dangerous\nACL SAVE\n"
         );
         let credentials = Credentials::tenant(&info("redis"), "p_shop", "pw1".into());
         assert_eq!(credentials.key_prefix.as_deref(), Some("p_shop:"));
@@ -539,7 +562,7 @@ mod tests {
             assert!(!script.command.join(" ").contains("new456"));
         }
         let redis = root_password_script(&info("redis"), "old123", "new456").unwrap();
-        assert_eq!(redis.content, "CONFIG SET requirepass new456\n");
+        assert_eq!(redis.content, "CONFIG SET requirepass new456\nACL SAVE\n");
         assert_eq!(redis.env, ["REDISCLI_AUTH=old123"]);
         // A Redis from before the password signs in without one.
         let open = root_password_script(&info("redis"), "", "new456").unwrap();
@@ -557,6 +580,20 @@ mod tests {
         assert!(pg.content.contains("DROP ROLE IF EXISTS \"p_shop\""));
         let my = drop_script(&info("mysql"), "root", "p_shop").unwrap();
         assert!(my.content.contains("DROP USER IF EXISTS 'p_shop'@'%'"));
+        let redis = drop_script(&info("redis"), "root", "p_shop").unwrap();
+        assert_eq!(redis.content, "ACL DELUSER p_shop\nACL SAVE\n");
         assert!(drop_script(&info("postgres"), "root", "x'y").is_err());
+    }
+
+    #[test]
+    fn a_redis_without_an_acl_file_keeps_its_users_until_a_restart() {
+        let container: ContainerName = "r3v3rs3-redis".parse().unwrap();
+        assert!(check_redis_output(&container, "OK\nOK\n").is_ok());
+        // A container from before the ACL file sets the user but cannot save it.
+        let unsaved = "OK\nERR This Redis instance is not configured to use an ACL file.\n";
+        assert!(check_redis_output(&container, unsaved).is_ok());
+        let refused = "ERR Error in ACL SETUSER modifier\nOK\n";
+        assert!(check_redis_output(&container, refused).is_err());
+        assert!(check_redis_output(&container, &format!("{refused}{unsaved}")).is_err());
     }
 }

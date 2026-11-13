@@ -1507,20 +1507,25 @@ async fn ensure_database_running(
     }
 }
 
+/// The start command of a Redis container. Redis keeps its users in the ACL file of its data
+/// volume, so the tenants and a new root password survive a restart of the container. A
+/// server that loads an ACL file ignores `--requirepass` and opens its default user without a
+/// password, so the first start writes the default user from `REDIS_PASSWORD` (its SHA-256
+/// hash) into the file; later starts keep the user of the file, like the other engines keep
+/// their root password in their data. A Redis without the variable starts without a password,
+/// as before. The entrypoint runs the server as the `redis` user, which must own the file.
+const REDIS_START: &str = "f=/data/users.acl; touch \"$f\" && \
+if ! grep -q '^user default ' \"$f\"; then \
+if [ -n \"$REDIS_PASSWORD\" ]; then \
+echo \"user default on #$(printf %s \"$REDIS_PASSWORD\" | sha256sum | cut -d' ' -f1) ~* &* +@all\"; \
+else echo 'user default on nopass ~* &* +@all'; fi >> \"$f\"; fi && \
+chown redis:redis \"$f\" && exec docker-entrypoint.sh redis-server --aclfile \"$f\"";
+
 /// The start command of a database container, when the image does not read its password
-/// from the environment. Redis takes the password of its default user only on the command
-/// line, so the shell reads it from `REDIS_PASSWORD` and the container spec never holds it; a
-/// Redis without the variable starts without a password, as before. The image entrypoint runs
-/// the server as the `redis` user.
+/// from the environment. The shell reads the password, so the container spec never holds it.
 pub(crate) fn database_command(engine: Option<&str>) -> Option<Vec<String>> {
-    (engine == Some("redis")).then(|| {
-        vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            "exec docker-entrypoint.sh redis-server ${REDIS_PASSWORD:+--requirepass \"$REDIS_PASSWORD\"}"
-                .to_string(),
-        ]
-    })
+    (engine == Some("redis"))
+        .then(|| vec!["sh".to_string(), "-c".to_string(), REDIS_START.to_string()])
 }
 
 /// The environment entries of a database connection: the variables of the engine,
@@ -2423,12 +2428,14 @@ mod tests {
     fn only_redis_reads_its_password_on_the_start_command() {
         let command = database_command(Some("redis")).expect("the redis command");
         let shell = command.join(" ");
+        assert!(shell.contains("--aclfile \"$f\""), "{shell}");
+        // A file without a default user would open the server without a password.
+        assert!(shell.contains("grep -q '^user default '"), "{shell}");
+        // The value stays in the environment, out of the container spec.
         assert!(
-            shell.contains("--requirepass \"$REDIS_PASSWORD\""),
+            shell.contains("printf %s \"$REDIS_PASSWORD\" | sha256sum"),
             "{shell}"
         );
-        // The value stays in the environment, out of the container spec.
-        assert!(shell.contains("${REDIS_PASSWORD:+"), "{shell}");
         assert_eq!(database_command(Some("postgres")), None);
         assert_eq!(database_command(None), None);
     }
