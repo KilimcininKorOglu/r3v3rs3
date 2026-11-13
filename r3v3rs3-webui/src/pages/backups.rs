@@ -1212,7 +1212,7 @@ struct SubTabProps {
 #[function_component(DisasterRecoveryTab)]
 fn disaster_recovery_tab(props: &SubTabProps) -> Html {
     let locale = use_locale();
-    let backups = use_state(Vec::<DisasterRecoveryBackupEntry>::new);
+    let backups = use_state(|| None::<DrBackups>);
     let passphrase = use_state(String::new);
     let upload_s3 = use_state(|| true);
     let is_creating = use_state(|| false);
@@ -1300,17 +1300,12 @@ fn disaster_recovery_tab(props: &SubTabProps) -> Html {
     }
 }
 
-async fn fetch_dr_backups(
-    locale: Locale,
-    backups: UseStateHandle<Vec<DisasterRecoveryBackupEntry>>,
-) {
-    let req = Request::get(&format!("{API_ENDPOINT}/disaster-recovery/backups"));
-    if let Ok(built) = req.build()
-        && let Ok(res) = send_request(locale, built).await
-        && let Ok(list) = res.json::<Vec<DisasterRecoveryBackupEntry>>().await
-    {
-        backups.set(list);
-    }
+/// The disaster recovery bundles, or the error of their load.
+type DrBackups = Result<Vec<DisasterRecoveryBackupEntry>, String>;
+
+async fn fetch_dr_backups(locale: Locale, backups: UseStateHandle<Option<DrBackups>>) {
+    let path = format!("{API_ENDPOINT}/disaster-recovery/backups");
+    backups.set(Some(fetch_json(locale, Request::get(&path)).await));
 }
 
 async fn execute_dr_create(
@@ -1451,17 +1446,22 @@ fn render_dr_controls(
 
 fn render_dr_table(
     locale: Locale,
-    backups: &UseStateHandle<Vec<DisasterRecoveryBackupEntry>>,
+    backups: &Option<DrBackups>,
     passphrase: &UseStateHandle<String>,
     can_edit: bool,
     load_backups: &Callback<()>,
 ) -> Html {
-    let rows = backups
+    let entries = match backups {
+        Some(Err(err)) => return failure_box(err),
+        Some(Ok(entries)) => entries.as_slice(),
+        None => &[],
+    };
+    let rows = entries
         .iter()
         .map(|entry| render_dr_row(locale, entry, passphrase, can_edit, load_backups))
         .collect::<Vec<_>>();
     let content = ListContent {
-        loaded: true,
+        loaded: backups.is_some(),
         empty: "backups.empty",
         columns: &DR_COLUMNS,
         rows: &rows,
