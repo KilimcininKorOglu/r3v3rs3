@@ -582,7 +582,7 @@ fn passkey_list_view(
             <div class="flex justify-between items-center mb-2">
                 <label class="text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("accounts.passkeys")}</label>
                 if own_account && is_web_authn_supported() {
-                    <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_add_passkey}>
+                    <Button kind={ButtonKind::Primary} size={ButtonSize::Sm} onclick={on_add_passkey}>
                         <AddIcon />
                         {locale.t("accounts.add_passkey")}
                     </Button>
@@ -653,7 +653,7 @@ fn token_list_view(
             <div class="flex justify-between items-center mb-2">
                 <label class="text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("accounts.tokens")}</label>
                 if own_account {
-                    <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_add_token}>
+                    <Button kind={ButtonKind::Primary} size={ButtonSize::Sm} onclick={on_add_token}>
                         <AddIcon />
                         {locale.t("accounts.add_token")}
                     </Button>
