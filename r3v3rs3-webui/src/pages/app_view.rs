@@ -432,6 +432,16 @@ async fn save(
         .map_err(|err| err.to_string())
 }
 
+/// The name of a database in the select of the app form. A database without a project is a
+/// shared server that every app can use, so its name carries a mark.
+fn database_label(locale: Locale, db: &AppEntry) -> String {
+    if db.spec.project_id.is_none() && db.spec.replica_of.is_none() {
+        locale.tf("apps.database_shared", &[("name", db.name.as_str())])
+    } else {
+        db.name.to_string()
+    }
+}
+
 /// Reads the targets, the connections, the ports, the databases and the app. A failed read
 /// shows its message. Without an app id, the app store entry of `store` fills the new form.
 fn load(
@@ -465,7 +475,7 @@ fn load(
         {
             databases.set(
                 list.into_iter()
-                    .map(|app| (app.id, app.name.to_string()))
+                    .map(|app| (app.id, database_label(locale, &app)))
                     .collect(),
             );
         }

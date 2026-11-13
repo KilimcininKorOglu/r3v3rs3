@@ -28,6 +28,7 @@ pub mod cert_list;
 pub mod ct_logs;
 mod dashboard;
 mod database_backups;
+mod database_credentials;
 mod databases;
 mod dns_credentials;
 mod env_groups;

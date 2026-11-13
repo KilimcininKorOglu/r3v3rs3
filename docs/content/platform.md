@@ -336,6 +336,8 @@ An account with the Admin permission reads the passwords of a database at any ti
 
 `POST /api/databases/{id}/password` gives an account a new password: the body `{"tenant": null}` changes the root password, `{"tenant": "<name>"}` the password of a tenant. The command runs inside the database container, the new password is sealed with the platform key, and every app that connects with the account starts a new deployment with it. The response returns the account with its new password and lists the apps whose deployment started (`redeployed`) or did not start (`failed`). The apps of a shared server connect as their tenants, so a new root password redeploys no app there. Redis has no root password. When the database refuses the new root password, the stored password stays the old one.
 
+On the **Databases** page a shared server carries the **Shared** badge, and the app form lists it as `<name> (shared)`. For an Admin account, the eye button of a row opens the **Credentials** panel: the root account and every tenant with user, password, connection string and the apps that use it. **Set a new password** (teal refresh) changes the password of a row, and **Delete the tenant** (red trash) appears on a tenant that no app uses.
+
 A deployment of a database is not blue-green, because the fixed port frees only when the old container stops: r3v3rs3 stops the old container, starts the new one and waits for its health check, so the database answers a few seconds later.
 
 ### Database Console Navigation & Backups Tab

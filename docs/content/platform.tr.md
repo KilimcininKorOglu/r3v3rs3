@@ -336,6 +336,8 @@ Admin yetkisi olan bir hesap bir veritabanının parolalarını her zaman okuyab
 
 `POST /api/databases/{id}/password` bir hesaba yeni parola verir: `{"tenant": null}` gövdesi root parolasını, `{"tenant": "<ad>"}` gövdesi bir tenant'ın parolasını değiştirir. Komut veritabanı container'ının içinde çalışır, yeni parola platform anahtarıyla mühürlenir ve hesapla bağlanan her uygulama yeni parolayla yeni bir deployment başlatır. Yanıt hesabı yeni parolasıyla döndürür ve deployment'ı başlayan (`redeployed`) ile başlamayan (`failed`) uygulamaları listeler. Ortak bir sunucunun uygulamaları kendi tenant'larıyla bağlanır, bu yüzden orada yeni bir root parolası hiçbir uygulamayı yeniden deploy etmez. Redis'in root parolası yoktur. Veritabanı yeni root parolasını reddederse saklanan parola eskisi olarak kalır.
 
+**Veritabanları** sayfasında ortak bir sunucu **Ortak** etiketini taşır ve uygulama formu onu `<ad> (ortak)` olarak listeler. Admin hesabı için bir satırın göz butonu **Bağlantı bilgileri** panelini açar: root hesabı ve her tenant kullanıcısı, parolası, bağlantı dizesi ve onu kullanan uygulamalarla listelenir. **Parolayı yenile** (teal yenile) bir satırın parolasını değiştirir. **Tenant'ı sil** (kırmızı çöp) hiçbir uygulamanın kullanmadığı bir tenant'ta görünür.
+
 Bir veritabanının deployment'ı blue-green değildir, çünkü sabit port eski container durmadan boşalmaz: r3v3rs3 eski container'ı durdurur, yenisini başlatır ve sağlık kontrolünü bekler; veritabanı birkaç saniye sonra yanıtlamaya devam eder.
 
 ### Veritabanı Konsolu Gezinimi ve Yedekler Sekmesi

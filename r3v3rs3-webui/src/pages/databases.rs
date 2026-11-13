@@ -1,6 +1,7 @@
 //! The databases: the apps with a database engine, created and deleted on this page.
 
 use super::Route;
+use super::database_credentials::CredentialsPanel;
 use super::resource_page::{Notice, delete_on_click, notice_view};
 use super::settings::fetch_json;
 use crate::API_ENDPOINT;
@@ -165,9 +166,11 @@ pub fn databases() -> Html {
     let created = use_state(|| Option::<DatabaseCreated>::None);
     let apps = use_state(Vec::<AppEntry>::new);
     let refreshing = use_state(|| false);
+    let viewing = use_state(|| Option::<AppEntry>::None);
 
     let signed_in = session.info.is_some();
     let can_edit = session.can_edit();
+    let is_admin = session.is_admin();
     {
         let (databases, engines, notice, apps) = (
             databases.clone(),
@@ -194,10 +197,23 @@ pub fn databases() -> Html {
     };
     let refresh_engines = refresh_callback(locale, &engines, &notice, &refreshing);
     let header = db_header_bar(locale, can_edit, *refreshing, refresh_engines);
+    let close_credentials = {
+        let viewing = viewing.clone();
+        Callback::from(move |()| viewing.set(None))
+    };
     html! {
         <>
             { header }
             { notice_view(&notice, |_| html! { {locale.t("databases.refreshed")} }) }
+            if let Some(database) = (*viewing).clone() {
+                <CredentialsPanel
+                    key={(*viewing).as_ref().map(|db| db.id.to_string()).unwrap_or_default()}
+                    {locale}
+                    {database}
+                    apps={(*apps).clone()}
+                    close={close_credentials}
+                />
+            }
             { (*created)
                 .clone()
                 .map(|value| created_view(locale, value, &engines, &created))
@@ -217,9 +233,11 @@ pub fn databases() -> Html {
                     locale,
                     engines: &engines,
                     can_edit,
+                    is_admin,
                     reload: reload.clone(),
                     created: &created,
                     notice: &notice,
+                    viewing: &viewing,
                     navigator,
                 },
             ) }
@@ -256,10 +274,35 @@ struct RowContext<'a> {
     locale: Locale,
     engines: &'a [EngineInfo],
     can_edit: bool,
+    /// Only an Admin account reads the passwords of a database.
+    is_admin: bool,
     reload: Callback<()>,
     created: &'a UseStateHandle<Option<DatabaseCreated>>,
     notice: &'a UseStateHandle<Option<Notice<()>>>,
+    /// The database whose credentials panel is open.
+    viewing: &'a UseStateHandle<Option<AppEntry>>,
     navigator: Option<Navigator>,
+}
+
+/// The button that opens the credentials panel of a database, for an Admin account.
+fn credentials_button(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
+    if !ctx.is_admin {
+        return html!();
+    }
+    let onclick = {
+        let (viewing, app) = (ctx.viewing.clone(), app.clone());
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            viewing.set(Some(app.clone()));
+        })
+    };
+    html! {
+        <ActionIconButton
+            variant={ActionVariant::View}
+            title={ctx.locale.t("databases.credentials").to_string()}
+            {onclick}
+        />
+    }
 }
 
 fn admin_ui_store_id(engine: &str) -> &'static str {
@@ -308,8 +351,9 @@ fn db_actions(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
     html! {
         <td class="py-1.5 text-right">
             <div class="inline-flex items-center justify-end gap-1.5">
+                { credentials_button(ctx, app) }
                 <ActionIconButton
-                    variant={ActionVariant::View}
+                    variant={ActionVariant::Metrics}
                     title={ctx.locale.t("common.view").to_string()}
                     onclick={nav_view}
                 />
@@ -449,6 +493,10 @@ fn db_row(ctx: &RowContext<'_>, app: &AppEntry, users: &str) -> Html {
                 if app.spec.project_id.is_some() {
                     <span class="ml-2 px-1.5 py-0.5 text-xs rounded bg-emerald-900/40 text-emerald-300 border border-emerald-700">
                         {ctx.locale.t("projects.project")}
+                    </span>
+                } else if !is_replica {
+                    <span class="ml-2 px-1.5 py-0.5 text-xs rounded bg-sky-900/40 text-sky-300 border border-sky-700">
+                        {ctx.locale.t("databases.shared")}
                     </span>
                 }
             </td>
