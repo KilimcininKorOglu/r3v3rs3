@@ -310,29 +310,27 @@ fn trigger_text(locale: Locale, trigger: r3v3rs3_api::platform::DeploymentTrigge
     }
 }
 
+fn quick_link(to: Route, label: String) -> Html {
+    html! {
+        <Link<Route> {to} classes={button_class(ButtonKind::Secondary, ButtonSize::Sm)}>
+            {label}
+        </Link<Route>>
+    }
+}
+
 fn render_quick_links(locale: Locale, platform_enabled: bool) -> Html {
-    let link = button_class(ButtonKind::Secondary, ButtonSize::Sm);
+    let add = |what: &str| format!("+ {} {}", locale.t("common.add"), locale.t(what));
     html! {
         <div class={CARD}>
             <h3 class="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mb-3">{locale.t("dashboard.quick_links")}</h3>
             <div class="flex flex-wrap gap-3">
-                <Link<Route> to={Route::NewProxy} classes={link}>
-                    {"+ "}{locale.t("common.add")}{" "}{locale.t("nav.proxies")}
-                </Link<Route>>
-                <Link<Route> to={Route::NewPort} classes={link}>
-                    {"+ "}{locale.t("common.add")}{" "}{locale.t("nav.ports")}
-                </Link<Route>>
+                { quick_link(Route::NewProxy, add("nav.proxies")) }
+                { quick_link(Route::NewPort, add("nav.ports")) }
                 if platform_enabled {
-                    <Link<Route> to={Route::NewApp} classes={link}>
-                        {"+ "}{locale.t("common.add")}{" "}{locale.t("nav.apps")}
-                    </Link<Route>>
-                    <Link<Route> to={Route::AppStore} classes={link}>
-                        {locale.t("nav.app_store")}
-                    </Link<Route>>
+                    { quick_link(Route::NewApp, add("nav.apps")) }
+                    { quick_link(Route::AppStore, locale.t("nav.app_store").to_string()) }
                 }
-                <Link<Route> to={Route::Settings} classes={link}>
-                    {locale.t("nav.settings")}
-                </Link<Route>>
+                { quick_link(Route::Settings, locale.t("nav.settings").to_string()) }
             </div>
         </div>
     }
