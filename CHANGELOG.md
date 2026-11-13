@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.4] - 2026-11-13
+
+### Fixed
+- Start PostgreSQL 18 databases. The engine catalog gave every engine one data directory, and PostgreSQL 18 refuses to start on a volume at `/var/lib/postgresql/data`, the directory of PostgreSQL 17, so every PostgreSQL 18 database failed its health check. The catalog now names the data directory of a version that keeps its data elsewhere (`version_data_paths`), and a new database, its backups, restores, clones and point-in-time branches use the directory of the version it runs. Delete a failed PostgreSQL 18 database and create it again after the upgrade; its empty volume holds no data.
+
 ## [3.2.3] - 2026-11-13
 
 ### Changed
