@@ -2,8 +2,8 @@
 //! and triggers immediate runs.
 
 use super::accounts::{HINT_CLASS, INPUT_CLASS};
-use super::resource_page::{FormCard, add_button, failed_view, form_modal};
-use super::settings::{fetch_json, send_json, send_request};
+use super::resource_page::{FormCard, add_button, delete_on_click, failed_view, form_modal};
+use super::settings::{fetch_json, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -560,26 +560,11 @@ fn delete_command_callback(
     cmd: &AppScheduledCommand,
     commands: &UseStateHandle<Option<Vec<AppScheduledCommand>>>,
 ) -> Callback<MouseEvent> {
-    let (cmd_id, cmd_name) = (cmd.id, cmd.name.clone());
+    let question = locale.tf("apps.command_delete_confirm", &[("name", &cmd.name)]);
+    let path = format!("/apps/{app_id}/commands/{}", cmd.id);
     let commands = commands.clone();
-    Callback::from(move |_: MouseEvent| {
-        let (commands, cmd_name) = (commands.clone(), cmd_name.clone());
-        let question = locale.tf("apps.command_delete_confirm", &[("name", &cmd_name)]);
-        dialog::confirm_then(locale, question, async move {
-            let path = format!("{API_ENDPOINT}/apps/{app_id}/commands/{cmd_id}");
-            let Ok(req) = Request::delete(&path).build() else {
-                return;
-            };
-            match send_request(locale, req).await {
-                Ok(_) => {
-                    load_commands(locale, app_id, commands);
-                }
-                Err(err) => {
-                    dialog::message(locale, &err, Icon::Error).await;
-                }
-            }
-        });
-    })
+    let deleted = Callback::from(move |()| load_commands(locale, app_id, commands.clone()));
+    delete_on_click(locale, question, path, deleted)
 }
 
 fn format_command_last_run(locale: Locale, ts: Option<i64>) -> String {
