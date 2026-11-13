@@ -713,8 +713,9 @@ async fn fetch_challenge(locale: Locale) -> Result<r3v3rs3_api::auth::PasskeyCha
     fetch_json(locale, Request::get(&path)).await
 }
 
+/// The message of a browser passkey error. An error without a message gets the translated one.
 #[cfg(target_arch = "wasm32")]
-fn js_error_message(err: wasm_bindgen::JsValue) -> String {
+fn js_error_message(locale: Locale, err: wasm_bindgen::JsValue) -> String {
     if let Some(s) = err.as_string() {
         return s;
     }
@@ -723,7 +724,7 @@ fn js_error_message(err: wasm_bindgen::JsValue) -> String {
     {
         return s;
     }
-    "Passkey operation failed".to_string()
+    locale.t("accounts.passkey_failed").to_string()
 }
 
 async fn register_passkey_request(
@@ -769,7 +770,7 @@ async fn add_passkey_flow(locale: Locale, form: UseStateHandle<Form>, accounts: 
                 serde_json::from_str::<serde_json::Value>(&s).ok()
             }
             Err(err) => {
-                let raw_msg = js_error_message(err);
+                let raw_msg = js_error_message(locale, err);
                 let msg = format_passkey_error(locale, &raw_msg);
                 crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await;
                 return;
