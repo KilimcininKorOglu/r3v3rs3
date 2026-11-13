@@ -7,7 +7,7 @@ use super::resource_page::{
     form_modal, load, open_on_click, reload_callback, row_actions, saved_view, text_input,
     use_form_modal,
 };
-use super::settings::send_json;
+use super::settings::{post_json, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -160,46 +160,36 @@ fn test_webhook_click(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
                 event: Some(WebhookEvent::TestPing),
             };
             let url = format!("{API_ENDPOINT}/webhooks/test");
-            let resp = Request::post(&url).json(&req);
-            match resp {
-                Ok(req) => match req.send().await {
-                    Ok(res) if res.ok() => {
-                        let parsed: Result<TestWebhookResponse, _> = res.json().await;
-                        match parsed {
-                            Ok(body) if body.success => {
-                                let msg = locale.tf(
-                                    "webhooks.test_success",
-                                    &[
-                                        ("status", &body.status_code.unwrap_or(200).to_string()),
-                                        ("elapsed", &body.elapsed_ms.to_string()),
-                                    ],
-                                );
-                                dialog::message(locale, &msg, Icon::Success).await;
-                            }
-                            Ok(body) => {
-                                let msg =
-                                    locale.tf("webhooks.test_failed", &[("reason", &body.message)]);
-                                dialog::message(locale, &msg, Icon::Error).await;
-                            }
-                            Err(err) => {
-                                dialog::message(locale, &err.to_string(), Icon::Error).await;
-                            }
-                        }
-                    }
-                    Ok(res) => {
-                        let text = res.text().await.unwrap_or_default();
-                        dialog::message(locale, &text, Icon::Error).await;
-                    }
-                    Err(err) => {
-                        dialog::message(locale, &err.to_string(), Icon::Error).await;
-                    }
-                },
-                Err(err) => {
-                    dialog::message(locale, &err.to_string(), Icon::Error).await;
-                }
-            }
+            let result = post_json::<TestWebhookResponse>(locale, Request::post(&url), &req).await;
+            let (msg, icon) = test_result_message(locale, result);
+            dialog::message(locale, &msg, icon).await;
         });
     })
+}
+
+/// The message of a test delivery: its status and time, the reason of a failed delivery, or the
+/// translated error of a failed request.
+fn test_result_message(
+    locale: Locale,
+    result: Result<TestWebhookResponse, String>,
+) -> (String, Icon) {
+    match result {
+        Ok(body) if body.success => {
+            let msg = locale.tf(
+                "webhooks.test_success",
+                &[
+                    ("status", &body.status_code.unwrap_or(200).to_string()),
+                    ("elapsed", &body.elapsed_ms.to_string()),
+                ],
+            );
+            (msg, Icon::Success)
+        }
+        Ok(body) => (
+            locale.tf("webhooks.test_failed", &[("reason", &body.message)]),
+            Icon::Error,
+        ),
+        Err(err) => (err, Icon::Error),
+    }
 }
 
 fn list_row(
