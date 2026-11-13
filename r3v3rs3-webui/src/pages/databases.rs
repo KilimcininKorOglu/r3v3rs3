@@ -4,7 +4,7 @@ use super::Route;
 use super::accounts::{INPUT_CLASS, LABEL_CLASS};
 use super::database_credentials::CredentialsPanel;
 use super::resource_page::{Notice, add_button, delete_on_click, notice_view};
-use super::settings::{fetch_json, success_box};
+use super::settings::{fetch_json, post_json, success_box};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -814,7 +814,7 @@ fn submit_callback(
             created: created.clone(),
             close: close.clone(),
         };
-        spawn_local(send_create(request, done));
+        spawn_local(send_create(locale, request, done));
     })
 }
 
@@ -866,28 +866,20 @@ struct Done {
 }
 
 /// Posts the new database and shows its password panel, or the reason of a failure.
-async fn send_create(request: DatabaseRequest, done: Done) {
+async fn send_create(locale: Locale, request: DatabaseRequest, done: Done) {
     done.busy.set(true);
-    let sent = Request::post(&format!("{API_ENDPOINT}/databases"))
-        .json(&request)
-        .map(|builder| builder.send());
-    match sent {
-        Ok(sent) => match sent.await {
-            Ok(response) if response.ok() => match response.json::<DatabaseCreated>().await {
-                Ok(created_db) => {
-                    done.notice.set(None);
-                    done.created.set(Some(created_db));
-                    done.saved.emit(());
-                    done.close.emit(());
-                }
-                Err(err) => done.notice.set(Some(err.to_string())),
-            },
-            Ok(response) => done.notice.set(Some(response.status_text())),
-            Err(err) => done.notice.set(Some(err.to_string())),
-        },
-        Err(err) => done.notice.set(Some(err.to_string())),
-    }
+    let builder = Request::post(&format!("{API_ENDPOINT}/databases"));
+    let sent = post_json::<DatabaseCreated>(locale, builder, &request).await;
     done.busy.set(false);
+    match sent {
+        Ok(created_db) => {
+            done.notice.set(None);
+            done.created.set(Some(created_db));
+            done.saved.emit(());
+            done.close.emit(());
+        }
+        Err(message) => done.notice.set(Some(message)),
+    }
 }
 
 /// Clones an existing database and shows its connection and password panel.
