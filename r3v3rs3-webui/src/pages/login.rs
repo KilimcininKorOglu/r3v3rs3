@@ -3,7 +3,11 @@ use crate::format::format_passkey_error;
 use crate::{
     API_ENDPOINT,
     auth::{LoginQuery, test_token},
-    components::{language_menu::LanguageMenu, theme_menu::ThemeMenu},
+    components::{
+        button::{Button, ButtonKind, ButtonSize, button_class},
+        language_menu::LanguageMenu,
+        theme_menu::ThemeMenu,
+    },
     i18n::use_locale,
 };
 use gloo_events::EventListener;
@@ -54,6 +58,16 @@ const MENU_BUTTON_CLASS: [&str; 6] = [
     "dark:hover:bg-neutral-700",
 ];
 
+/// The sign-in button: a full-width primary button.
+fn submit_class() -> Classes {
+    classes!(
+        button_class(ButtonKind::Primary, ButtonSize::Md),
+        "w-full",
+        "mt-4",
+        "py-3"
+    )
+}
+
 fn login_error_view(message: Option<String>) -> Html {
     let Some(message) = message else {
         return html!();
@@ -75,10 +89,10 @@ fn passkey_login_button(locale: Locale, on_click: Callback<MouseEvent>) -> Html 
                 <div class="border-t border-neutral-300 dark:border-neutral-700 w-full"></div>
                 <span class="bg-white dark:bg-neutral-900 px-2 text-xs text-neutral-400 absolute">{locale.t("login.or")}</span>
             </div>
-            <button type="button" class="w-full text-neutral-800 dark:text-neutral-100 font-semibold border border-neutral-300 dark:border-neutral-700 py-2.5 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800 transition duration-300 flex items-center justify-center gap-2 cursor-pointer" onclick={on_click}>
-                <svg class="w-5 h-5 text-neutral-600 dark:text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+            <Button kind={ButtonKind::Secondary} class="w-full py-2.5" onclick={on_click}>
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
                 {locale.t("login.sign_in_with_passkey")}
-            </button>
+            </Button>
         </>
     }
 }
@@ -164,7 +178,7 @@ pub fn login() -> Html {
             if let Some(totp) = &*totp {
                 <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.one_time_password")}</label>
                 <input type="number" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocomplete="one-time-code" oninput={oninput_totp} />
-                <input type="submit" class="w-full mt-4 text-neutral-50 font-bold bg-neutral-800 dark:bg-neutral-900 py-3 rounded-md hover:bg-neutral-600 transition duration-300" value={locale.t("login.continue")} disabled={totp.is_empty()} />
+                <input type="submit" class={submit_class()} value={locale.t("login.continue")} disabled={totp.is_empty()} />
             } else {
                 <div class="mb-4">
                     <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.username")}</label>
@@ -172,7 +186,7 @@ pub fn login() -> Html {
                 </div>
                 <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.password")}</label>
                 <input type="password" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocomplete="current-password" oninput={oninput_password} />
-                <input type="submit" class="w-full mt-4 text-neutral-50 font-bold bg-neutral-800 dark:bg-neutral-900 py-3 rounded-md hover:bg-neutral-600 transition duration-300" value={locale.t("login.submit")} disabled={username.is_empty() || password.is_empty()} />
+                <input type="submit" class={submit_class()} value={locale.t("login.submit")} disabled={username.is_empty() || password.is_empty()} />
                 { passkey_login_button(locale, on_passkey_login) }
             }
         </form>
