@@ -52,6 +52,8 @@ const BACKUP_COLUMNS: [Column; 2] = [
 struct Editing {
     path: String,
     text: String,
+    /// The error of the last save. The editor stays open with the text, so no change is lost.
+    error: Option<String>,
 }
 
 #[derive(Properties, PartialEq)]
@@ -405,7 +407,11 @@ fn open_editor(ctx: &Ctx, path: &str) {
     let path = path.to_string();
     wasm_bindgen_futures::spawn_local(async move {
         match read_text(locale, app_id, &path).await {
-            Ok(text) => editing.set(Some(Editing { path, text })),
+            Ok(text) => editing.set(Some(Editing {
+                path,
+                text,
+                error: None,
+            })),
             Err(message) => notice.set(Some(message)),
         }
     });
@@ -444,8 +450,8 @@ fn editor_view(ctx: &Ctx) -> Html {
             let area: web_sys::HtmlTextAreaElement = event.target_unchecked_into();
             if let Some(file) = (*editing).clone() {
                 editing.set(Some(Editing {
-                    path: file.path,
                     text: area.value(),
+                    ..file
                 }));
             }
         })
@@ -453,11 +459,9 @@ fn editor_view(ctx: &Ctx) -> Html {
     let save = {
         let ctx = ctx.clone();
         Callback::from(move |_: MouseEvent| {
-            let Some(file) = (*ctx.editing).clone() else {
-                return;
-            };
-            ctx.editing.set(None);
-            save_file(&ctx, &file);
+            if let Some(file) = (*ctx.editing).clone() {
+                save_file(&ctx, file);
+            }
         })
     };
     let footer = html! {
@@ -468,6 +472,9 @@ fn editor_view(ctx: &Ctx) -> Html {
     };
     html! {
         <Modal title={file.path.clone()} {on_close} size={ModalSize::Xl} {footer}>
+            if let Some(error) = file.error.as_deref() {
+                <div class="mb-3">{ failure_box(error) }</div>
+            }
             <textarea
                 class="w-full h-[50vh] font-mono text-sm rounded-lg border border-neutral-300 bg-neutral-50 text-neutral-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 p-2 focus:ring-primary-500 focus:border-primary-500"
                 value={file.text}
@@ -477,23 +484,29 @@ fn editor_view(ctx: &Ctx) -> Html {
     }
 }
 
-/// Writes the text of the editor back into the file and reads the directory again.
-fn save_file(ctx: &Ctx, file: &Editing) {
-    let request = match Request::put(&format!("{API_ENDPOINT}/apps/{}/files", ctx.app_id))
-        .header("content-type", "application/octet-stream")
-        .query([("path", file.path.as_str())])
-        .body(js_sys::Uint8Array::from(file.text.as_bytes()))
-    {
-        Ok(request) => request,
-        Err(err) => return ctx.notice.set(Some(err.to_string())),
-    };
+/// Writes the text of the editor back into the file, closes the editor and reads the directory
+/// again. A failed save keeps the editor open with its error.
+fn save_file(ctx: &Ctx, file: Editing) {
     let ctx = ctx.clone();
     wasm_bindgen_futures::spawn_local(async move {
-        if let Err(message) = send_ok(ctx.locale, request).await {
-            ctx.notice.set(Some(message));
-            return;
+        let sent = async {
+            let request = Request::put(&format!("{API_ENDPOINT}/apps/{}/files", ctx.app_id))
+                .header("content-type", "application/octet-stream")
+                .query([("path", file.path.as_str())])
+                .body(js_sys::Uint8Array::from(file.text.as_bytes()))
+                .map_err(|err| err.to_string())?;
+            send_ok(ctx.locale, request).await
+        };
+        match sent.await {
+            Ok(()) => {
+                ctx.editing.set(None);
+                ctx.refresh();
+            }
+            Err(message) => ctx.editing.set(Some(Editing {
+                error: Some(message),
+                ..file
+            })),
         }
-        ctx.refresh();
     });
 }
 
