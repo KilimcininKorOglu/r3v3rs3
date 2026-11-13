@@ -1910,7 +1910,7 @@ r3 <server> app delete <id>
 # Managed Databases
 r3 <server> db list
 r3 <server> db get <id>
-r3 <server> db create --name my-db --engine postgresql [--version 17] [--password secret]
+r3 <server> db create --name my-db --engine postgres [--version postgres:18-alpine]
 r3 <server> db clone <id> --name my-db-clone
 r3 <server> db replica <id> --name my-db-replica
 r3 <server> db logs <id> [--tail 100]

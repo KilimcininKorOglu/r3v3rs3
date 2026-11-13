@@ -509,16 +509,17 @@ pub enum DbCommand {
     List,
     /// Shows configuration of a database.
     Get { id: String },
-    /// Provisions a new database container.
+    /// Provisions a new database container. The server generates its password.
     Create {
         #[arg(long)]
         name: String,
+        /// The engine: postgres, mysql, mariadb, mongodb or redis.
         #[arg(long)]
         engine: String,
+        /// An image tag of the engine catalog, such as postgres:18-alpine. Default: the first
+        /// version that the server lists.
         #[arg(long)]
         version: Option<String>,
-        #[arg(long)]
-        password: Option<String>,
     },
     /// Deletes a database container.
     #[command(alias = "rm")]
@@ -1536,11 +1537,7 @@ async fn run_db(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<(
             name,
             engine,
             version,
-            password,
-        } => {
-            api.create_db(&name, &engine, version.as_deref(), password.as_deref())
-                .await
-        }
+        } => api.create_db(&name, &engine, version.as_deref()).await,
         DbCommand::Delete { id } => api.delete_db(&id).await,
         DbCommand::Clone { id, name } => api.clone_db(&id, &name).await,
         DbCommand::Replica { id, name } => api.replica_db(&id, &name).await,

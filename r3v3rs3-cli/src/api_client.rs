@@ -1756,28 +1756,25 @@ impl ApiClient {
         print_json(&res)
     }
 
+    /// Creates a database. Without a version it takes the first version that the engine
+    /// catalog of the server lists; the server generates the password.
     pub async fn create_db(
         &self,
         name: &str,
         engine: &str,
         version: Option<&str>,
-        password: Option<&str>,
     ) -> anyhow::Result<()> {
-        let default_ver = match engine.to_ascii_lowercase().as_str() {
-            "postgres" | "postgresql" => "17",
-            "mysql" => "8.4",
-            "mariadb" => "11.4",
-            "redis" => "7.4",
-            "mongo" | "mongodb" => "7.0",
-            _ => "latest",
+        let engine = engine_key(engine);
+        let version = match version {
+            Some(version) => version.to_string(),
+            None => self.default_db_version(&engine).await?,
         };
-        let _ = password;
         let req = r3v3rs3_api::platform::DatabaseRequest {
             name: name
                 .parse()
                 .map_err(|e| anyhow::anyhow!("invalid db name: {e}"))?,
-            engine: engine.to_string(),
-            version: version.unwrap_or(default_ver).to_string(),
+            engine,
+            version,
             host_port: None,
             limits: Default::default(),
             project_id: None,
@@ -1792,6 +1789,17 @@ impl ApiClient {
             .await?;
         println!("database created");
         print_json(&res)
+    }
+
+    /// The first version of an engine in the engine catalog of the server.
+    async fn default_db_version(&self, engine: &str) -> anyhow::Result<String> {
+        let engines: Vec<r3v3rs3_api::platform::EngineInfo> =
+            self.get_json("/api/databases/engines").await?;
+        engines
+            .into_iter()
+            .find(|info| info.engine == engine)
+            .and_then(|info| info.versions.into_iter().next())
+            .with_context(|| format!("the server offers no database engine {engine}"))
     }
 
     pub async fn delete_db(&self, id: &str) -> anyhow::Result<()> {
@@ -3442,6 +3450,15 @@ fn add_item_by_kind(items: &mut ManifestItems, item: Value) {
     }
 }
 
+/// The catalog key of an engine, accepting the common long names.
+fn engine_key(engine: &str) -> String {
+    match engine.to_ascii_lowercase().as_str() {
+        "postgresql" => "postgres".to_string(),
+        "mongo" => "mongodb".to_string(),
+        other => other.to_string(),
+    }
+}
+
 fn print_json(val: &Value) -> anyhow::Result<()> {
     let text = serde_json::to_string_pretty(val)?;
     println!("{text}");
@@ -3526,6 +3543,13 @@ pub fn build_pitr_restore_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_long_engine_name_maps_to_its_catalog_key() {
+        assert_eq!(engine_key("PostgreSQL"), "postgres");
+        assert_eq!(engine_key("mongo"), "mongodb");
+        assert_eq!(engine_key("mariadb"), "mariadb");
+    }
 
     #[test]
     fn parses_map_manifest_json() {
