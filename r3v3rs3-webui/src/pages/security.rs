@@ -1,6 +1,7 @@
 //! Security center consolidating Access Lists, Banned IPs, Quarantined IPs, and Anomaly Detection Rules.
 
 use super::access_lists::AccessLists;
+use super::resource_page::{FormCard, add_button, form_modal};
 use super::settings::{Notice, fetch_json, notice_view, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
@@ -20,6 +21,7 @@ use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
 const TABLE_FRAME: &str = "mt-4 rounded-md border border-neutral-300 dark:border-neutral-700";
+const INPUT_CLASS: &str = "w-full bg-neutral-50 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-primary-500 focus:border-primary-500 p-2.5 dark:bg-neutral-700 dark:border-neutral-600 dark:placeholder-neutral-400 dark:text-white";
 
 const BANNED_COLUMNS: [Column; 3] = [
     Column {
@@ -248,8 +250,7 @@ fn quarantined_ips_card() -> Html {
     let reload = use_state(|| 0);
     let list = use_state(Vec::<QuarantinedIpEntry>::new);
     let notice = use_state(|| Option::<Notice>::None);
-    let manual_ip = use_state(String::new);
-    let manual_reason = use_state(String::new);
+    let form = use_quarantine_form();
 
     let reload_val = *reload;
     let list_handle = list.clone();
@@ -293,15 +294,14 @@ fn quarantined_ips_card() -> Html {
     let on_manual_submit = {
         let reload = reload.clone();
         let notice = notice.clone();
-        let manual_ip = manual_ip.clone();
-        let manual_reason = manual_reason.clone();
+        let form = form.clone();
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
-            let ip_str = (*manual_ip).trim().to_string();
+            let ip_str = (*form.ip).trim().to_string();
             if ip_str.is_empty() {
                 return;
             }
-            let reason_str = (*manual_reason).trim().to_string();
+            let reason_str = (*form.reason).trim().to_string();
             let reason = if reason_str.is_empty() {
                 None
             } else {
@@ -313,9 +313,15 @@ fn quarantined_ips_card() -> Html {
                 reason,
                 notice.clone(),
                 reload.clone(),
-                manual_ip.clone(),
-                manual_reason.clone(),
+                form.clone(),
             ));
+        })
+    };
+    let on_open = {
+        let form = form.clone();
+        Callback::from(move |_: MouseEvent| {
+            form.error.set(None);
+            form.open.set(true);
         })
     };
 
@@ -332,40 +338,78 @@ fn quarantined_ips_card() -> Html {
                 </span>
             </div>
 
-            <form onsubmit={on_manual_submit} class="mt-4 mb-4 flex flex-col sm:flex-row gap-2">
-                <input
-                    type="text"
-                    value={(*manual_ip).clone()}
-                    oninput={let manual_ip = manual_ip.clone(); Callback::from(move |e: InputEvent| {
-                        if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
-                            manual_ip.set(target.value());
-                        }
-                    })}
-                    placeholder={locale.t("settings.quarantine_ip_placeholder").to_string()}
-                    class="flex-1 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg p-2"
-                />
-                <input
-                    type="text"
-                    value={(*manual_reason).clone()}
-                    oninput={let manual_reason = manual_reason.clone(); Callback::from(move |e: InputEvent| {
-                        if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
-                            manual_reason.set(target.value());
-                        }
-                    })}
-                    placeholder={locale.t("settings.quarantine_reason_placeholder").to_string()}
-                    class="flex-1 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg p-2"
-                />
-                <button
-                    type="submit"
-                    class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm"
-                >
-                    {locale.t("settings.quarantine_submit")}
-                </button>
-            </form>
-
             { quarantined_table_view(locale, &list, unquarantine) }
+            { add_button(locale, on_open) }
+            { quarantine_modal(locale, &form, on_manual_submit) }
         </div>
     }
+}
+
+/// The state of the form that quarantines an address by hand.
+#[derive(Clone)]
+struct QuarantineForm {
+    open: UseStateHandle<bool>,
+    ip: UseStateHandle<String>,
+    reason: UseStateHandle<String>,
+    /// The error of the last submit, shown in the modal.
+    error: UseStateHandle<Option<String>>,
+}
+
+#[hook]
+fn use_quarantine_form() -> QuarantineForm {
+    QuarantineForm {
+        open: use_state(|| false),
+        ip: use_state(String::new),
+        reason: use_state(String::new),
+        error: use_state(|| None),
+    }
+}
+
+fn text_field(label: String, state: &UseStateHandle<String>, placeholder: String) -> Html {
+    let oninput = {
+        let state = state.clone();
+        Callback::from(move |e: InputEvent| {
+            if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
+                state.set(target.value());
+            }
+        })
+    };
+    html! {
+        <label class="block mt-4">
+            <span class="block mb-2 text-sm font-medium text-neutral-900 dark:text-white">{label}</span>
+            <input type="text" value={(**state).clone()} {oninput} {placeholder} class={INPUT_CLASS} />
+        </label>
+    }
+}
+
+fn quarantine_modal(
+    locale: Locale,
+    form: &QuarantineForm,
+    onsubmit: Callback<SubmitEvent>,
+) -> Html {
+    if !*form.open {
+        return html! {};
+    }
+    let on_close = {
+        let open = form.open.clone();
+        Callback::from(move |()| open.set(false))
+    };
+    let fields = html! {
+        <>
+            { text_field("IP".to_string(), &form.ip, locale.t("settings.quarantine_ip_placeholder").to_string()) }
+            { text_field(locale.t("settings.quarantine_reason").to_string(), &form.reason, locale.t("settings.quarantine_reason_placeholder").to_string()) }
+        </>
+    };
+    let card = FormCard {
+        title: locale.t("settings.quarantine_submit").to_string(),
+        notice: html! {},
+        fields,
+        error: (*form.error).clone(),
+        cancel: None,
+        save_label: "settings.quarantine_submit",
+        can_save: true,
+    };
+    form_modal(locale, card, onsubmit, on_close)
 }
 
 async fn submit_manual_quarantine(
@@ -374,8 +418,7 @@ async fn submit_manual_quarantine(
     reason: Option<String>,
     notice: UseStateHandle<Option<Notice>>,
     reload: UseStateHandle<usize>,
-    manual_ip: UseStateHandle<String>,
-    manual_reason: UseStateHandle<String>,
+    form: QuarantineForm,
 ) {
     let body = json!({
         "ip": ip_str,
@@ -388,11 +431,12 @@ async fn submit_manual_quarantine(
                 notice.set(Some(Notice::Success(
                     locale.t("settings.quarantined_success").to_string(),
                 )));
-                manual_ip.set(String::new());
-                manual_reason.set(String::new());
+                form.ip.set(String::new());
+                form.reason.set(String::new());
+                form.open.set(false);
                 reload.set(*reload + 1);
             }
-            Err(err) => notice.set(Some(Notice::Failed(err))),
+            Err(err) => form.error.set(Some(err)),
         }
     }
 }
