@@ -313,6 +313,12 @@ WantedBy=multi-user.target
 EOF
 }
 
+# True when a drop-in of the service sets R3V3RS3_WEBUI_LISTEN=false, so the WebUI has no
+# TCP listener and only a proxy of the server serves it.
+webui_listener_off() {
+	systemctl show -p Environment r3-server 2>/dev/null | grep -Eq '(^|[= ])R3V3RS3_WEBUI_LISTEN=(false|0|no|off)( |$)'
+}
+
 wait_for_webui() {
 	local host=${webui%:*} port=${webui##*:} attempt
 	case "$host" in
@@ -320,15 +326,20 @@ wait_for_webui() {
 	"[::]") host="[::1]" ;;
 	esac
 	for attempt in $(seq 1 30); do
+		if webui_listener_off; then
+			# The service is Type=notify, so it is active once its ports listen.
+			if systemctl is-active --quiet r3-server; then
+				return
+			fi
 		# Connection errors are expected until the service listens.
-		if curl -fs -o /dev/null "http://$host:$port/"; then
+		elif curl -fs -o /dev/null "http://$host:$port/"; then
 			return
 		fi
 		sleep 1
 	done
-	systemctl --no-pager status r3v3rs3 || true
-	journalctl --no-pager -u r3v3rs3 -n 50 || true
-	die "the WebUI did not answer on http://$host:$port/ after $attempt seconds"
+	systemctl --no-pager status r3-server || true
+	journalctl --no-pager -u r3-server -n 50 || true
+	die "the server did not start within $attempt seconds"
 }
 
 # Inserts one accept rule for the WebUI port into the INPUT chain of one iptables
@@ -671,12 +682,16 @@ main() {
 	open_firewall
 	wait_for_webui
 	create_admin
+	local webui_line="http://$webui/"
+	if webui_listener_off; then
+		webui_line="no TCP listener (R3V3RS3_WEBUI_LISTEN=false); open it through its proxy"
+	fi
 
 	cat <<EOF
 
 r3-server $installed_tag is running.
 
-  WebUI:    http://$webui/
+  WebUI:    $webui_line
   Server:   $BIN
   Agent:    $AGENT_BIN
   CLI:      $CLI_BIN

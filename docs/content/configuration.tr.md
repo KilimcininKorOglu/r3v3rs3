@@ -2138,7 +2138,15 @@ Bu dosyaları elle de düzenleyebilirsiniz. Ancak r3v3rs3 yapılandırma dosyala
 
 r3v3rs3 bir WebUI ile birlikte gelir. WebUI varsayılan olarak `127.0.0.1:46492` adresinde çalışır. Başka bir dinleme adresini, örneğin `0.0.0.0:46492`, `R3V3RS3_WEBUI` ortam değişkeni veya `--webui` komut satırı seçeneğiyle ayarlayın. `R3V3RS3_NO_WEBUI=1` ortam değişkeni veya `--no-webui` komut satırı seçeneği WebUI'ı ve yönetim API'sini kapatır.
 
-Route'u WebUI adresine, örneğin `http://127.0.0.1:46492` adresine giden bir r3v3rs3 proxy'si paneli process içinde servis eder (bkz. [Panel oturumu](#panel-oturumu)). Bu durumda `R3V3RS3_WEBUI_LISTEN=false` ortam değişkeni veya `--webui-listen=false` komut satırı seçeneği TCP listener'ı kapatır. WebUI adresinde hiçbir şey yanıt vermez. Host'taki başka bir process proxy'nin korumalarını atlayıp yönetim API'sine ulaşamaz, paneli yalnız o proxy servis eder. Listener'ı kapatmadan önce panele başka bir giriş yolu bırakın, çünkü bozuk bir proxy sizi panelin dışında da bırakır. Worker modu (`worker_mode = "workers"`) listener olmadan başlamaz, çünkü onun proxy'leri başka process'lerde çalışır ve panele TCP ile bağlanır.
+Route'u WebUI adresine, örneğin `http://127.0.0.1:46492` adresine giden bir r3v3rs3 proxy'si paneli process içinde servis eder (bkz. [Panel oturumu](#panel-oturumu)). Bu durumda `R3V3RS3_WEBUI_LISTEN=false` ortam değişkeni veya `--webui-listen=false` komut satırı seçeneği TCP listener'ı kapatır. WebUI adresinde hiçbir şey yanıt vermez. Host'taki başka bir process proxy'nin korumalarını atlayıp yönetim API'sine ulaşamaz, paneli yalnız o proxy servis eder. Listener'ı kapatmadan önce panele başka bir giriş yolu bırakın, çünkü bozuk bir proxy sizi panelin dışında da bırakır. `install.sh` kullanıyorsanız ayarı bir drop-in dosyasına yazın, çünkü script her yükseltmede unit dosyasını yeniden yazar:
+
+```sh
+$ sudo mkdir -p /etc/systemd/system/r3-server.service.d
+$ printf '[Service]\nEnvironment=R3V3RS3_WEBUI_LISTEN=false\n' | sudo tee /etc/systemd/system/r3-server.service.d/webui-listen.conf
+$ sudo systemctl daemon-reload && sudo systemctl restart r3-server
+```
+
+Reload ayarı uygulamaz, çünkü kesintisiz yükseltmenin yeni process'i eski process'in ortam değişkenlerini alır. Listener'ı yeniden açmak için dosyayı silin ve servisi yeniden başlatın. Worker modu (`worker_mode = "workers"`) listener olmadan başlamaz, çünkü onun proxy'leri başka process'lerde çalışır ve panele TCP ile bağlanır.
 
 WebUI menüsü soldaki kenar çubuğundadır ve üç gruptan oluşur:
 
