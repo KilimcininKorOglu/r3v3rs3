@@ -1,6 +1,7 @@
 //! Confirmation and message dialogs. SweetAlert2 from `assets/vendor/sweetalert2` draws them
 //! inside the page, so the WebUI never opens a native browser dialog.
 
+use crate::components::button::{ButtonKind, ButtonSize, button_class};
 use js_sys::{Object, Promise, Reflect};
 use r3v3rs3_api::i18n::Locale;
 use std::future::Future;
@@ -52,7 +53,7 @@ pub async fn confirm(locale: Locale, question: &str) -> bool {
         ),
         ("cancelButtonText", JsValue::from_str(locale.t("common.no"))),
     ];
-    let confirmed = show(&entries)
+    let confirmed = show(&entries, ButtonKind::Danger)
         .await
         .and_then(|result| Reflect::get(&result, &JsValue::from_str("isConfirmed")))
         .and_then(|value| {
@@ -79,7 +80,7 @@ pub async fn message(locale: Locale, text: &str, icon: Icon) {
             JsValue::from_str(locale.t("common.ok")),
         ),
     ];
-    if let Err(err) = show(&entries).await {
+    if let Err(err) = show(&entries, ButtonKind::Primary).await {
         report(&err);
     }
 }
@@ -94,7 +95,7 @@ pub async fn html(locale: Locale, title: &str, html: &str) {
             JsValue::from_str(locale.t("common.ok")),
         ),
     ];
-    if let Err(err) = show(&entries).await {
+    if let Err(err) = show(&entries, ButtonKind::Primary).await {
         report(&err);
     }
 }
@@ -115,7 +116,7 @@ pub async fn prompt(locale: Locale, text: &str, placeholder: &str) -> Option<Str
             JsValue::from_str(locale.t("common.cancel")),
         ),
     ];
-    let result = show(&entries).await.ok()?;
+    let result = show(&entries, ButtonKind::Primary).await.ok()?;
     let confirmed = Reflect::get(&result, &JsValue::from_str("isConfirmed"))
         .ok()?
         .as_bool()?;
@@ -128,13 +129,44 @@ pub async fn prompt(locale: Locale, text: &str, placeholder: &str) -> Option<Str
     }
 }
 
-async fn show(entries: &[(&str, JsValue)]) -> Result<JsValue, JsValue> {
+async fn show(entries: &[(&str, JsValue)], confirm_kind: ButtonKind) -> Result<JsValue, JsValue> {
     let options = Object::new();
     for (key, value) in entries {
         Reflect::set(&options, &JsValue::from_str(key), value)?;
     }
     Reflect::set(&options, &JsValue::from_str("theme"), &theme().into())?;
+    Reflect::set(
+        &options,
+        &JsValue::from_str("buttonsStyling"),
+        &JsValue::FALSE,
+    )?;
+    Reflect::set(
+        &options,
+        &JsValue::from_str("customClass"),
+        &button_classes(confirm_kind)?.into(),
+    )?;
     JsFuture::from(swal_fire(&options)?).await
+}
+
+/// The classes of the dialog buttons: the shared button colors, so a dialog matches the page.
+fn button_classes(confirm_kind: ButtonKind) -> Result<Object, JsValue> {
+    let classes = Object::new();
+    let class_of = |kind| {
+        let mut class = button_class(kind, ButtonSize::Md);
+        class.push("mx-1");
+        JsValue::from_str(&class.to_string())
+    };
+    Reflect::set(
+        &classes,
+        &JsValue::from_str("confirmButton"),
+        &class_of(confirm_kind),
+    )?;
+    Reflect::set(
+        &classes,
+        &JsValue::from_str("cancelButton"),
+        &class_of(ButtonKind::Secondary),
+    )?;
+    Ok(classes)
 }
 
 /// The theme of the page, which `index.html` and `preferences.rs` set as the `dark` class.
