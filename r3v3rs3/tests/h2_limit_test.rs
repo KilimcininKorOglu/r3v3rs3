@@ -12,8 +12,8 @@ use r3v3rs3_api::proxy::HttpProxy;
 
 mod common;
 use common::{
-    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, port_entry,
-    wait_for_listener, with_server,
+    TestPort, TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route,
+    port_entry, wait_for_listener, with_server,
 };
 
 /// A port whose options override the HTTP/2 limits.
@@ -53,14 +53,54 @@ fn h2_client() -> Client<HttpConnector, Full<Bytes>> {
         .build_http()
 }
 
+/// Serves the `/version` upstream on the port and waits until it listens.
+async fn serve_version_upstream(upstream_port: &TestPort) -> anyhow::Result<()> {
+    let app = Router::new().route("/version", get(version));
+    tokio::spawn(axum_server::bind(upstream_port.socket_addr()).serve(app.into_make_service()));
+    wait_for_listener(upstream_port.socket_addr()).await
+}
+
+/// Sends a prior-knowledge HTTP/2 GET with the `host` header and an optional `x-flood` header,
+/// and returns the response status.
+async fn h2_status(
+    url: &hyper::Uri,
+    host: &str,
+    flood: Option<&str>,
+) -> anyhow::Result<hyper::StatusCode> {
+    let mut builder = HyperRequest::builder()
+        .uri(url.clone())
+        .header("host", host);
+    if let Some(flood) = flood {
+        builder = builder.header("x-flood", flood);
+    }
+    let response = h2_client()
+        .request(builder.body(Full::new(Bytes::new()))?)
+        .await?;
+    Ok(response.status())
+}
+
+/// Sends a prior-knowledge HTTP/2 GET with the `x-flood` header and returns true when the
+/// request fails or its status is not a success.
+async fn flood_is_refused(url: &hyper::Uri, host: &str, big: &str) -> bool {
+    let result = h2_client()
+        .request(
+            HyperRequest::builder()
+                .uri(url.clone())
+                .header("host", host)
+                .header("x-flood", big)
+                .body(Full::new(Bytes::new()))
+                .expect("the flood request itself is valid"),
+        )
+        .await;
+    result.is_err() || !result.as_ref().unwrap().status().is_success()
+}
+
 #[tokio::test]
 async fn an_oversized_header_list_resets_the_stream_and_the_port_serves_on() -> anyhow::Result<()> {
     let proxy_port = alloc_tcp_port().await?;
     let upstream_port = alloc_tcp_port().await?;
 
-    let app = Router::new().route("/version", get(version));
-    tokio::spawn(axum_server::bind(upstream_port.socket_addr()).serve(app.into_make_service()));
-    wait_for_listener(upstream_port.socket_addr()).await?;
+    serve_version_upstream(&upstream_port).await?;
 
     let upstream_url = upstream_port.http_url("/");
     let config = TestStorage::builder()
@@ -72,51 +112,28 @@ async fn an_oversized_header_list_resets_the_stream_and_the_port_serves_on() -> 
         )])
         .build();
 
-    with_server(config, |_| async move {
-        wait_for_listener(proxy_port.socket_addr()).await?;
-        let url: hyper::Uri = proxy_port.http_url("/version").as_str().parse()?;
+    with_server(config, |_| check_flood_reset(proxy_port)).await
+}
 
-        // The hardened builder still serves a normal HTTP/2 request.
-        let response = h2_client()
-            .request(
-                HyperRequest::builder()
-                    .uri(url.clone())
-                    .header("host", "h2.localhost")
-                    .body(Full::new(Bytes::new()))?,
-            )
-            .await?;
-        assert_eq!(response.status(), 200);
+/// Checks that the port serves a normal request, resets an oversized header list, and serves
+/// a new connection after the flood attempt.
+async fn check_flood_reset(proxy_port: TestPort) -> anyhow::Result<()> {
+    wait_for_listener(proxy_port.socket_addr()).await?;
+    let url: hyper::Uri = proxy_port.http_url("/version").as_str().parse()?;
 
-        // A header list above the server limit gets the stream reset instead of served.
-        let big = "a".repeat(100_000);
-        let result = h2_client()
-            .request(
-                HyperRequest::builder()
-                    .uri(url.clone())
-                    .header("host", "h2.localhost")
-                    .header("x-flood", &big)
-                    .body(Full::new(Bytes::new()))
-                    .expect("the flood request itself is valid"),
-            )
-            .await;
-        assert!(
-            result.is_err() || !result.as_ref().unwrap().status().is_success(),
-            "the oversized header list must not be served"
-        );
+    // The hardened builder still serves a normal HTTP/2 request.
+    assert_eq!(h2_status(&url, "h2.localhost", None).await?, 200);
 
-        // The port serves a new connection after the flood attempt.
-        let response = h2_client()
-            .request(
-                HyperRequest::builder()
-                    .uri(url.clone())
-                    .header("host", "h2.localhost")
-                    .body(Full::new(Bytes::new()))?,
-            )
-            .await?;
-        assert_eq!(response.status(), 200);
-        Ok(())
-    })
-    .await
+    // A header list above the server limit gets the stream reset instead of served.
+    let big = "a".repeat(100_000);
+    assert!(
+        flood_is_refused(&url, "h2.localhost", &big).await,
+        "the oversized header list must not be served"
+    );
+
+    // The port serves a new connection after the flood attempt.
+    assert_eq!(h2_status(&url, "h2.localhost", None).await?, 200);
+    Ok(())
 }
 
 #[tokio::test]
@@ -125,9 +142,7 @@ async fn the_global_limits_apply_and_a_port_override_wins() -> anyhow::Result<()
     let override_port = alloc_tcp_port().await?;
     let upstream_port = alloc_tcp_port().await?;
 
-    let app = Router::new().route("/version", get(version));
-    tokio::spawn(axum_server::bind(upstream_port.socket_addr()).serve(app.into_make_service()));
-    wait_for_listener(upstream_port.socket_addr()).await?;
+    serve_version_upstream(&upstream_port).await?;
 
     let upstream_url = upstream_port.http_url("/");
     let config = TestStorage::builder()
@@ -164,51 +179,33 @@ async fn the_global_limits_apply_and_a_port_override_wins() -> anyhow::Result<()
         ])
         .build();
 
-    with_server(config, |_| async move {
-        wait_for_listener(global_port.socket_addr()).await?;
-        wait_for_listener(override_port.socket_addr()).await?;
-        // A request under the reduced global limit is served.
-        let url: hyper::Uri = global_port.http_url("/version").as_str().parse()?;
-        let response = h2_client()
-            .request(
-                HyperRequest::builder()
-                    .uri(url.clone())
-                    .header("host", "g.localhost")
-                    .body(Full::new(Bytes::new()))?,
-            )
-            .await?;
-        assert_eq!(response.status(), 200);
-
-        // A header list above the reduced global limit gets the stream reset.
-        let big = "a".repeat(10_000);
-        let result = h2_client()
-            .request(
-                HyperRequest::builder()
-                    .uri(url.clone())
-                    .header("host", "g.localhost")
-                    .header("x-flood", &big)
-                    .body(Full::new(Bytes::new()))
-                    .expect("the flood request itself is valid"),
-            )
-            .await;
-        assert!(
-            result.is_err() || !result.as_ref().unwrap().status().is_success(),
-            "the global limit must reject the oversized header list"
-        );
-
-        // The port override serves the same header list.
-        let url: hyper::Uri = override_port.http_url("/version").as_str().parse()?;
-        let response = h2_client()
-            .request(
-                HyperRequest::builder()
-                    .uri(url)
-                    .header("host", "l.localhost")
-                    .header("x-flood", &big)
-                    .body(Full::new(Bytes::new()))?,
-            )
-            .await?;
-        assert_eq!(response.status(), 200);
-        Ok(())
+    with_server(config, |_| {
+        check_global_and_override(global_port, override_port)
     })
     .await
+}
+
+/// Checks that the reduced global limit serves a small request and resets a 10 000 byte header
+/// list, while the port override serves the same header list.
+async fn check_global_and_override(
+    global_port: TestPort,
+    override_port: TestPort,
+) -> anyhow::Result<()> {
+    wait_for_listener(global_port.socket_addr()).await?;
+    wait_for_listener(override_port.socket_addr()).await?;
+    // A request under the reduced global limit is served.
+    let url: hyper::Uri = global_port.http_url("/version").as_str().parse()?;
+    assert_eq!(h2_status(&url, "g.localhost", None).await?, 200);
+
+    // A header list above the reduced global limit gets the stream reset.
+    let big = "a".repeat(10_000);
+    assert!(
+        flood_is_refused(&url, "g.localhost", &big).await,
+        "the global limit must reject the oversized header list"
+    );
+
+    // The port override serves the same header list.
+    let url: hyper::Uri = override_port.http_url("/version").as_str().parse()?;
+    assert_eq!(h2_status(&url, "l.localhost", Some(&big)).await?, 200);
+    Ok(())
 }
