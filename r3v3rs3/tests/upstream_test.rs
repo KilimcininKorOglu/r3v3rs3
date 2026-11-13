@@ -363,7 +363,7 @@ async fn check_passive_reorder(port: &TestPort) -> anyhow::Result<()> {
 #[tokio::test]
 async fn http_failover_and_passive_health_check() -> anyhow::Result<()> {
     let urls = [
-        alloc_tcp_port().await?.http_url("/"),
+        closed_tcp_port().http_url("/"),
         start_named_upstream("live").await?,
     ];
     let retry_port = alloc_tcp_port().await?;
