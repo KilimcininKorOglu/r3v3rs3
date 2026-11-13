@@ -1612,9 +1612,13 @@ fn configuration_backup_tab(props: &SubTabProps) -> Html {
             let question = locale.t("settings.restore_confirm").to_string();
             dialog::confirm_then(locale, question, async move {
                 is_restoring.set(true);
-                if let Ok(js_val) = wasm_bindgen_futures::JsFuture::from(file.text()).await {
-                    let text = js_val.as_string().unwrap_or_default();
-                    handle_config_restore_payload(locale, &text).await;
+                let read = wasm_bindgen_futures::JsFuture::from(file.text()).await;
+                match read.ok().and_then(|value| value.as_string()) {
+                    Some(text) => handle_config_restore_payload(locale, &text).await,
+                    None => {
+                        dialog::message(locale, locale.t("backups.file_read_failed"), Icon::Error)
+                            .await;
+                    }
                 }
                 is_restoring.set(false);
             });
