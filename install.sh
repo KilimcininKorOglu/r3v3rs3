@@ -2,7 +2,7 @@
 # Installs or upgrades r3v3rs3 from a GitHub release and runs it as a systemd service.
 #
 #   curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash
-#   curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --version 3.2.8 --webui 0.0.0.0:46492
+#   curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --version 3.2.9 --webui 0.0.0.0:46492
 #   curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --password s3cret-PASSWORD
 #   curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh | sudo bash -s -- --agent --master master.example.com:9443 --token TOKEN
 set -euo pipefail

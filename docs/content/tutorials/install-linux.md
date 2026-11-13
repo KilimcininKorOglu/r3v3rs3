@@ -59,7 +59,7 @@ All options also work without a question, for an unattended install:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
-    | sudo bash -s -- --version 3.2.8 --webui 0.0.0.0:46492
+    | sudo bash -s -- --version 3.2.9 --webui 0.0.0.0:46492
 ```
 
 ## Step 2: Check the Service
@@ -127,7 +127,7 @@ $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/in
 - The WebUI question offers the address of the installed service as its default, so pressing Enter keeps it.
 - It restarts the service and waits until the WebUI answers. When the WebUI stays silent for 30 seconds, it prints `systemctl status` and the last 50 journal lines, then stops.
 
-Pin a release with `--version 3.2.8` when you upgrade a fleet in steps.
+Pin a release with `--version 3.2.9` when you upgrade a fleet in steps.
 
 ## Remove
 
