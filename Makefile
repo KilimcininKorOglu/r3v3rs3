@@ -1,4 +1,4 @@
-.PHONY: all build release webui webui-release test test-api test-server test-webui test-acme-pebble test-discovery-e2e test-runtime-docker lint fmt fmt-check check check-fast deny run clean cdn-snapshot
+.PHONY: all build release webui webui-release test test-api test-server test-webui test-acme-pebble test-discovery-e2e test-runtime-docker lint fmt fmt-check complexity check check-fast deny run clean cdn-snapshot
 
 CARGO ?= cargo
 TRUNK ?= trunk
@@ -66,7 +66,12 @@ fmt:
 fmt-check:
 	$(CARGO) fmt --all -- --check
 
-check: fmt-check lint test webui
+# The CI complexity gate: every function, the integration tests included, stays at or below
+# a cyclomatic complexity of 10.
+complexity:
+	lizard -l rust -C 10 -w r3v3rs3/src r3v3rs3/tests r3v3rs3-api/src r3v3rs3-cli/src r3v3rs3-webui/src
+
+check: fmt-check lint complexity test webui
 
 # The fast local loop: type-checks every target without codegen and runs no tests. Use it
 # between edits; run the full `make check` before a push.
