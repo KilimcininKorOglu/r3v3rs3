@@ -586,9 +586,9 @@ fn tab_bar_view(
         .map(db_tool_name);
 
     html! {
-        <div class="flex items-center justify-between gap-2 px-2 pt-2 bg-neutral-900 border-x border-t border-neutral-800 rounded-t overflow-x-auto">
+        <div class="flex items-center justify-between gap-2 px-2 pt-2 bg-neutral-100 dark:bg-neutral-900 border-x border-t border-neutral-300 dark:border-neutral-800 rounded-t overflow-x-auto">
             <div class="flex items-center gap-1">
-                { for tabs.iter().map(|tab| render_tab_item(tab, active_tab_id, tabs.len(), &on_select_tab, &on_close_tab)) }
+                { for tabs.iter().map(|tab| render_tab_item(locale, tab, active_tab_id, tabs.len(), &on_select_tab, &on_close_tab)) }
             </div>
             { quick_new_tab_buttons(locale, db_tool, &on_new_tab) }
         </div>
@@ -596,6 +596,7 @@ fn tab_bar_view(
 }
 
 fn render_tab_item(
+    locale: Locale,
     tab: &TerminalTab,
     active_tab_id: usize,
     total_tabs: usize,
@@ -617,9 +618,9 @@ fn render_tab_item(
     };
 
     let base_classes = if is_active {
-        "flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-t bg-black text-white border-t-2 border-t-blue-500 border-x border-neutral-800 cursor-pointer transition-colors"
+        "flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-t bg-white dark:bg-black text-primary-600 dark:text-white border-t-2 border-t-primary-600 dark:border-t-primary-400 border-x border-neutral-300 dark:border-neutral-800 cursor-pointer transition-colors"
     } else {
-        "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-t bg-neutral-800/60 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 border-t-2 border-t-transparent border-x border-neutral-800/40 cursor-pointer transition-colors"
+        "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-t bg-neutral-200/60 dark:bg-neutral-800/60 text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-800 border-t-2 border-t-transparent border-x border-neutral-300/60 dark:border-neutral-800/40 cursor-pointer transition-colors"
     };
 
     html! {
@@ -631,9 +632,10 @@ fn render_tab_item(
             if total_tabs > 1 {
                 <button
                     type="button"
-                    class="ml-1 p-0.5 text-neutral-400 hover:text-red-400 hover:bg-neutral-700/60 rounded transition-colors"
+                    class="ml-1 p-0.5 text-neutral-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-neutral-200 dark:hover:bg-neutral-700/60 rounded transition-colors"
                     onclick={on_close_click}
-                    title="Close Tab"
+                    title={locale.t("common.close")}
+                    aria-label={locale.t("common.close")}
                 >
                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -669,7 +671,7 @@ fn render_new_tab_chip(shell: &'static str, on_new_tab: &Callback<String>) -> Ht
     html! {
         <button
             type="button"
-            class="px-2 py-0.5 text-[11px] font-medium rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+            class="px-2 py-0.5 text-[11px] font-medium rounded bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 dark:hover:text-white transition-colors cursor-pointer"
             onclick={on_click}
             title={format!("+ {shell}")}
         >
@@ -686,7 +688,7 @@ fn render_new_db_chip(tool: &'static str, on_new_tab: &Callback<String>) -> Html
     html! {
         <button
             type="button"
-            class="px-2 py-0.5 text-[11px] font-medium rounded bg-amber-950/60 border border-amber-800/60 hover:bg-amber-900/60 text-amber-300 hover:text-amber-200 transition-colors cursor-pointer"
+            class="px-2 py-0.5 text-[11px] font-medium rounded bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 dark:hover:text-amber-200 transition-colors cursor-pointer"
             onclick={on_click}
             title={format!("+ {tool} (DB)")}
         >
@@ -703,7 +705,7 @@ struct ToolbarActions {
 
 fn toolbar_view(locale: Locale, state: &TerminalState, actions: &ToolbarActions) -> Html {
     html! {
-        <div class="flex flex-wrap items-center justify-between gap-2 p-2 bg-neutral-900 border-x border-b border-neutral-800">
+        <div class="flex flex-wrap items-center justify-between gap-2 p-2 bg-neutral-100 dark:bg-neutral-900 border-x border-b border-neutral-300 dark:border-neutral-800">
             { render_custom_command_input(locale, &state.custom_input, &state.history, &state.history_index, actions.on_submit.clone()) }
             <div class="flex items-center gap-1.5 ml-auto">
                 { render_snippets_toggle(locale, &state.show_snippets) }
@@ -736,7 +738,7 @@ fn render_custom_command_input(
         <div class="flex items-center gap-1.5">
             <input
                 type="text"
-                class="px-2.5 py-1 text-xs bg-neutral-950 border border-neutral-700 rounded text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-blue-500 w-44 sm:w-64 font-mono"
+                class="px-2.5 py-1 text-xs bg-white dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 rounded text-neutral-900 dark:text-neutral-200 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-primary-500 w-44 sm:w-64 font-mono"
                 placeholder={locale.t("apps.terminal_custom")}
                 value={(**custom_input).clone()}
                 {oninput}
@@ -833,7 +835,7 @@ fn render_snippets_toggle(locale: Locale, show_snippets: &UseStateHandle<bool>) 
     let classes = if is_open {
         "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-amber-600/30 text-amber-300 border border-amber-600/60 transition-colors cursor-pointer"
     } else {
-        "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors cursor-pointer"
+        "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 dark:hover:text-white transition-colors cursor-pointer"
     };
     let on_click = {
         let show_snippets = show_snippets.clone();
@@ -862,7 +864,7 @@ fn render_history_button(
     html! {
         <button
             type="button"
-            class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors cursor-pointer"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 dark:hover:text-white transition-colors cursor-pointer"
             onclick={on_click}
             title={locale.t("apps.terminal_history_title")}
         >
@@ -871,7 +873,7 @@ fn render_history_button(
             </svg>
             <span>{locale.t("apps.terminal_history")}</span>
             if count > 0 {
-                <span class="px-1.5 py-0.2 text-[10px] font-mono rounded-full bg-neutral-700 text-neutral-200">
+                <span class="px-1.5 py-0.5 text-[10px] font-mono rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200">
                     {count}
                 </span>
             }
@@ -888,7 +890,7 @@ fn render_session_actions(
     let copy_classes = if copied {
         "px-2.5 py-1 text-xs font-semibold rounded bg-green-600 text-white transition-colors"
     } else {
-        "px-2.5 py-1 text-xs font-medium rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors cursor-pointer"
+        "px-2.5 py-1 text-xs font-medium rounded bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 dark:hover:text-white transition-colors cursor-pointer"
     };
     let copy_text = if copied {
         locale.t("apps.terminal_copied")
@@ -899,7 +901,7 @@ fn render_session_actions(
         <>
             <button
                 type="button"
-                class="px-2.5 py-1 text-xs font-medium rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors cursor-pointer"
+                class="px-2.5 py-1 text-xs font-medium rounded bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 dark:hover:text-white transition-colors cursor-pointer"
                 onclick={on_clear}
             >
                 {locale.t("apps.terminal_clear")}
@@ -932,10 +934,10 @@ fn snippet_panel_view(
     let has_db = app.and_then(|a| a.spec.database.as_deref()).is_some();
 
     html! {
-        <div class="p-3 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg space-y-2.5">
-            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-800 pb-2">
+        <div class="p-3 mb-2 bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-lg space-y-2.5">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-300 dark:border-neutral-800 pb-2">
                 <div class="flex items-center gap-2">
-                    <span class="text-xs font-semibold text-neutral-200 flex items-center gap-1.5">
+                    <span class="text-xs font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
                         <svg class="w-4 h-4 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
                         </svg>
@@ -946,7 +948,7 @@ fn snippet_panel_view(
                 { category_pills(locale, active_category, has_db) }
             </div>
             <div class="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto">
-                { for filtered.into_iter().map(|s| render_snippet_chip(s, &on_run_snippet, &on_insert_snippet)) }
+                { for filtered.into_iter().map(|s| render_snippet_chip(locale, s, &on_run_snippet, &on_insert_snippet)) }
             </div>
         </div>
     }
@@ -993,7 +995,7 @@ fn render_category_pill(
     let classes = if is_active {
         "px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-600 text-white cursor-pointer"
     } else {
-        "px-2 py-0.5 rounded text-[11px] font-medium bg-neutral-800 text-neutral-400 hover:text-neutral-200 cursor-pointer"
+        "px-2 py-0.5 rounded text-[11px] font-medium bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 cursor-pointer"
     };
     let on_click = {
         let active_category = active_category.clone();
@@ -1007,6 +1009,7 @@ fn render_category_pill(
 }
 
 fn render_snippet_chip(
+    locale: Locale,
     snippet: SnippetItem,
     on_run: &Callback<&'static str>,
     on_insert: &Callback<&'static str>,
@@ -1022,10 +1025,10 @@ fn render_snippet_chip(
     };
 
     html! {
-        <div class="inline-flex items-center rounded bg-neutral-800/80 border border-neutral-700/60 overflow-hidden text-xs">
+        <div class="inline-flex items-center rounded bg-white dark:bg-neutral-800/80 border border-neutral-300 dark:border-neutral-700/60 overflow-hidden text-xs">
             <button
                 type="button"
-                class="px-2 py-1 text-neutral-200 hover:text-white hover:bg-neutral-700/80 font-mono text-[11px] transition-colors cursor-pointer"
+                class="px-2 py-1 text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:text-white dark:hover:bg-neutral-700/80 font-mono text-[11px] transition-colors cursor-pointer"
                 onclick={on_run_click}
                 title={snippet.desc}
             >
@@ -1033,9 +1036,9 @@ fn render_snippet_chip(
             </button>
             <button
                 type="button"
-                class="px-1.5 py-1 text-neutral-400 hover:text-amber-300 hover:bg-neutral-700 border-l border-neutral-700/60 transition-colors cursor-pointer"
+                class="px-1.5 py-1 text-neutral-500 dark:text-neutral-400 hover:text-amber-600 dark:hover:text-amber-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 border-l border-neutral-300 dark:border-neutral-700/60 transition-colors cursor-pointer"
                 onclick={on_insert_click}
-                title="Insert into input"
+                title={locale.t("apps.terminal_history_insert")}
             >
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
