@@ -214,31 +214,27 @@ pub type AcmeResult = Result<AcmeRequest, HashMap<String, String>>;
 /// The labels of the EAB fields. `None` hides the fields.
 pub type EabLabels = Option<(&'static str, &'static str)>;
 
-/// Loads the named DNS credentials of the store once. A failed load keeps an empty list, and
-/// the manual entry of the form stays usable.
+/// Loads the named DNS credentials of the store once. A failed load shows its error and keeps an
+/// empty list, so the manual entry of the form stays usable.
 #[hook]
 pub fn use_dns_credentials() -> Vec<DnsCredentialInfo> {
+    let locale = crate::i18n::use_locale();
     let state = use_state(Vec::new);
     {
         let state = state.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
-                if let Some(list) = load_credentials().await {
-                    state.set(list);
+                let request = Request::get(&format!("{API_ENDPOINT}/dns_credentials"));
+                match crate::pages::settings::fetch_json(locale, request).await {
+                    Ok(list) => state.set(list),
+                    Err(err) => {
+                        crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await
+                    }
                 }
             });
         });
     }
     (*state).clone()
-}
-
-/// The named DNS credentials, or `None` when the read failed.
-async fn load_credentials() -> Option<Vec<DnsCredentialInfo>> {
-    let response = Request::get(&format!("{API_ENDPOINT}/dns_credentials"))
-        .send()
-        .await
-        .ok()?;
-    response.json().await.ok()
 }
 
 #[derive(Clone, PartialEq)]
