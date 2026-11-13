@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::components::button::{ButtonKind, ButtonSize, button_class};
+use crate::pages::settings::{failure_box, fetch_json};
 use crate::{
     API_ENDPOINT,
     auth::use_ensure_auth,
@@ -32,7 +33,7 @@ pub fn port_view(props: &Props) -> Html {
     let (ports, _) = use_store::<PortStore>();
     let (session, _) = use_store::<SessionStore>();
     let can_edit = session.can_edit();
-    let port = use_loaded_port(props.id, &ports);
+    let port = use_loaded_port(locale, props.id, &ports);
 
     let Some(navigator) = use_navigator() else {
         return html!();
@@ -53,42 +54,45 @@ pub fn port_view(props: &Props) -> Html {
     let is_loading = use_state(|| false);
     let onsubmit = submit_callback(locale, props.id, entry.clone(), is_loading, navigator);
 
+    let port_entry = match &*port {
+        Some(Ok(port_entry)) => port_entry,
+        Some(Err(err)) => return failure_box(err),
+        None => return html! {},
+    };
     html! {
-        <>
-            if let Some(port_entry) = &*port {
-                <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
-                    <fieldset disabled={!can_edit}>
-                        <PortConfig port={port_entry.port.clone()} {onchanged} />
-                    </fieldset>
+        <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
+            <fieldset disabled={!can_edit}>
+                <PortConfig port={port_entry.port.clone()} {onchanged} />
+            </fieldset>
 
-                    <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
-                        <button type="button" onclick={cancel_onclick} class={button_class(ButtonKind::Secondary, ButtonSize::Md)}>
-                            {locale.t(if can_edit { "common.cancel" } else { "common.back" })}
-                        </button>
-                        if can_edit {
-                            <button type="submit" disabled={entry.is_err()} class={button_class(ButtonKind::Primary, ButtonSize::Md)}>
-                                {locale.t("common.update")}
-                            </button>
-                        }
-                    </div>
-                </form>
-            } else {
-                <Redirect<Route> to={Route::Ports}/>
-            }
-        </>
+            <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
+                <button type="button" onclick={cancel_onclick} class={button_class(ButtonKind::Secondary, ButtonSize::Md)}>
+                    {locale.t(if can_edit { "common.cancel" } else { "common.back" })}
+                </button>
+                if can_edit {
+                    <button type="submit" disabled={entry.is_err()} class={button_class(ButtonKind::Primary, ButtonSize::Md)}>
+                        {locale.t("common.update")}
+                    </button>
+                }
+            </div>
+        </form>
     }
 }
 
-/// The port of the id: the entry of the store first, then the entry that the admin API returns.
+/// The port of the id: the entry of the store first, then the entry or the error that the
+/// admin API returns. `None` while a port that is not in the store loads.
 #[hook]
-fn use_loaded_port(id: ShortId, ports: &PortStore) -> UseStateHandle<Option<PortEntry>> {
-    let port = use_state(|| ports.entries.iter().find(|e| e.id == id).cloned());
+fn use_loaded_port(
+    locale: Locale,
+    id: ShortId,
+    ports: &PortStore,
+) -> UseStateHandle<Option<Result<PortEntry, String>>> {
+    let port = use_state(|| ports.entries.iter().find(|e| e.id == id).cloned().map(Ok));
     let port_cloned = port.clone();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(entry) = get_port(id).await {
-                port_cloned.set(Some(entry));
-            }
+            let path = format!("{API_ENDPOINT}/ports/{id}");
+            port_cloned.set(Some(fetch_json(locale, Request::get(&path)).await));
         });
     });
     port
@@ -125,14 +129,6 @@ fn submit_callback(
             is_loading.set(false);
         });
     })
-}
-
-async fn get_port(id: ShortId) -> Result<PortEntry, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/ports/{id}"))
-        .send()
-        .await?
-        .json()
-        .await
 }
 
 async fn update_port(locale: Locale, id: ShortId, entry: &Port) -> Result<(), String> {
