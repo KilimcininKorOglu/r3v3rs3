@@ -1,4 +1,5 @@
 use super::app_log::download_text_file;
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::{API_ENDPOINT, auth::use_ensure_auth, format::format_instant, i18n::use_locale};
 use gloo_net::http::Request;
 use gloo_timers::callback::Timeout;
@@ -21,12 +22,17 @@ pub fn log_view(props: &Props) -> Html {
     let ul_ref = use_node_ref();
     let search = use_state(String::new);
     let log: UseStateHandle<Vec<SystemLogRow>> = use_state(Vec::<SystemLogRow>::new);
-    let id = props.id.clone();
-    let log_cloned = log.clone();
-    let ul_ref_cloned = ul_ref.clone();
+    let error = use_state(|| Option::<String>::None);
+    let poll = LogPoll {
+        locale,
+        id: props.id.clone(),
+        ul_ref: ul_ref.clone(),
+        setter: log.clone(),
+        error: error.clone(),
+    };
 
     use_effect_with((), move |_| {
-        poll_log(id.clone(), ul_ref_cloned.clone(), log_cloned, vec![], None);
+        poll_log(poll, vec![], None);
     });
 
     let Some(navigator) = use_navigator() else {
@@ -47,12 +53,15 @@ pub fn log_view(props: &Props) -> Html {
     html! {
         <>
             <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 mb-4">
-                <button onclick={back_onclick} class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2 self-start" type="button">
-                    <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 mr-1" />
+                <Button kind={ButtonKind::Secondary} class="self-start" onclick={back_onclick}>
+                    <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 dark:invert" />
                     {locale.t("common.back")}
-                </button>
+                </Button>
                 { log_controls_view(locale, &search, on_download) }
             </div>
+            if let Some(error) = &*error {
+                <div class="mb-4">{ super::settings::failure_box(error) }</div>
+            }
             if !search.is_empty() {
                 <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-2">
                     {locale.tf("log.matches", &[("matched", &matched.to_string()), ("total", &total.to_string())])}
@@ -106,16 +115,12 @@ fn log_controls_view(
                     </button>
                 }
             </div>
-            <button
-                onclick={on_download}
-                type="button"
-                class="inline-flex items-center text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 font-medium"
-            >
-                <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_download}>
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                 </svg>
                 {locale.t("log.download")}
-            </button>
+            </Button>
         </div>
     }
 }
@@ -194,43 +199,50 @@ pub fn export_system_logs(logs: &[SystemLogRow]) -> String {
         .join("\n")
 }
 
-fn poll_log(
+/// The state that one poll of the log reads and writes. A failed poll stores its error and stops.
+#[derive(Clone)]
+struct LogPoll {
+    locale: Locale,
     id: String,
     ul_ref: NodeRef,
     setter: UseStateHandle<Vec<SystemLogRow>>,
-    mut history: Vec<SystemLogRow>,
-    time: Option<OffsetDateTime>,
-) {
-    wasm_bindgen_futures::spawn_local(async move {
-        if let Ok(mut list) = get_log(&id, time).await {
-            let time = list.last().map(|row| row.timestamp).or(time);
-            let recent = &history[history.len().saturating_sub(100)..];
-            list.retain(|row| !recent.contains(row));
-            history.append(&mut list);
-            setter.set(history.clone());
+    error: UseStateHandle<Option<String>>,
+}
 
-            if let Some(elem) = ul_ref.cast::<Element>() {
-                if elem.scroll_top() == elem.scroll_height() - elem.client_height() {
-                    Timeout::new(0, move || {
-                        elem.set_scroll_top(elem.scroll_height());
-                    })
-                    .forget();
-                }
-                poll_log(id, ul_ref, setter, history, time);
+fn poll_log(poll: LogPoll, mut history: Vec<SystemLogRow>, time: Option<OffsetDateTime>) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let mut list = match get_log(poll.locale, &poll.id, time).await {
+            Ok(list) => list,
+            Err(err) => return poll.error.set(Some(err)),
+        };
+        let time = list.last().map(|row| row.timestamp).or(time);
+        let recent = &history[history.len().saturating_sub(100)..];
+        list.retain(|row| !recent.contains(row));
+        history.append(&mut list);
+        poll.setter.set(history.clone());
+
+        if let Some(elem) = poll.ul_ref.cast::<Element>() {
+            if elem.scroll_top() == elem.scroll_height() - elem.client_height() {
+                Timeout::new(0, move || {
+                    elem.set_scroll_top(elem.scroll_height());
+                })
+                .forget();
             }
+            poll_log(poll, history, time);
         }
     });
 }
 
 async fn get_log(
+    locale: Locale,
     id: &str,
     time: Option<OffsetDateTime>,
-) -> Result<Vec<SystemLogRow>, gloo_net::Error> {
+) -> Result<Vec<SystemLogRow>, String> {
     let mut req = Request::get(&format!("{API_ENDPOINT}/logs/{id}"));
     if let Some(time) = time {
         req = req.query([("since", &time.unix_timestamp().to_string())]);
     }
-    req.send().await?.json().await
+    super::settings::fetch_json(locale, req).await
 }
 
 #[cfg(test)]
