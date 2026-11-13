@@ -748,11 +748,7 @@ async fn delete_server_cert(locale: Locale, id: ShortId) -> Result<(), String> {
 }
 
 async fn delete_acme(locale: Locale, id: ShortId) -> Result<(), String> {
-    let req = Request::delete(&format!("{API_ENDPOINT}/acme/{id}"))
-        .build()
-        .map_err(|err| err.to_string())?;
-    send_request(locale, req).await?;
-    Ok(())
+    super::resource_page::delete(locale, &format!("/acme/{id}")).await
 }
 
 /// Orders the certificates of the ACME entry again. A 404 means that the entry is gone.
