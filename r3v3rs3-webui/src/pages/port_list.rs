@@ -346,11 +346,7 @@ async fn get_list() -> Result<Vec<PortEntry>, gloo_net::Error> {
 }
 
 async fn delete_port(locale: Locale, id: ShortId) -> Result<(), String> {
-    let req = Request::delete(&format!("{API_ENDPOINT}/ports/{id}"))
-        .build()
-        .map_err(|err| err.to_string())?;
-    crate::pages::settings::send_request(locale, req).await?;
-    Ok(())
+    super::resource_page::delete(locale, &format!("/ports/{id}")).await
 }
 
 async fn reset_port(locale: Locale, id: ShortId) -> Result<(), String> {
