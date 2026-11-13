@@ -3,13 +3,16 @@
 use super::Route;
 use super::accounts::{INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{
-    BUTTON_CLASS, FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback,
-    row_actions, save_result, set_on_click, submit_callback, text_input,
+    AddIcon, FormCard, FormState, Notice, add_button, close_callback, delete_on_click, failed_view,
+    form_modal, load, open_on_click, reload_callback, row_actions, save_result, saved_view,
+    submit_callback, text_input, then_close, use_form_modal,
 };
 use super::settings::send_json;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
-use crate::components::data_list::{Column, DANGER_LINK_CLASS, Row, list_card};
+use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind, ButtonSize};
+use crate::components::data_list::{Column, Row, list_card};
 use crate::format::format_time;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
@@ -149,7 +152,7 @@ pub fn env_groups() -> Html {
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
     let groups = use_state(|| Option::<Vec<EnvGroupSummary>>::None);
-    let form = use_state(Form::default);
+    let (form, open) = use_form_modal::<Form>();
     let notice = use_state(|| Option::<Notice<()>>::None);
 
     let signed_in = session.info.is_some();
@@ -169,14 +172,32 @@ pub fn env_groups() -> Html {
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(|entry| list_row(locale, entry, can_edit, &form, &groups))
+        .map(|entry| list_row(locale, entry, can_edit, (&form, &open), &groups))
         .collect::<Vec<_>>();
 
     html! {
         <>
+            { saved_view(&notice, |()| html! { <p>{locale.t("env_groups.created")}</p> }) }
             { list_card(locale, groups.is_some(), "env_groups.empty", &COLUMNS, &rows) }
             if can_edit {
-                { form_view(locale, &form, &notice, &groups) }
+                { add_section(locale, (&form, &open), &notice, &groups) }
+            }
+        </>
+    }
+}
+
+/// The add button and the modal of the form.
+fn add_section(
+    locale: Locale,
+    (form, open): FormState<Form>,
+    notice: &UseStateHandle<Option<Notice<()>>>,
+    groups: &GroupsList,
+) -> Html {
+    html! {
+        <>
+            { add_button(locale, open_on_click(form, open, Form::default())) }
+            if **open {
+                { form_view(locale, (form, open), notice, groups) }
             }
         </>
     }
@@ -186,16 +207,16 @@ fn list_row(
     locale: Locale,
     entry: &EnvGroupSummary,
     can_edit: bool,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     list: &GroupsList,
 ) -> Row {
     let actions = match can_edit {
         true => {
-            let form = form.clone();
+            let (form, open) = (form.clone(), open.clone());
             let id = entry.id;
             let edit = Callback::from(move |e: MouseEvent| {
                 e.prevent_default();
-                let form = form.clone();
+                let (form, open) = (form.clone(), open.clone());
                 spawn_local(async move {
                     if let Ok(res) = Request::get(&format!("{API_ENDPOINT}/env-groups/{id}"))
                         .send()
@@ -203,6 +224,7 @@ fn list_row(
                         && let Ok(group) = res.json::<EnvGroup>().await
                     {
                         form.set(Form::edit(&group));
+                        open.set(true);
                     }
                 });
             });
@@ -236,7 +258,7 @@ fn list_row(
 
 fn form_view(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     notice: &UseStateHandle<Option<Notice<()>>>,
     groups: &GroupsList,
 ) -> Html {
@@ -245,20 +267,22 @@ fn form_view(
         Some(_) => locale.t("env_groups.edit"),
         None => locale.t("env_groups.new"),
     };
-    let cancel = form.editing.map(|_| set_on_click(form, Form::default()));
+    let touched = form.editing.is_some() || !form.name.is_empty();
     let card = FormCard {
         title: title.to_string(),
-        notice: notice_view(
-            notice,
-            |()| html! { <p>{locale.t("env_groups.created")}</p> },
-        ),
+        notice: failed_view(notice),
         fields: fields_view(locale, form),
-        error: parsed.as_ref().err().cloned(),
-        cancel,
+        error: parsed.as_ref().err().filter(|_| touched).cloned(),
+        cancel: None,
         save_label: "env_groups.save",
         can_save: parsed.is_ok(),
     };
-    form_card(locale, card, submit(locale, form, notice, groups))
+    form_modal(
+        locale,
+        card,
+        submit(locale, (form, open), notice, groups),
+        close_callback(form, open),
+    )
 }
 
 fn fields_view(locale: Locale, form: &UseStateHandle<Form>) -> Html {
@@ -293,9 +317,10 @@ fn fields_view(locale: Locale, form: &UseStateHandle<Form>) -> Html {
             <div class="mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-700">
                 <div class="flex items-center justify-between mb-2">
                     <label class={LABEL_CLASS}>{locale.t("env_groups.variables")}</label>
-                    <button type="button" onclick={add_var} class={BUTTON_CLASS}>
+                    <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={add_var}>
+                        <AddIcon />
                         {locale.t("env_groups.add_variable")}
-                    </button>
+                    </Button>
                 </div>
                 { for (0..form.variables.len()).map(|idx| var_row_view(locale, form, idx)) }
             </div>
@@ -351,7 +376,11 @@ fn var_row_view(locale: Locale, form: &UseStateHandle<Form>, index: usize) -> Ht
                 />
                 {locale.t("env_groups.secret")}
             </label>
-            <a class={DANGER_LINK_CLASS} onclick={remove_row}>{locale.t("common.delete")}</a>
+            <ActionIconButton
+                variant={ActionVariant::Delete}
+                title={locale.t("common.delete").to_string()}
+                onclick={remove_row}
+            />
         </div>
     }
 }
@@ -386,7 +415,7 @@ fn var_secret_toggle(form: &UseStateHandle<Form>, index: usize) -> Callback<Even
 
 fn submit(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     notice: &UseStateHandle<Option<Notice<()>>>,
     groups: &GroupsList,
 ) -> Callback<SubmitEvent> {
@@ -407,6 +436,10 @@ fn submit(
     submit_callback(
         parse,
         save,
-        save_result(form, notice, reload_callback(groups, PATH)),
+        save_result(
+            form,
+            notice,
+            then_close(reload_callback(groups, PATH), open),
+        ),
     )
 }
