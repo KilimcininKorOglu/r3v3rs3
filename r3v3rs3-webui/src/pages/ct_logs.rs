@@ -341,6 +341,19 @@ fn render_header(
     }
 }
 
+/// The translated name of the state of the last check. A state that this panel does not know
+/// stays as the server sent it.
+fn check_status_text(locale: Locale, status: &str) -> String {
+    let key = match status {
+        "idle" => "certs.ct_check_status_idle",
+        "checking" => "certs.ct_check_status_checking",
+        "ok" => "certs.ct_check_status_ok",
+        "partial_error" => "certs.ct_check_status_partial_error",
+        other => return other.to_string(),
+    };
+    locale.t(key).to_string()
+}
+
 fn render_summary_cards(locale: Locale, status: &CtMonitorStatus) -> Html {
     let rogues_count = status.active_rogue_alerts_count;
     let (rogues_tile, rogues_value) = if rogues_count > 0 {
@@ -380,7 +393,7 @@ fn render_summary_cards(locale: Locale, status: &CtMonitorStatus) -> Html {
                     { last_check_text }
                 </div>
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mt-1 uppercase tracking-wider">
-                    { &status.last_check_status }
+                    { check_status_text(locale, &status.last_check_status) }
                 </div>
             </div>
 
@@ -728,6 +741,16 @@ mod tests {
             ["a.example.test", "b.example.test"]
         );
         assert_eq!(req.config.check_interval_secs, 3600);
+    }
+
+    #[test]
+    fn the_check_states_of_the_server_are_translated() {
+        assert_eq!(check_status_text(Locale::Tr, "ok"), "Başarılı");
+        assert_eq!(
+            check_status_text(Locale::En, "partial_error"),
+            "Partly failed"
+        );
+        assert_eq!(check_status_text(Locale::En, "new_state"), "new_state");
     }
 
     #[test]
