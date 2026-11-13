@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": 1792249000000,
+  "updated_at": 1794561881000,
   "engines": [
     {
       "engine": "postgres",
@@ -16,7 +16,10 @@
       "url_scheme": "postgres",
       "env_prefix": "POSTGRES",
       "url_database": true,
-      "data_path": "/var/lib/postgresql/data"
+      "data_path": "/var/lib/postgresql/data",
+      "version_data_paths": {
+        "postgres:18-alpine": "/var/lib/postgresql"
+      }
     },
     {
       "engine": "mariadb",

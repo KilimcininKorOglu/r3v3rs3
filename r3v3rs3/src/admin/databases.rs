@@ -332,7 +332,7 @@ fn replica_app_request(
             health_check_path: None,
             volumes: vec![VolumeMount {
                 volume: volume_name(request.name.as_str())?,
-                target: info.data_path.parse()?,
+                target: info.data_path_for(&version).parse()?,
                 read_only: false,
             }],
             restart: Default::default(),
@@ -385,7 +385,7 @@ fn source_engine_info(source: &AppEntry) -> Result<EngineInfo, AppError> {
             reason: format!("the app {} is not a managed database", source.name),
         })
     })?;
-    r3v3rs3_api::platform::engine_info(engine).ok_or_else(|| {
+    r3v3rs3_api::platform::app_engine_info(&source.spec).ok_or_else(|| {
         AppError::R3v3rs3(Error::InvalidContainerSpec {
             reason: format!("the engine {engine} is not in the database catalog"),
         })
@@ -475,7 +475,7 @@ fn app_request(
             health_check_path: None,
             volumes: vec![VolumeMount {
                 volume: volume_name(request.name.as_str())?,
-                target: info.data_path.parse()?,
+                target: info.data_path_for(&request.version).parse()?,
                 read_only: false,
             }],
             restart: Default::default(),
@@ -635,6 +635,7 @@ mod tests {
             env_prefix: "MONGO".to_string(),
             url_database: true,
             data_path: "/data/db".to_string(),
+            version_data_paths: Default::default(),
         };
         let entries = initial_db_env_entries(&info, "secret123").unwrap();
         assert_eq!(entries.len(), 2);
@@ -660,6 +661,7 @@ mod tests {
             env_prefix: "POSTGRES".to_string(),
             url_database: true,
             data_path: "/var/lib/postgresql/data".to_string(),
+            version_data_paths: Default::default(),
         };
         let entries = initial_db_env_entries(&info, "pass456").unwrap();
         assert_eq!(entries.len(), 1);
@@ -682,6 +684,7 @@ mod tests {
             env_prefix: "REDIS".to_string(),
             url_database: false,
             data_path: "/data".to_string(),
+            version_data_paths: Default::default(),
         };
         let entries = initial_db_env_entries(&info, "").unwrap();
         assert!(entries.is_empty());

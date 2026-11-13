@@ -16,7 +16,7 @@ use crate::subject_name::SubjectName;
 use crate::upstream::{LoadBalancing, StickyCookie};
 use serde_default::DefaultFromSerde;
 use serde_derive::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use utoipa::{IntoParams, ToSchema};
 
 /// The id of the target that runs the containers on the server of r3v3rs3 itself.
@@ -50,6 +50,28 @@ pub struct EngineInfo {
     pub url_database: bool,
     /// The directory inside the container that the data volume mounts.
     pub data_path: String,
+    /// The data directory of the image tags that keep their data elsewhere, keyed by the tag.
+    /// For example `postgres:18` keeps it in `/var/lib/postgresql`, while `postgres:17`
+    /// declares `/var/lib/postgresql/data` as its own volume. A tag without an entry uses
+    /// `data_path`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub version_data_paths: BTreeMap<String, String>,
+}
+
+impl EngineInfo {
+    /// The directory that the data volume mounts for one image tag of the engine.
+    pub fn data_path_for(&self, image: &str) -> &str {
+        self.version_data_paths
+            .get(image)
+            .map_or(self.data_path.as_str(), String::as_str)
+    }
+
+    /// This entry with `data_path` set to the data directory of one image tag, so that the
+    /// backup and restore code of an existing database reads the directory it mounts.
+    pub fn for_image(mut self, image: &str) -> Self {
+        self.data_path = self.data_path_for(image).to_string();
+        self
+    }
 }
 
 /// The document of the `engines.json` catalog.
@@ -114,6 +136,17 @@ pub fn engine_info(key: &str) -> Option<EngineInfo> {
         .iter()
         .find(|info| info.engine == key)
         .cloned()
+}
+
+/// The catalog entry of the engine of a database app, with the data directory of the image
+/// that the app runs. `None` for an app that is not a managed database or whose engine left
+/// the catalog.
+pub fn app_engine_info(spec: &AppSpec) -> Option<EngineInfo> {
+    let info = engine_info(spec.database.as_deref()?)?;
+    Some(match &spec.source {
+        AppSource::Image { image } => info.for_image(image.as_str()),
+        _ => info,
+    })
 }
 
 fn read_engines() -> std::sync::RwLockReadGuard<'static, InstalledEngines> {
@@ -2556,7 +2589,10 @@ mod tests {
         let info = EngineInfo {
             engine: "postgres".to_string(),
             label: "PostgreSQL".to_string(),
-            versions: vec!["postgres:17-alpine".to_string()],
+            versions: vec![
+                "postgres:17-alpine".to_string(),
+                "postgres:18-alpine".to_string(),
+            ],
             container_port: 5432,
             password_env: "POSTGRES_PASSWORD".to_string(),
             user: "postgres".to_string(),
@@ -2565,12 +2601,61 @@ mod tests {
             env_prefix: "POSTGRES".to_string(),
             url_database: true,
             data_path: "/var/lib/postgresql/data".to_string(),
+            version_data_paths: BTreeMap::from([(
+                "postgres:18-alpine".to_string(),
+                "/var/lib/postgresql".to_string(),
+            )]),
         };
         install_engines(EnginesCatalog {
             version: 1,
             updated_at: 1,
             engines: vec![info],
         });
+    }
+
+    fn database_spec(image: &str) -> AppSpec {
+        serde_json::from_value(json!({
+            "source": {"type": "image", "image": image},
+            "port": 5432,
+            "database": "postgres",
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_database_mounts_the_data_directory_of_its_image_tag() {
+        install_test_engines();
+        let info = |image: &str| app_engine_info(&database_spec(image)).unwrap().data_path;
+        // postgres:18 refuses to start on a volume at the directory of postgres:17.
+        assert_eq!(info("postgres:18-alpine"), "/var/lib/postgresql");
+        // postgres:17 declares this directory as its own volume, so data under any other
+        // mount would land in an anonymous volume and be lost on the next deployment.
+        assert_eq!(info("postgres:17-alpine"), "/var/lib/postgresql/data");
+    }
+
+    #[test]
+    fn an_app_that_is_not_a_database_has_no_engine() {
+        install_test_engines();
+        let mut spec = database_spec("postgres:18-alpine");
+        spec.database = None;
+        assert!(app_engine_info(&spec).is_none());
+    }
+
+    #[test]
+    fn a_catalog_without_version_paths_still_parses() {
+        let info: EngineInfo = serde_json::from_value(json!({
+            "engine": "redis", "label": "Redis", "versions": ["redis:8-alpine"],
+            "container_port": 6379, "password_env": "", "user": "", "default_db": "",
+            "url_scheme": "redis", "env_prefix": "REDIS", "url_database": false,
+            "data_path": "/data",
+        }))
+        .unwrap();
+        assert_eq!(info.data_path_for("redis:8-alpine"), "/data");
+        assert!(
+            !serde_json::to_string(&info)
+                .unwrap()
+                .contains("version_data_paths")
+        );
     }
 
     #[test]
@@ -2765,6 +2850,7 @@ mod tests {
             env_prefix: "X".to_string(),
             url_database: false,
             data_path: "/data".to_string(),
+            version_data_paths: BTreeMap::new(),
         };
         let catalog = |engines: Vec<EngineInfo>| EnginesCatalog {
             version: 1,

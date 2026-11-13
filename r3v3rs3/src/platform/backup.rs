@@ -497,7 +497,7 @@ impl Platform {
             .database
             .clone()
             .context("the app is not a managed database")?;
-        let info = r3v3rs3_api::platform::engine_info(&engine)
+        let info = r3v3rs3_api::platform::app_engine_info(&app.spec)
             .context("the engine is not in the database catalog")?;
         let password = self.database_password(db_id, &info).await?;
         let plan = dump_plan(&engine, &info, &password)?;
@@ -685,7 +685,7 @@ impl Platform {
             .database
             .clone()
             .context("the app is not a managed database")?;
-        let info = r3v3rs3_api::platform::engine_info(&engine)
+        let info = r3v3rs3_api::platform::app_engine_info(&app.spec)
             .context("the engine is not in the database catalog")?;
         let password = self.database_password(db_id, &info).await?;
         let plan = restore_plan(&engine, &info, &password)?;
@@ -792,7 +792,8 @@ impl Platform {
             .database
             .clone()
             .context("the source app is not a managed database")?;
-        let info = r3v3rs3_api::platform::engine_info(&engine)
+        // The clone runs the image of its source, so both mount the same data directory.
+        let info = r3v3rs3_api::platform::app_engine_info(&source.spec)
             .context("the engine is not in the database catalog")?;
 
         let dump_bytes = self.get_clone_dump(source_id, &engine, &info).await?;
@@ -1058,6 +1059,7 @@ async fn resolve_s3_restore_app(
         .version
         .clone()
         .unwrap_or_else(|| info.versions.first().cloned().unwrap_or_default());
+    let info = info.for_image(&version);
     let host_port = match req.host_port {
         Some(p) => p,
         None => platform.allocate_host_port().await?,
@@ -1116,7 +1118,7 @@ impl Platform {
             .database
             .clone()
             .context("the app is not a managed database")?;
-        let info = r3v3rs3_api::platform::engine_info(&engine)
+        let info = r3v3rs3_api::platform::app_engine_info(&app.spec)
             .context("the engine is not in the database catalog")?;
         let password = self.database_password(db_id, &info).await?;
         Ok((container, runtime, engine, info, password))
@@ -1250,7 +1252,9 @@ impl Platform {
             .database
             .as_deref()
             .context("not a managed database")?;
-        let info = r3v3rs3_api::platform::engine_info(engine).context("engine not in catalog")?;
+        // The branch copies the spec of its source, so both mount the same data directory.
+        let info = r3v3rs3_api::platform::app_engine_info(&source.spec)
+            .context("engine not in catalog")?;
         let created_app = self.create_pitr_app(source, new_name, host_port).await?;
         let dest_password = self
             .sync_pitr_password(source_id, created_app.id, &info)
@@ -1320,7 +1324,7 @@ impl Platform {
     ) -> anyhow::Result<()> {
         let (app, container, runtime) = self.database_container(target_db_id).await?;
         let engine = app.spec.database.clone().context("no database")?;
-        let info = r3v3rs3_api::platform::engine_info(&engine).context("no engine")?;
+        let info = r3v3rs3_api::platform::app_engine_info(&app.spec).context("no engine")?;
         let password = self.database_password(target_db_id, &info).await?;
         let restore = restore_plan(&engine, &info, &password)?;
         let dir = self.wal_dir(source_db_id).await?;
