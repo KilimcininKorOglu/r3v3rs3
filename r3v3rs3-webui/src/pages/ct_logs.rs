@@ -1,5 +1,5 @@
 use super::resource_page::{FormCard, form_modal};
-use super::settings::{failure_box, fetch_json, post_empty};
+use super::settings::{failure_box, fetch_json, post_empty, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -60,6 +60,8 @@ struct CtFormHandles {
     interval_hours: UseStateHandle<u64>,
     domains: UseStateHandle<String>,
     issuers: UseStateHandle<String>,
+    /// The error of the last save, shown in the settings dialog.
+    save_error: UseStateHandle<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -137,6 +139,7 @@ fn create_check_callback(
 }
 
 fn create_save_callback(
+    locale: Locale,
     form: CtFormHandles,
     show_settings: UseStateHandle<bool>,
     reload: Callback<()>,
@@ -153,16 +156,29 @@ fn create_save_callback(
         );
         let show = show_settings.clone();
         let rel = reload.clone();
+        let save_error = form.save_error.clone();
         spawn_local(async move {
-            let _ = save_ct_config(req).await;
-            show.set(false);
-            rel.emit(());
+            let builder = Request::put(&format!("{API_ENDPOINT}/certs/ct/config"));
+            match send_json(locale, builder, &req).await {
+                Ok(()) => {
+                    show.set(false);
+                    rel.emit(());
+                    dialog::message(locale, locale.t("certs.ct_config_saved"), Icon::Success).await;
+                }
+                Err(err) => save_error.set(Some(err)),
+            }
         });
     })
 }
 
-fn create_toggle_settings(show_settings: UseStateHandle<bool>) -> Callback<MouseEvent> {
-    Callback::from(move |_| show_settings.set(!*show_settings))
+fn create_toggle_settings(
+    show_settings: UseStateHandle<bool>,
+    save_error: UseStateHandle<Option<String>>,
+) -> Callback<MouseEvent> {
+    Callback::from(move |_| {
+        save_error.set(None);
+        show_settings.set(!*show_settings);
+    })
 }
 
 fn render_settings_if_visible(
@@ -182,7 +198,7 @@ fn render_settings_if_visible(
         title: locale.t("certs.ct_settings").to_string(),
         notice: html! {},
         fields: render_settings_fields(locale, form),
-        error: None,
+        error: (*form.save_error).clone(),
         cancel: None,
         save_label: "certs.ct_save_config",
         can_save: true,
@@ -238,6 +254,7 @@ pub fn ct_logs() -> Html {
         interval_hours: use_state(default_interval),
         domains: use_state(String::default),
         issuers: use_state(String::default),
+        save_error: use_state(Option::default),
     };
 
     let checking = use_state(bool::default);
@@ -254,8 +271,10 @@ pub fn ct_logs() -> Html {
     }
 
     let check_now_onclick = create_check_callback(locale, checking.clone(), load_data.clone());
-    let toggle_settings = create_toggle_settings(show_settings.clone());
+    let toggle_settings =
+        create_toggle_settings(show_settings.clone(), form_handles.save_error.clone());
     let save_settings = create_save_callback(
+        locale,
         form_handles.clone(),
         show_settings.clone(),
         load_data.clone(),
@@ -653,14 +672,6 @@ fn build_update_config_request(
             ct_api_url: None,
         },
     }
-}
-
-async fn save_ct_config(req: UpdateCtConfigRequest) -> Result<(), gloo_net::Error> {
-    Request::put(&format!("{API_ENDPOINT}/certs/ct/config"))
-        .json(&req)?
-        .send()
-        .await?;
-    Ok(())
 }
 
 async fn dismiss_ct_alert(id: &str) -> Result<(), gloo_net::Error> {
