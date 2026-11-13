@@ -8,24 +8,34 @@ use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName}
 use tokio_rustls::rustls::{ClientConfig, NamedGroup, RootCertStore, ServerConfig};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
+/// Builds a server config that presents the given certificate chain and key.
+fn server_config(cert: &Cert) -> anyhow::Result<ServerConfig> {
+    Ok(ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(
+            CertificateDer::pem_slice_iter(&cert.pem_chain).collect::<Result<Vec<_>, _>>()?,
+            PrivateKeyDer::from_pem_slice(cert.pem_key.as_ref().unwrap())?,
+        )?)
+}
+
+/// Builds a client config that trusts only the given root certificate.
+fn client_config(root: &Cert) -> anyhow::Result<ClientConfig> {
+    let mut roots = RootCertStore::empty();
+    for der in CertificateDer::pem_slice_iter(&root.pem_chain) {
+        roots.add(der?)?;
+    }
+    Ok(ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth())
+}
+
 #[tokio::test]
 async fn a_tls_handshake_negotiates_the_post_quantum_group() -> anyhow::Result<()> {
     let root = Arc::new(Cert::new_ca().unwrap());
     let cert = Arc::new(Cert::new_self_signed(&["localhost".parse().unwrap()], &root).unwrap());
 
-    let server_config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(
-            CertificateDer::pem_slice_iter(&cert.pem_chain).collect::<Result<Vec<_>, _>>()?,
-            PrivateKeyDer::from_pem_slice(cert.pem_key.as_ref().unwrap())?,
-        )?;
-    let mut roots = RootCertStore::empty();
-    for der in CertificateDer::pem_slice_iter(&root.pem_chain) {
-        roots.add(der?)?;
-    }
-    let client_config = ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+    let server_config = server_config(&cert)?;
+    let client_config = client_config(&root)?;
 
     let (client, server) = tokio::io::duplex(64 * 1024);
     let server = tokio::spawn(async move {
