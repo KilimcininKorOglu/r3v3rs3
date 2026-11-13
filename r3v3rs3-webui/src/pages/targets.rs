@@ -741,10 +741,7 @@ fn submit_region_callback(
         };
         let (saving, on_saved, on_close) = (saving.clone(), on_saved.clone(), on_close.clone());
         spawn_local(async move {
-            let sent = match Request::put(&path).json(&body) {
-                Ok(req) => send_request(locale, req).await,
-                Err(err) => Err(err.to_string()),
-            };
+            let sent = super::settings::send_json(locale, Request::put(&path), &body).await;
             match sent {
                 Ok(_) => {
                     dialog::message(locale, locale.t("targets.region_updated"), Icon::Success)
