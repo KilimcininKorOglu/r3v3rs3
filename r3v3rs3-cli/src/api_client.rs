@@ -1833,7 +1833,7 @@ impl ApiClient {
         let res = self
             .request(
                 Method::POST,
-                &format!("/api/databases/{id}/replica"),
+                &format!("/api/databases/{id}/replicas"),
                 Some(&serde_json::to_value(&req)?),
             )
             .await?;
