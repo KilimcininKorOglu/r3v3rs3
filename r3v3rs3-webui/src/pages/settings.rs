@@ -1707,11 +1707,15 @@ fn upgrade_card() -> Html {
     let notice = use_state(|| Option::<Notice>::None);
     let is_running = use_state(|| false);
     let stage = use_state(|| Option::<UpgradeStage>::None);
+    // A state handle keeps the value of the render it came from, so the poll loop reads this
+    // shared flag to see that the upgrade has ended.
+    let polling = use_mut_ref(|| false);
 
     let onclick = {
         let notice = notice.clone();
         let is_running = is_running.clone();
         let stage = stage.clone();
+        let polling = polling.clone();
         Callback::from(move |_: MouseEvent| {
             if *is_running {
                 return;
@@ -1719,8 +1723,10 @@ fn upgrade_card() -> Html {
             notice.set(None);
             stage.set(Some(UpgradeStage::CheckingRelease));
             is_running.set(true);
+            *polling.borrow_mut() = true;
             let notice = notice.clone();
             let task_running = is_running.clone();
+            let task_polling = polling.clone();
             let task_stage = stage.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match upgrade_server(locale).await {
@@ -1737,25 +1743,14 @@ fn upgrade_card() -> Html {
                         }
                     }
                     Err(message) => {
+                        *task_polling.borrow_mut() = false;
                         notice.set(Some(Notice::Failed(message)));
                         task_stage.set(None);
                         task_running.set(false);
                     }
                 }
             });
-            let poll_stage = stage.clone();
-            let poll_running = is_running.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                loop {
-                    gloo_timers::future::TimeoutFuture::new(1000).await;
-                    if !*poll_running {
-                        return;
-                    }
-                    if let Ok(status) = upgrade_status().await {
-                        poll_stage.set(status.stage);
-                    }
-                }
-            });
+            spawn_stage_poll(stage.clone(), polling.clone());
         })
     };
 
@@ -1774,6 +1769,26 @@ fn upgrade_card() -> Html {
             }
         </div>
     }
+}
+
+/// Reads the step of the running upgrade every second until `polling` turns off.
+fn spawn_stage_poll(
+    stage: UseStateHandle<Option<UpgradeStage>>,
+    polling: std::rc::Rc<std::cell::RefCell<bool>>,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(1000).await;
+            if !*polling.borrow() {
+                return;
+            }
+            // The server restarts during the upgrade, so a failed read is expected and the
+            // next poll tries again.
+            if let Ok(status) = upgrade_status().await {
+                stage.set(status.stage);
+            }
+        }
+    });
 }
 
 /// The blocking dialog of a running upgrade: it covers the page until the panel reloads.
