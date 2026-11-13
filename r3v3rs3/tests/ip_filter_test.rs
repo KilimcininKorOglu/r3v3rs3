@@ -10,7 +10,8 @@ use reqwest::{StatusCode, header::COOKIE};
 
 mod common;
 use common::{
-    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
+    TestPort, TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route,
+    with_server,
 };
 
 fn nets(values: &[&str]) -> Vec<IpNet> {
@@ -138,61 +139,86 @@ async fn ip_filter_allows_and_denies_clients() -> anyhow::Result<()> {
 
     with_server(config, |_| async move {
         let client = reqwest::Client::new();
-
-        let resp = client.get(deny_port.http_url("/open")).send().await?;
-        assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(resp.text().await?, "root");
-
-        let resp = client.get(deny_port.http_url("/denied")).send().await?;
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-        assert_eq!(resp.headers()["content-type"], "text/html; charset=utf-8");
-        let body = resp.text().await?;
-        assert!(body.contains("<div class=\"error-text\">Forbidden</div>"));
-        assert!(body.contains(r#"<html lang="en">"#), "{body}");
-
-        // The error page uses the language and the theme that the WebUI stores in cookies.
-        let resp = client
-            .get(deny_port.http_url("/denied"))
-            .header(COOKIE, "r3v3rs3_lang=tr; r3v3rs3_theme=dark")
-            .send()
-            .await?;
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-        let body = resp.text().await?;
-        assert!(
-            body.contains(r#"<html lang="tr" data-theme="dark">"#),
-            "{body}"
-        );
-        assert!(body.contains(&format!(
-            "<div class=\"error-text\">{}</div>",
-            Locale::Tr.t("error_page.403")
-        )));
-
-        let resp = client.get(allow_port.http_url("/allowed")).send().await?;
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let resp = client.get(allow_port.http_url("/admin")).send().await?;
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-
-        let resp = client
-            .get(forwarded_port.http_url("/spoofed"))
-            .header("x-forwarded-for", "203.0.113.9")
-            .send()
-            .await?;
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-
-        let resp = client
-            .get(forwarded_port.http_url("/allowed"))
-            .header("x-forwarded-for", "198.51.100.1")
-            .send()
-            .await?;
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        Ok(())
+        check_deny_port(&client, &deny_port).await?;
+        check_error_page_cookies(&client, &deny_port).await?;
+        check_allow_port(&client, &allow_port).await?;
+        check_forwarded_port(&client, &forwarded_port).await
     })
     .await?;
 
     mock_root.assert_async().await;
     mock_allowed.assert_async().await;
     mock_denied.assert_async().await;
+    Ok(())
+}
+
+/// Checks that a route with an empty filter passes loopback clients, and that the proxy filter
+/// denies them with the English error page.
+async fn check_deny_port(client: &reqwest::Client, deny_port: &TestPort) -> anyhow::Result<()> {
+    let resp = client.get(deny_port.http_url("/open")).send().await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.text().await?, "root");
+
+    let resp = client.get(deny_port.http_url("/denied")).send().await?;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.headers()["content-type"], "text/html; charset=utf-8");
+    let body = resp.text().await?;
+    assert!(body.contains("<div class=\"error-text\">Forbidden</div>"));
+    assert!(body.contains(r#"<html lang="en">"#), "{body}");
+    Ok(())
+}
+
+/// Checks that the error page uses the language and the theme that the WebUI stores in cookies.
+async fn check_error_page_cookies(
+    client: &reqwest::Client,
+    deny_port: &TestPort,
+) -> anyhow::Result<()> {
+    let resp = client
+        .get(deny_port.http_url("/denied"))
+        .header(COOKIE, "r3v3rs3_lang=tr; r3v3rs3_theme=dark")
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = resp.text().await?;
+    assert!(
+        body.contains(r#"<html lang="tr" data-theme="dark">"#),
+        "{body}"
+    );
+    assert!(body.contains(&format!(
+        "<div class=\"error-text\">{}</div>",
+        Locale::Tr.t("error_page.403")
+    )));
+    Ok(())
+}
+
+/// Checks that the proxy allow list passes loopback clients and that the route allow list of
+/// `/admin` denies them.
+async fn check_allow_port(client: &reqwest::Client, allow_port: &TestPort) -> anyhow::Result<()> {
+    let resp = client.get(allow_port.http_url("/allowed")).send().await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let resp = client.get(allow_port.http_url("/admin")).send().await?;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+/// Checks that the filter uses the `x-forwarded-for` address of a trusted proxy.
+async fn check_forwarded_port(
+    client: &reqwest::Client,
+    forwarded_port: &TestPort,
+) -> anyhow::Result<()> {
+    let resp = client
+        .get(forwarded_port.http_url("/spoofed"))
+        .header("x-forwarded-for", "203.0.113.9")
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    let resp = client
+        .get(forwarded_port.http_url("/allowed"))
+        .header("x-forwarded-for", "198.51.100.1")
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
     Ok(())
 }
