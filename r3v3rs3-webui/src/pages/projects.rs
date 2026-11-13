@@ -389,7 +389,11 @@ fn switch_env_tab(
     });
 }
 
-fn switch_compare_tab(modal: UseStateHandle<Option<EnvModalState>>, project_id: ShortId) {
+fn switch_compare_tab(
+    locale: Locale,
+    modal: UseStateHandle<Option<EnvModalState>>,
+    project_id: ShortId,
+) {
     if let Some(st) = modal.as_ref() {
         let source_id = st.diff_source_id.unwrap_or(st.selected_env_id);
         let target_id = st.diff_target_id.or_else(|| {
@@ -408,12 +412,13 @@ fn switch_compare_tab(modal: UseStateHandle<Option<EnvModalState>>, project_id: 
         if let Some(tgt) = target_id
             && tgt != source_id
         {
-            fetch_environment_diff(modal, project_id, source_id, tgt);
+            fetch_environment_diff(locale, modal, project_id, source_id, tgt);
         }
     }
 }
 
 fn fetch_environment_diff(
+    locale: Locale,
     modal: UseStateHandle<Option<EnvModalState>>,
     project_id: ShortId,
     source_id: ShortId,
@@ -422,14 +427,13 @@ fn fetch_environment_diff(
     spawn_local(async move {
         let url =
             format!("{API_ENDPOINT}{PATH}/{project_id}/environments/{source_id}/diff/{target_id}");
-        if let Ok(res) = Request::get(&url).send().await
-            && let Ok(report) = res.json::<EnvironmentDiffReport>().await
-        {
-            modal.set(modal.as_ref().map(|st| {
+        match fetch_json::<EnvironmentDiffReport>(locale, Request::get(&url)).await {
+            Ok(report) => modal.set(modal.as_ref().map(|st| {
                 let mut updated = st.clone();
                 updated.diff_report = Some(report);
                 updated
-            }));
+            })),
+            Err(message) => dialog::message(locale, &message, dialog::Icon::Error).await,
         }
     });
 }
@@ -464,6 +468,7 @@ fn run_environment_sync(
                 &[("count", &report.synced_count.to_string())],
             );
             fetch_environment_diff(
+                locale,
                 modal.clone(),
                 project_id,
                 req.source_env_id,
@@ -693,7 +698,7 @@ fn render_env_modal_tabs(
         let env_modal = env_modal.clone();
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
-            switch_compare_tab(env_modal.clone(), project_id);
+            switch_compare_tab(locale, env_modal.clone(), project_id);
         })
     };
 
@@ -798,6 +803,7 @@ fn env_save_callback(
 }
 
 fn create_source_change_callback(
+    locale: Locale,
     env_modal: UseStateHandle<Option<EnvModalState>>,
     state: EnvModalState,
     project_id: ShortId,
@@ -812,13 +818,14 @@ fn create_source_change_callback(
             if let Some(tgt) = state.diff_target_id
                 && tgt != id
             {
-                fetch_environment_diff(env_modal.clone(), project_id, id, tgt);
+                fetch_environment_diff(locale, env_modal.clone(), project_id, id, tgt);
             }
         }
     })
 }
 
 fn create_target_change_callback(
+    locale: Locale,
     env_modal: UseStateHandle<Option<EnvModalState>>,
     state: EnvModalState,
     project_id: ShortId,
@@ -833,7 +840,7 @@ fn create_target_change_callback(
             if let Some(src) = state.diff_source_id
                 && src != id
             {
-                fetch_environment_diff(env_modal.clone(), project_id, src, id);
+                fetch_environment_diff(locale, env_modal.clone(), project_id, src, id);
             }
         }
     })
@@ -849,9 +856,9 @@ fn render_compare_controls(
     let target_id = state.diff_target_id;
 
     let on_source_change =
-        create_source_change_callback(env_modal.clone(), state.clone(), project_id);
+        create_source_change_callback(locale, env_modal.clone(), state.clone(), project_id);
     let on_target_change =
-        create_target_change_callback(env_modal.clone(), state.clone(), project_id);
+        create_target_change_callback(locale, env_modal.clone(), state.clone(), project_id);
 
     let on_compare_btn = {
         let env_modal = env_modal.clone();
@@ -860,7 +867,7 @@ fn render_compare_controls(
             if let (Some(src), Some(tgt)) = (source_id, target_id)
                 && src != tgt
             {
-                fetch_environment_diff(env_modal.clone(), project_id, src, tgt);
+                fetch_environment_diff(locale, env_modal.clone(), project_id, src, tgt);
             }
         })
     };
