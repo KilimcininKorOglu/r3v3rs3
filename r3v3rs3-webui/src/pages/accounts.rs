@@ -4,7 +4,7 @@ use super::resource_page::{
     form_modal, load, open_on_click, reload_callback, row_actions, save_result, saved_view,
     submit_callback, text_input, then_close, use_form_modal,
 };
-use super::settings::{fetch_json, send_json, send_request};
+use super::settings::{fetch_json, post_json, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -542,14 +542,8 @@ fn path_segment(value: &str) -> String {
 async fn save(locale: Locale, change: Change) -> Result<Option<String>, String> {
     match change {
         Change::Add(account) => {
-            let request = Request::post(&format!("{API_ENDPOINT}{PATH}"))
-                .json(&account)
-                .map_err(|err| err.to_string())?;
-            let created: AccountCreated = send_request(locale, request)
-                .await?
-                .json()
-                .await
-                .map_err(|err| err.to_string())?;
+            let request = Request::post(&format!("{API_ENDPOINT}{PATH}"));
+            let created: AccountCreated = post_json(locale, request, &account).await?;
             Ok(created.totp_secret)
         }
         Change::Update { username, update } => {
