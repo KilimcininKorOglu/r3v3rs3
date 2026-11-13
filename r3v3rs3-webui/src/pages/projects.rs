@@ -1,7 +1,7 @@
 //! The page for managing Projects and Environments hierarchy.
 
 use super::accounts::{INPUT_CLASS, LABEL_CLASS};
-use super::resource_page::{FormCard, add_button, form_modal};
+use super::resource_page::{FormCard, add_button, delete_on_click, form_modal};
 use super::settings::{fetch_json, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
@@ -253,32 +253,9 @@ fn render_project_row(
 
     let del_cb = {
         let reload = reload.clone();
-        let p_id = p.id;
-        let p_name = p.name.clone();
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            let reload = reload.clone();
-            let p_name = p_name.clone();
-            spawn_local(async move {
-                let question = format!("{} ({p_name})", locale.t("projects.delete_confirm"));
-                let confirmed = dialog::confirm(locale, &question).await;
-                if confirmed {
-                    let url = format!("{API_ENDPOINT}{PATH}/{p_id}");
-                    match Request::delete(&url).send().await {
-                        Ok(res) if res.ok() => {
-                            reload.set(*reload + 1);
-                        }
-                        Ok(res) => {
-                            let msg = crate::pages::settings::error_message(locale, res).await;
-                            dialog::message(locale, &msg, dialog::Icon::Error).await;
-                        }
-                        Err(err) => {
-                            dialog::message(locale, &err.to_string(), dialog::Icon::Error).await;
-                        }
-                    }
-                }
-            });
-        })
+        let question = format!("{} ({})", locale.t("projects.delete_confirm"), p.name);
+        let deleted = Callback::from(move |()| reload.set(*reload + 1));
+        delete_on_click(locale, question, format!("{PATH}/{}", p.id), deleted)
     };
 
     let env_cb = {
