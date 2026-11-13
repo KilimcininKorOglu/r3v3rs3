@@ -40,7 +40,7 @@ pub fn backup_drill_modal(props: &BackupDrillModalProps) -> Html {
     let footer = html! {
         <div class="flex w-full items-center justify-between gap-2">
             <span class="text-xs font-mono text-neutral-500">
-                {format!("ID: {}", entry.id)}
+                {locale.tf("backups.drill_backup_id", &[("id", &entry.id.to_string())])}
             </span>
             <div class="flex items-center gap-2">
                 <Button kind={ButtonKind::Secondary} onclick={on_close_click}>
@@ -100,7 +100,7 @@ fn modal_status_style(
             "bg-emerald-50 border-emerald-300 text-emerald-800 dark:bg-emerald-950/60 dark:border-emerald-800 dark:text-emerald-300",
             drill
                 .map(|d| d.summary.clone())
-                .unwrap_or_else(|| "Valid".to_string()),
+                .unwrap_or_else(|| locale.t("backups.drill_valid").to_string()),
             locale.t("backups.drill_passed"),
             true,
             false,
@@ -111,7 +111,7 @@ fn modal_status_style(
             entry
                 .verification_status
                 .clone()
-                .unwrap_or_else(|| "Failed integrity check".to_string()),
+                .unwrap_or_else(|| locale.t("backups.drill_check_failed").to_string()),
             locale.t("backups.drill_failed"),
             false,
             true,
@@ -243,7 +243,7 @@ fn render_tables_section(
                 })}
                 if drill.table_count > drill.tables_sample.len() as u32 {
                     <span class="inline-flex items-center px-2 py-1 rounded-md text-xs text-neutral-500 dark:text-neutral-400 italic">
-                        {format!("+{} more...", drill.table_count - drill.tables_sample.len() as u32)}
+                        {locale.tf("backups.drill_more_tables", &[("count", &(drill.table_count - drill.tables_sample.len() as u32).to_string())])}
                     </span>
                 }
             </div>
