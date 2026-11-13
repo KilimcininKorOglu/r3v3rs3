@@ -128,7 +128,7 @@ fn render_panic_overlay() {
         "fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 text-white",
     );
     overlay.set_inner_html(
-        r#"<div class="bg-gray-800 rounded-lg p-6 max-w-md w-full border border-red-500 shadow-xl text-center"><h2 class="text-xl font-bold text-red-400 mb-2">Application Error</h2><p class="text-gray-300 mb-4">An unexpected error occurred. Please refresh the page to reload the application.</p><button onclick="window.location.reload()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium">Reload Page</button></div>"#,
+        r#"<div class="bg-neutral-800 rounded-lg p-6 max-w-md w-full border border-red-500 shadow-xl text-center"><h2 class="text-xl font-bold text-red-400 mb-2">Application Error</h2><p class="text-neutral-300 mb-4">An unexpected error occurred. Please refresh the page to reload the application.</p><button onclick="window.location.reload()" class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium">Reload Page</button></div>"#,
     );
     let _ = body.append_child(&overlay);
 }
