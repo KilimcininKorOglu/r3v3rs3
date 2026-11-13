@@ -1,12 +1,15 @@
 //! The page for managing Projects and Environments hierarchy.
 
 use super::accounts::{INPUT_CLASS, LABEL_CLASS};
-use super::resource_page::BUTTON_CLASS;
+use super::resource_page::{FormCard, add_button, form_modal};
 use super::settings::send_json;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
-use crate::components::data_list::{Column, Row, list_card};
+use crate::components::button::{Button, ButtonKind, ButtonSize};
+use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_card, list_view};
+use crate::components::modal::{Modal, ModalSize};
+use crate::components::tabs::{TabItem, Tabs};
 use crate::dialog;
 use crate::format::format_time;
 use crate::i18n::use_locale;
@@ -25,6 +28,27 @@ use yew::prelude::*;
 use yewdux::prelude::*;
 
 const PATH: &str = "/projects";
+
+const SELECT: &str = "rounded-lg border border-neutral-300 bg-neutral-50 text-neutral-900 dark:border-neutral-600 dark:bg-neutral-700 dark:text-white px-2.5 py-1.5 text-xs focus:ring-primary-500 focus:border-primary-500";
+
+const DIFF_COLUMNS: [Column; 4] = [
+    Column {
+        label: "apps.env_key",
+        class: "font-semibold",
+    },
+    Column {
+        label: "projects.source_env",
+        class: "",
+    },
+    Column {
+        label: "projects.target_env",
+        class: "",
+    },
+    Column {
+        label: "projects.diff_status",
+        class: "whitespace-nowrap",
+    },
+];
 
 const COLUMNS: [Column; 5] = [
     Column {
@@ -153,27 +177,21 @@ pub fn projects_page() -> Html {
 
     html! {
         <div class="space-y-6">
-            <div class="flex items-center justify-between">
-                <div>
-                    <h1 class="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
-                        {locale.t("projects.title")}
-                    </h1>
-                    <p class="text-sm text-neutral-500 dark:text-neutral-400">
-                        {locale.t("projects.subtitle")}
-                    </p>
-                </div>
-                {session.can_edit().then(|| html! {
-                    <button
-                        type="button"
-                        class={BUTTON_CLASS}
-                        onclick={on_new}
-                    >
-                        {locale.t("projects.new")}
-                    </button>
-                })}
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
+                    {locale.t("projects.title")}
+                </h1>
+                <p class="text-sm text-neutral-500 dark:text-neutral-400">
+                    {locale.t("projects.subtitle")}
+                </p>
             </div>
 
-            {render_projects_table(locale, &list, &form, &reload, session.can_edit(), &env_modal)}
+            <div>
+                {render_projects_table(locale, &list, &form, &reload, session.can_edit(), &env_modal)}
+                if session.can_edit() {
+                    { add_button(locale, on_new) }
+                }
+            </div>
             {render_project_form(locale, &form, &reload)}
             {render_env_modal(locale, &env_modal, &reload)}
         </div>
@@ -526,9 +544,9 @@ fn render_project_form(
         })
     };
 
-    let on_cancel = {
+    let on_close = {
         let form = form.clone();
-        Callback::from(move |_| form.set(None))
+        Callback::from(move |()| form.set(None))
     };
 
     let on_submit = {
@@ -573,59 +591,56 @@ fn render_project_form(
         })
     };
 
-    html! {
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-800">
-                <h3 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">{title}</h3>
-                <form onsubmit={on_submit} class="mt-4 space-y-4">
-                    <div>
-                        <label class={LABEL_CLASS}>{locale.t("projects.name")}</label>
-                        <input
-                            type="text"
-                            class={INPUT_CLASS}
-                            value={name}
-                            oninput={on_name_change}
-                            placeholder={locale.t("projects.name_placeholder")}
-                            required=true
-                        />
-                    </div>
-                    <div>
-                        <label class={LABEL_CLASS}>{locale.t("projects.description")}</label>
-                        <input
-                            type="text"
-                            class={INPUT_CLASS}
-                            value={desc}
-                            oninput={on_desc_change}
-                        />
-                    </div>
-                    {if !is_editing {
-                        html! {
-                            <div>
-                                <label class={LABEL_CLASS}>{locale.t("projects.default_envs")}</label>
-                                <input
-                                    type="text"
-                                    class={INPUT_CLASS}
-                                    value={def_envs}
-                                    oninput={on_envs_change}
-                                    placeholder={locale.t("projects.default_envs_placeholder")}
-                                />
-                            </div>
-                        }
-                    } else {
-                        html!()
-                    }}
-                    <div class="flex justify-end space-x-3 pt-4">
-                        <button type="button" class="btn btn-secondary" onclick={on_cancel}>
-                            {locale.t("common.cancel")}
-                        </button>
-                        <button type="submit" class={BUTTON_CLASS}>
-                            {if is_editing { locale.t("common.update") } else { locale.t("common.create") }}
-                        </button>
-                    </div>
-                </form>
+    let fields = html! {
+        <div class="space-y-4">
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("projects.name")}</label>
+                <input
+                    type="text"
+                    class={INPUT_CLASS}
+                    value={name}
+                    oninput={on_name_change}
+                    placeholder={locale.t("projects.name_placeholder")}
+                    required=true
+                />
             </div>
+            <div>
+                <label class={LABEL_CLASS}>{locale.t("projects.description")}</label>
+                <input
+                    type="text"
+                    class={INPUT_CLASS}
+                    value={desc}
+                    oninput={on_desc_change}
+                />
+            </div>
+            if !is_editing {
+                <div>
+                    <label class={LABEL_CLASS}>{locale.t("projects.default_envs")}</label>
+                    <input
+                        type="text"
+                        class={INPUT_CLASS}
+                        value={def_envs}
+                        oninput={on_envs_change}
+                        placeholder={locale.t("projects.default_envs_placeholder")}
+                    />
+                </div>
+            }
         </div>
-    }
+    };
+    let card = FormCard {
+        title: title.to_string(),
+        notice: html! {},
+        fields,
+        error: None,
+        cancel: None,
+        save_label: if is_editing {
+            "common.update"
+        } else {
+            "common.create"
+        },
+        can_save: true,
+    };
+    form_modal(locale, card, on_submit, on_close)
 }
 
 fn render_env_modal(
@@ -639,43 +654,39 @@ fn render_env_modal(
 
     let on_close = {
         let env_modal = env_modal.clone();
-        Callback::from(move |_| env_modal.set(None))
+        Callback::from(move |()| env_modal.set(None))
     };
+    let close = {
+        let on_close = on_close.clone();
+        Callback::from(move |_: MouseEvent| on_close.emit(()))
+    };
+    let is_variables = state.active_tab == EnvModalTab::Variables;
+    let footer = html! {
+        <>
+            <Button kind={ButtonKind::Secondary} onclick={close}>
+                {locale.t(if is_variables { "common.cancel" } else { "common.close" })}
+            </Button>
+            if is_variables {
+                <Button kind={ButtonKind::Primary} onclick={env_save_callback(locale, state, env_modal, reload)}>
+                    {locale.t("common.update")}
+                </Button>
+            }
+        </>
+    };
+    let title = format!("{} - {}", locale.t("projects.env_vars"), state.project_name);
 
     html! {
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div class="w-full max-w-6xl rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-800 max-h-[90vh] flex flex-col">
-                {render_env_modal_header(locale, state, on_close.clone())}
-                {render_env_modal_tabs(locale, state, env_modal)}
-                {if state.active_tab == EnvModalTab::Variables {
-                    render_env_variables_tab(locale, state, env_modal, reload, on_close)
-                } else {
-                    render_compare_sync_tab(locale, state, env_modal, reload)
-                }}
-            </div>
-        </div>
-    }
-}
-
-fn render_env_modal_header(
-    locale: Locale,
-    state: &EnvModalState,
-    on_close: Callback<MouseEvent>,
-) -> Html {
-    html! {
-        <div class="flex items-center justify-between border-b pb-3 dark:border-neutral-700">
-            <div>
-                <h3 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
-                    {format!("{} - {}", locale.t("projects.env_vars"), state.project_name)}
-                </h3>
-                <p class="text-xs text-neutral-500">
-                    {locale.t("projects.inherited_env_vars")}
-                </p>
-            </div>
-            <button type="button" class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200" onclick={on_close}>
-                {"✕"}
-            </button>
-        </div>
+        <Modal {title} {on_close} size={ModalSize::Xl} {footer}>
+            <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-2">
+                {locale.t("projects.inherited_env_vars")}
+            </p>
+            {render_env_modal_tabs(locale, state, env_modal)}
+            if is_variables {
+                {render_env_variables_tab(locale, state, env_modal)}
+            } else {
+                {render_compare_sync_tab(locale, state, env_modal, reload)}
+            }
+        </Modal>
     }
 }
 
@@ -695,62 +706,64 @@ fn render_env_modal_tabs(
         })
     };
 
-    html! {
-        <div class="flex items-center space-x-1 border-b dark:border-neutral-700 pt-3 pb-0 text-sm overflow-x-auto">
-            {state.environments.iter().map(|env| {
-                let env_id = env.id;
-                let is_selected = state.active_tab == EnvModalTab::Variables && state.selected_env_id == env_id;
-                let modal_ref = env_modal.clone();
-                let on_tab = Callback::from(move |e: MouseEvent| {
-                    e.prevent_default();
-                    switch_env_tab(modal_ref.clone(), project_id, env_id);
-                });
-                let tab_cls = if is_selected {
-                    "border-b-2 border-primary-600 text-primary-600 dark:text-primary-400 font-semibold px-3 py-2 -mb-[1px]"
-                } else {
-                    "text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 px-3 py-2 -mb-[1px]"
-                };
-                html! {
-                    <button type="button" class={tab_cls} onclick={on_tab}>
-                        {&env.name}
-                    </button>
-                }
-            }).collect::<Html>()}
-
-            <button
-                type="button"
-                class={if is_compare_active {
-                    "border-b-2 border-primary-600 text-primary-600 dark:text-primary-400 font-semibold px-3 py-2 -mb-[1px] ml-auto flex items-center space-x-1"
-                } else {
-                    "text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 px-3 py-2 -mb-[1px] ml-auto flex items-center space-x-1"
-                }}
-                onclick={on_compare_click}
-            >
-                <span>{"⇄"}</span>
-                <span>{locale.t("projects.compare_sync_tab")}</span>
-            </button>
-        </div>
-    }
+    let mut tabs = state
+        .environments
+        .iter()
+        .map(|env| {
+            let env_id = env.id;
+            let is_selected =
+                state.active_tab == EnvModalTab::Variables && state.selected_env_id == env_id;
+            let modal_ref = env_modal.clone();
+            let on_tab = Callback::from(move |e: MouseEvent| {
+                e.prevent_default();
+                switch_env_tab(modal_ref.clone(), project_id, env_id);
+            });
+            TabItem::click(env.name.clone(), on_tab, is_selected)
+        })
+        .collect::<Vec<_>>();
+    tabs.push(TabItem::click(
+        format!("⇄ {}", locale.t("projects.compare_sync_tab")),
+        on_compare_click,
+        is_compare_active,
+    ));
+    html! { <Tabs {tabs} /> }
 }
 
 fn render_env_variables_tab(
     locale: Locale,
     state: &EnvModalState,
     env_modal: &UseStateHandle<Option<EnvModalState>>,
-    reload: &UseStateHandle<u32>,
-    on_close: Callback<MouseEvent>,
 ) -> Html {
     let on_add_var = {
         let env_modal = env_modal.clone();
         let state = state.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let mut updated = state.clone();
             updated.variables.push(EnvVarRow::default());
             env_modal.set(Some(updated));
         })
     };
 
-    let on_save = {
+    html! {
+        <div class="py-4 space-y-3 min-h-[200px]">
+            {state.variables.iter().enumerate().map(|(idx, row)| {
+                render_var_row(locale, idx, row, env_modal.clone(), state.clone())
+            }).collect::<Html>()}
+            <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_add_var}>
+                {locale.t("env_groups.add_variable")}
+            </Button>
+        </div>
+    }
+}
+
+/// Saves the variables of the selected environment.
+fn env_save_callback(
+    locale: Locale,
+    state: &EnvModalState,
+    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    reload: &UseStateHandle<u32>,
+) -> Callback<MouseEvent> {
+    {
         let env_modal = env_modal.clone();
         let reload = reload.clone();
         let state = state.clone();
@@ -787,33 +800,6 @@ fn render_env_variables_tab(
                 }
             });
         })
-    };
-
-    html! {
-        <>
-            <div class="flex-1 overflow-y-auto py-4 space-y-3 min-h-[200px]">
-                {state.variables.iter().enumerate().map(|(idx, row)| {
-                    render_var_row(locale, idx, row, env_modal.clone(), state.clone())
-                }).collect::<Html>()}
-
-                <button
-                    type="button"
-                    class="text-xs text-primary-600 hover:underline font-semibold dark:text-primary-400 mt-2"
-                    onclick={on_add_var}
-                >
-                    {format!("+ {}", locale.t("env_groups.add_variable"))}
-                </button>
-            </div>
-
-            <div class="flex justify-end space-x-3 border-t pt-3 dark:border-neutral-700">
-                <button type="button" class="btn btn-secondary" onclick={on_close}>
-                    {locale.t("common.cancel")}
-                </button>
-                <button type="button" class={BUTTON_CLASS} onclick={on_save}>
-                    {locale.t("common.update")}
-                </button>
-            </div>
-        </>
     }
 }
 
@@ -886,15 +872,12 @@ fn render_compare_controls(
     };
 
     html! {
-        <div class="flex flex-wrap items-center gap-3 bg-neutral-50 dark:bg-neutral-900/50 p-3 rounded-lg border dark:border-neutral-700">
+        <div class="flex flex-wrap items-center gap-3 bg-neutral-50 dark:bg-neutral-900/50 p-3 rounded-lg border border-neutral-200 dark:border-neutral-700">
             <div class="flex items-center space-x-2">
                 <label class="text-xs font-medium text-neutral-600 dark:text-neutral-400">
                     {locale.t("projects.source_env")}
                 </label>
-                <select
-                    class="select text-xs py-1 px-2 border rounded dark:bg-neutral-800 dark:border-neutral-700"
-                    onchange={on_source_change}
-                >
+                <select class={SELECT} onchange={on_source_change}>
                     <option key="" value="" selected={source_id.is_none()}>{locale.t("projects.select_environment")}</option>
                     {state.environments.iter().map(|env| {
                         let selected = Some(env.id) == source_id;
@@ -909,10 +892,7 @@ fn render_compare_controls(
                 <label class="text-xs font-medium text-neutral-600 dark:text-neutral-400">
                     {locale.t("projects.target_env")}
                 </label>
-                <select
-                    class="select text-xs py-1 px-2 border rounded dark:bg-neutral-800 dark:border-neutral-700"
-                    onchange={on_target_change}
-                >
+                <select class={SELECT} onchange={on_target_change}>
                     <option key="" value="" selected={target_id.is_none()}>{locale.t("projects.select_environment")}</option>
                     {state.environments.iter().map(|env| {
                         let selected = Some(env.id) == target_id;
@@ -921,13 +901,9 @@ fn render_compare_controls(
                 </select>
             </div>
 
-            <button
-                type="button"
-                class="btn btn-secondary text-xs px-3 py-1"
-                onclick={on_compare_btn}
-            >
+            <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_compare_btn}>
                 {locale.t("projects.compare")}
-            </button>
+            </Button>
         </div>
     }
 }
@@ -1047,27 +1023,14 @@ fn render_diff_actions(
 
     html! {
         <div class="flex items-center space-x-2">
-            {if report.missing_in_target > 0 {
-                html! {
-                    <button
-                        type="button"
-                        class="px-3 py-1 text-xs font-semibold rounded bg-primary-600 text-white hover:bg-primary-700"
-                        onclick={on_sync_missing}
-                    >
-                        {format!("{} ({})", locale.t("projects.sync_missing"), report.missing_in_target)}
-                    </button>
-                }
-            } else {
-                html!()
-            }}
-
-            <button
-                type="button"
-                class="px-3 py-1 text-xs font-semibold rounded border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700"
-                onclick={on_clone_all}
-            >
+            if report.missing_in_target > 0 {
+                <Button kind={ButtonKind::Primary} size={ButtonSize::Sm} onclick={on_sync_missing}>
+                    {format!("{} ({})", locale.t("projects.sync_missing"), report.missing_in_target)}
+                </Button>
+            }
+            <Button kind={ButtonKind::Warning} size={ButtonSize::Sm} onclick={on_clone_all}>
                 {locale.t("projects.clone_all")}
-            </button>
+            </Button>
         </div>
     }
 }
@@ -1079,24 +1042,39 @@ fn render_diff_table(
     env_modal: &UseStateHandle<Option<EnvModalState>>,
     reload: &UseStateHandle<u32>,
 ) -> Html {
+    let rows = report
+        .entries
+        .iter()
+        .map(|entry| render_diff_row(locale, state, entry, env_modal, reload))
+        .collect::<Vec<_>>();
+    let content = ListContent {
+        loaded: true,
+        empty: "projects.no_diff_data",
+        columns: &DIFF_COLUMNS,
+        rows: &rows,
+    };
+    let options = ListOptions {
+        embedded: true,
+        compact: true,
+        headings: Some(vec![
+            locale.t("apps.env_key").to_string(),
+            format!(
+                "{} ({})",
+                locale.t("projects.source_env"),
+                report.source_env_name
+            ),
+            format!(
+                "{} ({})",
+                locale.t("projects.target_env"),
+                report.target_env_name
+            ),
+            locale.t("projects.diff_status").to_string(),
+        ]),
+        ..Default::default()
+    };
     html! {
-        <div class="border rounded-lg overflow-hidden dark:border-neutral-700">
-            <table class="w-full text-left text-xs">
-                <thead class="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-semibold border-b dark:border-neutral-700">
-                    <tr>
-                        <th class="py-2.5 px-3">{locale.t("apps.env_key")}</th>
-                        <th class="py-2.5 px-3">{format!("{} ({})", locale.t("projects.source_env"), report.source_env_name)}</th>
-                        <th class="py-2.5 px-3">{format!("{} ({})", locale.t("projects.target_env"), report.target_env_name)}</th>
-                        <th class="py-2.5 px-3">{locale.t("projects.diff_status")}</th>
-                        <th class="py-2.5 px-3 text-right">{locale.t("common.actions")}</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y dark:divide-neutral-700">
-                    {report.entries.iter().map(|entry| {
-                        render_diff_row(locale, state, entry, env_modal, reload)
-                    }).collect::<Html>()}
-                </tbody>
-            </table>
+        <div class="rounded-md border border-neutral-300 dark:border-neutral-700">
+            { list_view(locale, content, None, &options) }
         </div>
     }
 }
@@ -1107,7 +1085,7 @@ fn render_diff_row(
     entry: &EnvDiffEntry,
     modal: &UseStateHandle<Option<EnvModalState>>,
     reload: &UseStateHandle<u32>,
-) -> Html {
+) -> Row {
     let key_str = entry.key.as_str().to_string();
     let is_syncable = entry.source_present
         && (entry.status == EnvDiffStatus::MissingInTarget
@@ -1134,9 +1112,10 @@ fn render_diff_row(
         })
     };
 
-    html! {
-        <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-700/30">
-            <td class="py-2.5 px-3 font-semibold text-neutral-900 dark:text-neutral-100">
+    Row {
+        key: key_str.clone(),
+        cells: vec![
+            html! {
                 <div class="flex items-center gap-1.5">
                     <span>{&key_str}</span>
                     {(entry.source_secret || entry.target_secret).then(|| html! {
@@ -1145,32 +1124,30 @@ fn render_diff_row(
                         </span>
                     })}
                 </div>
-            </td>
-            <td class="py-2.5 px-3">
-                {render_diff_val_cell(locale, entry.source_present, entry.source_secret, &entry.source_value)}
-            </td>
-            <td class="py-2.5 px-3">
-                {render_diff_val_cell(locale, entry.target_present, entry.target_secret, &entry.target_value)}
-            </td>
-            <td class="py-2.5 px-3">
-                {render_diff_status_badge(locale, entry.status)}
-            </td>
-            <td class="py-2.5 px-3 text-right">
-                {if is_syncable {
-                    html! {
-                        <button
-                            type="button"
-                            class="px-2 py-1 text-xs font-medium text-primary-600 bg-primary-50 hover:bg-primary-100 rounded dark:bg-primary-950/40 dark:text-primary-300 dark:hover:bg-primary-900/50"
-                            onclick={on_sync_key}
-                        >
-                            {locale.t("projects.sync_this_key")}
-                        </button>
-                    }
-                } else {
-                    html! { <span class="text-neutral-300 dark:text-neutral-600">{"-"}</span> }
-                }}
-            </td>
-        </tr>
+            },
+            render_diff_val_cell(
+                locale,
+                entry.source_present,
+                entry.source_secret,
+                &entry.source_value,
+            ),
+            render_diff_val_cell(
+                locale,
+                entry.target_present,
+                entry.target_secret,
+                &entry.target_value,
+            ),
+            render_diff_status_badge(locale, entry.status),
+        ],
+        actions: html! {
+            if is_syncable {
+                <ActionIconButton
+                    variant={ActionVariant::Restore}
+                    title={locale.t("projects.sync_this_key").to_string()}
+                    onclick={on_sync_key}
+                />
+            }
+        },
     }
 }
 
@@ -1286,36 +1263,39 @@ fn render_var_row(
     };
 
     html! {
-        <div class="flex items-center space-x-2">
-            <input
-                type="text"
-                class="input text-xs w-1/3"
-                placeholder={locale.t("apps.env_key")}
-                value={row.key.clone()}
-                oninput={on_key}
-            />
-            <input
-                type={if row.secret { "password" } else { "text" }}
-                class="input text-xs flex-1"
-                placeholder={locale.t("apps.env_value")}
-                value={row.value.clone()}
-                oninput={on_val}
-            />
-            <label class="flex items-center space-x-1 text-xs text-neutral-600 dark:text-neutral-400">
+        <div class="flex items-center gap-2">
+            <div class="w-1/3">
+                <input
+                    type="text"
+                    class={classes!(INPUT_CLASS, "font-mono")}
+                    placeholder={locale.t("apps.env_key")}
+                    value={row.key.clone()}
+                    oninput={on_key}
+                />
+            </div>
+            <div class="flex-1">
+                <input
+                    type={if row.secret { "password" } else { "text" }}
+                    class={classes!(INPUT_CLASS, "font-mono")}
+                    placeholder={locale.t("apps.env_value")}
+                    value={row.value.clone()}
+                    oninput={on_val}
+                />
+            </div>
+            <label class="flex items-center gap-1 text-xs text-neutral-600 dark:text-neutral-400 whitespace-nowrap">
                 <input
                     type="checkbox"
+                    class="rounded border-neutral-300 dark:border-neutral-600 text-primary-600 focus:ring-primary-500"
                     checked={row.secret}
                     onchange={on_secret}
                 />
                 <span>{locale.t("apps.env_secret")}</span>
             </label>
-            <button
-                type="button"
-                class="text-red-500 hover:text-red-700 text-xs px-2"
+            <ActionIconButton
+                variant={ActionVariant::Delete}
+                title={locale.t("common.delete").to_string()}
                 onclick={on_del}
-            >
-                {"✕"}
-            </button>
+            />
         </div>
     }
 }
