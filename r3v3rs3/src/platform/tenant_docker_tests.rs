@@ -98,11 +98,36 @@ fn write_command(info: &EngineInfo, login: &Login<'_>, database: &str) -> String
             "redis-cli -h $H --no-auth-warning --user {user} --pass {password} set {database}:k 1 | grep -qx OK"
         ),
     };
-    // Docker writes the IPv4 address of the container into /etc/hosts; not every image has
-    // `hostname`.
-    format!(
-        "H=$(awk '$1 ~ /^[0-9]+\\./ && $1 != \"127.0.0.1\" {{print $1; exit}}' /etc/hosts); {command}"
-    )
+    format!("{HOST}; {command}")
+}
+
+/// Sets `H` to the IPv4 address of the container, which Docker writes into /etc/hosts; not
+/// every image has `hostname`.
+const HOST: &str =
+    "H=$(awk '$1 ~ /^[0-9]+\\./ && $1 != \"127.0.0.1\" {print $1; exit}' /etc/hosts)";
+
+/// A PostgreSQL tenant connects to no database but its own: PUBLIC may connect to the
+/// `postgres` and `template1` databases by default.
+async fn check_postgres_system_databases(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    info: &EngineInfo,
+) -> anyhow::Result<()> {
+    if info.engine != "postgres" {
+        return Ok(());
+    }
+    for database in ["postgres", "template1"] {
+        let command = format!(
+            "{HOST}; psql -v ON_ERROR_STOP=1 postgresql://p_one:pwone1@$H/{database} -c 'SELECT 1'"
+        );
+        let shell = vec!["sh".to_string(), "-c".to_string(), command];
+        let connected = runtime
+            .exec_capture(container, shell, Vec::new())
+            .await
+            .is_ok();
+        ensure!(!connected, "a tenant connected to the {database} database");
+    }
+    Ok(())
 }
 
 async fn can_write(
@@ -339,6 +364,7 @@ async fn run_checks(
     runtime.start_container(name).await?;
     wait_ready(runtime, name, info, ROOT_PASSWORD).await?;
     check_isolation(runtime, name, info).await?;
+    check_postgres_system_databases(runtime, name, info).await?;
     check_reset_and_drop(runtime, name, info).await?;
     check_root_password(runtime, name, info).await?;
     check_restart(runtime, name, info).await

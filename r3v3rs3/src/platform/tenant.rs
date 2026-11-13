@@ -211,7 +211,9 @@ fn postgres_create(tenant: &str, password: &str) -> String {
         "SELECT 'CREATE ROLE \"{tenant}\" LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{tenant}')\\gexec\n\
          ALTER ROLE \"{tenant}\" WITH LOGIN PASSWORD '{password}';\n\
          SELECT 'CREATE DATABASE \"{tenant}\" OWNER \"{tenant}\"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{tenant}')\\gexec\n\
-         REVOKE ALL ON DATABASE \"{tenant}\" FROM PUBLIC;\n"
+         REVOKE ALL ON DATABASE \"{tenant}\" FROM PUBLIC;\n\
+         REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;\n\
+         REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;\n"
     )
 }
 
@@ -492,6 +494,10 @@ mod tests {
                 .content
                 .contains("REVOKE ALL ON DATABASE \"p_shop\" FROM PUBLIC")
         );
+        for system in ["postgres", "template1"] {
+            let revoke = format!("REVOKE CONNECT ON DATABASE {system} FROM PUBLIC");
+            assert!(script.content.contains(&revoke), "{system}");
+        }
         assert!(
             script
                 .content
