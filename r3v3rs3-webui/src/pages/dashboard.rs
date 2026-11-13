@@ -2,7 +2,10 @@
 
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
-use crate::components::data_list::status_badge;
+use crate::components::button::{ButtonKind, ButtonSize, button_class};
+use crate::components::data_list::{
+    Column, ListContent, ListOptions, Row, list_view, status_badge,
+};
 use crate::format::{format_disk_bytes, format_time};
 use crate::i18n::use_locale;
 use crate::pages::Route;
@@ -20,6 +23,31 @@ use yew_router::prelude::*;
 use yewdux::prelude::*;
 
 const REFRESH_INTERVAL_MS: u32 = 10_000;
+
+const CARD: &str = "bg-white dark:bg-neutral-800 p-5 rounded-md border border-neutral-300 dark:border-neutral-700 shadow-sm";
+const STAT_CARD: &str = "block bg-white dark:bg-neutral-800 p-5 rounded-md border border-neutral-300 dark:border-neutral-700 hover:border-primary-500 dark:hover:border-primary-400 transition-colors shadow-sm";
+const STAT_LABEL: &str = "text-sm font-medium text-neutral-500 dark:text-neutral-400";
+const STAT_VALUE: &str = "text-2xl font-bold text-neutral-900 dark:text-neutral-100";
+const STAT_HINT: &str = "mt-1 text-xs text-neutral-500 dark:text-neutral-400";
+
+const DEPLOYMENT_COLUMNS: [Column; 4] = [
+    Column {
+        label: "common.name",
+        class: "",
+    },
+    Column {
+        label: "common.status",
+        class: "",
+    },
+    Column {
+        label: "deployments.trigger",
+        class: "",
+    },
+    Column {
+        label: "deployments.started",
+        class: "whitespace-nowrap",
+    },
+];
 
 #[function_component(Dashboard)]
 pub fn dashboard() -> Html {
@@ -88,6 +116,16 @@ fn render_stat_cards(locale: Locale, data: &DashboardSummary) -> Html {
     }
 }
 
+/// The head of a stat card: its name and its icon.
+fn stat_head(label: &str, icon: &'static str) -> Html {
+    html! {
+        <div class="flex items-center justify-between">
+            <span class={STAT_LABEL}>{label}</span>
+            <img src={icon} alt="" class="w-5 h-5 opacity-70" />
+        </div>
+    }
+}
+
 fn render_ports_card(locale: Locale, ports: &PortsSummary) -> Html {
     let subtext = locale.tf(
         "dashboard.active_count",
@@ -97,13 +135,10 @@ fn render_ports_card(locale: Locale, ports: &PortsSummary) -> Html {
         ],
     );
     html! {
-        <Link<Route> to={Route::Ports} classes="block bg-white dark:bg-neutral-800 p-5 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:border-blue-500 dark:hover:border-blue-400 transition-colors shadow-sm">
-            <div class="flex items-center justify-between">
-                <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{locale.t("dashboard.ports")}</span>
-                <img src="/assets/icons/wifi.svg" alt="" class="w-5 h-5 opacity-70" />
-            </div>
-            <div class="mt-2 text-2xl font-bold text-neutral-900 dark:text-neutral-100">{ports.total}</div>
-            <div class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{subtext}</div>
+        <Link<Route> to={Route::Ports} classes={STAT_CARD}>
+            { stat_head(locale.t("dashboard.ports"), "/assets/icons/wifi.svg") }
+            <div class={classes!("mt-2", STAT_VALUE)}>{ports.total}</div>
+            <div class={STAT_HINT}>{subtext}</div>
         </Link<Route>>
     }
 }
@@ -117,13 +152,10 @@ fn render_proxies_card(locale: Locale, proxies: &r3v3rs3_api::dashboard::Proxies
         ],
     );
     html! {
-        <Link<Route> to={Route::Proxies} classes="block bg-white dark:bg-neutral-800 p-5 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:border-blue-500 dark:hover:border-blue-400 transition-colors shadow-sm">
-            <div class="flex items-center justify-between">
-                <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{locale.t("dashboard.proxies")}</span>
-                <img src="/assets/icons/swap-horizontal.svg" alt="" class="w-5 h-5 opacity-70" />
-            </div>
-            <div class="mt-2 text-2xl font-bold text-neutral-900 dark:text-neutral-100">{proxies.total}</div>
-            <div class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{subtext}</div>
+        <Link<Route> to={Route::Proxies} classes={STAT_CARD}>
+            { stat_head(locale.t("dashboard.proxies"), "/assets/icons/swap-horizontal.svg") }
+            <div class={classes!("mt-2", STAT_VALUE)}>{proxies.total}</div>
+            <div class={STAT_HINT}>{subtext}</div>
         </Link<Route>>
     }
 }
@@ -137,20 +169,17 @@ fn render_apps_card(locale: Locale, apps: &AppsSummary) -> Html {
         ],
     );
     html! {
-        <Link<Route> to={Route::Apps} classes="block bg-white dark:bg-neutral-800 p-5 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:border-blue-500 dark:hover:border-blue-400 transition-colors shadow-sm">
-            <div class="flex items-center justify-between">
-                <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{locale.t("dashboard.apps")}</span>
-                <img src="/assets/icons/cube.svg" alt="" class="w-5 h-5 opacity-70" />
-            </div>
+        <Link<Route> to={Route::Apps} classes={STAT_CARD}>
+            { stat_head(locale.t("dashboard.apps"), "/assets/icons/cube.svg") }
             <div class="mt-2 flex items-baseline gap-2">
-                <span class="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{apps.total}</span>
+                <span class={STAT_VALUE}>{apps.total}</span>
                 if apps.update_available > 0 {
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200">
                         {locale.tf("dashboard.update_badge", &[("count", &apps.update_available.to_string())])}
                     </span>
                 }
             </div>
-            <div class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{subtext}</div>
+            <div class={STAT_HINT}>{subtext}</div>
         </Link<Route>>
     }
 }
@@ -164,13 +193,10 @@ fn render_databases_card(locale: Locale, databases: &DatabasesSummary) -> Html {
         ],
     );
     html! {
-        <Link<Route> to={Route::Databases} classes="block bg-white dark:bg-neutral-800 p-5 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:border-blue-500 dark:hover:border-blue-400 transition-colors shadow-sm">
-            <div class="flex items-center justify-between">
-                <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{locale.t("dashboard.databases")}</span>
-                <img src="/assets/icons/database.svg" alt="" class="w-5 h-5 opacity-70" />
-            </div>
-            <div class="mt-2 text-2xl font-bold text-neutral-900 dark:text-neutral-100">{databases.total}</div>
-            <div class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{subtext}</div>
+        <Link<Route> to={Route::Databases} classes={STAT_CARD}>
+            { stat_head(locale.t("dashboard.databases"), "/assets/icons/database.svg") }
+            <div class={classes!("mt-2", STAT_VALUE)}>{databases.total}</div>
+            <div class={STAT_HINT}>{subtext}</div>
         </Link<Route>>
     }
 }
@@ -184,13 +210,10 @@ fn render_targets_card(locale: Locale, targets: &TargetsSummary) -> Html {
         ],
     );
     html! {
-        <Link<Route> to={Route::Targets} classes="block bg-white dark:bg-neutral-800 p-5 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:border-blue-500 dark:hover:border-blue-400 transition-colors shadow-sm">
-            <div class="flex items-center justify-between">
-                <span class="text-sm font-medium text-neutral-500 dark:text-neutral-400">{locale.t("dashboard.targets")}</span>
-                <img src="/assets/icons/server.svg" alt="" class="w-5 h-5 opacity-70" />
-            </div>
-            <div class="mt-2 text-2xl font-bold text-neutral-900 dark:text-neutral-100">{targets.total}</div>
-            <div class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{subtext}</div>
+        <Link<Route> to={Route::Targets} classes={STAT_CARD}>
+            { stat_head(locale.t("dashboard.targets"), "/assets/icons/server.svg") }
+            <div class={classes!("mt-2", STAT_VALUE)}>{targets.total}</div>
+            <div class={STAT_HINT}>{subtext}</div>
         </Link<Route>>
     }
 }
@@ -217,7 +240,7 @@ fn render_disk_card(locale: Locale, disk: &DiskSpace) -> Html {
     };
 
     html! {
-        <div class="bg-white dark:bg-neutral-800 p-5 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm">
+        <div class={CARD}>
             <div class="flex items-center justify-between mb-2">
                 <h3 class="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{locale.t("dashboard.disk_space")}</h3>
                 <span class="text-xs font-medium text-neutral-500 dark:text-neutral-400">{text}</span>
@@ -230,42 +253,46 @@ fn render_disk_card(locale: Locale, disk: &DiskSpace) -> Html {
 }
 
 fn render_recent_deployments(locale: Locale, deployments: &[DeploymentSummary]) -> Html {
+    let rows = deployments
+        .iter()
+        .map(|d| render_deployment_row(locale, d))
+        .collect::<Vec<_>>();
+    let content = ListContent {
+        loaded: true,
+        empty: "dashboard.no_deployments",
+        columns: &DEPLOYMENT_COLUMNS,
+        rows: &rows,
+    };
+    let options = ListOptions {
+        embedded: true,
+        no_actions: true,
+        ..Default::default()
+    };
     html! {
-        <div class="bg-white dark:bg-neutral-800 p-5 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm">
+        <div class={CARD}>
             <h3 class="text-base font-semibold text-neutral-800 dark:text-neutral-200 mb-4">{locale.t("dashboard.recent_deployments")}</h3>
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm text-left">
-                    <thead class="text-xs text-neutral-500 uppercase border-b border-neutral-200 dark:border-neutral-700">
-                        <tr>
-                            <th class="py-2 pr-4">{locale.t("common.name")}</th>
-                            <th class="py-2 px-4">{locale.t("common.status")}</th>
-                            <th class="py-2 px-4">{locale.t("deployments.trigger")}</th>
-                            <th class="py-2 pl-4 text-right">{locale.t("deployments.started")}</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-neutral-100 dark:divide-neutral-700/50">
-                        { for deployments.iter().map(|d| render_deployment_row(locale, d)) }
-                    </tbody>
-                </table>
+            <div class="rounded-md border border-neutral-300 dark:border-neutral-700">
+                { list_view(locale, content, None, &options) }
             </div>
         </div>
     }
 }
 
-fn render_deployment_row(locale: Locale, d: &DeploymentSummary) -> Html {
+fn render_deployment_row(locale: Locale, d: &DeploymentSummary) -> Row {
     let (status_key, badge_color) = super::app_list::status_style(d.status);
-    let trigger_str = trigger_text(locale, d.trigger);
-    html! {
-        <tr key={d.id.to_string()} class="hover:bg-neutral-50 dark:hover:bg-neutral-700/20">
-            <td class="py-3 pr-4 font-medium">
-                <Link<Route> to={Route::AppDashboard { id: d.app_id }} classes="text-blue-600 dark:text-blue-400 hover:underline">
+    Row {
+        key: d.id.to_string(),
+        cells: vec![
+            html! {
+                <Link<Route> to={Route::AppDashboard { id: d.app_id }} classes="text-primary-600 dark:text-primary-400 hover:underline">
                     {&d.app_name}
                 </Link<Route>>
-            </td>
-            <td class="py-3 px-4">{ status_badge(locale.t(status_key), badge_color) }</td>
-            <td class="py-3 px-4 text-neutral-600 dark:text-neutral-300">{trigger_str}</td>
-            <td class="py-3 pl-4 text-right text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{format_time(d.started_at)}</td>
-        </tr>
+            },
+            status_badge(locale.t(status_key), badge_color),
+            html! { {trigger_text(locale, d.trigger)} },
+            html! { {format_time(d.started_at)} },
+        ],
+        actions: html! {},
     }
 }
 
@@ -284,25 +311,26 @@ fn trigger_text(locale: Locale, trigger: r3v3rs3_api::platform::DeploymentTrigge
 }
 
 fn render_quick_links(locale: Locale, platform_enabled: bool) -> Html {
+    let link = button_class(ButtonKind::Secondary, ButtonSize::Sm);
     html! {
-        <div class="bg-white dark:bg-neutral-800 p-5 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm">
+        <div class={CARD}>
             <h3 class="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mb-3">{locale.t("dashboard.quick_links")}</h3>
             <div class="flex flex-wrap gap-3">
-                <Link<Route> to={Route::NewProxy} classes="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700">
+                <Link<Route> to={Route::NewProxy} classes={link}>
                     {"+ "}{locale.t("common.add")}{" "}{locale.t("nav.proxies")}
                 </Link<Route>>
-                <Link<Route> to={Route::NewPort} classes="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700">
+                <Link<Route> to={Route::NewPort} classes={link}>
                     {"+ "}{locale.t("common.add")}{" "}{locale.t("nav.ports")}
                 </Link<Route>>
                 if platform_enabled {
-                    <Link<Route> to={Route::NewApp} classes="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700">
+                    <Link<Route> to={Route::NewApp} classes={link}>
                         {"+ "}{locale.t("common.add")}{" "}{locale.t("nav.apps")}
                     </Link<Route>>
-                    <Link<Route> to={Route::AppStore} classes="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700">
+                    <Link<Route> to={Route::AppStore} classes={link}>
                         {locale.t("nav.app_store")}
                     </Link<Route>>
                 }
-                <Link<Route> to={Route::Settings} classes="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700">
+                <Link<Route> to={Route::Settings} classes={link}>
                     {locale.t("nav.settings")}
                 </Link<Route>>
             </div>
