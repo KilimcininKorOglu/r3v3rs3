@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.6] - 2026-11-13
+
+### Fixed
+- Redis keeps the tenants of a shared server across a restart of its container. The ACL users lived only in memory, so a restart (a host reboot, a restart after a crash) dropped them and the apps got `WRONGPASS` until their next deployment. Redis now starts with the ACL file `/data/users.acl` of its data volume, the tenant and root password changes are saved into it, and the first start writes the `default` user with the root password, because a server that loads an ACL file ignores `--requirepass`. A Redis started by 3.2.5 or earlier gets the file at its next deployment.
+- The MCP tools that change apps, deployments, backups, targets, projects and environment groups write the same audit entries as the HTTP API; they called the platform directly and left no audit record.
+- Deleting a database backup and upgrading all agent targets write audit entries.
+- Tests that need a refused upstream use port 1 of `127.0.0.1` instead of a released ephemeral port, which a parallel test or a self-connection could take.
+
 ## [3.2.5] - 2026-11-13
 
 ### Added
