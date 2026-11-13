@@ -1,8 +1,10 @@
 use crate::API_ENDPOINT;
+use crate::components::button::{Button, ButtonKind};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
 use r3v3rs3_api::anomaly::AnomalyAlertRules;
+use r3v3rs3_api::i18n::Locale;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yewdux::prelude::*;
@@ -63,13 +65,14 @@ pub fn anomaly_rules_card() -> Html {
     let is_saving = use_state(|| false);
 
     {
-        let form = form.clone();
+        let (form, notice) = (form.clone(), notice.clone());
         use_effect_with(session.info.is_some(), move |signed_in| {
             if *signed_in {
-                let form = form.clone();
+                let (form, notice) = (form.clone(), notice.clone());
                 wasm_bindgen_futures::spawn_local(async move {
-                    if let Ok(rules) = fetch_anomaly_rules().await {
-                        form.set(FormFields::from_rules(&rules));
+                    match fetch_anomaly_rules(locale).await {
+                        Ok(rules) => form.set(FormFields::from_rules(&rules)),
+                        Err(err) => notice.set(Some(err)),
                     }
                 });
             }
@@ -89,7 +92,7 @@ pub fn anomaly_rules_card() -> Html {
 
             wasm_bindgen_futures::spawn_local(async move {
                 let new_rules = form.to_rules();
-                match save_anomaly_rules(&new_rules).await {
+                match save_anomaly_rules(locale, &new_rules).await {
                     Ok(saved) => {
                         form.set(FormFields::from_rules(&saved));
                         notice.set(Some(locale.t("anomalies.rules_saved").to_string()));
@@ -171,13 +174,9 @@ pub fn anomaly_rules_card() -> Html {
             </div>
 
             <div class="mt-5 flex justify-end">
-                <button
-                    type="submit"
-                    disabled={*is_saving || *is_loading}
-                    class="inline-flex justify-center items-center text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 transition disabled:opacity-50"
-                >
+                <Button kind={ButtonKind::Primary} r#type="submit" disabled={*is_saving || *is_loading}>
                     {locale.t("anomalies.save_rules")}
-                </button>
+                </Button>
             </div>
         </form>
     }
@@ -219,32 +218,17 @@ where
     }
 }
 
-async fn fetch_anomaly_rules() -> Result<AnomalyAlertRules, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/system/anomalies/rules"))
-        .send()
-        .await?
-        .json()
-        .await
+async fn fetch_anomaly_rules(locale: Locale) -> Result<AnomalyAlertRules, String> {
+    let path = format!("{API_ENDPOINT}/system/anomalies/rules");
+    crate::pages::settings::fetch_json(locale, Request::get(&path)).await
 }
 
-async fn save_anomaly_rules(rules: &AnomalyAlertRules) -> Result<AnomalyAlertRules, String> {
-    let res = Request::put(&format!("{API_ENDPOINT}/system/anomalies/rules"))
-        .json(rules)
-        .map_err(|e| e.to_string())?
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if res.ok() {
-        res.json::<AnomalyAlertRules>()
-            .await
-            .map_err(|e| e.to_string())
-    } else {
-        Err(format!(
-            "Error {}: Failed to save anomaly alert rules",
-            res.status()
-        ))
-    }
+async fn save_anomaly_rules(
+    locale: Locale,
+    rules: &AnomalyAlertRules,
+) -> Result<AnomalyAlertRules, String> {
+    let path = format!("{API_ENDPOINT}/system/anomalies/rules");
+    crate::pages::settings::post_json(locale, Request::put(&path), rules).await
 }
 
 #[cfg(test)]
