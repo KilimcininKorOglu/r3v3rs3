@@ -1,9 +1,10 @@
 use crate::components::action_button::{ActionIconButton, ActionVariant};
-use crate::components::button::{ButtonKind, ButtonSize, button_class};
+use crate::components::button::{Button, ButtonKind, ButtonSize, button_class};
 use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
 use crate::components::http_proxy_config::{
     client_cert_label, parse_optional_id, use_client_certs,
 };
+use crate::components::modal::{Modal, ModalSize};
 use crate::components::worker_status::WorkerStatusCard;
 use crate::format::format_unix_time;
 use crate::pages::Route;
@@ -346,9 +347,9 @@ pub fn settings() -> Html {
             { etcd_section(locale, &fields, &errors, &client_certs) }
 
             <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
-                <button type="submit" disabled={parsed.is_err() || *is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                <Button kind={ButtonKind::Primary} r#type="submit" disabled={parsed.is_err() || *is_loading}>
                     {locale.t("settings.save")}
-                </button>
+                </Button>
             </div>
         </form>
         <CdnStatusCard />
@@ -572,13 +573,9 @@ fn platform_section(
             { text_field(fields, errors, locale.t("settings.platform_proxy_ports"), "platform_proxy_ports", "http,https", |f| &mut f.platform_proxy_ports) }
             <p class={HINT_CLASS}>{locale.t("settings.platform_proxy_ports_hint")}</p>
             <div class="mt-4">
-                <button
-                    type="button"
-                    onclick={rotate_on_click}
-                    class="px-3 py-1.5 rounded bg-neutral-200 dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-sm font-medium"
-                >
+                <Button kind={ButtonKind::Warning} onclick={rotate_on_click}>
                     {locale.t("settings.rotate_key")}
-                </button>
+                </Button>
                 <p class={HINT_CLASS}>{locale.t("settings.rotate_key_hint")}</p>
             </div>
         </>
@@ -640,9 +637,9 @@ fn notifications_section(
             { text_field(fields, errors, locale.t("settings.webhook_timeout"), "webhook_timeout", "10s", |f| &mut f.webhook_timeout) }
             <div class="mt-4">
                 { notice_view(test_notice) }
-                <button type="button" onclick={send_test_notification(locale, test_notice)} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                <Button kind={ButtonKind::Primary} onclick={send_test_notification(locale, test_notice)}>
                     {locale.t("settings.notification_test")}
-                </button>
+                </Button>
             </div>
             <p class={HINT_CLASS}>{locale.t("settings.notification_test_hint")}</p>
         </>
@@ -1488,9 +1485,9 @@ fn cdn_status_card() -> Html {
                 { cdn_status_view(locale, status) }
             }
             <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
-                <button type="button" {onclick} disabled={*is_loading} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                <Button kind={ButtonKind::Secondary} {onclick} disabled={*is_loading}>
                     {locale.t("settings.refresh_now")}
-                </button>
+                </Button>
             </div>
         </div>
     }
@@ -1783,9 +1780,9 @@ fn upgrade_card() -> Html {
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.upgrade_title")}</h2>
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.upgrade_hint")}</p>
             <div class="flex flex-col mt-4 sm:flex-row sm:items-center sm:justify-end">
-                <button type="button" {onclick} disabled={*is_running} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                <Button kind={ButtonKind::Success} {onclick} disabled={*is_running}>
                     {locale.t("settings.upgrade_button")}
-                </button>
+                </Button>
             </div>
             if *is_running {
                 { upgrade_dialog(locale, *stage) }
@@ -1800,14 +1797,14 @@ fn upgrade_dialog(locale: Locale, stage: Option<UpgradeStage>) -> Html {
         Some(step) => locale.t(step_label(step)).to_string(),
         None => locale.t("settings.upgrade_dialog_wait").to_string(),
     };
+    // No close callback: the dialog cannot be dismissed while the upgrade runs.
     html! {
-        <div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
-            <div class="bg-white dark:bg-neutral-800 p-6 border border-neutral-300 dark:border-neutral-700 rounded-md shadow-lg text-center">
-                <div class="mx-auto h-10 w-10 border-4 border-neutral-300 dark:border-neutral-600 border-t-blue-600 rounded-full animate-spin" role="status"></div>
-                <h3 class="mt-4 text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.upgrade_dialog_title")}</h3>
-                <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{message}</p>
+        <Modal title={locale.t("settings.upgrade_dialog_title").to_string()} size={ModalSize::Sm}>
+            <div class="text-center">
+                <div class="mx-auto h-10 w-10 border-4 border-neutral-300 dark:border-neutral-600 border-t-primary-600 rounded-full animate-spin" role="status"></div>
+                <p class="mt-4 text-sm text-neutral-500 dark:text-neutral-400">{message}</p>
             </div>
-        </div>
+        </Modal>
     }
 }
 
