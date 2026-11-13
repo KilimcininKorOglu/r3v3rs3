@@ -3,8 +3,9 @@
 use super::Route;
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{
-    FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback, row_actions,
-    set_on_click, text_input,
+    FormCard, FormState, Notice, add_button, close_callback, delete_on_click, failed_view,
+    form_modal, load, open_on_click, reload_callback, row_actions, saved_view, text_input,
+    use_form_modal,
 };
 use super::settings::send_json;
 use crate::API_ENDPOINT;
@@ -109,7 +110,7 @@ pub fn webhooks() -> Html {
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
     let list = use_state(|| Option::<Vec<OutboundWebhook>>::None);
-    let form = use_state(Form::default);
+    let (form, open) = use_form_modal::<Form>();
     let notice = use_state(|| Option::<Notice<()>>::None);
 
     let signed_in = session.info.is_some();
@@ -129,7 +130,7 @@ pub fn webhooks() -> Html {
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(|entry| list_row(locale, entry, &form, &list))
+        .map(|entry| list_row(locale, entry, (&form, &open), &list))
         .collect::<Vec<_>>();
 
     html! {
@@ -138,8 +139,12 @@ pub fn webhooks() -> Html {
                 <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{locale.t("webhooks.title")}</h1>
                 <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{locale.t("webhooks.subtitle")}</p>
             </div>
+            { saved_view(&notice, |()| html! { <p>{locale.t("webhooks.created")}</p> }) }
             { list_card(locale, list.is_some(), "webhooks.empty", &COLUMNS, &rows) }
-            { form_view(locale, &form, &notice, &list) }
+            { add_button(locale, open_on_click(&form, &open, Form::default())) }
+            if *open {
+                { form_view(locale, (&form, &open), &notice, &list) }
+            }
         </>
     }
 }
@@ -200,7 +205,7 @@ fn test_webhook_click(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
 fn list_row(
     locale: Locale,
     entry: &OutboundWebhook,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     list: &WebhooksList,
 ) -> Row {
     let question = locale.t("webhooks.delete_confirm").to_string();
@@ -208,16 +213,16 @@ fn list_row(
     let delete = delete_on_click(locale, question, path, reload_callback(list, PATH));
     let test_cb = test_webhook_click(locale, entry.id);
 
-    let edit_cb = set_on_click(form, Form::edit(entry));
+    let edit_cb = open_on_click(form, open, Form::edit(entry));
     let actions = html! {
-        <div class="flex items-center space-x-2">
+        <>
             <ActionIconButton
                 variant={ActionVariant::Play}
                 title={locale.t("webhooks.test_button").to_string()}
                 onclick={test_cb}
             />
             { row_actions(locale, edit_cb, Some(delete)) }
-        </div>
+        </>
     };
 
     let status_badge = if entry.enabled {
@@ -399,7 +404,7 @@ fn render_event_checkbox(locale: Locale, ev: WebhookEvent, form: &UseStateHandle
 
 fn form_view(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     notice: &UseStateHandle<Option<Notice<()>>>,
     list: &WebhooksList,
 ) -> Html {
@@ -488,17 +493,13 @@ fn form_view(
         </div>
     };
 
-    let oncancel = form
-        .editing
-        .is_some()
-        .then(|| set_on_click(form, Form::default()));
-
+    let touched = is_editing || !form.name.is_empty() || !form.url.is_empty();
     let card = FormCard {
         title,
-        notice: notice_view(notice, |()| html! { <p>{locale.t("webhooks.created")}</p> }),
+        notice: failed_view(notice),
         fields,
-        error: validation.err(),
-        cancel: oncancel,
+        error: validation.err().filter(|_| touched),
+        cancel: None,
         save_label: if is_editing {
             "common.update"
         } else {
@@ -507,23 +508,25 @@ fn form_view(
         can_save: form.validate(locale).is_ok(),
     };
 
-    let onsubmit = submit_webhook(locale, form, notice, list);
-    form_card(locale, card, onsubmit)
+    let onsubmit = submit_webhook(locale, (form, open), notice, list);
+    form_modal(locale, card, onsubmit, close_callback(form, open))
 }
 
 fn submit_webhook(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     notice: &UseStateHandle<Option<Notice<()>>>,
     list: &WebhooksList,
 ) -> Callback<SubmitEvent> {
     let form_cloned = form.clone();
+    let open_cloned = open.clone();
     let notice_cloned = notice.clone();
     let list_cloned = list.clone();
 
     Callback::from(move |e: SubmitEvent| {
         e.prevent_default();
         let form_state = form_cloned.clone();
+        let open_state = open_cloned.clone();
         let notice_state = notice_cloned.clone();
         let list_state = list_cloned.clone();
 
@@ -563,6 +566,7 @@ fn submit_webhook(
             match res {
                 Ok(_) => {
                     form_state.set(Form::default());
+                    open_state.set(false);
                     notice_state.set(Some(Notice::Saved(())));
                     load(list_state, PATH);
                 }
