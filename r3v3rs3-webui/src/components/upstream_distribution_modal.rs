@@ -1,3 +1,5 @@
+use crate::components::button::{Button, ButtonKind};
+use crate::components::modal::{Modal, ModalSize};
 use crate::format::{format_bytes, format_latency};
 use r3v3rs3_api::{
     i18n::Locale,
@@ -55,68 +57,29 @@ pub fn upstream_distribution_modal(props: &UpstreamDistributionModalProps) -> Ht
     let total_errors: u64 = props.upstreams.iter().map(|u| u.total_errors).sum();
     let total_bytes: u64 = props.upstreams.iter().map(|u| u.total_bytes).sum();
 
-    let on_backdrop = {
+    let locale = props.locale;
+    let close = {
         let onclose = props.onclose.clone();
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            onclose.emit(());
-        })
+        Callback::from(move |_: MouseEvent| onclose.emit(()))
     };
-
-    let on_card_click = Callback::from(|e: MouseEvent| {
-        e.stop_propagation();
-    });
-
-    html! {
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onclick={on_backdrop}>
-            <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl max-w-2xl w-full p-6 flex flex-col gap-5 max-h-[90vh] overflow-y-auto" onclick={on_card_click}>
-                { render_header(props.locale, &props.proxy_name, total_reqs, &props.onclose) }
-                { render_summary_cards(props.locale, total_reqs, total_active, total_errors, total_bytes) }
-                { render_distribution_bar(props.locale, &props.upstreams, total_reqs) }
-                { render_upstreams_table(props.locale, &props.upstreams, total_reqs, total_weight) }
-            </div>
-        </div>
-    }
-}
-
-fn render_header(
-    locale: Locale,
-    proxy_name: &str,
-    total_reqs: u64,
-    onclose: &Callback<()>,
-) -> Html {
-    let on_close_click = {
-        let onclose = onclose.clone();
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            onclose.emit(());
-        })
+    let footer = html! {
+        <Button kind={ButtonKind::Secondary} onclick={close}>{locale.t("common.close")}</Button>
     };
     html! {
-        <div class="flex items-start justify-between border-b border-neutral-100 dark:border-neutral-800 pb-3">
-            <div>
-                <h3 class="text-base font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-                    <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                    { locale.t("proxies.distribution_title") }
-                </h3>
-                <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                    { format!("{} • {} {}", proxy_name, total_reqs, locale.t("proxies.dist_requests")) }
+        <Modal title={locale.t("proxies.distribution_title")} on_close={props.onclose.clone()} size={ModalSize::Lg} {footer}>
+            <div class="flex flex-col gap-5">
+                <p class="text-xs text-neutral-500 dark:text-neutral-400">
+                    { format!("{} • {} {}", props.proxy_name, total_reqs, locale.t("proxies.dist_requests")) }
                 </p>
+                { render_summary_cards(locale, total_reqs, total_active, total_errors, total_bytes) }
+                { render_distribution_bar(locale, &props.upstreams, total_reqs) }
+                { render_upstreams_table(locale, &props.upstreams, total_reqs, total_weight) }
             </div>
-            <button
-                type="button"
-                onclick={on_close_click}
-                class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
-            >
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-            </button>
-        </div>
+        </Modal>
     }
 }
+
+const TILE: &str = "p-3 rounded-xl bg-neutral-50 border border-neutral-200 dark:bg-neutral-900/50 dark:border-neutral-700";
 
 fn render_summary_cards(
     locale: Locale,
@@ -130,21 +93,21 @@ fn render_summary_cards(
 
     html! {
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div class="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-100 dark:border-neutral-800">
+            <div class={TILE}>
                 <span class="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium block">{ locale.t("proxies.dist_requests") }</span>
                 <span class="text-base font-bold text-neutral-900 dark:text-neutral-100 font-mono">{ requests }</span>
             </div>
-            <div class="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-100 dark:border-neutral-800">
+            <div class={TILE}>
                 <span class="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium block">{ locale.t("proxies.dist_active") }</span>
                 <span class="text-base font-bold text-blue-600 dark:text-blue-400 font-mono">{ active }</span>
             </div>
-            <div class="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-100 dark:border-neutral-800">
+            <div class={TILE}>
                 <span class="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium block">{ locale.t("proxies.dist_errors") }</span>
                 <span class={classes!("text-base", "font-bold", "font-mono", if errors > 0 { "text-red-500" } else { "text-neutral-700 dark:text-neutral-300" })}>
                     { format!("{:.1}%", error_rate) }
                 </span>
             </div>
-            <div class="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-100 dark:border-neutral-800">
+            <div class={TILE}>
                 <span class="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium block">{ locale.t("proxies.dist_throughput") }</span>
                 <span class="text-base font-bold text-neutral-900 dark:text-neutral-100 font-mono">{ bytes_formatted }</span>
             </div>
@@ -220,7 +183,7 @@ fn render_upstream_row(
     let rtt_formatted = format_rtt(u.rtt_ms);
 
     html! {
-        <div class="p-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex flex-col gap-2 hover:border-neutral-300 dark:hover:border-neutral-700 transition">
+        <div class="p-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900/50 flex flex-col gap-2">
             <div class="flex items-center justify-between gap-2 flex-wrap">
                 <div class="flex items-center gap-2">
                     <span class={classes!("w-3", "h-3", "rounded-full", bg_color)} />
