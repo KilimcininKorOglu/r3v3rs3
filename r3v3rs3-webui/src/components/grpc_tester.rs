@@ -1,8 +1,10 @@
 //! Interactive gRPC Server Reflection and Call Tester component.
 
 use crate::API_ENDPOINT;
+use crate::components::button::{Button, ButtonKind};
 use crate::components::http_proxy_config::{HINT_CLASS, INPUT_CLASS};
 use crate::i18n::use_locale;
+use crate::pages::settings::post_json;
 use gloo_net::http::Request;
 use r3v3rs3_api::grpc::{
     GrpcInvokeRequest, GrpcInvokeResponse, GrpcReflectRequest, GrpcReflectResponse,
@@ -78,6 +80,7 @@ fn default_json() -> String {
 }
 
 struct DiscoverHandles<'a> {
+    locale: Locale,
     proxy_id: Option<ShortId>,
     target_url: &'a UseStateHandle<String>,
     is_reflecting: &'a UseStateHandle<bool>,
@@ -87,41 +90,40 @@ struct DiscoverHandles<'a> {
     reflect_error: &'a UseStateHandle<Option<String>>,
 }
 
+/// The state that one discovery reads and writes.
+#[derive(Clone)]
+struct Discovery {
+    locale: Locale,
+    proxy_id: Option<ShortId>,
+    target_url: String,
+    services: UseStateHandle<Vec<GrpcServiceInfo>>,
+    selected_service: UseStateHandle<Option<String>>,
+    selected_method: UseStateHandle<Option<String>>,
+    reflect_error: UseStateHandle<Option<String>>,
+    is_reflecting: UseStateHandle<bool>,
+}
+
 fn make_discover_callback(h: DiscoverHandles<'_>) -> Callback<MouseEvent> {
-    let proxy_id = h.proxy_id;
-    let target_url = (**h.target_url).clone();
-    let is_reflecting = h.is_reflecting.clone();
-    let services = h.services.clone();
-    let selected_service = h.selected_service.clone();
-    let selected_method = h.selected_method.clone();
-    let reflect_error = h.reflect_error.clone();
-
+    let discovery = Discovery {
+        locale: h.locale,
+        proxy_id: h.proxy_id,
+        target_url: (**h.target_url).clone(),
+        services: h.services.clone(),
+        selected_service: h.selected_service.clone(),
+        selected_method: h.selected_method.clone(),
+        reflect_error: h.reflect_error.clone(),
+        is_reflecting: h.is_reflecting.clone(),
+    };
     Callback::from(move |_| {
-        let target_url = target_url.clone();
-        let is_reflecting = is_reflecting.clone();
-        let services = services.clone();
-        let selected_service = selected_service.clone();
-        let selected_method = selected_method.clone();
-        let reflect_error = reflect_error.clone();
-
-        is_reflecting.set(true);
-        reflect_error.set(None);
-        wasm_bindgen_futures::spawn_local(async move {
-            execute_discover(
-                proxy_id,
-                target_url,
-                services,
-                selected_service,
-                selected_method,
-                reflect_error,
-                is_reflecting,
-            )
-            .await;
-        });
+        let discovery = discovery.clone();
+        discovery.is_reflecting.set(true);
+        discovery.reflect_error.set(None);
+        wasm_bindgen_futures::spawn_local(execute_discover(discovery));
     })
 }
 
 struct InvokeHandles<'a> {
+    locale: Locale,
     proxy_id: Option<ShortId>,
     target_url: &'a UseStateHandle<String>,
     selected_service: &'a UseStateHandle<Option<String>>,
@@ -133,7 +135,7 @@ struct InvokeHandles<'a> {
 }
 
 fn make_invoke_callback(h: InvokeHandles<'_>) -> Callback<MouseEvent> {
-    let proxy_id = h.proxy_id;
+    let (locale, proxy_id) = (h.locale, h.proxy_id);
     let target_url = (**h.target_url).clone();
     let service = (**h.selected_service).clone();
     let method = (**h.selected_method).clone();
@@ -154,7 +156,12 @@ fn make_invoke_callback(h: InvokeHandles<'_>) -> Callback<MouseEvent> {
             Some(target_url.trim().to_string())
         };
 
-        let parsed_payload = serde_json::from_str(&payload).unwrap_or(serde_json::Value::Null);
+        // A payload that is not JSON is refused here, so it never goes out as null.
+        let Ok(parsed_payload) = serde_json::from_str(&payload) else {
+            let message = locale.t("grpc.invalid_payload").to_string();
+            invoke_result.set(Some(Err(message)));
+            return;
+        };
 
         let req_body = GrpcInvokeRequest {
             target_url: target,
@@ -170,7 +177,7 @@ fn make_invoke_callback(h: InvokeHandles<'_>) -> Callback<MouseEvent> {
         invoke_result.set(None);
 
         wasm_bindgen_futures::spawn_local(async move {
-            execute_invoke(proxy_id, req_body, invoke_result, is_invoking).await;
+            execute_invoke(locale, proxy_id, req_body, invoke_result, is_invoking).await;
         });
     })
 }
@@ -197,6 +204,7 @@ pub fn grpc_tester(props: &Props) -> Html {
     let on_metadata_change = make_textarea_callback(&metadata);
 
     let on_discover = make_discover_callback(DiscoverHandles {
+        locale,
         proxy_id: props.proxy_id,
         target_url: &target_url,
         is_reflecting: &is_reflecting,
@@ -207,6 +215,7 @@ pub fn grpc_tester(props: &Props) -> Html {
     });
 
     let on_invoke = make_invoke_callback(InvokeHandles {
+        locale,
         proxy_id: props.proxy_id,
         target_url: &target_url,
         selected_service: &selected_service,
@@ -285,15 +294,17 @@ fn content_panel_view(p: ContentPanelProps<'_>) -> Html {
     }
 }
 
-async fn execute_discover(
-    proxy_id: Option<ShortId>,
-    target_url: String,
-    services: UseStateHandle<Vec<GrpcServiceInfo>>,
-    selected_service: UseStateHandle<Option<String>>,
-    selected_method: UseStateHandle<Option<String>>,
-    reflect_error: UseStateHandle<Option<String>>,
-    is_reflecting: UseStateHandle<bool>,
-) {
+async fn execute_discover(discovery: Discovery) {
+    let Discovery {
+        locale,
+        proxy_id,
+        target_url,
+        services,
+        selected_service,
+        selected_method,
+        reflect_error,
+        is_reflecting,
+    } = discovery;
     let target = if target_url.trim().is_empty() {
         None
     } else {
@@ -305,39 +316,29 @@ async fn execute_discover(
         None => format!("{API_ENDPOINT}/grpc/reflect"),
     };
 
-    let req = Request::post(&url).json(&GrpcReflectRequest {
+    let body = GrpcReflectRequest {
         target_url: target,
         service_name: None,
-    });
-
-    match req {
-        Ok(builder) => match builder.send().await {
-            Ok(resp) if resp.ok() => match resp.json::<GrpcReflectResponse>().await {
-                Ok(data) => {
-                    let first_svc = data.services.first().map(|s| s.name.clone());
-                    let first_method = data
-                        .services
-                        .first()
-                        .and_then(|s| s.methods.first())
-                        .map(|m| m.name.clone());
-                    selected_service.set(first_svc);
-                    selected_method.set(first_method);
-                    services.set(data.services);
-                }
-                Err(err) => reflect_error.set(Some(err.to_string())),
-            },
-            Ok(resp) => {
-                let text = resp.text().await.unwrap_or_else(|_| "Error".to_string());
-                reflect_error.set(Some(text));
-            }
-            Err(err) => reflect_error.set(Some(err.to_string())),
-        },
-        Err(err) => reflect_error.set(Some(err.to_string())),
+    };
+    match post_json::<GrpcReflectResponse>(locale, Request::post(&url), &body).await {
+        Ok(data) => {
+            let first_svc = data.services.first().map(|s| s.name.clone());
+            let first_method = data
+                .services
+                .first()
+                .and_then(|s| s.methods.first())
+                .map(|m| m.name.clone());
+            selected_service.set(first_svc);
+            selected_method.set(first_method);
+            services.set(data.services);
+        }
+        Err(err) => reflect_error.set(Some(err)),
     }
     is_reflecting.set(false);
 }
 
 async fn execute_invoke(
+    locale: Locale,
     proxy_id: Option<ShortId>,
     req_body: GrpcInvokeRequest,
     invoke_result: UseStateHandle<Option<Result<GrpcInvokeResponse, String>>>,
@@ -347,22 +348,9 @@ async fn execute_invoke(
         Some(id) => format!("{API_ENDPOINT}/proxies/{id}/grpc/invoke"),
         None => format!("{API_ENDPOINT}/grpc/invoke"),
     };
-
-    let req = Request::post(&url).json(&req_body);
-    match req {
-        Ok(builder) => match builder.send().await {
-            Ok(resp) if resp.ok() => match resp.json::<GrpcInvokeResponse>().await {
-                Ok(data) => invoke_result.set(Some(Ok(data))),
-                Err(err) => invoke_result.set(Some(Err(err.to_string()))),
-            },
-            Ok(resp) => {
-                let text = resp.text().await.unwrap_or_else(|_| "Error".to_string());
-                invoke_result.set(Some(Err(text)));
-            }
-            Err(err) => invoke_result.set(Some(Err(err.to_string()))),
-        },
-        Err(err) => invoke_result.set(Some(Err(err.to_string()))),
-    }
+    invoke_result.set(Some(
+        post_json(locale, Request::post(&url), &req_body).await,
+    ));
     is_invoking.set(false);
 }
 
@@ -407,19 +395,14 @@ fn target_input_view(
                     placeholder="http://127.0.0.1:50051"
                     class={INPUT_CLASS}
                 />
-                <button
-                    type="button"
-                    onclick={on_discover}
-                    disabled={is_reflecting}
-                    class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors shrink-0 flex items-center gap-2"
-                >
+                <Button kind={ButtonKind::Primary} class="shrink-0" onclick={on_discover} disabled={is_reflecting}>
                     if is_reflecting {
                         <span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
                         {locale.t("grpc.discovering")}
                     } else {
                         {locale.t("grpc.discover_button")}
                     }
-                </button>
+                </Button>
             </div>
             <p class={HINT_CLASS}>{locale.t("grpc.target_url_hint")}</p>
         </div>
@@ -572,12 +555,7 @@ fn invoke_button_view(
 ) -> Html {
     html! {
         <div>
-            <button
-                type="button"
-                onclick={on_invoke}
-                disabled={is_invoking || !can_invoke}
-                class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-            >
+            <Button kind={ButtonKind::Success} onclick={on_invoke} disabled={is_invoking || !can_invoke}>
                 if is_invoking {
                     <span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
                     {locale.t("grpc.invoking")}
@@ -587,7 +565,7 @@ fn invoke_button_view(
                     </svg>
                     {locale.t("grpc.invoke_button")}
                 }
-            </button>
+            </Button>
         </div>
     }
 }
