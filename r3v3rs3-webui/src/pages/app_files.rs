@@ -357,7 +357,7 @@ fn entry_row(
             locale.t("apps.files_dir").to_string(),
         )
     } else {
-        (entry.name.clone(), entry.size.to_string())
+        (entry.name.clone(), format_bytes(entry.size))
     };
     let actions = if entry.dir {
         html! {
