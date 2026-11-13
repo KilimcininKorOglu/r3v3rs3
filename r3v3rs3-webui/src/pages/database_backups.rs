@@ -328,7 +328,7 @@ fn pitr_banner_view(
         let def_time = pitr.latest.unwrap_or_else(|| pitr.earliest.unwrap_or(0));
         let onclick = pitr_restore_action(locale, id, def_time, reload.clone());
         html! {
-            <Button kind={ButtonKind::Primary} size={ButtonSize::Sm} {onclick}>
+            <Button kind={ButtonKind::Success} size={ButtonSize::Sm} {onclick}>
                 {locale.t("databases.pitr_restore")}
             </Button>
         }
