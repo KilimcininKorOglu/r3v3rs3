@@ -25,7 +25,7 @@ pub fn discovery_status_card() -> Html {
         });
         wasm_bindgen_futures::spawn_local(async move {
             match get_proxies().await {
-                Ok(entries) => handle.set(Some(entries.len())),
+                Ok(entries) => handle.set(Some(manual_count(&entries))),
                 Err(_) => handle.set(None),
             }
         });
@@ -86,6 +86,14 @@ fn state_badge(state: DiscoveryState) -> (&'static str, &'static str) {
     }
 }
 
+/// The proxies that an account added by hand. A discovered proxy carries its source.
+fn manual_count(entries: &[ProxyEntry]) -> usize {
+    entries
+        .iter()
+        .filter(|entry| entry.source.is_none())
+        .count()
+}
+
 fn issue_text(issue: &DiscoveryIssue) -> String {
     format!("{}: {}", issue.resource, issue.message)
 }
@@ -125,5 +133,27 @@ mod tests {
             message: "http.app: port not found: https".into(),
         };
         assert_eq!(issue_text(&issue), "web-1: http.app: port not found: https");
+    }
+
+    #[test]
+    fn the_manual_count_leaves_out_the_discovered_proxies() {
+        let manual = ProxyEntry {
+            id: "man-ual".parse().unwrap(),
+            source: None,
+            status: None,
+            proxy: Default::default(),
+        };
+        let discovered = ProxyEntry {
+            id: "dis-cov".parse().unwrap(),
+            source: Some(r3v3rs3_api::discovery::DiscoverySource {
+                provider: r3v3rs3_api::discovery::DiscoveryProvider::Platform,
+                resource: "web".into(),
+            }),
+            status: None,
+            proxy: Default::default(),
+        };
+        assert_eq!(manual_count(&[manual.clone(), discovered]), 1);
+        assert_eq!(manual_count(&[manual]), 1);
+        assert_eq!(manual_count(&[]), 0);
     }
 }
