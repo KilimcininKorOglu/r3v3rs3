@@ -10,7 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Redis keeps the tenants of a shared server across a restart of its container. The ACL users lived only in memory, so a restart (a host reboot, a restart after a crash) dropped them and the apps got `WRONGPASS` until their next deployment. Redis now starts with the ACL file `/data/users.acl` of its data volume, the tenant and root password changes are saved into it, and the first start writes the `default` user with the root password, because a server that loads an ACL file ignores `--requirepass`. A Redis started by 3.2.5 or earlier gets the file at its next deployment.
 - The MCP tools that change apps, deployments, backups, targets, projects and environment groups write the same audit entries as the HTTP API; they called the platform directly and left no audit record.
 - Deleting a database backup and upgrading all agent targets write audit entries.
+- A tenant of a shared PostgreSQL server can no longer connect to the `postgres` and `template1` databases, which PUBLIC may open by default.
 - Tests that need a refused upstream use port 1 of `127.0.0.1` instead of a released ephemeral port, which a parallel test or a self-connection could take.
+
+### Changed
+- The upstream integration tests are split into helpers so each function has a cyclomatic complexity of ten or less.
 
 ## [3.2.5] - 2026-11-13
 
