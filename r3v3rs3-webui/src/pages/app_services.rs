@@ -3,7 +3,11 @@
 use super::Route;
 use super::settings::fetch_json;
 use crate::API_ENDPOINT;
+use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::compose_topology::ComposeTopologyGraph;
+use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
+use crate::components::tabs::{TabItem, Tabs};
 use gloo_net::http::Request;
 use r3v3rs3_api::container::ContainerHealth;
 use r3v3rs3_api::i18n::Locale;
@@ -49,6 +53,13 @@ pub fn app_services(props: &Props) -> Html {
         })
     };
 
+    let navigator = use_navigator();
+    let open_log = Callback::from(move |_: MouseEvent| {
+        if let Some(navigator) = &navigator {
+            navigator.push(&Route::AppLog { id });
+        }
+    });
+
     let Some(list) = (*services).as_ref() else {
         return html! {};
     };
@@ -70,7 +81,7 @@ pub fn app_services(props: &Props) -> Html {
                     </div>
                 }
             } else {
-                { services_table(locale, id, list) }
+                { services_table(locale, &open_log, list) }
             }
         </div>
     }
@@ -84,11 +95,11 @@ fn render_header(
     let current_mode = **view_mode;
     let set_graph = {
         let view_mode = view_mode.clone();
-        Callback::from(move |_| view_mode.set(ComposeViewMode::Graph))
+        Callback::from(move |_: MouseEvent| view_mode.set(ComposeViewMode::Graph))
     };
     let set_table = {
         let view_mode = view_mode.clone();
-        Callback::from(move |_| view_mode.set(ComposeViewMode::Table))
+        Callback::from(move |_: MouseEvent| view_mode.set(ComposeViewMode::Table))
     };
 
     html! {
@@ -102,39 +113,15 @@ fn render_header(
                 </p>
             </div>
             <div class="flex items-center gap-3">
-                <div class="inline-flex rounded-lg p-0.5 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700">
-                    <button
-                        type="button"
-                        onclick={set_graph}
-                        class={tab_class(current_mode == ComposeViewMode::Graph)}
-                    >
-                        {locale.t("compose.topology_tab_graph")}
-                    </button>
-                    <button
-                        type="button"
-                        onclick={set_table}
-                        class={tab_class(current_mode == ComposeViewMode::Table)}
-                    >
-                        {locale.t("compose.topology_tab_table")}
-                    </button>
-                </div>
-                <button
-                    type="button"
-                    onclick={refresh}
-                    class="text-xs sm:text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
-                >
+                <Tabs tabs={vec![
+                    TabItem::click(locale.t("compose.topology_tab_graph"), set_graph, current_mode == ComposeViewMode::Graph),
+                    TabItem::click(locale.t("compose.topology_tab_table"), set_table, current_mode == ComposeViewMode::Table),
+                ]} />
+                <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={refresh.clone()}>
                     {locale.t("apps.log_refresh")}
-                </button>
+                </Button>
             </div>
         </div>
-    }
-}
-
-fn tab_class(active: bool) -> &'static str {
-    if active {
-        "px-3 py-1 text-xs font-semibold rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-sm"
-    } else {
-        "px-3 py-1 text-xs font-medium rounded-md text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
     }
 }
 
@@ -157,50 +144,77 @@ fn load_data(
     });
 }
 
-fn services_table(locale: Locale, app_id: ShortId, list: &[ComposeServiceStatus]) -> Html {
+const SERVICE_COLUMNS: [Column; 5] = [
+    Column {
+        label: "apps.service_name",
+        class: "font-mono",
+    },
+    Column {
+        label: "apps.service_container",
+        class: "font-mono",
+    },
+    Column {
+        label: "apps.service_state",
+        class: "",
+    },
+    Column {
+        label: "apps.service_health",
+        class: "",
+    },
+    Column {
+        label: "apps.service_exit",
+        class: "",
+    },
+];
+
+fn services_table(
+    locale: Locale,
+    open_log: &Callback<MouseEvent>,
+    list: &[ComposeServiceStatus],
+) -> Html {
+    let rows = list
+        .iter()
+        .map(|s| service_row(locale, open_log, s))
+        .collect::<Vec<_>>();
+    let content = ListContent {
+        loaded: true,
+        empty: "compose.topology_empty",
+        columns: &SERVICE_COLUMNS,
+        rows: &rows,
+    };
+    let options = ListOptions {
+        embedded: true,
+        compact: true,
+        ..Default::default()
+    };
     html! {
-        <div class="overflow-x-auto -mx-4 -mb-4">
-            <table class="w-full text-left border-collapse text-xs">
-                <thead>
-                    <tr class="border-b border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
-                        <th class="py-2 px-4 font-medium text-neutral-600 dark:text-neutral-300">{locale.t("apps.service_name")}</th>
-                        <th class="py-2 px-4 font-medium text-neutral-600 dark:text-neutral-300">{locale.t("apps.service_container")}</th>
-                        <th class="py-2 px-4 font-medium text-neutral-600 dark:text-neutral-300">{locale.t("apps.service_state")}</th>
-                        <th class="py-2 px-4 font-medium text-neutral-600 dark:text-neutral-300">{locale.t("apps.service_health")}</th>
-                        <th class="py-2 px-4 font-medium text-neutral-600 dark:text-neutral-300">{locale.t("apps.service_exit")}</th>
-                        <th class="py-2 px-4 text-right font-medium text-neutral-600 dark:text-neutral-300"></th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-neutral-200 dark:divide-neutral-700">
-                    { for list.iter().map(|s| service_row(locale, app_id, s)) }
-                </tbody>
-            </table>
+        <div class="rounded-md border border-neutral-300 dark:border-neutral-700">
+            { list_view(locale, content, None, &options) }
         </div>
     }
 }
 
-fn service_row(locale: Locale, app_id: ShortId, s: &ComposeServiceStatus) -> Html {
+fn service_row(locale: Locale, open_log: &Callback<MouseEvent>, s: &ComposeServiceStatus) -> Row {
     let exit_text = match s.exit_code {
         Some(code) => locale.tf("apps.service_exit_code", &[("code", &code.to_string())]),
         None => "-".to_string(),
     };
-
-    html! {
-        <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/30">
-            <td class="py-2.5 px-4 font-mono font-medium text-neutral-900 dark:text-neutral-100">{&s.service}</td>
-            <td class="py-2.5 px-4 font-mono text-neutral-500 dark:text-neutral-400">{&s.container}</td>
-            <td class="py-2.5 px-4">{state_badge(&s.state)}</td>
-            <td class="py-2.5 px-4">{health_badge(locale, s.health)}</td>
-            <td class="py-2.5 px-4 text-neutral-500 dark:text-neutral-400">{exit_text}</td>
-            <td class="py-2.5 px-4 text-right">
-                <Link<Route>
-                    to={Route::AppLog { id: app_id }}
-                    classes="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                    {locale.t("apps.tabs_logs")}
-                </Link<Route>>
-            </td>
-        </tr>
+    Row {
+        key: s.service.clone(),
+        cells: vec![
+            html! { {&s.service} },
+            html! { {&s.container} },
+            state_badge(&s.state),
+            health_badge(locale, s.health),
+            html! { {exit_text} },
+        ],
+        actions: html! {
+            <ActionIconButton
+                variant={ActionVariant::Logs}
+                title={locale.t("apps.tabs_logs").to_string()}
+                onclick={open_log.clone()}
+            />
+        },
     }
 }
 
