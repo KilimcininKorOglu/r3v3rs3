@@ -3,9 +3,9 @@
 use super::Route;
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{
-    FormCard, Notice, add_button, close_callback, delete_on_click, form_modal, load, notice_view,
-    open_on_click, reload_callback, row_actions, save_result, submit_callback, text_input,
-    then_close, use_form_modal,
+    FormCard, FormState, Notice, add_button, close_callback, delete_on_click, failed_view,
+    form_modal, load, open_on_click, reload_callback, row_actions, save_result, saved_view,
+    submit_callback, text_input, then_close, use_form_modal,
 };
 use super::settings::send_json;
 use crate::API_ENDPOINT;
@@ -35,7 +35,6 @@ const COLUMNS: [Column; 2] = [
 ];
 
 type RegistriesList = UseStateHandle<Option<Vec<RegistryEntry>>>;
-type FormState<'a> = (&'a UseStateHandle<Form>, &'a UseStateHandle<bool>);
 
 #[derive(Clone, PartialEq, Default)]
 struct Form {
@@ -112,7 +111,7 @@ pub fn registries() -> Html {
 
     html! {
         <>
-            { notice_view(&notice, |()| html! { <p>{locale.t("registries.saved")}</p> }) }
+            { saved_view(&notice, |()| html! { <p>{locale.t("registries.saved")}</p> }) }
             { list_card(locale, registries.is_some(), "registries.no_registries", &COLUMNS, &rows) }
             if can_edit {
                 { add_button(locale, open_on_click(&form, &open, Form::default())) }
@@ -128,7 +127,7 @@ fn list_row(
     locale: Locale,
     entry: &RegistryEntry,
     can_edit: bool,
-    (form, open): FormState,
+    (form, open): FormState<Form>,
     registries: &RegistriesList,
 ) -> Row {
     let actions = if can_edit {
@@ -155,7 +154,7 @@ fn list_row(
 
 fn form_view(
     locale: Locale,
-    (form, open): FormState,
+    (form, open): FormState<Form>,
     notice: &UseStateHandle<Option<Notice<()>>>,
     registries: &RegistriesList,
 ) -> Html {
@@ -204,7 +203,7 @@ fn form_view(
 
     let card = FormCard {
         title,
-        notice: html! {},
+        notice: failed_view(notice),
         fields,
         error: parsed.as_ref().err().filter(|_| touched).cloned(),
         cancel: None,
@@ -222,7 +221,7 @@ fn form_view(
 
 fn submit(
     locale: Locale,
-    (form, open): FormState,
+    (form, open): FormState<Form>,
     notice: &UseStateHandle<Option<Notice<()>>>,
     registries: &RegistriesList,
 ) -> Callback<SubmitEvent> {

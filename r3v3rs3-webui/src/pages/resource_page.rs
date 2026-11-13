@@ -49,7 +49,8 @@ pub fn form_card(locale: Locale, card: FormCard, onsubmit: Callback<SubmitEvent>
 }
 
 /// The add or edit form of a list page in a modal. The cancel button, Escape and a click on the
-/// backdrop call `on_close`; the notice of the form shows above the list, not in the modal.
+/// backdrop call `on_close`. The notice of the card shows at the top of the modal, so a failed
+/// save is visible while the modal stays open.
 pub fn form_modal(
     locale: Locale,
     card: FormCard,
@@ -66,6 +67,7 @@ pub fn form_modal(
     html! {
         <Modal title={card.title} on_close={on_close} size={ModalSize::Lg}>
             <form {onsubmit}>
+                { card.notice }
                 { card.fields }
                 { form_buttons(locale, card.error, Some(cancel), card.save_label, card.can_save) }
             </form>
@@ -126,6 +128,22 @@ pub fn notice_view<T>(notice: &Option<Notice<T>>, saved: impl Fn(&T) -> Html) ->
     }
 }
 
+/// Shows only a successful save, above the list of a page whose form opens in a modal.
+pub fn saved_view<T>(notice: &Option<Notice<T>>, saved: impl Fn(&T) -> Html) -> Html {
+    match notice {
+        Some(Notice::Saved(value)) => success_box(saved(value)),
+        _ => html! {},
+    }
+}
+
+/// Shows only a failed save, inside the modal of the form, which stays open.
+pub fn failed_view<T>(notice: &Option<Notice<T>>) -> Html {
+    match notice {
+        Some(Notice::Failed(message)) => failure_box(message),
+        _ => html! {},
+    }
+}
+
 /// The edit link of a row, and its delete link when the row has one.
 pub fn row_actions(
     locale: Locale,
@@ -175,6 +193,9 @@ pub fn set_on_click<T: Clone + 'static>(
         state.set(value.clone());
     })
 }
+
+/// A form that opens in a modal and whether its modal is open.
+pub type FormState<'a, F> = (&'a UseStateHandle<F>, &'a UseStateHandle<bool>);
 
 /// The state of a form that opens in a modal: the form and whether the modal is open.
 #[hook]

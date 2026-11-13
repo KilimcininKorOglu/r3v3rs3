@@ -2,9 +2,9 @@
 
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{
-    FormCard, Notice, add_button, close_callback, delete_on_click, form_modal, load, notice_view,
-    open_on_click, reload_callback, row_actions, save_result, submit_callback, text_input,
-    then_close, use_form_modal,
+    FormCard, Notice, add_button, close_callback, delete_on_click, failed_view, form_modal, load,
+    open_on_click, reload_callback, row_actions, save_result, saved_view, submit_callback,
+    text_input, then_close, use_form_modal,
 };
 use super::settings::send_json;
 use crate::API_ENDPOINT;
@@ -143,7 +143,7 @@ pub fn dns_credentials() -> Html {
         .collect::<Vec<_>>();
     html! {
         <>
-            { notice_view(&notice, |()| html! { <p>{locale.t("dns_credentials.saved")}</p> }) }
+            { saved_view(&notice, |()| html! { <p>{locale.t("dns_credentials.saved")}</p> }) }
             { list_card(locale, credentials.is_some(), "dns_credentials.empty", &COLUMNS, &rows) }
             if can_edit {
                 { add_button(locale, open_on_click(&form, &open, Form::default())) }
@@ -218,7 +218,7 @@ fn form_view(
     };
     let card = FormCard {
         title,
-        notice: html! {},
+        notice: failed_view(notice),
         fields,
         error: parsed.as_ref().err().filter(|_| touched).cloned(),
         cancel: None,
