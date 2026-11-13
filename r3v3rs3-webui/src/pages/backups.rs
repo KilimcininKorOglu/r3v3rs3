@@ -8,7 +8,7 @@ use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::backup_drill_modal::BackupDrillModal;
 use crate::dialog::{self, Icon};
-use crate::format::format_time;
+use crate::format::{format_rfc3339, format_time, format_unix_time};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -767,7 +767,7 @@ fn render_s3_row(
             <td class="px-4 py-2 font-medium text-neutral-200">{&snap.database_name}</td>
             <td class="px-4 py-2 font-mono text-neutral-400">{&snap.key}</td>
             <td class="px-4 py-2 font-mono text-neutral-300">{format_bytes(snap.size)}</td>
-            <td class="px-4 py-2 text-neutral-400">{&snap.last_modified}</td>
+            <td class="px-4 py-2 text-neutral-400">{format_rfc3339(&snap.last_modified)}</td>
             <td class="px-4 py-2 text-right">
                 <div class="flex items-center justify-end gap-3">
                     <a class="text-neutral-300 hover:text-white font-medium" href={download_url} download={format!("{}.dump.gz", snap.backup_id)}>
@@ -1462,12 +1462,7 @@ fn render_dr_row(
     can_edit: bool,
     load_backups: &Callback<()>,
 ) -> Html {
-    let date_str = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
-        (entry.created_at * 1000) as f64,
-    ))
-    .to_locale_string("en-US", &wasm_bindgen::JsValue::UNDEFINED)
-    .as_string()
-    .unwrap_or_default();
+    let date_str = format_unix_time(locale, entry.created_at);
     let download_url = format!(
         "{API_ENDPOINT}/disaster-recovery/backups/{}/download",
         entry.id

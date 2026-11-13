@@ -69,6 +69,15 @@ pub fn format_instant(time: &OffsetDateTime) -> String {
     }
 }
 
+/// An RFC 3339 time from another system, such as the `LastModified` of an S3 object, in the same
+/// form and time zone as `format_time`. A text that does not parse stays as it is.
+pub fn format_rfc3339(text: &str) -> String {
+    match OffsetDateTime::parse(text, &Rfc3339) {
+        Ok(time) => format_instant(&time),
+        Err(_) => text.to_string(),
+    }
+}
+
 /// The current Unix time in seconds.
 pub fn unix_now() -> i64 {
     SystemTime::now()
@@ -263,6 +272,17 @@ mod tests {
             rfc3339_in_offset(1_500, -5 * 3600),
             Some("1969-12-31T19:00:01.5-05:00".to_owned())
         );
+    }
+
+    #[test]
+    fn an_s3_time_renders_like_the_stored_times() {
+        // S3 sends milliseconds with trailing zeros; the panel renders the same instant in the
+        // form of every other time instead of the raw text.
+        assert_eq!(
+            format_rfc3339("2026-10-21T18:00:00.000Z"),
+            "2026-10-21T18:00:00Z"
+        );
+        assert_eq!(format_rfc3339("not a time"), "not a time");
     }
 
     #[test]
