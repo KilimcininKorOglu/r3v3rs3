@@ -111,7 +111,7 @@ pub fn webhooks() -> Html {
     let (session, _) = use_store::<SessionStore>();
     let list = use_state(|| Option::<Vec<OutboundWebhook>>::None);
     let (form, open) = use_form_modal::<Form>();
-    let notice = use_state(|| Option::<Notice<()>>::None);
+    let notice = use_state(|| Option::<Notice<&'static str>>::None);
 
     let signed_in = session.info.is_some();
     let list_cloned = list.clone();
@@ -139,7 +139,7 @@ pub fn webhooks() -> Html {
                 <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{locale.t("webhooks.title")}</h1>
                 <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{locale.t("webhooks.subtitle")}</p>
             </div>
-            { saved_view(&notice, |()| html! { <p>{locale.t("webhooks.created")}</p> }) }
+            { saved_view(&notice, |key: &&'static str| html! { <p>{locale.t(key)}</p> }) }
             { list_card(locale, list.is_some(), "webhooks.empty", &COLUMNS, &rows) }
             { add_button(locale, open_on_click(&form, &open, Form::default())) }
             if *open {
@@ -395,7 +395,7 @@ fn render_event_checkbox(locale: Locale, ev: WebhookEvent, form: &UseStateHandle
 fn form_view(
     locale: Locale,
     (form, open): FormState<Form>,
-    notice: &UseStateHandle<Option<Notice<()>>>,
+    notice: &UseStateHandle<Option<Notice<&'static str>>>,
     list: &WebhooksList,
 ) -> Html {
     let is_editing = form.editing.is_some();
@@ -505,7 +505,7 @@ fn form_view(
 fn submit_webhook(
     locale: Locale,
     (form, open): FormState<Form>,
-    notice: &UseStateHandle<Option<Notice<()>>>,
+    notice: &UseStateHandle<Option<Notice<&'static str>>>,
     list: &WebhooksList,
 ) -> Callback<SubmitEvent> {
     let form_cloned = form.clone();
@@ -520,6 +520,10 @@ fn submit_webhook(
         let notice_state = notice_cloned.clone();
         let list_state = list_cloned.clone();
 
+        let saved_key = match form_state.editing {
+            Some(_) => "webhooks.updated",
+            None => "webhooks.created",
+        };
         spawn_local(async move {
             let res = if let Some(id) = form_state.editing {
                 let secret_opt = if form_state.secret.trim().is_empty() {
@@ -557,11 +561,11 @@ fn submit_webhook(
                 Ok(_) => {
                     form_state.set(Form::default());
                     open_state.set(false);
-                    notice_state.set(Some(Notice::Saved(())));
+                    notice_state.set(Some(Notice::Saved(saved_key)));
                     load(locale, list_state, PATH);
                 }
                 Err(err) => {
-                    notice_state.set(Some(Notice::Failed(err.to_string())));
+                    notice_state.set(Some(Notice::Failed(err)));
                 }
             }
         });
