@@ -1,3 +1,4 @@
+use super::resource_page::{Loaded, delete, loaded_entries, use_list};
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::button::{Button, ButtonKind, ButtonSize, button_class};
 use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
@@ -1582,23 +1583,8 @@ fn error_page_themes_redirect(locale: Locale) -> Html {
 fn mcp_sessions_card() -> Html {
     let locale = use_locale();
     let reload = use_state(|| 0);
-    let list = use_state(Vec::<McpSession>::new);
+    let list = use_list::<McpSession>(locale, "/mcp/sessions", *reload);
     let notice = use_state(|| Option::<Notice>::None);
-
-    let reload_val = *reload;
-    let list_handle = list.clone();
-    use_effect_with(reload_val, move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(entries) = fetch_json::<Vec<McpSession>>(
-                locale,
-                Request::get(&format!("{API_ENDPOINT}/mcp/sessions")),
-            )
-            .await
-            {
-                list_handle.set(entries);
-            }
-        });
-    });
 
     let revoke = {
         let reload = reload.clone();
@@ -1608,17 +1594,14 @@ fn mcp_sessions_card() -> Html {
             let notice = notice.clone();
             let question = locale.t("settings.mcp_session_revoke_confirm").to_string();
             dialog::confirm_then(locale, question, async move {
-                let req = Request::delete(&format!("{API_ENDPOINT}/mcp/sessions/{id}"));
-                if let Ok(built) = req.build() {
-                    match send_request(locale, built).await {
-                        Ok(_) => {
-                            notice.set(Some(Notice::Success(
-                                locale.t("settings.mcp_session_revoked").to_string(),
-                            )));
-                            reload.set(*reload + 1);
-                        }
-                        Err(err) => notice.set(Some(Notice::Failed(err))),
+                match delete(locale, &format!("/mcp/sessions/{id}")).await {
+                    Ok(()) => {
+                        notice.set(Some(Notice::Success(
+                            locale.t("settings.mcp_session_revoked").to_string(),
+                        )));
+                        reload.set(*reload + 1);
                     }
+                    Err(err) => notice.set(Some(Notice::Failed(err))),
                 }
             });
         })
@@ -1695,13 +1678,21 @@ fn mcp_session_row(locale: Locale, entry: &McpSession, revoke: &Callback<String>
     }
 }
 
-fn mcp_sessions_table(locale: Locale, list: &[McpSession], revoke: &Callback<String>) -> Html {
-    let rows = list
+fn mcp_sessions_table(
+    locale: Locale,
+    list: &Loaded<McpSession>,
+    revoke: &Callback<String>,
+) -> Html {
+    let (loaded, entries) = match loaded_entries(list) {
+        Ok(found) => found,
+        Err(err) => return failure_box(err),
+    };
+    let rows = entries
         .iter()
         .map(|entry| mcp_session_row(locale, entry, revoke))
         .collect::<Vec<_>>();
     let content = ListContent {
-        loaded: true,
+        loaded,
         empty: "settings.mcp_no_sessions",
         columns: &MCP_SESSION_COLUMNS,
         rows: &rows,
