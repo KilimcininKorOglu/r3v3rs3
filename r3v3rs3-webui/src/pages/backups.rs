@@ -1268,6 +1268,8 @@ fn disaster_recovery_tab(props: &SubTabProps) -> Html {
             let Some(file) = input.files().and_then(|files| files.get(0)) else {
                 return;
             };
+            // Clear the input so that picking the same file again fires a change.
+            input.set_value("");
             let is_restoring = is_restoring.clone();
             let pass = (*passphrase).clone();
             let load_backups = load_backups.clone();
@@ -1608,6 +1610,8 @@ fn configuration_backup_tab(props: &SubTabProps) -> Html {
             let Some(file) = input.files().and_then(|files| files.get(0)) else {
                 return;
             };
+            // Clear the input so that picking the same file again fires a change.
+            input.set_value("");
             let is_restoring = is_restoring.clone();
             let question = locale.t("settings.restore_confirm").to_string();
             dialog::confirm_then(locale, question, async move {
