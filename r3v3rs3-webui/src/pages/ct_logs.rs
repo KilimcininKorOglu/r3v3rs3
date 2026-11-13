@@ -1,6 +1,9 @@
+use super::resource_page::{FormCard, form_modal};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind};
+use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
 use crate::format::format_duration;
 use crate::i18n::use_locale;
 use gloo_net::http::Request;
@@ -9,8 +12,43 @@ use r3v3rs3_api::ct::{
     UpdateCtConfigRequest,
 };
 use r3v3rs3_api::i18n::Locale;
+use std::collections::HashMap;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
+
+const INPUT_CLASS: &str = "w-full rounded-lg border border-neutral-300 bg-neutral-50 text-neutral-900 dark:border-neutral-600 dark:bg-neutral-700 dark:text-white px-3 py-2 text-sm focus:ring-primary-500 focus:border-primary-500";
+const CHECKBOX_CLASS: &str =
+    "rounded border-neutral-300 dark:border-neutral-600 text-primary-600 focus:ring-primary-500";
+const TILE: &str = "p-4 rounded-md border border-neutral-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-800";
+const TILE_ALERT: &str = "p-4 rounded-md border border-red-300 bg-red-50 shadow-sm dark:border-red-900 dark:bg-red-950/40";
+const TILE_LABEL: &str = "text-xs font-medium text-neutral-500 dark:text-neutral-400";
+const FIELD_LABEL: &str = "block text-sm font-medium text-neutral-800 dark:text-neutral-200";
+const HINT: &str = "text-xs text-neutral-500 dark:text-neutral-400";
+const BADGE: &str = "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium";
+const ROGUE_ROW: &str = "bg-red-50/60 dark:bg-red-950/20";
+
+const COLUMNS: [Column; 5] = [
+    Column {
+        label: "certs.ct_domain_sans",
+        class: "",
+    },
+    Column {
+        label: "certs.issuer",
+        class: "max-w-xs",
+    },
+    Column {
+        label: "certs.ct_serial",
+        class: "text-xs font-mono",
+    },
+    Column {
+        label: "certs.ct_validity",
+        class: "text-xs whitespace-nowrap",
+    },
+    Column {
+        label: "common.status",
+        class: "",
+    },
+];
 
 #[derive(Clone)]
 struct CtFormHandles {
@@ -80,8 +118,9 @@ fn create_save_callback(
     form: CtFormHandles,
     show_settings: UseStateHandle<bool>,
     reload: Callback<()>,
-) -> Callback<MouseEvent> {
-    Callback::from(move |_| {
+) -> Callback<SubmitEvent> {
+    Callback::from(move |event: SubmitEvent| {
+        event.prevent_default();
         let req = build_update_config_request(
             *form.enabled,
             *form.auto_discover,
@@ -104,16 +143,29 @@ fn create_toggle_settings(show_settings: UseStateHandle<bool>) -> Callback<Mouse
     Callback::from(move |_| show_settings.set(!*show_settings))
 }
 
-fn render_drawer_if_visible(
+fn render_settings_if_visible(
     locale: Locale,
-    show: bool,
+    show_settings: &UseStateHandle<bool>,
     form: &CtFormHandles,
-    save_cb: Callback<MouseEvent>,
+    onsubmit: Callback<SubmitEvent>,
 ) -> Html {
-    if !show {
+    if !**show_settings {
         return html! {};
     }
-    render_settings_drawer(locale, form, save_cb)
+    let on_close = {
+        let show_settings = show_settings.clone();
+        Callback::from(move |()| show_settings.set(false))
+    };
+    let card = FormCard {
+        title: locale.t("certs.ct_settings").to_string(),
+        notice: html! {},
+        fields: render_settings_fields(locale, form),
+        error: None,
+        cancel: None,
+        save_label: "certs.ct_save_config",
+        can_save: true,
+    };
+    form_modal(locale, card, onsubmit, on_close)
 }
 
 fn render_summary_if_present(locale: Locale, status: Option<&CtMonitorStatus>) -> Html {
@@ -180,21 +232,20 @@ pub fn ct_logs() -> Html {
 
     let check_now_onclick = create_check_callback(checking.clone(), load_data.clone());
     let toggle_settings = create_toggle_settings(show_settings.clone());
-    let save_settings_onclick = create_save_callback(
+    let save_settings = create_save_callback(
         form_handles.clone(),
         show_settings.clone(),
         load_data.clone(),
     );
 
     let filtered = filter_entries(&data_handles.entries, *rogue_only, &search_filter);
-    let drawer =
-        render_drawer_if_visible(locale, *show_settings, &form_handles, save_settings_onclick);
+    let settings = render_settings_if_visible(locale, &show_settings, &form_handles, save_settings);
     let summary = render_summary_if_present(locale, data_handles.status.as_ref());
 
     html! {
         <div class="space-y-6">
             { render_header(locale, *checking, check_now_onclick, toggle_settings) }
-            { drawer }
+            { settings }
             { summary }
             { render_filter_bar(locale, &rogue_only, &search_filter) }
             { render_entries_table(locale, &filtered, load_data) }
@@ -211,7 +262,7 @@ fn render_header(
     html! {
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-                <h1 class="text-2xl font-bold tracking-tight text-neutral-900 dark:text-white">
+                <h1 class="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
                     { locale.t("certs.ct_title") }
                 </h1>
                 <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
@@ -219,26 +270,24 @@ fn render_header(
                 </p>
             </div>
             <div class="flex items-center gap-2">
-                <button
-                    onclick={check_now}
-                    disabled={checking}
-                    class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:ring-primary-300 dark:focus:ring-primary-800 disabled:opacity-50"
-                >
+                <Button kind={ButtonKind::Secondary} onclick={toggle_settings}>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    { locale.t("certs.ct_settings") }
+                </Button>
+                <Button kind={ButtonKind::Primary} onclick={check_now} disabled={checking}>
                     if checking {
-                        <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        <span>{ locale.t("certs.ct_checking") }</span>
+                        <span class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        { locale.t("certs.ct_checking") }
                     } else {
-                        <img src="/assets/icons/refresh.svg" class="w-4 h-4 invert dark:invert-0" />
-                        <span>{ locale.t("certs.ct_check_now") }</span>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        { locale.t("certs.ct_check_now") }
                     }
-                </button>
-                <button
-                    onclick={toggle_settings}
-                    class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-700"
-                >
-                    <img src="/assets/icons/create.svg" class="w-4 h-4 text-neutral-500" />
-                    <span>{ locale.t("certs.ct_settings") }</span>
-                </button>
+                </Button>
             </div>
         </div>
     }
@@ -246,10 +295,10 @@ fn render_header(
 
 fn render_summary_cards(locale: Locale, status: &CtMonitorStatus) -> Html {
     let rogues_count = status.active_rogue_alerts_count;
-    let rogues_card_cls = if rogues_count > 0 {
-        "p-4 rounded-xl border border-red-300 dark:border-red-900 bg-red-50 dark:bg-red-950/40"
+    let (rogues_tile, rogues_value) = if rogues_count > 0 {
+        (TILE_ALERT, "text-red-600 dark:text-red-400")
     } else {
-        "p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"
+        (TILE, "text-neutral-900 dark:text-neutral-100")
     };
 
     let last_check_text = match status.last_check_at {
@@ -263,41 +312,33 @@ fn render_summary_cards(locale: Locale, status: &CtMonitorStatus) -> Html {
 
     html! {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
-                <div class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                    { locale.t("certs.ct_monitored_domains") }
-                </div>
-                <div class="mt-2 text-2xl font-bold text-neutral-900 dark:text-white">
+            <div class={TILE}>
+                <div class={TILE_LABEL}>{ locale.t("certs.ct_monitored_domains") }</div>
+                <div class="mt-2 text-2xl font-bold text-neutral-900 dark:text-neutral-100">
                     { status.monitored_domains.len() }
                 </div>
             </div>
 
-            <div class={rogues_card_cls}>
-                <div class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                    { locale.t("certs.ct_active_rogue_alerts") }
-                </div>
-                <div class={classes!("mt-2", "text-2xl", "font-bold", if rogues_count > 0 { "text-red-600 dark:text-red-400" } else { "text-neutral-900 dark:text-white" })}>
+            <div class={rogues_tile}>
+                <div class={TILE_LABEL}>{ locale.t("certs.ct_active_rogue_alerts") }</div>
+                <div class={classes!("mt-2", "text-2xl", "font-bold", rogues_value)}>
                     { rogues_count }
                 </div>
             </div>
 
-            <div class="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
-                <div class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                    { locale.t("certs.ct_last_check") }
-                </div>
-                <div class="mt-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+            <div class={TILE}>
+                <div class={TILE_LABEL}>{ locale.t("certs.ct_last_check") }</div>
+                <div class="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                     { last_check_text }
                 </div>
-                <div class="text-xs text-neutral-400 mt-1 uppercase tracking-wider">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mt-1 uppercase tracking-wider">
                     { &status.last_check_status }
                 </div>
             </div>
 
-            <div class="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
-                <div class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                    { locale.t("certs.ct_next_check") }
-                </div>
-                <div class="mt-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+            <div class={TILE}>
+                <div class={TILE_LABEL}>{ locale.t("certs.ct_next_check") }</div>
+                <div class="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                     { next_check_text }
                 </div>
             </div>
@@ -305,24 +346,37 @@ fn render_summary_cards(locale: Locale, status: &CtMonitorStatus) -> Html {
     }
 }
 
-fn render_settings_drawer(
+fn settings_checkbox(
     locale: Locale,
-    form: &CtFormHandles,
-    save_cb: Callback<MouseEvent>,
+    state: &UseStateHandle<bool>,
+    label: &'static str,
+    hint: &'static str,
 ) -> Html {
-    let on_toggle_enabled = {
-        let enabled = form.enabled.clone();
-        Callback::from(move |_| enabled.set(!*enabled))
+    let onclick = {
+        let state = state.clone();
+        Callback::from(move |_: MouseEvent| state.set(!*state))
     };
-    let on_toggle_auto = {
-        let auto_discover = form.auto_discover.clone();
-        Callback::from(move |_| auto_discover.set(!*auto_discover))
-    };
-    let on_toggle_alert = {
-        let alert_unknown = form.alert_unknown.clone();
-        Callback::from(move |_| alert_unknown.set(!*alert_unknown))
-    };
+    html! {
+        <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" checked={**state} {onclick} class={CHECKBOX_CLASS} />
+            <div>
+                <div class="text-sm font-medium text-neutral-800 dark:text-neutral-200">{ locale.t(label) }</div>
+                <div class={HINT}>{ locale.t(hint) }</div>
+            </div>
+        </label>
+    }
+}
 
+fn text_oninput(state: &UseStateHandle<String>) -> Callback<InputEvent> {
+    let state = state.clone();
+    Callback::from(move |e: InputEvent| {
+        if let Some(target) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+            state.set(target.value());
+        }
+    })
+}
+
+fn render_settings_fields(locale: Locale, form: &CtFormHandles) -> Html {
     let on_interval_input = {
         let interval = form.interval_hours.clone();
         Callback::from(move |e: InputEvent| {
@@ -334,76 +388,28 @@ fn render_settings_drawer(
         })
     };
 
-    let on_domains_input = {
-        let domains = form.domains.clone();
-        Callback::from(move |e: InputEvent| {
-            if let Some(target) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
-                domains.set(target.value());
-            }
-        })
-    };
-
-    let on_issuers_input = {
-        let issuers = form.issuers.clone();
-        Callback::from(move |e: InputEvent| {
-            if let Some(target) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
-                issuers.set(target.value());
-            }
-        })
-    };
-
     html! {
-        <div class="p-5 border border-neutral-200 dark:border-neutral-800 rounded-xl bg-neutral-50 dark:bg-neutral-900/60 space-y-4">
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-white">
-                { locale.t("certs.ct_settings") }
-            </h2>
+        <div class="space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <label class="flex items-center gap-3 cursor-pointer">
-                    <input type="checkbox" checked={*form.enabled} onclick={on_toggle_enabled} class="rounded border-neutral-300 dark:border-neutral-700 text-primary-600 focus:ring-primary-500" />
-                    <div>
-                        <div class="text-sm font-medium text-neutral-800 dark:text-neutral-200">{ locale.t("certs.ct_enable") }</div>
-                        <div class="text-xs text-neutral-500 dark:text-neutral-400">{ locale.t("certs.ct_enable_hint") }</div>
-                    </div>
-                </label>
-
-                <label class="flex items-center gap-3 cursor-pointer">
-                    <input type="checkbox" checked={*form.auto_discover} onclick={on_toggle_auto} class="rounded border-neutral-300 dark:border-neutral-700 text-primary-600 focus:ring-primary-500" />
-                    <div>
-                        <div class="text-sm font-medium text-neutral-800 dark:text-neutral-200">{ locale.t("certs.ct_auto_discover") }</div>
-                        <div class="text-xs text-neutral-500 dark:text-neutral-400">{ locale.t("certs.ct_auto_discover_hint") }</div>
-                    </div>
-                </label>
-
-                <label class="flex items-center gap-3 cursor-pointer">
-                    <input type="checkbox" checked={*form.alert_unknown} onclick={on_toggle_alert} class="rounded border-neutral-300 dark:border-neutral-700 text-primary-600 focus:ring-primary-500" />
-                    <div>
-                        <div class="text-sm font-medium text-neutral-800 dark:text-neutral-200">{ locale.t("certs.ct_alert_unknown") }</div>
-                        <div class="text-xs text-neutral-500 dark:text-neutral-400">{ locale.t("certs.ct_alert_unknown_hint") }</div>
-                    </div>
-                </label>
-
+                { settings_checkbox(locale, &form.enabled, "certs.ct_enable", "certs.ct_enable_hint") }
+                { settings_checkbox(locale, &form.auto_discover, "certs.ct_auto_discover", "certs.ct_auto_discover_hint") }
+                { settings_checkbox(locale, &form.alert_unknown, "certs.ct_alert_unknown", "certs.ct_alert_unknown_hint") }
                 <div>
-                    <label class="block text-sm font-medium text-neutral-800 dark:text-neutral-200">{ locale.t("certs.ct_check_interval") }</label>
-                    <input type="number" min="1" value={form.interval_hours.to_string()} oninput={on_interval_input} class="mt-1 w-full text-sm rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white px-3 py-2" />
+                    <label class={FIELD_LABEL}>{ locale.t("certs.ct_check_interval") }</label>
+                    <input type="number" min="1" value={form.interval_hours.to_string()} oninput={on_interval_input} class={classes!(INPUT_CLASS, "mt-1")} />
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm font-medium text-neutral-800 dark:text-neutral-200">{ locale.t("certs.ct_custom_domains") }</label>
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">{ locale.t("certs.ct_custom_domains_hint") }</div>
-                <input type="text" value={(*form.domains).clone()} oninput={on_domains_input} placeholder="example.com, test.org" class="w-full text-sm rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white px-3 py-2" />
+                <label class={FIELD_LABEL}>{ locale.t("certs.ct_custom_domains") }</label>
+                <div class={classes!(HINT, "mb-1")}>{ locale.t("certs.ct_custom_domains_hint") }</div>
+                <input type="text" value={(*form.domains).clone()} oninput={text_oninput(&form.domains)} placeholder="example.com, test.org" class={INPUT_CLASS} />
             </div>
 
             <div>
-                <label class="block text-sm font-medium text-neutral-800 dark:text-neutral-200">{ locale.t("certs.ct_allowed_issuers") }</label>
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">{ locale.t("certs.ct_allowed_issuers_hint") }</div>
-                <input type="text" value={(*form.issuers).clone()} oninput={on_issuers_input} placeholder="Let's Encrypt, Google Trust Services, DigiCert" class="w-full text-sm rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white px-3 py-2" />
-            </div>
-
-            <div class="flex justify-end pt-2">
-                <button onclick={save_cb} class="px-4 py-2 text-sm font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700">
-                    { locale.t("certs.ct_save_config") }
-                </button>
+                <label class={FIELD_LABEL}>{ locale.t("certs.ct_allowed_issuers") }</label>
+                <div class={classes!(HINT, "mb-1")}>{ locale.t("certs.ct_allowed_issuers_hint") }</div>
+                <input type="text" value={(*form.issuers).clone()} oninput={text_oninput(&form.issuers)} placeholder="Let's Encrypt, Google Trust Services, DigiCert" class={INPUT_CLASS} />
             </div>
         </div>
     }
@@ -418,14 +424,6 @@ fn render_filter_bar(
         let rogue_only = rogue_only.clone();
         Callback::from(move |_| rogue_only.set(!*rogue_only))
     };
-    let on_search_input = {
-        let search_filter = search_filter.clone();
-        Callback::from(move |e: InputEvent| {
-            if let Some(target) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
-                search_filter.set(target.value());
-            }
-        })
-    };
 
     html! {
         <div class="flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -433,13 +431,13 @@ fn render_filter_bar(
                 <input
                     type="text"
                     value={(**search_filter).clone()}
-                    oninput={on_search_input}
+                    oninput={text_oninput(search_filter)}
                     placeholder={locale.t("certs.ct_search_placeholder").to_string()}
-                    class="w-full text-sm rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white px-3 py-2"
+                    class={INPUT_CLASS}
                 />
             </div>
             <label class="flex items-center gap-2 cursor-pointer self-start sm:self-center">
-                <input type="checkbox" checked={**rogue_only} onclick={on_toggle_rogue} class="rounded border-neutral-300 dark:border-neutral-700 text-red-600 focus:ring-red-500" />
+                <input type="checkbox" checked={**rogue_only} onclick={on_toggle_rogue} class="rounded border-neutral-300 dark:border-neutral-600 text-red-600 focus:ring-red-500" />
                 <span class="text-sm font-medium text-red-600 dark:text-red-400">
                     { locale.t("certs.ct_status_rogue") }
                 </span>
@@ -448,43 +446,35 @@ fn render_filter_bar(
     }
 }
 
-fn render_entries_table(locale: Locale, entries: &[CtLogEntry], reload_cb: Callback<()>) -> Html {
-    if entries.is_empty() {
-        return html! {
-            <div class="p-8 text-center border border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 text-sm">
-                { locale.t("certs.ct_no_entries") }
-            </div>
-        };
-    }
-
-    html! {
-        <div class="overflow-x-auto border border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-900 shadow-sm">
-            <table class="w-full text-left text-sm text-neutral-600 dark:text-neutral-300">
-                <thead class="text-xs uppercase bg-neutral-50 dark:bg-neutral-800/60 text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800">
-                    <tr>
-                        <th class="px-4 py-3">{ locale.t("certs.ct_domain_sans") }</th>
-                        <th class="px-4 py-3">{ locale.t("certs.issuer") }</th>
-                        <th class="px-4 py-3">{ locale.t("certs.ct_serial") }</th>
-                        <th class="px-4 py-3">{ locale.t("certs.ct_validity") }</th>
-                        <th class="px-4 py-3">{ locale.t("common.status") }</th>
-                        <th class="px-4 py-3 text-right">{ locale.t("common.actions") }</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-neutral-200 dark:divide-neutral-800">
-                    { for entries.iter().map(|entry| render_entry_row(locale, entry, reload_cb.clone())) }
-                </tbody>
-            </table>
-        </div>
-    }
+/// An entry that is still an open rogue alert.
+fn is_open_alert(entry: &CtLogEntry) -> bool {
+    entry.is_rogue && entry.status != CtAlertStatus::Dismissed
 }
 
-fn render_entry_row(locale: Locale, entry: &CtLogEntry, reload_cb: Callback<()>) -> Html {
-    let row_cls = if entry.is_rogue && entry.status != CtAlertStatus::Dismissed {
-        "bg-red-50/60 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
-    } else {
-        "hover:bg-neutral-50 dark:hover:bg-neutral-800/40 transition-colors"
+fn render_entries_table(locale: Locale, entries: &[CtLogEntry], reload_cb: Callback<()>) -> Html {
+    let rows = entries
+        .iter()
+        .map(|entry| render_entry_row(locale, entry, reload_cb.clone()))
+        .collect::<Vec<_>>();
+    let row_class: HashMap<String, &'static str> = entries
+        .iter()
+        .filter(|entry| is_open_alert(entry))
+        .map(|entry| (entry.id.clone(), ROGUE_ROW))
+        .collect();
+    let content = ListContent {
+        loaded: true,
+        empty: "certs.ct_no_entries",
+        columns: &COLUMNS,
+        rows: &rows,
     };
+    let options = ListOptions {
+        row_class,
+        ..Default::default()
+    };
+    list_view(locale, content, None, &options)
+}
 
+fn render_entry_row(locale: Locale, entry: &CtLogEntry, reload_cb: Callback<()>) -> Row {
     let not_before = entry
         .not_before
         .map(|ts| format_duration(locale, ts))
@@ -511,46 +501,51 @@ fn render_entry_row(locale: Locale, entry: &CtLogEntry, reload_cb: Callback<()>)
         })
     };
 
-    html! {
-        <tr class={row_cls}>
-            <td class="px-4 py-3">
-                <div class="font-medium text-neutral-900 dark:text-white">{ &entry.domain }</div>
-                if !entry.san.is_empty() {
-                    <div class="text-xs text-neutral-400 truncate max-w-xs">{ entry.san.join(", ") }</div>
-                }
-            </td>
-            <td class="px-4 py-3 max-w-xs">
+    let actions = if is_open_alert(entry) {
+        html! {
+            <ActionIconButton
+                variant={ActionVariant::Pause}
+                title={locale.t("certs.ct_dismiss").to_string()}
+                onclick={dismiss_onclick}
+            />
+        }
+    } else {
+        html! {}
+    };
+
+    Row {
+        key: entry.id.clone(),
+        cells: vec![
+            html! {
+                <>
+                    <div class="font-medium text-neutral-900 dark:text-neutral-100">{ &entry.domain }</div>
+                    if !entry.san.is_empty() {
+                        <div class="text-xs text-neutral-500 dark:text-neutral-400 truncate max-w-xs">{ entry.san.join(", ") }</div>
+                    }
+                </>
+            },
+            html! {
                 <div class="truncate text-xs font-mono" title={entry.issuer_name.clone()}>
                     { &entry.issuer_name }
                 </div>
-            </td>
-            <td class="px-4 py-3 text-xs font-mono text-neutral-500">
-                { truncate_serial(&entry.serial_number) }
-            </td>
-            <td class="px-4 py-3 text-xs">
-                <div>{ not_before }</div>
-                <div class="text-neutral-400">{"→ "}{ not_after }</div>
-            </td>
-            <td class="px-4 py-3">
-                { render_status_badge(locale, entry) }
-            </td>
-            <td class="px-4 py-3 text-right">
-                if entry.is_rogue && entry.status != CtAlertStatus::Dismissed {
-                    <ActionIconButton
-                        variant={ActionVariant::Pause}
-                        title={locale.t("certs.ct_dismiss").to_string()}
-                        onclick={dismiss_onclick}
-                    />
-                }
-            </td>
-        </tr>
+            },
+            html! { { truncate_serial(&entry.serial_number) } },
+            html! {
+                <>
+                    <div>{ not_before }</div>
+                    <div class="text-neutral-500 dark:text-neutral-400">{"→ "}{ not_after }</div>
+                </>
+            },
+            render_status_badge(locale, entry),
+        ],
+        actions,
     }
 }
 
 fn render_status_badge(locale: Locale, entry: &CtLogEntry) -> Html {
     if !entry.is_rogue {
         return html! {
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400">
+            <span class={classes!(BADGE, "bg-emerald-100", "text-emerald-800", "dark:bg-emerald-950/60", "dark:text-emerald-400")}>
                 { locale.t("certs.ct_status_ok") }
             </span>
         };
@@ -558,18 +553,18 @@ fn render_status_badge(locale: Locale, entry: &CtLogEntry) -> Html {
 
     match entry.status {
         CtAlertStatus::Investigating => html! {
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-300" title={entry.rogue_reason.clone().unwrap_or_default()}>
+            <span class={classes!(BADGE, "font-semibold", "bg-red-100", "text-red-800", "dark:bg-red-900/60", "dark:text-red-300")} title={entry.rogue_reason.clone().unwrap_or_default()}>
                 <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                 { locale.t("certs.ct_status_rogue") }
             </span>
         },
         CtAlertStatus::Dismissed => html! {
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-400">
+            <span class={classes!(BADGE, "bg-neutral-200", "text-neutral-700", "dark:bg-neutral-700", "dark:text-neutral-300")}>
                 { locale.t("certs.ct_status_dismissed") }
             </span>
         },
         CtAlertStatus::ConfirmedRogue => html! {
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-700 text-white">
+            <span class={classes!(BADGE, "font-semibold", "bg-red-700", "text-white")}>
                 { locale.t("certs.ct_status_confirmed") }
             </span>
         },
