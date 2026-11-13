@@ -5,6 +5,7 @@ use super::app_list::SLOW_REFRESH_MS;
 use super::settings::{failure_box, fetch_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::dialog::{self, Icon};
 use crate::format::format_bytes;
 use crate::i18n::use_locale;
@@ -375,11 +376,7 @@ fn toolbar_view(props: ToolbarProps<'_>) -> Html {
                     />
                     {locale.t("apps.log_auto_scroll")}
                 </label>
-                <button
-                    onclick={toggle_live}
-                    type="button"
-                    class="inline-flex items-center gap-1.5 text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 font-medium"
-                >
+                <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={toggle_live}>
                     if **live {
                         <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
                         {locale.t("apps.log_live")}
@@ -387,39 +384,31 @@ fn toolbar_view(props: ToolbarProps<'_>) -> Html {
                         <span class="w-2 h-2 rounded-full bg-neutral-400"></span>
                         {locale.t("apps.log_paused")}
                     }
-                </button>
+                </Button>
                 if !**live {
-                    <button
+                    <Button
+                        kind={ButtonKind::Secondary}
+                        size={ButtonSize::Sm}
                         onclick={{
                             let refresh = refresh.clone();
                             move |_: MouseEvent| refresh.emit(())
                         }}
-                        type="button"
-                        class="text-xs sm:text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
                     >
                         {locale.t("apps.log_refresh")}
-                    </button>
+                    </Button>
                 }
-                <button
-                    onclick={on_download}
-                    type="button"
-                    class="inline-flex items-center text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 font-medium"
-                >
-                    <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_download}>
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                     </svg>
                     {locale.t("apps.log_download")}
-                </button>
-                <button
-                    onclick={on_vacuum}
-                    type="button"
-                    class="inline-flex items-center text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40 font-medium"
-                >
-                    <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                </Button>
+                <Button kind={ButtonKind::Danger} size={ButtonSize::Sm} onclick={on_vacuum}>
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                     </svg>
                     {locale.t("apps.log_vacuum")}
-                </button>
+                </Button>
             </div>
         </div>
     }

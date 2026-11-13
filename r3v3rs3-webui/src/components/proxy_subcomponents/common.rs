@@ -14,7 +14,6 @@ pub const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutr
 pub const HINT_CLASS: &str = "mt-2 text-sm text-neutral-500 dark:text-neutral-400";
 pub const ERROR_CLASS: &str = "mt-2 text-sm text-red-600 dark:text-red-500";
 pub const TOGGLE_CLASS: &str = "shrink-0 w-9 h-5 bg-neutral-200 dark:bg-neutral-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600";
-pub const BUTTON_CLASS: &str = "inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600";
 
 pub fn toggle(
     onchange: Callback<Event>,
@@ -208,13 +207,13 @@ pub fn list_buttons<T: Clone + 'static>(
     };
 
     html! {
-        <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
-            <button type="button" onclick={add_onclick} class={classes!(BUTTON_CLASS, "rounded-l-lg")}>
-                <img src="/assets/icons/add.svg" class="w-4 h-4" />
-            </button>
-            <button type="button" onclick={remove_onclick} disabled={items.len() <= 1} class={classes!(BUTTON_CLASS, "border-l-0", "rounded-r-lg")}>
-                <img src="/assets/icons/remove.svg" class="w-4 h-4" />
-            </button>
+        <div class="flex justify-end gap-2 mt-4 sm:ml-auto" role="group">
+            <crate::components::button::Button kind={crate::components::button::ButtonKind::Secondary} size={crate::components::button::ButtonSize::Sm} onclick={add_onclick}>
+                <img src="/assets/icons/add.svg" class="w-4 h-4 dark:invert" />
+            </crate::components::button::Button>
+            <crate::components::button::Button kind={crate::components::button::ButtonKind::Secondary} size={crate::components::button::ButtonSize::Sm} onclick={remove_onclick} disabled={items.len() <= 1}>
+                <img src="/assets/icons/remove.svg" class="w-4 h-4 dark:invert" />
+            </crate::components::button::Button>
         </div>
     }
 }

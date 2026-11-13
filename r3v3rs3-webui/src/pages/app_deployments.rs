@@ -215,10 +215,10 @@ pub fn back_header(locale: Locale, navigator: &Navigator, title: String) -> Html
     let onclick = Callback::from(move |_: MouseEvent| navigator.push(&Route::Apps));
     html! {
         <div class="flex flex-wrap items-center gap-4 mb-4">
-            <button {onclick} type="button" class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
-                <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 mr-1" />
+            <crate::components::button::Button kind={crate::components::button::ButtonKind::Secondary} {onclick}>
+                <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 dark:invert" />
                 {locale.t("common.back")}
-            </button>
+            </crate::components::button::Button>
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{title}</h2>
         </div>
     }

@@ -205,14 +205,10 @@ fn toolbar_view(
         .unwrap_or(365);
     html! {
         <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
-            <button
-                type="button"
-                onclick={on_export}
-                class="inline-flex items-center gap-1.5 text-neutral-700 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-50 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-700 font-medium rounded-lg text-xs px-3 py-2"
-            >
-                <img src="/assets/icons/download.svg" class="w-3.5 h-3.5 mr-1 dark:invert opacity-80" alt="" />
+            <crate::components::button::Button kind={crate::components::button::ButtonKind::Secondary} size={crate::components::button::ButtonSize::Sm} onclick={on_export}>
+                <img src="/assets/icons/download.svg" class="w-3.5 h-3.5 dark:invert opacity-80" alt="" />
                 {locale.t("audit.export_csv")}
-            </button>
+            </crate::components::button::Button>
             if is_admin {
                 <div class="flex items-center gap-2">
                     <label class="text-xs font-medium text-neutral-500 dark:text-neutral-400 whitespace-nowrap" for="audit-retention">

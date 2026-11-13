@@ -1,6 +1,7 @@
 // Copyright 2026 r3v3rs3 Authors
 // SPDX-License-Identifier: MIT
 
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::http_proxy_config::ErrorPageForm;
 use crate::format::format_bytes;
 use crate::i18n::use_locale;
@@ -80,16 +81,16 @@ pub fn error_pages_editor(props: &ErrorPagesEditorProps) -> Html {
                         {locale.t("http_form.error_pages_hint")}
                     </p>
                 </div>
-                <button
-                    type="button"
+                <Button
+                    kind={ButtonKind::Primary}
+                    size={ButtonSize::Sm}
                     onclick={
                         let on_add = on_add_page.clone();
                         Callback::from(move |_| on_add.emit(None))
                     }
-                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-primary-600 hover:bg-primary-700 text-white transition-colors"
                 >
                     {locale.t("http_form.add_error_page")}
-                </button>
+                </Button>
             </div>
 
             if pages.is_empty() {
@@ -248,16 +249,16 @@ pub fn single_error_page_card(props: &SingleErrorPageCardProps) -> Html {
                 </div>
 
                 <div class="flex items-center gap-2">
-                    <button
-                        type="button"
+                    <Button
+                        kind={ButtonKind::Danger}
+                        size={ButtonSize::Sm}
                         onclick={
                             let on_remove = props.on_remove.clone();
                             Callback::from(move |_| on_remove.emit(()))
                         }
-                        class="text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 hover:underline px-2 py-1"
                     >
                         {locale.t("http_form.remove_error_page")}
-                    </button>
+                    </Button>
                 </div>
             </div>
 
@@ -298,36 +299,14 @@ fn empty_state_view(locale: Locale, on_add: Callback<Option<u16>>) -> Html {
                 {locale.t("http_form.error_page_empty_preview")}
             </p>
             <div class="mt-4 flex items-center justify-center gap-2 flex-wrap">
-                <button
-                    type="button"
-                    onclick={
-                        let on_add = on_add.clone();
-                        Callback::from(move |_| on_add.emit(Some(404)))
+                { for [(404, "+ 404 Not Found"), (502, "+ 502 Bad Gateway"), (503, "+ 503 Maintenance")].into_iter().map(|(code, label)| {
+                    let on_add = on_add.clone();
+                    html! {
+                        <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={Callback::from(move |_| on_add.emit(Some(code)))}>
+                            {label}
+                        </Button>
                     }
-                    class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-800 dark:text-neutral-200 transition-colors"
-                >
-                    {"+ 404 Not Found"}
-                </button>
-                <button
-                    type="button"
-                    onclick={
-                        let on_add = on_add.clone();
-                        Callback::from(move |_| on_add.emit(Some(502)))
-                    }
-                    class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-800 dark:text-neutral-200 transition-colors"
-                >
-                    {"+ 502 Bad Gateway"}
-                </button>
-                <button
-                    type="button"
-                    onclick={
-                        let on_add = on_add.clone();
-                        Callback::from(move |_| on_add.emit(Some(503)))
-                    }
-                    class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-800 dark:text-neutral-200 transition-colors"
-                >
-                    {"+ 503 Maintenance"}
-                </button>
+                }) }
             </div>
         </div>
     }

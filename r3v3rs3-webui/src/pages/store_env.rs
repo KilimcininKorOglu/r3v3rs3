@@ -74,13 +74,9 @@ pub fn fields_view(locale: Locale, values: &UseStateHandle<Vec<StoreEnvValue>>) 
         <>
             <div class="flex items-center justify-between mb-1 mt-4">
                 <label class={LABEL_CLASS}>{locale.t("apps.store_env")}</label>
-                <button
-                    type="button"
-                    class="px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:text-emerald-300 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 rounded border border-emerald-300 dark:border-emerald-800 transition-colors"
-                    onclick={on_auto_generate}
-                >
+                <crate::components::button::Button kind={crate::components::button::ButtonKind::Secondary} size={crate::components::button::ButtonSize::Sm} onclick={on_auto_generate}>
                     {locale.t("apps.store_env_generate_secrets")}
-                </button>
+                </crate::components::button::Button>
             </div>
             {rows}
             <p class={HINT_CLASS}>{locale.t("apps.store_env_hint")}</p>

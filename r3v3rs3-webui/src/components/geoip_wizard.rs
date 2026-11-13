@@ -1,3 +1,4 @@
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::i18n::use_locale;
 use r3v3rs3_api::geoip::{
     CountryInfo, REGIONAL_PRESETS, RegionalPreset, add_country, country_name, format_countries,
@@ -272,13 +273,9 @@ fn presets_bar_view(
             </span>
             <div class="flex flex-wrap items-center gap-1.5">
                 { for REGIONAL_PRESETS.iter().map(|preset| render_preset_button(preset, is_tr, active_mode, on_apply.clone())) }
-                <button
-                    type="button"
-                    onclick={on_clear}
-                    class="text-xs px-2.5 py-1 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 font-medium transition-colors"
-                >
+                <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_clear}>
                     { locale.t("geoip.clear_all") }
-                </button>
+                </Button>
             </div>
         </div>
     }
@@ -304,13 +301,9 @@ fn render_preset_button(
     };
 
     html! {
-        <button
-            type="button"
-            onclick={onclick}
-            class="text-xs px-2.5 py-1 rounded-md border border-blue-200 dark:border-blue-800/80 bg-blue-50/70 dark:bg-blue-950/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-medium transition-colors"
-        >
+        <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} {onclick}>
             { name }
-        </button>
+        </Button>
     }
 }
 

@@ -1,4 +1,5 @@
-use super::http_proxy_config::{BUTTON_CLASS, HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
+use super::button::{Button, ButtonKind, ButtonSize};
+use super::http_proxy_config::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use crate::i18n::use_locale;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::policy::{
@@ -388,13 +389,13 @@ pub fn auth_config(props: &Props) -> Html {
 
                 <label class={LABEL_CLASS}>{locale.t("auth.users")}</label>
                 { for form.users.iter().enumerate().map(|(index, user)| user_view(locale, props, index, user)) }
-                <button type="button" onclick={add_user(props)} class={classes!(BUTTON_CLASS, "mt-2", "rounded-lg")}>{locale.t("auth.add_user")}</button>
+                <Button kind={ButtonKind::Primary} size={ButtonSize::Sm} class="mt-2" onclick={add_user(props)}>{locale.t("auth.add_user")}</Button>
                 <p class={HINT_CLASS}>{locale.t("auth.basic_hint")}</p>
             }
             if form.kind == AuthKind::Bearer {
                 <label class={LABEL_CLASS}>{locale.t("auth.tokens")}</label>
                 { for form.tokens.iter().enumerate().map(|(index, token)| token_view(locale, props, index, token)) }
-                <button type="button" onclick={form_update(props, |form, _: MouseEvent| form.tokens.push(TokenForm::default()))} class={classes!(BUTTON_CLASS, "mt-2", "rounded-lg")}>{locale.t("auth.add_token")}</button>
+                <Button kind={ButtonKind::Primary} size={ButtonSize::Sm} class="mt-2" onclick={form_update(props, |form, _: MouseEvent| form.tokens.push(TokenForm::default()))}>{locale.t("auth.add_token")}</Button>
                 <p class={HINT_CLASS}>{locale.t("auth.bearer_hint")}</p>
             }
             if form.kind == AuthKind::Forward {
@@ -473,9 +474,9 @@ fn credential_row(name: Html, secret: Html, remove: Callback<MouseEvent>, rows: 
         <div class="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_1fr_auto] gap-2 mt-2">
             <div class="col-span-2 sm:col-span-1">{ name }</div>
             { secret }
-            <button type="button" onclick={remove} disabled={rows <= 1} class={classes!(BUTTON_CLASS, "rounded-lg")}>
-                <img src="/assets/icons/remove.svg" class="w-4 h-4" />
-            </button>
+            <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={remove} disabled={rows <= 1}>
+                <img src="/assets/icons/remove.svg" class="w-4 h-4 dark:invert" />
+            </Button>
         </div>
     }
 }

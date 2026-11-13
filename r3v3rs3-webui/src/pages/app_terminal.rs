@@ -5,6 +5,7 @@ use super::Route;
 use super::settings::fetch_json;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -740,13 +741,9 @@ fn render_custom_command_input(
                 {oninput}
                 {onkeydown}
             />
-            <button
-                type="button"
-                class="px-2.5 py-1 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-500 transition-colors cursor-pointer"
-                {onclick}
-            >
+            <Button kind={ButtonKind::Success} size={ButtonSize::Sm} {onclick}>
                 {locale.t("apps.terminal_run")}
-            </button>
+            </Button>
             <span class="text-[11px] text-neutral-500 hidden md:inline ml-1">
                 {locale.t("apps.terminal_history_hint")}
             </span>
@@ -1112,20 +1109,12 @@ fn history_modal_view(
                     }
                 </div>
                 <div class="flex items-center justify-between border-t border-neutral-800 pt-3">
-                    <button
-                        type="button"
-                        class="px-2.5 py-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-red-800/40 rounded transition cursor-pointer"
-                        onclick={Callback::from(move |_| on_clear.emit(()))}
-                    >
+                    <Button kind={ButtonKind::Danger} size={ButtonSize::Sm} onclick={Callback::from(move |_| on_clear.emit(()))}>
                         {locale.t("apps.terminal_history_clear")}
-                    </button>
-                    <button
-                        type="button"
-                        class="px-3 py-1 text-xs bg-neutral-800 text-neutral-200 hover:bg-neutral-700 rounded transition cursor-pointer"
-                        onclick={on_close_click}
-                    >
+                    </Button>
+                    <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_close_click}>
                         {locale.t("apps.terminal_history_close")}
-                    </button>
+                    </Button>
                 </div>
             </div>
         </div>

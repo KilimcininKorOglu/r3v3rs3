@@ -9,6 +9,7 @@ use super::settings::{failure_box, fetch_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::app_tabs::{AppTab, AppTabs};
+use crate::components::button::{Button, ButtonKind};
 use crate::dialog;
 use crate::format::{format_bytes, format_time, format_uptime};
 use crate::i18n::use_locale;
@@ -220,60 +221,40 @@ fn render_quick_actions(p: &DashboardParams) -> Html {
         <div class="flex flex-wrap items-center justify-between gap-3 p-4 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm">
             <div class="flex flex-wrap items-center gap-2">
                 if p.can_edit && !p.busy {
-                    <button
-                        type="button"
-                        onclick={on_deploy}
-                        class="inline-flex items-center gap-1.5 text-white bg-blue-600 hover:bg-blue-700 font-medium rounded-lg text-sm px-3.5 py-2 shadow-sm"
-                    >
+                    <Button kind={ButtonKind::Success} onclick={on_deploy}>
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                         </svg>
                         {p.locale.t("apps.deploy")}
-                    </button>
-                    <button
-                        type="button"
-                        onclick={on_restart}
-                        class="inline-flex items-center gap-1.5 text-neutral-700 dark:text-neutral-200 bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 hover:bg-neutral-50 hover:dark:bg-neutral-600 font-medium rounded-lg text-sm px-3.5 py-2"
-                    >
+                    </Button>
+                    <Button kind={ButtonKind::Secondary} onclick={on_restart}>
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
                         {p.locale.t("apps.restart")}
-                    </button>
+                    </Button>
                 }
                 if p.can_edit
                     && p.summary.running_deployment.is_some()
                     && p.summary.app.spec.database.is_none()
                 {
-                    <button
-                        type="button"
-                        onclick={on_rollback}
-                        class="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 hover:dark:bg-amber-900/60 font-medium rounded-lg text-sm px-3.5 py-2"
-                    >
+                    <Button kind={ButtonKind::Warning} onclick={on_rollback}>
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
                         </svg>
                         {p.locale.t("apps.rollback")}
-                    </button>
+                    </Button>
                 }
             </div>
             <div class="flex items-center gap-2">
-                <button
-                    type="button"
-                    onclick={on_terminal}
-                    class="inline-flex items-center gap-1 text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 hover:dark:text-white px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-600 text-sm font-medium"
-                >
-                    <img src="/assets/icons/terminal.svg" class="w-4 h-4 mr-1" />
+                <Button kind={ButtonKind::Secondary} onclick={on_terminal}>
+                    <img src="/assets/icons/terminal.svg" class="w-4 h-4 dark:invert" />
                     {p.locale.t("apps.tabs_terminal")}
-                </button>
-                <button
-                    type="button"
-                    onclick={on_logs}
-                    class="inline-flex items-center gap-1 text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 hover:dark:text-white px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-600 text-sm font-medium"
-                >
-                    <img src="/assets/icons/description.svg" class="w-4 h-4 mr-1" />
+                </Button>
+                <Button kind={ButtonKind::Secondary} onclick={on_logs}>
+                    <img src="/assets/icons/description.svg" class="w-4 h-4 dark:invert" />
                     {p.locale.t("apps.tabs_logs")}
-                </button>
+                </Button>
             </div>
         </div>
     }

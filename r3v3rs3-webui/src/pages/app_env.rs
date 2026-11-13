@@ -97,13 +97,9 @@ pub fn app_env(props: &Props) -> Html {
             { for (0..current.len()).map(|index| row_view(locale, &rows, &current, index)) }
             <div class="mt-4 flex items-center justify-between">
                 <a class={LINK_CLASS} onclick={add_row(&rows)}>{locale.t("apps.env_add")}</a>
-                <button
-                    type="button"
-                    class="px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:text-emerald-300 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 rounded border border-emerald-300 dark:border-emerald-800 transition-colors"
-                    onclick={generate_secrets_action(locale, id, &rows, &notice)}
-                >
+                <crate::components::button::Button kind={crate::components::button::ButtonKind::Secondary} size={crate::components::button::ButtonSize::Sm} onclick={generate_secrets_action(locale, id, &rows, &notice)}>
                     {locale.t("apps.env_generate_secrets")}
-                </button>
+                </crate::components::button::Button>
             </div>
         </>
     };

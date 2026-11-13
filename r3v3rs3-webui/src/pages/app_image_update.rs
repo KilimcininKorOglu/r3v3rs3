@@ -2,9 +2,9 @@
 //! tags and updated digests, and lets the user deploy updates.
 
 use super::accounts::HINT_CLASS;
-use super::resource_page::BUTTON_CLASS;
 use super::settings::fetch_json;
 use crate::API_ENDPOINT;
+use crate::components::button::{Button, ButtonKind};
 use crate::dialog::{self, Icon};
 use crate::format::format_time;
 use gloo_net::http::Request;
@@ -12,8 +12,6 @@ use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::platform::{AppEntry, AppSource, DeploymentEntry, ImageUpdateStatus};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
-
-const PRIMARY_BUTTON_CLASS: &str = "inline-flex justify-center items-center text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2 dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800 disabled:opacity-50";
 
 #[derive(Properties, PartialEq)]
 pub struct Props {
@@ -43,18 +41,13 @@ pub fn app_image_update(props: &Props) -> Html {
                     </h2>
                     <p class={HINT_CLASS}>{image.as_str()}</p>
                 </div>
-                <button
-                    type="button"
-                    onclick={check_onclick}
-                    disabled={*checking}
-                    class={BUTTON_CLASS}
-                >
+                <Button kind={ButtonKind::Secondary} onclick={check_onclick} disabled={*checking}>
                     if *checking {
                         { locale.t("apps.checking_update") }
                     } else {
                         { locale.t("apps.check_update") }
                     }
-                </button>
+                </Button>
             </div>
             { status_view(locale, props.app.update.as_ref(), deploy_onclick, *deploying) }
         </div>
@@ -124,14 +117,9 @@ fn banner_view(
                     </p>
                     <p class="text-xs text-neutral-500 mt-1">{last_checked}</p>
                 </div>
-                <button
-                    type="button"
-                    onclick={deploy_onclick}
-                    disabled={deploying}
-                    class={PRIMARY_BUTTON_CLASS}
-                >
+                <Button kind={ButtonKind::Success} onclick={deploy_onclick} disabled={deploying}>
                     {locale.t("apps.deploy_update")}
-                </button>
+                </Button>
             </div>
         </div>
     }

@@ -1,5 +1,6 @@
 use super::app_log::download_text_file;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::traffic_inspector::TrafficInspector;
 use crate::dialog::confirm;
 use crate::format::{format_bytes, format_instant, format_uptime};
@@ -524,15 +525,12 @@ fn active_connections_view(
                         { format!("({})", connections.len()) }
                     </span>
                 </h3>
-                <button
-                    class="px-3 py-1.5 text-sm bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-lg transition-colors flex items-center gap-1.5"
-                    onclick={on_refresh}
-                >
+                <Button kind={ButtonKind::Secondary} onclick={on_refresh}>
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                     { locale.t("traffic.refresh") }
-                </button>
+                </Button>
             </div>
 
             if connections.is_empty() {
@@ -593,15 +591,12 @@ fn stream_priority_view(
                         { locale.t("traffic.priority_desc") }
                     </p>
                 </div>
-                <button
-                    class="px-3 py-1.5 text-sm bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-lg transition-colors flex items-center gap-1.5"
-                    onclick={on_refresh}
-                >
+                <Button kind={ButtonKind::Secondary} onclick={on_refresh}>
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                     { locale.t("traffic.refresh") }
-                </button>
+                </Button>
             </div>
 
             { priority_kpi_cards(locale, stats) }
@@ -893,6 +888,15 @@ pub fn traffic_view() -> Html {
     }
 }
 
+/// The kind of a toolbar toggle: an active toggle is drawn as the primary button.
+fn toggle_kind(active: bool) -> ButtonKind {
+    if active {
+        ButtonKind::Primary
+    } else {
+        ButtonKind::Secondary
+    }
+}
+
 fn header_view(locale: Locale, on_back: Callback<MouseEvent>, controls: HeaderControls) -> Html {
     let HeaderControls {
         live,
@@ -907,14 +911,10 @@ fn header_view(locale: Locale, on_back: Callback<MouseEvent>, controls: HeaderCo
     html! {
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b dark:border-neutral-700">
             <div class="flex items-center gap-3">
-                <button
-                    onclick={on_back}
-                    type="button"
-                    class="inline-flex items-center text-neutral-500 dark:text-neutral-300 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg text-sm px-3 py-1.5 font-medium"
-                >
-                    <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 mr-1" />
+                <Button kind={ButtonKind::Secondary} onclick={on_back}>
+                    <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 dark:invert" />
                     {locale.t("common.back")}
-                </button>
+                </Button>
                 <div>
                     <h1 class="text-xl font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
                         {locale.t("traffic.title")}
@@ -926,56 +926,30 @@ fn header_view(locale: Locale, on_back: Callback<MouseEvent>, controls: HeaderCo
                 </div>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
-                <button
-                    onclick={on_toggle_map}
-                    type="button"
-                    class={if show_geo_map {
-                        "inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-medium"
-                    } else {
-                        "inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 font-medium"
-                    }}
-                >
-                    <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <Button kind={toggle_kind(show_geo_map)} size={ButtonSize::Sm} onclick={on_toggle_map}>
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     {locale.t("traffic.toggle_map")}
-                </button>
-                <button
-                    onclick={on_toggle_live}
-                    type="button"
-                    class={if live {
-                        "inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-medium hover:bg-amber-100"
-                    } else {
-                        "inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-medium hover:bg-emerald-100"
-                    }}
-                >
-                    {if live { locale.t("traffic.pause") } else { locale.t("traffic.resume") }}
-                </button>
-                <button
-                    onclick={on_toggle_scroll}
-                    type="button"
-                    class={if auto_scroll {
-                        "inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-medium"
-                    } else {
-                        "inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 font-medium"
-                    }}
-                >
+                </Button>
+                if live {
+                    <Button kind={ButtonKind::Warning} size={ButtonSize::Sm} onclick={on_toggle_live}>
+                        {locale.t("traffic.pause")}
+                    </Button>
+                } else {
+                    <Button kind={ButtonKind::Success} size={ButtonSize::Sm} onclick={on_toggle_live}>
+                        {locale.t("traffic.resume")}
+                    </Button>
+                }
+                <Button kind={toggle_kind(auto_scroll)} size={ButtonSize::Sm} onclick={on_toggle_scroll}>
                     {locale.t("traffic.auto_scroll")}
-                </button>
-                <button
-                    onclick={on_clear}
-                    type="button"
-                    class="inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 font-medium"
-                >
+                </Button>
+                <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_clear}>
                     {locale.t("traffic.clear")}
-                </button>
-                <button
-                    onclick={on_export}
-                    type="button"
-                    class="inline-flex items-center text-xs px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 font-medium"
-                >
+                </Button>
+                <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_export}>
                     {locale.t("traffic.download")}
-                </button>
+                </Button>
                 <a
                     href="/api/metrics/grafana"
                     target="_blank"

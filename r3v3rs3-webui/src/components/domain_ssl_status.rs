@@ -115,17 +115,17 @@ fn render_cname_action(
         html! {}
     } else {
         html! {
-            <button
-                type="button"
+            <crate::components::button::Button
+                kind={crate::components::button::ButtonKind::Secondary}
+                size={crate::components::button::ButtonSize::Sm}
                 disabled={is_loading}
                 {onclick}
-                class="px-2 py-1 text-xs font-medium rounded bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-700 dark:hover:bg-neutral-600 text-neutral-800 dark:text-neutral-200"
             >
                 if is_loading {
-                    <span class="animate-spin inline-block w-3 h-3 border-2 border-neutral-600 border-t-transparent rounded-full mr-1"></span>
+                    <span class="animate-spin inline-block w-3 h-3 border-2 border-neutral-600 border-t-transparent rounded-full"></span>
                 }
                 {locale.t("certs.verify_cname_button")}
-            </button>
+            </crate::components::button::Button>
         }
     }
 }

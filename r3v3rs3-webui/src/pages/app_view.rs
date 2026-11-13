@@ -289,13 +289,9 @@ fn catalog_upgrade_banner(
                     {arrow_text}
                 </span>
             </div>
-            <button
-                type="button"
-                onclick={on_upgrade}
-                class="inline-flex items-center text-white bg-purple-600 hover:bg-purple-700 focus:ring-4 focus:ring-purple-300 font-medium rounded-lg text-xs px-3 py-1.5 dark:bg-purple-600 dark:hover:bg-purple-700 dark:focus:ring-purple-800"
-            >
+            <crate::components::button::Button kind={crate::components::button::ButtonKind::Success} size={crate::components::button::ButtonSize::Sm} onclick={on_upgrade}>
                 {locale.t("apps.upgrade_catalog")}
-            </button>
+            </crate::components::button::Button>
         </div>
     }
 }

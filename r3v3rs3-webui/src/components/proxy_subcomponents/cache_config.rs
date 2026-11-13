@@ -1,5 +1,6 @@
 use super::common::*;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::error_pages_editor::ErrorPagesEditor;
 use r3v3rs3_api::cache::CacheConfig;
 use r3v3rs3_api::compression::{
@@ -257,17 +258,15 @@ pub fn compression_view(
                             {locale.t("http_form.compression_dictionaries_hint")}
                         </p>
                     </div>
-                    <button
-                        type="button"
-                        onclick={on_toggle_add_dict}
-                        class="text-xs px-3 py-1.5 rounded bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-700 dark:hover:bg-neutral-600 text-neutral-800 dark:text-neutral-200 font-medium transition"
-                    >
-                        {if form.show_add_dict {
-                            locale.t("dialog.cancel")
-                        } else {
-                            locale.t("http_form.add_dictionary")
-                        }}
-                    </button>
+                    if form.show_add_dict {
+                        <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_toggle_add_dict}>
+                            {locale.t("dialog.cancel")}
+                        </Button>
+                    } else {
+                        <Button kind={ButtonKind::Primary} size={ButtonSize::Sm} onclick={on_toggle_add_dict}>
+                            {locale.t("http_form.add_dictionary")}
+                        </Button>
+                    }
                 </div>
 
                 if form.show_add_dict {
@@ -438,13 +437,9 @@ pub fn add_dictionary_card(
                 />
             </div>
             <div class="flex justify-end">
-                <button
-                    type="button"
-                    onclick={on_add}
-                    class="px-3 py-1.5 rounded bg-primary-600 hover:bg-primary-700 text-white font-medium transition"
-                >
+                <Button kind={ButtonKind::Primary} size={ButtonSize::Sm} onclick={on_add}>
                     {locale.t("http_form.save_dictionary")}
-                </button>
+                </Button>
             </div>
         </div>
     }

@@ -14,8 +14,6 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
-const BUTTON_CLASS: &str = "px-3 rounded-lg border border-neutral-300 dark:border-neutral-600 text-sm hover:bg-neutral-100 hover:dark:bg-neutral-900";
-
 type Loaded<T> = UseStateHandle<Option<Result<Vec<T>, String>>>;
 
 #[derive(Properties, PartialEq)]
@@ -195,7 +193,7 @@ fn search_view(
             <label class={LABEL_CLASS}>{locale.t("apps.repository_search")}</label>
             <div class="flex gap-2">
                 <input type="search" autocapitalize="off" autocomplete="off" value={(**search).clone()} {oninput} {onkeydown} class={INPUT_CLASS} />
-                <button type="button" {onclick} class={BUTTON_CLASS}>{locale.t("apps.search")}</button>
+                <crate::components::button::Button kind={crate::components::button::ButtonKind::Secondary} {onclick}>{locale.t("apps.search")}</crate::components::button::Button>
             </div>
         </>
     }
