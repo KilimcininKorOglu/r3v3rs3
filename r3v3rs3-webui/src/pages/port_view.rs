@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::components::button::{ButtonKind, ButtonSize, button_class};
 use crate::{
     API_ENDPOINT,
     auth::use_ensure_auth,
@@ -61,11 +62,11 @@ pub fn port_view(props: &Props) -> Html {
                     </fieldset>
 
                     <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
-                        <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                        <button type="button" onclick={cancel_onclick} class={button_class(ButtonKind::Secondary, ButtonSize::Md)}>
                             {locale.t(if can_edit { "common.cancel" } else { "common.back" })}
                         </button>
                         if can_edit {
-                            <button type="submit" disabled={entry.is_err()} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                            <button type="submit" disabled={entry.is_err()} class={button_class(ButtonKind::Primary, ButtonSize::Md)}>
                                 {locale.t("common.update")}
                             </button>
                         }

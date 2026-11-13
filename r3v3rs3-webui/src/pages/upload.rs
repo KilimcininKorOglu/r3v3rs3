@@ -1,3 +1,4 @@
+use crate::components::button::{ButtonKind, ButtonSize, button_class};
 use crate::{API_ENDPOINT, auth::use_ensure_auth, i18n::use_locale, pages::Route};
 use gloo_net::http::Request;
 use r3v3rs3_api::cert::{CertKind, UploadQuery};
@@ -93,10 +94,10 @@ pub fn upload() -> Html {
                 <input onchange={key_onchange} class="block w-full text-sm text-neutral-900 border border-neutral-300 rounded-lg cursor-pointer bg-neutral-50 dark:text-neutral-200 dark:file:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 focus:outline-none file:border-0 file:bg-neutral-100 dark:file:bg-neutral-700 file:mr-4 file:py-3 file:px-4" type="file" />
 
                 <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
-                    <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                    <button type="button" onclick={cancel_onclick} class={button_class(ButtonKind::Secondary, ButtonSize::Md)}>
                         {locale.t("common.cancel")}
                     </button>
-                    <button type="submit" disabled={!uploadable} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                    <button type="submit" disabled={!uploadable} class={button_class(ButtonKind::Primary, ButtonSize::Md)}>
                         {locale.t("common.upload")}
                     </button>
                 </div>

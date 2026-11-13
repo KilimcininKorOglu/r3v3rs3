@@ -1,5 +1,6 @@
 use crate::components::acme_form::AcmeResult;
 use crate::components::acme_provider::AcmeProvider;
+use crate::components::button::{ButtonKind, ButtonSize, button_class};
 use crate::components::custom_acme::CustomAcme;
 use crate::components::http_proxy_config::error_view;
 use crate::pages::settings::send_json;
@@ -119,10 +120,10 @@ pub fn new_acme() -> Html {
                 { error_view(submit_error.as_ref()) }
 
                 <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
-                    <button type="button" onclick={cancel_onclick} class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                    <button type="button" onclick={cancel_onclick} class={button_class(ButtonKind::Secondary, ButtonSize::Md)}>
                         {locale.t("common.cancel")}
                     </button>
-                    <button disabled={*is_loading} type="submit" class="inline-flex justify-center items-center text-neutral-500 bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-600 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2">
+                    <button disabled={*is_loading} type="submit" class={button_class(ButtonKind::Primary, ButtonSize::Md)}>
                         if *is_loading {
                             <svg aria-hidden="true" role="status" class="inline w-4 h-4 mr-3 text-neutral-200 animate-spin dark:text-neutral-600" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="#ccc"/>
