@@ -59,7 +59,7 @@ pub fn self_sign() -> Html {
         }
     });
 
-    let (ca_cert, ca_cert_list) = use_ca_certs();
+    let (ca_cert, ca_cert_list) = use_ca_certs(locale);
 
     let validation = use_state(|| false);
     let entry = get_request(locale, &san, *ca_cert, *kind);
@@ -94,16 +94,21 @@ pub fn self_sign() -> Html {
 }
 
 /// The root certificates that can sign, and the selected one. The default is the first of them.
+/// A failed load shows its error and keeps only the option that generates a CA.
 #[hook]
-fn use_ca_certs() -> (UseStateHandle<ShortId>, UseStateHandle<Vec<CertInfo>>) {
+fn use_ca_certs(locale: Locale) -> (UseStateHandle<ShortId>, UseStateHandle<Vec<CertInfo>>) {
     let ca_cert = use_state(|| ShortId::from_str(GENERATE_CA).unwrap_throw());
     let ca_cert_list = use_state(Vec::<CertInfo>::new);
     let ca_cert_cloned = ca_cert.clone();
     let list_cloned = ca_cert_list.clone();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            let Ok(res) = get_cert_list().await else {
-                return;
+            let res = match get_cert_list(locale).await {
+                Ok(res) => res,
+                Err(err) => {
+                    crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await;
+                    return;
+                }
             };
             let list = res
                 .into_iter()

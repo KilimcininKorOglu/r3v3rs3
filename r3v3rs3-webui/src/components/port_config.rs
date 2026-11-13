@@ -438,16 +438,20 @@ fn use_tls_fields(tls_termination: &TlsTermination) -> TlsFields {
         early_data: use_state(|| tls_termination.early_data),
         root_certs: use_state(Vec::<CertInfo>::new),
     };
+    let locale = use_locale();
     use_effect_with((), {
         let root_certs = fields.root_certs.clone();
         move |_| {
             wasm_bindgen_futures::spawn_local(async move {
-                if let Ok(list) = get_cert_list().await {
-                    root_certs.set(
+                match get_cert_list(locale).await {
+                    Ok(list) => root_certs.set(
                         list.into_iter()
                             .filter(|cert| cert.kind == CertKind::Root)
                             .collect(),
-                    );
+                    ),
+                    Err(err) => {
+                        crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await
+                    }
                 }
             });
         }

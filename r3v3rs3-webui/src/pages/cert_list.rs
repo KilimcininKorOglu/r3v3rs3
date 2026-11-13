@@ -217,14 +217,12 @@ pub fn cert_list(props: &CertListProps) -> Html {
 fn use_cert_lists(locale: Locale, certs: Dispatch<CertStore>, acme: Dispatch<AcmeStore>) {
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            let loaded = fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/certs")))
-                .await
-                .map(|entries| {
-                    certs.set(CertStore {
-                        entries,
-                        loaded: true,
-                    })
-                });
+            let loaded = get_cert_list(locale).await.map(|entries| {
+                certs.set(CertStore {
+                    entries,
+                    loaded: true,
+                })
+            });
             let acme_loaded = fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/acme")))
                 .await
                 .map(|entries| {
@@ -743,12 +741,9 @@ fn acme_provider_text(entry: &AcmeInfo, credentials: &[DnsCredentialInfo]) -> St
     }
 }
 
-pub async fn get_cert_list() -> Result<Vec<CertInfo>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/certs"))
-        .send()
-        .await?
-        .json()
-        .await
+/// The certificates, or the translated error of a failed load.
+pub async fn get_cert_list(locale: Locale) -> Result<Vec<CertInfo>, String> {
+    fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/certs"))).await
 }
 
 async fn delete_server_cert(locale: Locale, id: ShortId) -> Result<(), String> {
