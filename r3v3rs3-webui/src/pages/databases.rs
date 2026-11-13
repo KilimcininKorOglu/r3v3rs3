@@ -133,13 +133,13 @@ fn refresh_callback(
         refreshing.set(true);
         let (engines, notice, refreshing) = (engines.clone(), notice.clone(), refreshing.clone());
         spawn_local(async move {
-            refreshing.set(false);
-            match fetch_json::<Vec<EngineInfo>>(
+            let refreshed = fetch_json::<Vec<EngineInfo>>(
                 locale,
                 Request::post(&format!("{API_ENDPOINT}/databases/engines/refresh")),
             )
-            .await
-            {
+            .await;
+            refreshing.set(false);
+            match refreshed {
                 Ok(list) => {
                     engines.set(list);
                     notice.set(Some(Notice::Saved(())));
