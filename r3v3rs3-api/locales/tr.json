@@ -2182,6 +2182,7 @@
   "traffic.formatted_view": "Biçimlendirilmiş JSON",
   "traffic.target_url": "Hedef URL",
   "traffic.click_to_inspect": "Canlı İstek İnceleyici ve Tekrarlama Konsolunu açmak için herhangi bir satıra tıklayın.",
+  "traffic.entry_count": "{count} istek",
   "traffic.tab_connections": "Aktif Bağlantılar",
   "traffic.tab_logs": "Erişim Logları",
   "traffic.connections_empty": "Aktif bağlantı veya akış yok.",

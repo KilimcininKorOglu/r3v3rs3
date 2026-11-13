@@ -1347,7 +1347,7 @@ fn table_view(
                     </svg>
                     {locale.t("traffic.click_to_inspect")}
                 </span>
-                <span class="font-mono">{format!("{} items", filtered.len())}</span>
+                <span class="font-mono">{locale.tf("traffic.entry_count", &[("count", &filtered.len().to_string())])}</span>
             </div>
             <div ref={table_ref.clone()}>
                 { list_view(locale, content, None, &options) }

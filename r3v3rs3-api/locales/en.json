@@ -2182,6 +2182,7 @@
   "traffic.formatted_view": "Formatted JSON",
   "traffic.target_url": "Target URL",
   "traffic.click_to_inspect": "Click any row to open the Live Request Inspector & Replay Console.",
+  "traffic.entry_count": "{count} requests",
   "traffic.tab_connections": "Active Connections",
   "traffic.tab_logs": "Access Logs",
   "traffic.connections_empty": "No active connections or streams.",
