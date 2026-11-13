@@ -6,7 +6,7 @@ use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::button::{Button, ButtonKind};
 use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
 use crate::dialog::{self, Icon};
-use crate::format::format_duration;
+use crate::format::{format_duration, format_unix_time};
 use crate::i18n::use_locale;
 use gloo_net::http::Request;
 use r3v3rs3_api::ct::{
@@ -350,11 +350,11 @@ fn render_summary_cards(locale: Locale, status: &CtMonitorStatus) -> Html {
     };
 
     let last_check_text = match status.last_check_at {
-        Some(ts) => format_duration(locale, ts),
+        Some(ts) => format_unix_time(locale, ts),
         None => "-".to_string(),
     };
     let next_check_text = match status.next_check_at {
-        Some(ts) => format_duration(locale, ts),
+        Some(ts) => format_unix_time(locale, ts),
         None => "-".to_string(),
     };
 
@@ -530,7 +530,7 @@ fn render_entries_table(
 fn render_entry_row(locale: Locale, entry: &CtLogEntry, reload_cb: Callback<()>) -> Row {
     let not_before = entry
         .not_before
-        .map(|ts| format_duration(locale, ts))
+        .map(|ts| format_unix_time(locale, ts))
         .unwrap_or_else(|| "-".to_string());
     let not_after = entry
         .not_after
