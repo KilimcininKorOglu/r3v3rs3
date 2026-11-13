@@ -5,6 +5,7 @@ use super::resource_page::{Notice, notice_view};
 use super::settings::fetch_json;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::tabs::{TabItem, Tabs};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -150,30 +151,21 @@ fn category_filter(
         let selected = selected.clone();
         Callback::from(move |_| selected.set(None))
     };
-    let all_active = selected.is_none();
-    let all_class = if all_active {
-        "px-3 py-1 text-xs rounded-full font-medium bg-neutral-100 text-neutral-900 cursor-pointer"
-    } else {
-        "px-3 py-1 text-xs rounded-full font-medium bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200 cursor-pointer"
-    };
-
+    let mut tabs = vec![TabItem::click(
+        locale.t("apps.store_all_categories"),
+        on_all,
+        selected.is_none(),
+    )];
+    tabs.extend(categories.iter().map(|cat| category_tab(cat, selected)));
     html! {
-        <div class="flex flex-wrap items-center gap-1.5 mb-4">
-            <button type="button" class={all_class} onclick={on_all}>
-                {locale.t("apps.store_all_categories")}
-            </button>
-            { for categories.iter().map(|cat| category_pill(cat, selected)) }
+        <div class="mb-4">
+            <Tabs {tabs} />
         </div>
     }
 }
 
-fn category_pill(category: &str, selected: &UseStateHandle<Option<String>>) -> Html {
+fn category_tab(category: &str, selected: &UseStateHandle<Option<String>>) -> TabItem {
     let is_active = selected.as_deref() == Some(category);
-    let class = if is_active {
-        "px-3 py-1 text-xs rounded-full font-medium bg-neutral-100 text-neutral-900 cursor-pointer"
-    } else {
-        "px-3 py-1 text-xs rounded-full font-medium bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200 cursor-pointer"
-    };
     let onclick = {
         let selected = selected.clone();
         let cat = category.to_string();
@@ -185,11 +177,7 @@ fn category_pill(category: &str, selected: &UseStateHandle<Option<String>>) -> H
             }
         })
     };
-    html! {
-        <button type="button" class={class} {onclick}>
-            {category}
-        </button>
-    }
+    TabItem::click(category.to_string(), onclick, is_active)
 }
 
 pub(crate) fn unique_categories(apps: &[StoreApp], tr: bool) -> Vec<String> {
