@@ -242,17 +242,20 @@ pub fn settings() -> Html {
         move |(loaded, scroll)| scroll_to_upgrade_card(&effect_card_ref, *loaded, *scroll),
     );
 
+    let load_error = use_state(|| Option::<String>::None);
     let fields_cloned = fields.clone();
+    let load_error_cloned = load_error.clone();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(config) = get_config().await {
-                fields_cloned.set(Some(Fields::from_config(&config)));
+            match get_config(locale).await {
+                Ok(config) => fields_cloned.set(Some(Fields::from_config(&config))),
+                Err(message) => load_error_cloned.set(Some(message)),
             }
         });
     });
 
     let Some(current) = (*fields).clone() else {
-        return html! {};
+        return load_error.as_deref().map(failure_box).unwrap_or_default();
     };
     let parsed = parse_fields(locale, &current);
 
@@ -276,7 +279,7 @@ pub fn settings() -> Html {
             wasm_bindgen_futures::spawn_local(async move {
                 let result = update_config(locale, &config).await;
                 // The saved settings clear the typed secrets and show which secrets are set.
-                if let (Ok(()), Ok(saved)) = (&result, get_config().await) {
+                if let (Ok(()), Ok(saved)) = (&result, get_config(locale).await) {
                     fields.set(Some(Fields::from_config(&saved)));
                 }
                 notice.set(Some(match result {
@@ -1330,12 +1333,8 @@ fn parse_public_url(
     }
 }
 
-async fn get_config() -> Result<AppConfig, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/config"))
-        .send()
-        .await?
-        .json()
-        .await
+async fn get_config(locale: Locale) -> Result<AppConfig, String> {
+    fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/config"))).await
 }
 
 async fn update_config(locale: Locale, config: &AppConfig) -> Result<(), String> {
