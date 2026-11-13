@@ -166,27 +166,22 @@ fn reload(
     pitr_range: &UseStateHandle<Option<PitrRange>>,
     id: ShortId,
 ) {
-    let (backups, notice) = (backups.clone(), notice.clone());
+    let (backups, pitr_state, notice) = (backups.clone(), pitr_range.clone(), notice.clone());
     spawn_local(async move {
-        match fetch_json::<Vec<BackupEntry>>(
+        let list = fetch_json::<Vec<BackupEntry>>(
             locale,
             Request::get(&format!("{API_ENDPOINT}/databases/{id}/backups")),
         )
         .await
-        {
-            Ok(list) => backups.set(list),
-            Err(message) => notice.set(Some(Notice::Failed(message))),
-        }
-    });
-    let pitr_state = pitr_range.clone();
-    spawn_local(async move {
-        if let Ok(loaded) = fetch_json::<PitrRange>(
+        .map(|list| backups.set(list));
+        let range = fetch_json::<PitrRange>(
             locale,
             Request::get(&format!("{API_ENDPOINT}/databases/{id}/pitr")),
         )
         .await
-        {
-            pitr_state.set(Some(loaded));
+        .map(|loaded| pitr_state.set(Some(loaded)));
+        if let Err(message) = list.and(range) {
+            notice.set(Some(Notice::Failed(message)));
         }
     });
 }
