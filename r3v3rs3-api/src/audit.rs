@@ -68,6 +68,12 @@ pub enum AuditAction {
     CreateDatabaseReplica,
     /// An account deleted a database app.
     DeleteDatabase,
+    /// An account read the passwords of the accounts of a database.
+    ViewDatabaseCredentials,
+    /// An account gave the root account or a tenant of a database a new password.
+    ResetDatabasePassword,
+    /// An account removed a tenant of a shared database server with its data.
+    DeleteDatabaseTenant,
     /// An account took the backup of a database.
     BackupDatabase,
     /// An account restored the backup of a database.
@@ -216,7 +222,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 117] = [
+    pub const ALL: [AuditAction; 120] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -255,6 +261,9 @@ impl AuditAction {
         Self::CloneDatabase,
         Self::CreateDatabaseReplica,
         Self::DeleteDatabase,
+        Self::ViewDatabaseCredentials,
+        Self::ResetDatabasePassword,
+        Self::DeleteDatabaseTenant,
         Self::BackupDatabase,
         Self::RestoreDatabase,
         Self::RestoreDatabaseFromS3,

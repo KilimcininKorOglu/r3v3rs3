@@ -9,6 +9,7 @@ mod backup;
 mod build;
 mod compose;
 mod connections;
+mod db_access;
 pub mod deploy;
 pub mod disaster_recovery;
 #[cfg(test)]

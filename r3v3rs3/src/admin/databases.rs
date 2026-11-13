@@ -20,8 +20,9 @@ use r3v3rs3_api::{
     id::ShortId,
     platform::{
         AppEntry, AppRequest, AppSource, AppSpec, DatabaseCloneRequest, DatabaseCreated,
-        DatabaseReplicaRequest, DatabaseRequest, DeploymentTrigger, EngineInfo, LOCAL_TARGET,
-        MAX_REPLICAS_PER_PRIMARY,
+        DatabaseCredentials, DatabasePasswordRequest, DatabasePasswordReset,
+        DatabaseReplicaRequest, DatabaseRequest, DatabaseTenant, DeploymentTrigger, EngineInfo,
+        LOCAL_TARGET, MAX_REPLICAS_PER_PRIMARY,
     },
 };
 use std::sync::Arc;
@@ -449,6 +450,119 @@ pub async fn delete(
     let record = AuditRecord::new(AuditAction::DeleteDatabase)
         .id(app.id)
         .summary(app.name.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(()))
+}
+
+/// The root account and every tenant of a database with their passwords. Only an Admin
+/// account reads them, and the audit log records each read without the passwords.
+#[utoipa::path(
+    get,
+    path = "/{id}/credentials",
+    tag = "platform",
+    operation_id = "get_database_credentials",
+    params(("id" = ShortId, Path, description = "Database id.")),
+    responses((status = 200, description = "The accounts of the database.", body = DatabaseCredentials), NotFoundResponse, ErrorResponses)
+)]
+pub async fn credentials(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<DatabaseCredentials>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let credentials = platform
+        .database_accounts(id)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::ViewDatabaseCredentials).id(id);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(credentials))
+}
+
+/// The tenants of a shared database server and the apps that connect as each of them.
+#[utoipa::path(
+    get,
+    path = "/{id}/tenants",
+    tag = "platform",
+    operation_id = "list_database_tenants",
+    params(("id" = ShortId, Path, description = "Database id.")),
+    responses((status = 200, description = "The tenants of the database.", body = [DatabaseTenant]), NotFoundResponse, ErrorResponses)
+)]
+pub async fn tenants(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Vec<DatabaseTenant>>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let tenants = platform
+        .database_tenants(id)
+        .await
+        .map_err(platform_error)?;
+    Ok(Json(tenants))
+}
+
+/// Gives the root account or a tenant of a database a new password and starts a new
+/// deployment of every app that connects with it. The new password is in the response only.
+#[utoipa::path(
+    post,
+    path = "/{id}/password",
+    tag = "platform",
+    operation_id = "reset_database_password",
+    params(("id" = ShortId, Path, description = "Database id.")),
+    request_body = DatabasePasswordRequest,
+    responses((status = 200, description = "The account with its new password.", body = DatabasePasswordReset), NotFoundResponse, ErrorResponses)
+)]
+pub async fn reset_password(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<DatabasePasswordRequest>,
+) -> Result<Json<DatabasePasswordReset>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    let reset = platform
+        .reset_database_password(id, request.tenant.as_deref(), &caller.username)
+        .await
+        .map_err(platform_error)?;
+    let account = request.tenant.unwrap_or_else(|| reset.account.user.clone());
+    let record = AuditRecord::new(AuditAction::ResetDatabasePassword)
+        .id(id)
+        .summary(account);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+    Ok(Json(reset))
+}
+
+/// Removes a tenant of a shared database server with its user and its data. A tenant that
+/// an app connects as stays.
+#[utoipa::path(
+    delete,
+    path = "/{id}/tenants/{tenant}",
+    tag = "platform",
+    operation_id = "delete_database_tenant",
+    params(
+        ("id" = ShortId, Path, description = "Database id."),
+        ("tenant" = String, Path, description = "Tenant name.")
+    ),
+    responses((status = 200, description = "The tenant is deleted."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn delete_tenant(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((id, tenant)): Path<(ShortId, String)>,
+) -> Result<Json<()>, AppError> {
+    let platform = state.platform(&caller, Permission::Admin).await?;
+    platform
+        .delete_database_tenant(id, &tenant)
+        .await
+        .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeleteDatabaseTenant)
+        .id(id)
+        .summary(tenant);
     state
         .record_audit(&caller.username, caller.client, record)
         .await;

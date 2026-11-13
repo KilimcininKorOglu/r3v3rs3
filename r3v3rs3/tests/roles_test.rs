@@ -490,6 +490,10 @@ async fn the_admin_api_answers_403_to_an_action_that_the_role_does_not_allow() -
                 "/api/databases/s3/download?key=test.dump.gz",
                 403,
             ),
+            // The passwords of a database belong to the administrators only.
+            (Method::GET, "/api/databases/abc/credentials", 403),
+            (Method::POST, "/api/databases/abc/password", 403),
+            (Method::DELETE, "/api/databases/abc/tenants/p_one", 403),
         ];
         for (method, path, expected) in checks {
             let actual = status(&client, addr, method.clone(), path, &editor).await?;

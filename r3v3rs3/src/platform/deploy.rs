@@ -2403,6 +2403,160 @@ mod tests {
         Ok(())
     }
 
+    /// `setup_with_database` with the app deployed once.
+    async fn deployed_with_database(
+        in_project: bool,
+    ) -> anyhow::Result<(Arc<Platform>, Arc<FakeRuntime>, AppEntry, TempDir, u16)> {
+        let (platform, runtime, linked, dir, host_port) = setup_with_database(in_project).await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        deploy_running(&platform, linked.id, db_id).await?;
+        Ok((platform, runtime, linked, dir, host_port))
+    }
+
+    /// Waits until no app of `apps` runs a pipeline.
+    async fn idle(platform: &Platform, apps: &[ShortId]) -> anyhow::Result<()> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+        while tokio::time::Instant::now() < deadline {
+            if !apps.iter().any(|app| platform.busy_apps().contains(app)) {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        bail!("the apps {apps:?} did not settle")
+    }
+
+    #[tokio::test]
+    async fn an_administrator_reads_the_root_account_and_every_tenant() -> anyhow::Result<()> {
+        let (platform, _runtime, linked, _dir, host_port) = deployed_with_database(false).await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        let accounts = platform.database_accounts(db_id).await?;
+        assert_eq!(
+            accounts.root.url,
+            format!("postgres://postgres:s3cret@127.0.0.1:{host_port}/postgres")
+        );
+        assert_eq!(accounts.root.tenant, None);
+
+        let tenant = super::super::tenant::tenant_name(linked.id, None, None);
+        let password = platform.tenant_password(db_id, &tenant).await?;
+        let [account] = accounts.tenants.as_slice() else {
+            bail!("one tenant: {:?}", accounts.tenants);
+        };
+        assert_eq!(account.tenant.as_deref(), Some(tenant.as_str()));
+        assert_eq!(Some(account.password.clone()), password);
+        assert_eq!(
+            account.url,
+            format!(
+                "postgres://{tenant}:{}@127.0.0.1:{host_port}/{tenant}",
+                account.password
+            )
+        );
+        let expected = r3v3rs3_api::platform::DatabaseTenant {
+            name: tenant,
+            apps: vec![linked.id],
+        };
+        assert_eq!(platform.database_tenants(db_id).await?, vec![expected]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_new_tenant_password_reaches_the_database_and_redeploys_its_apps()
+    -> anyhow::Result<()> {
+        let (platform, runtime, linked, _dir, _host_port) = deployed_with_database(false).await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        let tenant = super::super::tenant::tenant_name(linked.id, None, None);
+        let old = platform.tenant_password(db_id, &tenant).await?;
+        let reset = platform
+            .reset_database_password(db_id, Some(&tenant), "alice")
+            .await?;
+        let new = reset.account.password.clone();
+        assert_ne!(Some(new.clone()), old);
+        assert_eq!(platform.tenant_password(db_id, &tenant).await?, Some(new));
+        assert_eq!(reset.redeployed, vec![linked.id]);
+        assert!(reset.failed.is_empty());
+        assert_tenant_script_ran(&runtime)?;
+
+        // The new deployment of the app connects with the new password.
+        idle(&platform, &[db_id, linked.id]).await?;
+        let url = reset
+            .account
+            .url
+            .replace("127.0.0.1", "host.docker.internal");
+        assert_eq!(last_database_url(&runtime)?, url);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_new_root_password_reaches_the_apps_of_the_project() -> anyhow::Result<()> {
+        let (platform, runtime, linked, _dir, host_port) = deployed_with_database(true).await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        let reset = platform
+            .reset_database_password(db_id, None, "alice")
+            .await?;
+        let new = reset.account.password.clone();
+        assert_ne!(new, "s3cret");
+        // The root script signs in with the old password.
+        assert_tenant_script_ran(&runtime)?;
+        let info = r3v3rs3_api::platform::engine_info("postgres").context("the engine")?;
+        assert_eq!(platform.open_password(db_id, &info).await?, new);
+        assert_eq!(reset.redeployed, vec![linked.id]);
+
+        idle(&platform, &[db_id, linked.id]).await?;
+        assert_eq!(
+            last_database_url(&runtime)?,
+            format!("postgres://postgres:{new}@host.docker.internal:{host_port}/postgres")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_root_password_that_the_database_refuses_keeps_the_old_one() -> anyhow::Result<()> {
+        let (platform, runtime, linked, _dir, _host_port) = deployed_with_database(true).await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        runtime.state().hook_fail = true;
+        assert!(
+            platform
+                .reset_database_password(db_id, None, "alice")
+                .await
+                .is_err()
+        );
+        let info = r3v3rs3_api::platform::engine_info("postgres").context("the engine")?;
+        assert_eq!(platform.open_password(db_id, &info).await?, "s3cret");
+        Ok(())
+    }
+
+    /// The request that keeps an app and removes its database.
+    fn without_database(app: &AppEntry) -> r3v3rs3_api::platform::AppRequest {
+        let mut spec = app.spec.clone();
+        spec.uses_database = None;
+        r3v3rs3_api::platform::AppRequest {
+            name: app.name.clone(),
+            target: app.target,
+            spec,
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_tenant_without_apps_can_be_deleted() -> anyhow::Result<()> {
+        let (platform, runtime, linked, _dir, _host_port) = deployed_with_database(false).await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        let tenant = super::super::tenant::tenant_name(linked.id, None, None);
+        let err = platform.delete_database_tenant(db_id, &tenant).await;
+        let err = err.unwrap_err().downcast::<Error>()?;
+        assert!(matches!(err, Error::DatabaseInUse { .. }), "{err}");
+
+        platform
+            .update_app(linked.id, without_database(&linked), 3)
+            .await?;
+        platform.delete_database_tenant(db_id, &tenant).await?;
+        assert!(platform.tenants(db_id).await?.is_empty());
+        assert_tenant_script_ran(&runtime)?;
+
+        let err = platform.delete_database_tenant(db_id, &tenant).await;
+        let err = err.unwrap_err().downcast::<Error>()?;
+        assert!(matches!(err, Error::IdNotFound { .. }), "{err}");
+        Ok(())
+    }
+
     async fn add_and_deploy_replica(
         platform: &Arc<Platform>,
         db_id: ShortId,

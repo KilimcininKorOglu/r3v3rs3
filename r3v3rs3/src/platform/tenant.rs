@@ -25,7 +25,7 @@ const MAX_TENANT_NAME: usize = 63;
 
 /// One tenant script at a time, so two deployments of one project environment cannot create
 /// its user with two passwords.
-static TENANT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(super) static TENANT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The account that a connection to a database uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,6 +152,32 @@ pub fn drop_script(
     script(info, root_password, content)
 }
 
+/// The script that gives the root account of a database a new password. The data of the
+/// server keeps the root password, so a new value of the password variable alone changes
+/// nothing.
+pub(crate) fn root_password_script(
+    info: &EngineInfo,
+    root_password: &str,
+    password: &str,
+) -> anyhow::Result<TenantScript> {
+    check_script_values(&info.user, password)?;
+    let user = &info.user;
+    let content = match info.engine.as_str() {
+        "postgres" => format!("ALTER ROLE \"{user}\" WITH PASSWORD '{password}';\n"),
+        // The image creates the root user for `%` and for `localhost`.
+        "mysql" | "mariadb" => format!(
+            "ALTER USER IF EXISTS '{user}'@'%' IDENTIFIED BY '{password}';\n\
+             ALTER USER IF EXISTS '{user}'@'localhost' IDENTIFIED BY '{password}';\n\
+             FLUSH PRIVILEGES;\n"
+        ),
+        "mongodb" => {
+            format!("db.getSiblingDB('admin').changeUserPassword('{user}', '{password}');\n")
+        }
+        other => bail!("the engine {other} has no root password"),
+    };
+    script(info, root_password, content)
+}
+
 /// A tenant name and a generated password hold only characters that need no quoting, which
 /// keeps them out of reach of an injection into a script.
 fn check_script_values(tenant: &str, password: &str) -> anyhow::Result<()> {
@@ -246,7 +272,7 @@ fn script(info: &EngineInfo, root_password: &str, content: String) -> anyhow::Re
 }
 
 /// Uploads the script, runs it and removes it again, also after a failure.
-async fn run_script(
+pub(super) async fn run_script(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
     script: TenantScript,
@@ -268,7 +294,7 @@ async fn run_script(
     Ok(())
 }
 
-fn secret_name(tenant: &str) -> String {
+pub(super) fn secret_name(tenant: &str) -> String {
     format!("{TENANT_SECRET_PREFIX}{tenant}")
 }
 
@@ -325,7 +351,7 @@ impl Platform {
         ))
     }
 
-    async fn store_tenant_password(
+    pub(super) async fn store_tenant_password(
         &self,
         db_id: ShortId,
         tenant: &str,
@@ -477,6 +503,34 @@ mod tests {
         let root = Credentials::root(&info("mysql"), "pw0".into());
         assert_eq!(root.user, "root");
         assert!(!root.database_in_url);
+    }
+
+    #[test]
+    fn a_root_password_changes_in_the_database_and_never_on_the_command_line() {
+        let pg = root_password_script(&info("postgres"), "old123", "new456").unwrap();
+        assert_eq!(
+            pg.content,
+            "ALTER ROLE \"postgres\" WITH PASSWORD 'new456';\n"
+        );
+        // The script signs in with the old password.
+        assert_eq!(pg.env, ["PGPASSWORD=old123"]);
+        let my = root_password_script(&info("mysql"), "old123", "new456").unwrap();
+        assert!(my.content.contains("ALTER USER IF EXISTS 'root'@'%'"));
+        assert!(
+            my.content
+                .contains("ALTER USER IF EXISTS 'root'@'localhost'")
+        );
+        let mongo = root_password_script(&info("mongodb"), "old123", "new456").unwrap();
+        assert!(
+            mongo
+                .content
+                .contains("changeUserPassword('root', 'new456')")
+        );
+        for script in [pg, my, mongo] {
+            assert!(!script.command.join(" ").contains("new456"));
+        }
+        assert!(root_password_script(&info("redis"), "", "new456").is_err());
+        assert!(root_password_script(&info("postgres"), "old", "x'; DROP").is_err());
     }
 
     #[test]

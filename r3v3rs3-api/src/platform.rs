@@ -1815,6 +1815,66 @@ pub struct DatabaseCreated {
     pub database: String,
 }
 
+/// One account of a database with its password: the root account, or the account of one
+/// tenant of a shared server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DatabaseAccount {
+    /// The tenant of the account. `None` for the root account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant: Option<String>,
+    pub user: String,
+    pub password: String,
+    /// The database of the account. Empty for an engine without databases, such as Redis.
+    pub database: String,
+    /// The prefix that the keys of a Redis tenant start with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_prefix: Option<String>,
+    /// The connection string on `127.0.0.1` of the r3v3rs3 server.
+    pub url: String,
+}
+
+/// The accounts of a database with their passwords. Only an Admin account reads them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DatabaseCredentials {
+    /// The root account. Its user and password are empty for an engine without a password,
+    /// such as Redis.
+    pub root: DatabaseAccount,
+    /// The accounts of the tenants of a shared server.
+    pub tenants: Vec<DatabaseAccount>,
+}
+
+/// One tenant of a shared database server, without its password.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DatabaseTenant {
+    /// The name of the tenant: the name of its user and its database.
+    pub name: String,
+    /// The apps that connect as this tenant. Empty for a tenant whose apps left the server;
+    /// its database stays until it is deleted.
+    #[schema(value_type = Vec<String>)]
+    pub apps: Vec<ShortId>,
+}
+
+/// The body that sets a new password for an account of a database.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DatabasePasswordRequest {
+    /// The tenant whose password changes. `None` changes the root password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant: Option<String>,
+}
+
+/// The new password of an account, shown once, and the apps that a new deployment gives it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DatabasePasswordReset {
+    pub account: DatabaseAccount,
+    /// The connected apps whose new deployment started with the new password.
+    #[schema(value_type = Vec<String>)]
+    pub redeployed: Vec<ShortId>,
+    /// The connected apps whose new deployment did not start; they keep the old password
+    /// until their next deployment.
+    #[schema(value_type = Vec<String>)]
+    pub failed: Vec<ShortId>,
+}
+
 /// The body that creates or replaces an app.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct AppRequest {
