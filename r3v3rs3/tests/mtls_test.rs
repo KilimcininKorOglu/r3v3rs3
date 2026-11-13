@@ -1,7 +1,11 @@
 use axum::{Router, routing::get};
 use axum_server::tls_rustls::RustlsConfig;
-use r3v3rs3::{admin::start_admin, certs::Cert, config::new_appinfo, log::DatabaseLayer};
+use r3v3rs3::{
+    admin::start_admin, certs::Cert, config::new_appinfo, log::DatabaseLayer,
+    server::ServerChannels,
+};
 use r3v3rs3_api::{
+    app::AppInfo,
     header_rules::{HeaderRule, HeaderRules},
     id::ShortId,
     multiaddr::Multiaddr,
@@ -301,6 +305,33 @@ async fn admin_api_checks_certificates() -> anyhow::Result<()> {
     let server_id = pki.server.id;
     let client_id = pki.client.id;
     with_server(storage, |channels| async move {
+        let admin = AdminSession::start(channels, app_info, addr).await?;
+        admin.check_port_roots(listen, root_id, server_id).await?;
+        admin.check_proxy_client_cert(server_id, client_id).await?;
+        admin
+            .check_cert_deletes(root_id, server_id, client_id)
+            .await
+    })
+    .await?;
+
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// A signed-in session on the admin API.
+struct AdminSession {
+    client: reqwest::Client,
+    addr: std::net::SocketAddr,
+    cookie: String,
+}
+
+impl AdminSession {
+    /// Starts the admin API on `addr` and signs in as the admin.
+    async fn start(
+        channels: ServerChannels,
+        app_info: AppInfo,
+        addr: std::net::SocketAddr,
+    ) -> anyhow::Result<Self> {
         tokio::spawn(start_admin(
             app_info,
             addr,
@@ -310,14 +341,26 @@ async fn admin_api_checks_certificates() -> anyhow::Result<()> {
             channels.accounts.clone(),
         ));
         wait_for_listener(addr).await?;
-        let cookie = admin_session_cookie(addr).await?;
-        let client = reqwest::Client::new();
+        Ok(Self {
+            cookie: admin_session_cookie(addr).await?,
+            client: reqwest::Client::new(),
+            addr,
+        })
+    }
+
+    /// Checks that a port with client authentication needs a root certificate as its client CA.
+    async fn check_port_roots(
+        &self,
+        listen: Multiaddr,
+        root_id: ShortId,
+        server_id: ShortId,
+    ) -> anyhow::Result<()> {
         let add_port = |roots: Vec<ShortId>| {
             let port: Port =
                 tls_port("unused", listen.clone(), ClientAuthMode::Required, roots).port;
-            client
-                .post(format!("http://{addr}/api/ports"))
-                .header(COOKIE, &cookie)
+            self.client
+                .post(format!("http://{}/api/ports", self.addr))
+                .header(COOKIE, &self.cookie)
                 .json(&port)
                 .send()
         };
@@ -333,13 +376,21 @@ async fn admin_api_checks_certificates() -> anyhow::Result<()> {
         }
 
         add_port(vec![root_id]).await?.error_for_status()?;
+        Ok(())
+    }
 
+    /// Checks that a proxy client certificate must be a client certificate.
+    async fn check_proxy_client_cert(
+        &self,
+        server_id: ShortId,
+        client_id: ShortId,
+    ) -> anyhow::Result<()> {
         let add_proxy = |client_cert: ShortId| {
             let upstream = "/dns/localhost/tcp/1/tls".parse().unwrap();
             let proxy = tcp_proxy_entry("unused", "unused", upstream, Some(client_cert)).proxy;
-            client
-                .post(format!("http://{addr}/api/proxies"))
-                .header(COOKIE, &cookie)
+            self.client
+                .post(format!("http://{}/api/proxies", self.addr))
+                .header(COOKIE, &self.cookie)
                 .json(&proxy)
                 .send()
         };
@@ -348,11 +399,21 @@ async fn admin_api_checks_certificates() -> anyhow::Result<()> {
         let body = resp.text().await?;
         assert!(body.contains("invalid_client_cert"), "{body}");
         add_proxy(client_id).await?.error_for_status()?;
+        Ok(())
+    }
 
+    /// Checks that a certificate in use by a port or a proxy is not deleted, and that an unused
+    /// one is.
+    async fn check_cert_deletes(
+        &self,
+        root_id: ShortId,
+        server_id: ShortId,
+        client_id: ShortId,
+    ) -> anyhow::Result<()> {
         let delete_cert = |id: ShortId| {
-            client
-                .delete(format!("http://{addr}/api/certs/{id}"))
-                .header(COOKIE, &cookie)
+            self.client
+                .delete(format!("http://{}/api/certs/{id}", self.addr))
+                .header(COOKIE, &self.cookie)
                 .send()
         };
         // The port uses the root certificate and the proxy uses the client certificate.
@@ -364,11 +425,7 @@ async fn admin_api_checks_certificates() -> anyhow::Result<()> {
         }
         delete_cert(server_id).await?.error_for_status()?;
         Ok(())
-    })
-    .await?;
-
-    std::fs::remove_dir_all(&dir)?;
-    Ok(())
+    }
 }
 
 #[tokio::test]
