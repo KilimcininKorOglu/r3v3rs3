@@ -318,13 +318,9 @@ pub fn security_profile_buttons(locale: Locale, on_apply: Callback<SecurityProfi
                     Callback::from(move |_| on_apply.emit(prof))
                 };
                 html! {
-                    <button
-                        type="button"
-                        onclick={on_click}
-                        class="px-2 py-0.5 text-xs font-medium rounded border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 transition-colors cursor-pointer"
-                    >
+                    <crate::components::button::Button kind={crate::components::button::ButtonKind::Secondary} size={crate::components::button::ButtonSize::Sm} onclick={on_click}>
                         {locale.t(key)}
-                    </button>
+                    </crate::components::button::Button>
                 }
             }) }
         </div>
