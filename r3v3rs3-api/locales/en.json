@@ -146,6 +146,7 @@
   "audit.action_reset_database_password": "Set a new database password",
   "audit.action_delete_database_tenant": "Delete a database tenant",
   "audit.action_backup_database": "Back up a database",
+  "audit.action_delete_database_backup": "Delete a database backup",
   "audit.action_restore_database": "Restore a database backup",
   "audit.action_restore_database_from_s3": "Restore a database from S3 snapshot",
   "audit.action_pitr_restore_database": "Restore a database to a point in time (PITR)",

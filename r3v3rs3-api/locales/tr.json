@@ -146,6 +146,7 @@
   "audit.action_reset_database_password": "Veritabanı parolasını yenile",
   "audit.action_delete_database_tenant": "Veritabanı tenant'ını sil",
   "audit.action_backup_database": "Veritabanı yedekle",
+  "audit.action_delete_database_backup": "Veritabanı yedeğini sil",
   "audit.action_restore_database": "Veritabanı yedeğini geri yükle",
   "audit.action_restore_database_from_s3": "S3 yedeğinden veritabanı geri yükle",
   "audit.action_pitr_restore_database": "Veritabanını bir zaman noktasına geri döndür (PITR)",

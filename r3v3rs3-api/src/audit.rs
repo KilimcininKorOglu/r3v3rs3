@@ -76,6 +76,8 @@ pub enum AuditAction {
     DeleteDatabaseTenant,
     /// An account took the backup of a database.
     BackupDatabase,
+    /// An account deleted a backup of a database.
+    DeleteDatabaseBackup,
     /// An account restored the backup of a database.
     RestoreDatabase,
     /// An account restored a database from an S3 remote backup snapshot.
@@ -222,7 +224,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 120] = [
+    pub const ALL: [AuditAction; 121] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -265,6 +267,7 @@ impl AuditAction {
         Self::ResetDatabasePassword,
         Self::DeleteDatabaseTenant,
         Self::BackupDatabase,
+        Self::DeleteDatabaseBackup,
         Self::RestoreDatabase,
         Self::RestoreDatabaseFromS3,
         Self::PitrRestoreDatabase,

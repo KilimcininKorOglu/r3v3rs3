@@ -117,6 +117,12 @@ pub async fn delete(
         .delete_backup(id, &backup_id)
         .await
         .map_err(platform_error)?;
+    let record = AuditRecord::new(AuditAction::DeleteDatabaseBackup)
+        .id(id)
+        .summary(backup_id);
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
     Ok(Json(()))
 }
 
