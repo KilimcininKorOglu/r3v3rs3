@@ -15,18 +15,26 @@ pub struct DomainCertCoverageProps {
     pub domains: Vec<String>,
 }
 
-async fn check_coverage(domains: &[String]) -> Result<Vec<DomainCoverageInfo>, gloo_net::Error> {
-    Request::post(&format!("{API_ENDPOINT}/certs/coverage"))
-        .json(&domains)?
-        .send()
-        .await?
-        .json()
-        .await
+async fn check_coverage(
+    locale: Locale,
+    domains: &[String],
+) -> Result<Vec<DomainCoverageInfo>, String> {
+    let request = Request::post(&format!("{API_ENDPOINT}/certs/coverage"));
+    crate::pages::settings::post_json(locale, request, &domains).await
 }
 
-async fn verify_cname(domain: &str, target: &str) -> Result<CnameVerifyResult, gloo_net::Error> {
-    let url = format!("{API_ENDPOINT}/certs/verify_cname?domain={domain}&expected_target={target}");
-    Request::get(&url).send().await?.json().await
+async fn verify_cname(
+    locale: Locale,
+    domain: &str,
+    target: &str,
+) -> Result<CnameVerifyResult, String> {
+    let request = Request::get(&format!("{API_ENDPOINT}/certs/verify_cname"))
+        .query([("domain", domain), ("expected_target", target)]);
+    crate::pages::settings::fetch_json(locale, request).await
+}
+
+async fn show_error(locale: Locale, err: &str) {
+    crate::dialog::message(locale, err, crate::dialog::Icon::Error).await;
 }
 
 fn render_wildcard(locale: Locale, domain: &str, pattern: &str) -> Html {
@@ -210,8 +218,9 @@ pub fn domain_cert_coverage(props: &DomainCertCoverageProps) -> Html {
                     let coverage_list = coverage_list.clone();
                     let domains = domains.clone();
                     wasm_bindgen_futures::spawn_local(async move {
-                        if let Ok(res) = check_coverage(&domains).await {
-                            coverage_list.set(res);
+                        match check_coverage(locale, &domains).await {
+                            Ok(res) => coverage_list.set(res),
+                            Err(err) => show_error(locale, &err).await,
                         }
                     });
                 } else if domains.is_empty() {
@@ -229,10 +238,13 @@ pub fn domain_cert_coverage(props: &DomainCertCoverageProps) -> Html {
             let loading_domain = loading_domain.clone();
             loading_domain.set(Some(domain.clone()));
             wasm_bindgen_futures::spawn_local(async move {
-                if let Ok(res) = verify_cname(&domain, &target).await {
-                    let mut current = (*cname_status).clone();
-                    current.insert(domain, res);
-                    cname_status.set(current);
+                match verify_cname(locale, &domain, &target).await {
+                    Ok(res) => {
+                        let mut current = (*cname_status).clone();
+                        current.insert(domain, res);
+                        cname_status.set(current);
+                    }
+                    Err(err) => show_error(locale, &err).await,
                 }
                 loading_domain.set(None);
             });
