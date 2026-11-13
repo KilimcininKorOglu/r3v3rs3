@@ -8,7 +8,7 @@ use super::app_git_token::AppGitToken;
 use super::app_image_update::AppImageUpdate;
 use super::app_webhook::AppWebhook;
 use super::resource_page::{FormCard, Notice, delete_on_click, form_card, notice_view};
-use super::settings::{fetch_json, send_request};
+use super::settings::fetch_json;
 use super::store_env::{StoreEnvValue, fields_view as store_env_fields, parse as parse_store_env};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
@@ -387,10 +387,7 @@ async fn store_entry_saved(
 ) -> bool {
     if let Some(env) = env {
         let path = format!("{API_ENDPOINT}/apps/{}/env", entry.id);
-        let saved_env = match Request::put(&path).json(&env) {
-            Ok(request) => send_request(locale, request).await,
-            Err(err) => Err(err.to_string()),
-        };
+        let saved_env = super::settings::send_json(locale, Request::put(&path), &env).await;
         if let Err(message) = saved_env {
             notice.set(Some(Notice::Failed(format!(
                 "{}: {}",
@@ -424,12 +421,7 @@ async fn save(
         Some(id) => Request::put(&format!("{API_ENDPOINT}/apps/{id}")),
         None => Request::post(&format!("{API_ENDPOINT}/apps")),
     };
-    let request = builder.json(request).map_err(|err| err.to_string())?;
-    send_request(locale, request)
-        .await?
-        .json()
-        .await
-        .map_err(|err| err.to_string())
+    super::settings::post_json(locale, builder, request).await
 }
 
 /// The name of a database in the select of the app form. A database without a project is a
