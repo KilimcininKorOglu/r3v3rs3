@@ -2,7 +2,6 @@ use r3v3rs3_api::i18n::Locale;
 use std::cell::RefCell;
 use time::{OffsetDateTime, UtcOffset, format_description::well_known::Rfc3339};
 use wasm_bindgen::JsCast;
-use wasm_bindgen::UnwrapThrowExt;
 use web_time::{SystemTime, UNIX_EPOCH};
 
 const HOUR: u64 = 3600;
@@ -29,13 +28,16 @@ fn display_timezone() -> Option<String> {
 
 /// Formats a Unix time as its date and the exact days left until it,
 /// e.g. `2026-12-01 (59 days)`. A time less than a day away names its hours.
+/// A time before 1970 has no date in this form and stays as its number.
 pub fn format_duration(locale: Locale, unix_time: i64) -> String {
-    let timestamp = format_time(u64::try_from(unix_time).unwrap_throw() * 1000);
-    let date = timestamp.split('T').next().unwrap_throw().to_owned();
-    let remaining = u64::try_from(unix_time)
+    let Ok(time) = u64::try_from(unix_time) else {
+        return unix_time.to_string();
+    };
+    let timestamp = format_time(time.saturating_mul(1000));
+    let date = timestamp.split('T').next().unwrap_or(&timestamp);
+    let remaining = u64::try_from(unix_now())
         .ok()
-        .zip(u64::try_from(unix_now()).ok())
-        .and_then(|(time, now)| time.checked_sub(now));
+        .and_then(|now| time.checked_sub(now));
     format!("{date} ({})", time_left(locale, remaining))
 }
 
@@ -283,6 +285,12 @@ mod tests {
             "2026-10-21T18:00:00Z"
         );
         assert_eq!(format_rfc3339("not a time"), "not a time");
+    }
+
+    #[test]
+    fn a_time_before_1970_is_no_panic() {
+        assert_eq!(format_duration(Locale::En, -5), "-5");
+        assert_eq!(format_duration(Locale::En, 0), "1970-01-01 (Expired)");
     }
 
     #[test]
