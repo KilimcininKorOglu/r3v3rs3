@@ -10,7 +10,7 @@ use reqwest::redirect::Policy;
 use std::sync::Arc;
 
 mod common;
-use common::{TestStorage, alloc_tcp_port, with_server};
+use common::{TestPort, TestStorage, alloc_tcp_port, with_server};
 
 #[tokio::test]
 async fn https_proxy() -> anyhow::Result<()> {
@@ -108,45 +108,43 @@ async fn https_proxy() -> anyhow::Result<()> {
         .build();
 
     let ca = reqwest::Certificate::from_pem(&root.pem_chain)?;
-    with_server(config, |_| async move {
-        let client = reqwest::Client::builder()
-            .add_root_certificate(ca.clone())
-            .build()?;
-        let resp = client
-            .get(proxy_port.https_url("/hello"))
-            .send()
-            .await?
-            .text()
-            .await?;
-        assert_eq!(resp, "Hello");
+    with_server(config, |_| check_https_clients(proxy_port, ca)).await
+}
 
-        let client = reqwest::Client::builder()
-            .http1_only()
-            .add_root_certificate(ca.clone())
-            .build()?;
-        let resp = client
-            .get(proxy_port.https_url("/hello"))
-            .send()
-            .await?
-            .text()
-            .await?;
-        assert_eq!(resp, "Hello");
+/// Builds a client from `builder` and returns the body of `/hello` on the HTTPS port.
+async fn fetch_hello(
+    builder: reqwest::ClientBuilder,
+    proxy_port: &TestPort,
+) -> anyhow::Result<String> {
+    let client = builder.build()?;
+    Ok(client
+        .get(proxy_port.https_url("/hello"))
+        .send()
+        .await?
+        .text()
+        .await?)
+}
 
-        let client = reqwest::Client::builder()
-            .http2_prior_knowledge()
-            .add_root_certificate(ca)
-            .build()?;
-        let resp = client
-            .get(proxy_port.https_url("/hello"))
-            .send()
-            .await?
-            .text()
-            .await?;
-        assert_eq!(resp, "Hello");
+/// Checks that a default client, an HTTP/1.1 only client and an HTTP/2 prior knowledge client
+/// all receive "Hello" through the HTTPS port.
+async fn check_https_clients(proxy_port: TestPort, ca: reqwest::Certificate) -> anyhow::Result<()> {
+    let builder = reqwest::Client::builder().add_root_certificate(ca.clone());
+    let resp = fetch_hello(builder, &proxy_port).await?;
+    assert_eq!(resp, "Hello");
 
-        Ok(())
-    })
-    .await
+    let builder = reqwest::Client::builder()
+        .http1_only()
+        .add_root_certificate(ca.clone());
+    let resp = fetch_hello(builder, &proxy_port).await?;
+    assert_eq!(resp, "Hello");
+
+    let builder = reqwest::Client::builder()
+        .http2_prior_knowledge()
+        .add_root_certificate(ca);
+    let resp = fetch_hello(builder, &proxy_port).await?;
+    assert_eq!(resp, "Hello");
+
+    Ok(())
 }
 
 #[tokio::test]
