@@ -507,7 +507,7 @@ fn render_backups_table(
                 <thead class="border-b border-neutral-800 bg-neutral-900/90 text-xs text-neutral-400 font-medium">
                     <tr>
                         <th class="px-4 py-3">{locale.t("backups.database")}</th>
-                        <th class="px-4 py-3">{"ID"}</th>
+                        <th class="px-4 py-3">{locale.t("backups.backup_id")}</th>
                         <th class="px-4 py-3">{locale.t("backups.size")}</th>
                         <th class="px-4 py-3">{locale.t("backups.time")}</th>
                         <th class="px-4 py-3">{locale.t("backups.verified")}</th>
@@ -698,7 +698,7 @@ fn render_s3_drawer(
                     <thead class="border-b border-neutral-800 text-neutral-400">
                         <tr>
                             <th class="px-4 py-2 font-medium">{locale.t("backups.database")}</th>
-                            <th class="px-4 py-2 font-medium">{"Snapshot Key"}</th>
+                            <th class="px-4 py-2 font-medium">{locale.t("backups.snapshot_key")}</th>
                             <th class="px-4 py-2 font-medium">{locale.t("backups.size")}</th>
                             <th class="px-4 py-2 font-medium">{locale.t("backups.time")}</th>
                             <th class="px-4 py-2 text-right font-medium">{locale.t("common.actions")}</th>
@@ -1439,11 +1439,11 @@ fn render_dr_table(
             <table class="w-full text-sm text-left text-neutral-400">
                 <thead class="text-xs uppercase bg-neutral-800/60 text-neutral-400 border-b border-neutral-800">
                     <tr>
-                        <th class="px-4 py-2.5">{"ID"}</th>
+                        <th class="px-4 py-2.5">{locale.t("backups.backup_id")}</th>
                         <th class="px-4 py-2.5">{locale.t("backups.time")}</th>
                         <th class="px-4 py-2.5 text-right">{locale.t("backups.size")}</th>
                         <th class="px-4 py-2.5 text-center">{locale.t("settings.dr_files_count")}</th>
-                        <th class="px-4 py-2.5 text-center">{"Status"}</th>
+                        <th class="px-4 py-2.5 text-center">{locale.t("backups.status")}</th>
                         <th class="px-4 py-2.5 text-right">{locale.t("common.actions")}</th>
                     </tr>
                 </thead>
