@@ -708,18 +708,9 @@ fn token_item(
     }
 }
 
-async fn fetch_challenge() -> Result<r3v3rs3_api::auth::PasskeyChallenge, String> {
-    let response = Request::get(&format!("{API_ENDPOINT}/auth/passkey/challenge"))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !response.ok() {
-        return Err("failed to get passkey challenge".into());
-    }
-    response
-        .json::<r3v3rs3_api::auth::PasskeyChallenge>()
-        .await
-        .map_err(|e| e.to_string())
+async fn fetch_challenge(locale: Locale) -> Result<r3v3rs3_api::auth::PasskeyChallenge, String> {
+    let path = format!("{API_ENDPOINT}/auth/passkey/challenge");
+    fetch_json(locale, Request::get(&path)).await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -766,7 +757,7 @@ async fn add_passkey_flow(locale: Locale, form: UseStateHandle<Form>, accounts: 
         return;
     }
 
-    let challenge = match fetch_challenge().await {
+    let challenge = match fetch_challenge(locale).await {
         Ok(c) => c,
         Err(e) => {
             crate::dialog::message(locale, &e, crate::dialog::Icon::Error).await;
