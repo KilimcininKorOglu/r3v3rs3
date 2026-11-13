@@ -401,6 +401,7 @@ fn proxy_row(entry: &ProxyEntry, ctx: &ProxyRowContext) -> Row {
         Some((
             http.maintenance.enabled,
             maintenance_onclick(
+                ctx.locale,
                 id,
                 !http.maintenance.enabled,
                 ctx.proxies_dispatcher.clone(),
@@ -752,7 +753,9 @@ async fn toggle_proxy(locale: Locale, id: ShortId) -> Result<(), String> {
     Ok(())
 }
 
+/// Turns the maintenance mode of the proxy on or off. A failed change shows its message.
 fn maintenance_onclick(
+    locale: Locale,
     id: ShortId,
     enabled: bool,
     proxies_dispatcher: Dispatch<ProxyStore>,
@@ -761,25 +764,29 @@ fn maintenance_onclick(
         e.prevent_default();
         let proxies_dispatcher = proxies_dispatcher.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            let _ = toggle_maintenance(id, enabled).await;
+            if let Err(err) = toggle_maintenance(locale, id, enabled).await {
+                dialog::message(locale, &err, Icon::Error).await;
+            }
             load_proxies(proxies_dispatcher);
         });
     })
 }
 
-async fn toggle_maintenance(id: ShortId, enabled: bool) -> Result<(), gloo_net::Error> {
+async fn toggle_maintenance(locale: Locale, id: ShortId, enabled: bool) -> Result<(), String> {
     let mut entry: ProxyEntry = Request::get(&format!("{API_ENDPOINT}/proxies/{id}"))
         .send()
-        .await?
+        .await
+        .map_err(|err| err.to_string())?
         .json()
-        .await?;
+        .await
+        .map_err(|err| err.to_string())?;
     if let ProxyKind::Http(ref mut http) = entry.proxy.kind {
         http.maintenance.enabled = enabled;
     }
-    Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
-        .json(&entry)?
-        .send()
-        .await?;
+    let req = Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
+        .json(&entry)
+        .map_err(|err| err.to_string())?;
+    crate::pages::settings::send_request(locale, req).await?;
     Ok(())
 }
 
