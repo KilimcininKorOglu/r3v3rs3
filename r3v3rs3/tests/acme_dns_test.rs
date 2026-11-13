@@ -674,17 +674,37 @@ async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_othe
         "private_key": key.to_pkcs8_pem(LineEnding::LF)?.as_str(),
     })
     .to_string();
-    let provider = |project_id: &str, url: String| {
-        DnsProvider::Cloud(CloudProvider::GoogleCloud {
-            service_account_key: key_file.clone(),
-            project_id: project_id.to_string(),
-            api_url: Some(url.clone()),
-            auth_url: Some(url),
-        })
-    };
 
+    let record = check_google_add_signs_the_token_request(&key, &key_file).await?;
+    check_google_remove_keeps_other_values(&key_file, &record).await?;
+    check_google_remove_deletes_the_challenge_only_set(&key_file, &record).await?;
+    check_google_project_id_replaces_the_key_project(&key_file).await
+}
+
+/// A Google Cloud provider with the service account key that uses the mock URL.
+fn google_provider(key_file: &str, project_id: &str, url: String) -> DnsProvider {
+    DnsProvider::Cloud(CloudProvider::GoogleCloud {
+        service_account_key: key_file.to_string(),
+        project_id: project_id.to_string(),
+        api_url: Some(url.clone()),
+        auth_url: Some(url),
+    })
+}
+
+/// The TXT record set of the challenge name with `rrdatas`.
+fn google_rrset(rrdatas: serde_json::Value) -> serde_json::Value {
+    json!({ "name": "_acme-challenge.app.example.test.", "type": "TXT", "ttl": 60, "rrdatas": rrdatas })
+}
+
+/// Checks that an add skips the private zones, creates the record set and sends a signed token
+/// request. Returns the added record.
+async fn check_google_add_signs_the_token_request(
+    key: &rsa::RsaPrivateKey,
+    key_file: &str,
+) -> anyhow::Result<dns::TxtRecord> {
     let (base, calls) = start_mock(google_missing).await?;
-    let client = dns::client(&provider("", base.clone()), &AcmeExecConfig::default()).await?;
+    let provider = google_provider(key_file, "", base.clone());
+    let client = dns::client(&provider, &AcmeExecConfig::default()).await?;
     let record = client.add_txt(&challenge_name()).await?;
     assert_eq!(
         requests(&calls),
@@ -696,20 +716,25 @@ async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_othe
             "POST /projects/key-project/managedZones/example-zone/rrsets".to_string(),
         ]
     );
-    let rrset = |rrdatas: serde_json::Value| json!({ "name": "_acme-challenge.app.example.test.", "type": "TXT", "ttl": 60, "rrdatas": rrdatas });
-    assert_eq!(body(&calls, 4)?, rrset(json!(["\"v1\"", "\"v2\""])));
-    {
-        let calls = calls.lock().unwrap();
-        verify_google_assertion(&calls[0], &key, &format!("{base}/token"))?;
-        assert!(
-            calls[1..]
-                .iter()
-                .all(|call| call.authorization == "Bearer gc-access")
-        );
-    }
+    assert_eq!(body(&calls, 4)?, google_rrset(json!(["\"v1\"", "\"v2\""])));
+    let calls = calls.lock().unwrap();
+    verify_google_assertion(&calls[0], key, &format!("{base}/token"))?;
+    assert!(
+        calls[1..]
+            .iter()
+            .all(|call| call.authorization == "Bearer gc-access")
+    );
+    Ok(record)
+}
 
-    let (client, calls) = mock_client(google_with_other, |url| provider("", url)).await?;
-    client.remove_txt(&record).await?;
+/// Checks that a remove keeps the other values of the record set.
+async fn check_google_remove_keeps_other_values(
+    key_file: &str,
+    record: &dns::TxtRecord,
+) -> anyhow::Result<()> {
+    let (client, calls) =
+        mock_client(google_with_other, |url| google_provider(key_file, "", url)).await?;
+    client.remove_txt(record).await?;
     assert_eq!(
         requests(&calls),
         vec![
@@ -718,10 +743,20 @@ async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_othe
             format!("PATCH {GOOGLE_RRSET}"),
         ]
     );
-    assert_eq!(body(&calls, 2)?, rrset(json!(["\"other\""])));
+    assert_eq!(body(&calls, 2)?, google_rrset(json!(["\"other\""])));
+    Ok(())
+}
 
-    let (client, calls) = mock_client(google_challenge_only, |url| provider("", url)).await?;
-    client.remove_txt(&record).await?;
+/// Checks that a remove deletes a record set that holds only the challenge values.
+async fn check_google_remove_deletes_the_challenge_only_set(
+    key_file: &str,
+    record: &dns::TxtRecord,
+) -> anyhow::Result<()> {
+    let (client, calls) = mock_client(google_challenge_only, |url| {
+        google_provider(key_file, "", url)
+    })
+    .await?;
+    client.remove_txt(record).await?;
     assert_eq!(
         requests(&calls),
         vec![
@@ -730,9 +765,16 @@ async fn google_cloud_signs_its_token_request_skips_private_zones_and_keeps_othe
             format!("DELETE {GOOGLE_RRSET}"),
         ]
     );
+    Ok(())
+}
 
+/// Checks that a project ID replaces the project of the key.
+async fn check_google_project_id_replaces_the_key_project(key_file: &str) -> anyhow::Result<()> {
     // A project ID replaces the project of the key.
-    let (client, calls) = mock_client(google_missing, |url| provider("dns-project", url)).await?;
+    let (client, calls) = mock_client(google_missing, |url| {
+        google_provider(key_file, "dns-project", url)
+    })
+    .await?;
     assert!(client.add_txt(&challenge_name()).await.is_err());
     assert_eq!(
         requests(&calls).get(1).map(String::as_str),
