@@ -1,4 +1,6 @@
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{ButtonKind, ButtonSize, button_class};
+use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
 use crate::components::http_proxy_config::{
     client_cert_label, parse_optional_id, use_client_certs,
 };
@@ -1569,7 +1571,7 @@ fn error_page_themes_redirect(locale: Locale) -> Html {
             </div>
             <Link<Route>
                 to={Route::Proxies}
-                classes="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm whitespace-nowrap self-start sm:self-auto"
+                classes={classes!(button_class(ButtonKind::Primary, ButtonSize::Md), "whitespace-nowrap", "self-start", "sm:self-auto")}
             >
                 <img src="/assets/icons/swap-horizontal.svg" class="w-4 h-4 filter invert" alt="" />
                 { locale.t("settings.manage_error_page_themes") }
@@ -1630,64 +1632,88 @@ fn mcp_sessions_card() -> Html {
             { notice_view(&notice) }
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.mcp_sessions_title")}</h2>
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.mcp_sessions_desc")}</p>
-            if list.is_empty() {
-                <p class="mt-4 text-sm text-neutral-400 dark:text-neutral-500 italic">{locale.t("settings.mcp_no_sessions")}</p>
-            } else {
-                <div class="mt-4 overflow-x-auto">
-                    <table class="w-full text-sm text-left text-neutral-500 dark:text-neutral-400">
-                        <thead class="text-xs uppercase bg-neutral-50 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
-                            <tr>
-                                <th class="px-4 py-2">{locale.t("settings.mcp_session_client")}</th>
-                                <th class="px-4 py-2">{locale.t("settings.mcp_session_user")}</th>
-                                <th class="px-4 py-2">{locale.t("settings.mcp_session_scope")}</th>
-                                <th class="px-4 py-2">{locale.t("settings.mcp_session_created")}</th>
-                                <th class="px-4 py-2">{locale.t("settings.mcp_session_expires")}</th>
-                                <th class="px-4 py-2"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            { for list.iter().map(|entry| {
-                                let id = entry.id.clone();
-                                let on_revoke = {
-                                    let revoke = revoke.clone();
-                                    let id = id.clone();
-                                    Callback::from(move |e: MouseEvent| {
-                                        e.prevent_default();
-                                        revoke.emit(id.clone());
-                                    })
-                                };
-                                let created_str = format_unix_time(locale, entry.created_at as i64);
-                                let expires_str = format_unix_time(locale, entry.refresh_expires_at as i64);
-                                html! {
-                                    <tr class="border-b dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700/50">
-                                        <td class="px-4 py-2">
-                                            <div class="font-medium text-neutral-900 dark:text-white">{&entry.client_name}</div>
-                                            <div class="text-xs font-mono text-neutral-400">{&entry.client_id}</div>
-                                        </td>
-                                        <td class="px-4 py-2 font-medium text-neutral-800 dark:text-neutral-200">{&entry.username}</td>
-                                        <td class="px-4 py-2">
-                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-neutral-100 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-300">
-                                                {&entry.scope}
-                                            </span>
-                                        </td>
-                                        <td class="px-4 py-2 text-xs text-neutral-500 dark:text-neutral-400">{created_str}</td>
-                                        <td class="px-4 py-2 text-xs font-mono text-neutral-500 dark:text-neutral-400">{expires_str}</td>
-                                        <td class="px-4 py-2 text-right">
-                                            <ActionIconButton
-                                                variant={ActionVariant::Delete}
-                                                title={locale.t("settings.mcp_session_revoke").to_string()}
-                                                onclick={on_revoke}
-                                            />
-                                        </td>
-                                    </tr>
-                                }
-                            }) }
-                        </tbody>
-                    </table>
-                </div>
-            }
+            <div class="mt-4 rounded-md border border-neutral-300 dark:border-neutral-700">
+                { mcp_sessions_table(locale, &list, &revoke) }
+            </div>
         </div>
     }
+}
+
+const MCP_SESSION_COLUMNS: [Column; 5] = [
+    Column {
+        label: "settings.mcp_session_client",
+        class: "",
+    },
+    Column {
+        label: "settings.mcp_session_user",
+        class: "",
+    },
+    Column {
+        label: "settings.mcp_session_scope",
+        class: "",
+    },
+    Column {
+        label: "settings.mcp_session_created",
+        class: "text-xs whitespace-nowrap",
+    },
+    Column {
+        label: "settings.mcp_session_expires",
+        class: "text-xs whitespace-nowrap",
+    },
+];
+
+fn mcp_session_row(locale: Locale, entry: &McpSession, revoke: &Callback<String>) -> Row {
+    let on_revoke = {
+        let (revoke, id) = (revoke.clone(), entry.id.clone());
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            revoke.emit(id.clone());
+        })
+    };
+    Row {
+        key: entry.id.clone(),
+        cells: vec![
+            html! {
+                <>
+                    <div>{&entry.client_name}</div>
+                    <div class="text-xs font-mono font-normal text-neutral-500 dark:text-neutral-400">{&entry.client_id}</div>
+                </>
+            },
+            html! { {&entry.username} },
+            html! {
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-neutral-100 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-300">
+                    {&entry.scope}
+                </span>
+            },
+            html! { {format_unix_time(locale, entry.created_at as i64)} },
+            html! { {format_unix_time(locale, entry.refresh_expires_at as i64)} },
+        ],
+        actions: html! {
+            <ActionIconButton
+                variant={ActionVariant::Delete}
+                title={locale.t("settings.mcp_session_revoke").to_string()}
+                onclick={on_revoke}
+            />
+        },
+    }
+}
+
+fn mcp_sessions_table(locale: Locale, list: &[McpSession], revoke: &Callback<String>) -> Html {
+    let rows = list
+        .iter()
+        .map(|entry| mcp_session_row(locale, entry, revoke))
+        .collect::<Vec<_>>();
+    let content = ListContent {
+        loaded: true,
+        empty: "settings.mcp_no_sessions",
+        columns: &MCP_SESSION_COLUMNS,
+        rows: &rows,
+    };
+    let options = ListOptions {
+        embedded: true,
+        ..Default::default()
+    };
+    list_view(locale, content, None, &options)
 }
 
 /// The card of the server upgrade: it installs the newest release and restarts the server
