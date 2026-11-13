@@ -2,6 +2,7 @@ use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::acme_form::{dns_provider_label, use_dns_credentials};
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind};
 use crate::components::data_list::{
     Column, LINK_CLASS, Row, active_toggle, list_card, status_badge,
 };
@@ -180,32 +181,28 @@ pub fn cert_list(props: &CertListProps) -> Html {
             { body }
             if can_edit && !chosen.is_empty() {
             <div class="flex justify-end mt-4">
-                <button onclick={delete_selected} class="inline-flex items-center px-4 py-2 text-sm font-medium text-red-600 dark:text-red-500 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
+                <Button kind={ButtonKind::Danger} onclick={delete_selected}>
                     {locale.tf("certs.delete_selected", &[("count", &chosen.len().to_string())])}
-                </button>
+                </Button>
             </div>
             }
             if can_edit {
-            <div class="flex justify-end rounded-md mt-4 sm:ml-auto" role="group">
+            <div class="flex justify-end gap-2 mt-4 sm:ml-auto">
                 if matches!(kind, Some(CertKind::Server) | Some(CertKind::Client)) {
-                    <button onclick={self_sign_onclick} class="inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-l-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
-                        <img src="/assets/icons/create.svg" class="w-4 h-4 mr-1 text-neutral-500" />
+                    <Button kind={ButtonKind::Primary} onclick={self_sign_onclick}>
                         {locale.t("certs.self_sign")}
-                    </button>
-                    <button onclick={upload_onclick} class="inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-l-0 border-neutral-300 dark:border-neutral-700 rounded-r-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
-                        <img src="/assets/icons/cloud-upload.svg" class="w-4 h-4 mr-1" />
+                    </Button>
+                    <Button kind={ButtonKind::Primary} onclick={upload_onclick}>
                         {locale.t("common.upload")}
-                    </button>
+                    </Button>
                 } else if kind == Some(CertKind::Root) {
-                    <button onclick={upload_onclick} class="inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
-                        <img src="/assets/icons/cloud-upload.svg" class="w-4 h-4 mr-1" />
+                    <Button kind={ButtonKind::Primary} onclick={upload_onclick}>
                         {locale.t("common.upload")}
-                    </button>
+                    </Button>
                 } else {
-                    <button onclick={new_acme_onclick} class="inline-flex items-center px-4 py-2 text-sm font-medium text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:z-10 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600">
-                        <img src="/assets/icons/add.svg" class="w-4 h-4 mr-1" />
+                    <Button kind={ButtonKind::Primary} onclick={new_acme_onclick}>
                         {locale.t("common.add")}
-                    </button>
+                    </Button>
                 }
             </div>
             }
