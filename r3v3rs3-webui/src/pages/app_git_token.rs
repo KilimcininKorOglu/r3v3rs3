@@ -3,7 +3,7 @@
 
 use super::accounts::{HINT_CLASS, INPUT_CLASS};
 use super::resource_page::{FormCard, Notice, form_card, notice_view, text_input};
-use super::settings::{fetch_json, send_request};
+use super::settings::{fetch_json, post_json};
 use crate::API_ENDPOINT;
 use crate::components::data_list::DANGER_LINK_CLASS;
 use crate::dialog;
@@ -81,10 +81,7 @@ fn save_callback(
         let (token, notice, onchanged) = (token.clone(), notice.clone(), onchanged.clone());
         spawn_local(async move {
             let path = format!("{API_ENDPOINT}/apps/{id}/git_token");
-            let result = match Request::put(&path).json(&body) {
-                Ok(request) => read_app(locale, request).await,
-                Err(err) => Err(err.to_string()),
-            };
+            let result = post_json(locale, Request::put(&path), &body).await;
             token.set(String::new());
             apply(result, &notice, &onchanged);
         });
@@ -109,14 +106,6 @@ fn remove_callback(
             apply(result, &notice, &onchanged);
         });
     })
-}
-
-async fn read_app(locale: Locale, request: Request) -> Result<AppEntry, String> {
-    send_request(locale, request)
-        .await?
-        .json()
-        .await
-        .map_err(|err| err.to_string())
 }
 
 fn apply(
