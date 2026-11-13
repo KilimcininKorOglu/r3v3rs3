@@ -477,12 +477,16 @@ fn build_drill_modal(
             let path = format!("{API_ENDPOINT}/databases/{db_id}/backups/{backup_id}/test");
             drill_running.set(true);
             spawn_local(async move {
-                if let Ok(req) = Request::post(&path).build() {
-                    let _ = send_request(locale, req).await;
-                    reload.emit(());
-                    s.set(None);
-                }
+                let sent = match Request::post(&path).build() {
+                    Ok(req) => send_request(locale, req).await.map(|_| ()),
+                    Err(err) => Err(err.to_string()),
+                };
                 drill_running.set(false);
+                reload.emit(());
+                match sent {
+                    Ok(()) => s.set(None),
+                    Err(message) => dialog::message(locale, &message, Icon::Error).await,
+                }
             });
         })
     };
