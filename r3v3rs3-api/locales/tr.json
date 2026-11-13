@@ -1776,6 +1776,8 @@
   "apps.files_title": "{name} dosyaları",
   "apps.files_no_volumes": "Uygulamanın volume'ü yok. Dosyalarına bakmak için ona bir volume ekleyin.",
   "apps.files_dir": "dizin",
+  "apps.files_name": "Ad",
+  "apps.files_size": "Boyut",
   "apps.files_empty": "Dizin boş.",
   "apps.files_parent": "Üst",
   "apps.files_save": "Kaydet",

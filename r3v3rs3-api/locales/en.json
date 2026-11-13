@@ -1776,6 +1776,8 @@
   "apps.files_title": "Files of {name}",
   "apps.files_no_volumes": "The app has no volume. Give it a volume to browse its files.",
   "apps.files_dir": "directory",
+  "apps.files_name": "Name",
+  "apps.files_size": "Size",
   "apps.files_empty": "The directory is empty.",
   "apps.files_parent": "Up",
   "apps.files_save": "Save",
