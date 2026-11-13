@@ -11,7 +11,7 @@ use crate::format::{format_duration, unix_now};
 use crate::i18n::use_locale;
 use crate::pages::Route;
 use crate::pages::self_sign::SelfSignQuery;
-use crate::pages::settings::{failure_box, send_request, success_box};
+use crate::pages::settings::{failure_box, format_network_error, send_request, success_box};
 use crate::store::{AcmeStore, CertStore, SessionStore};
 use gloo_net::http::Request;
 use r3v3rs3_api::acme::{AcmeInfo, DnsCredentialInfo};
@@ -410,12 +410,12 @@ fn status_key(status: DeleteCertStatus) -> &'static str {
 async fn delete_certs(locale: Locale, ids: Vec<ShortId>) -> Result<Vec<DeleteCertResult>, String> {
     let request = Request::post(&format!("{API_ENDPOINT}/certs/delete"))
         .json(&DeleteCertsRequest { ids })
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| format_network_error(locale, &err))?;
     send_request(locale, request)
         .await?
         .json()
         .await
-        .map_err(|err| err.to_string())
+        .map_err(|_| locale.t("common.response_parse_failed").to_string())
 }
 
 /// Downloads the certificate. A file with a private key needs a confirmation first.
