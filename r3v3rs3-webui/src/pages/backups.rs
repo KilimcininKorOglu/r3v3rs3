@@ -1,12 +1,16 @@
 //! Centralized database backups, automated schedules, and disaster recovery center.
 
 use super::app_files::format_bytes;
-use super::resource_page::{Notice, delete_on_click, notice_view};
+use super::resource_page::{FormCard, Notice, delete_on_click, form_modal, notice_view};
 use super::settings::{fetch_json, send_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::backup_drill_modal::BackupDrillModal;
+use crate::components::button::{Button, ButtonKind, ButtonSize, button_class};
+use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
+use crate::components::modal::{Modal, ModalSize};
+use crate::components::tabs::{TabItem, Tabs};
 use crate::dialog::{self, Icon};
 use crate::format::{format_rfc3339, format_time, format_unix_time};
 use crate::i18n::use_locale;
@@ -24,9 +28,83 @@ use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yewdux::prelude::*;
 
-const INPUT_CLASS: &str = "w-full rounded bg-neutral-800 text-neutral-100 border border-neutral-700 px-3 py-1.5 text-sm focus:border-neutral-500 focus:outline-none";
-const BUTTON_PRIMARY: &str = "px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-colors flex items-center gap-1.5 disabled:opacity-50";
-const BUTTON_SECONDARY: &str = "px-3 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 font-medium text-sm transition-colors flex items-center gap-1.5";
+const INPUT_CLASS: &str = "w-full rounded-lg border border-neutral-300 bg-neutral-50 text-neutral-900 dark:border-neutral-600 dark:bg-neutral-700 dark:text-white px-3 py-1.5 text-sm focus:ring-primary-500 focus:border-primary-500";
+const CARD: &str = "rounded-md border border-neutral-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-800";
+const TILE: &str = "p-4 rounded-md border border-neutral-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-800";
+const TILE_LABEL: &str = "text-xs text-neutral-500 dark:text-neutral-400 font-medium";
+const FIELD_LABEL: &str = "text-xs font-medium text-neutral-700 dark:text-neutral-300";
+const HINT: &str = "text-[11px] text-neutral-500 dark:text-neutral-400";
+const BADGE: &str = "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium border";
+const BADGE_OK: &str = "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800";
+const BADGE_FAIL: &str =
+    "bg-red-50 text-red-700 border-red-300 dark:bg-red-950 dark:text-red-400 dark:border-red-800";
+const BADGE_INFO: &str = "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-800";
+const BADGE_MUTED: &str = "bg-neutral-100 text-neutral-600 border-neutral-300 dark:bg-neutral-800 dark:text-neutral-400 dark:border-neutral-700";
+
+const BACKUP_COLUMNS: [Column; 5] = [
+    Column {
+        label: "backups.database",
+        class: "",
+    },
+    Column {
+        label: "backups.backup_id",
+        class: "font-mono text-xs",
+    },
+    Column {
+        label: "backups.size",
+        class: "font-mono text-xs whitespace-nowrap",
+    },
+    Column {
+        label: "backups.time",
+        class: "text-xs whitespace-nowrap",
+    },
+    Column {
+        label: "backups.verified",
+        class: "",
+    },
+];
+
+const S3_COLUMNS: [Column; 4] = [
+    Column {
+        label: "backups.database",
+        class: "",
+    },
+    Column {
+        label: "backups.snapshot_key",
+        class: "font-mono break-all",
+    },
+    Column {
+        label: "backups.size",
+        class: "font-mono whitespace-nowrap",
+    },
+    Column {
+        label: "backups.time",
+        class: "whitespace-nowrap",
+    },
+];
+
+const DR_COLUMNS: [Column; 5] = [
+    Column {
+        label: "backups.backup_id",
+        class: "font-mono text-xs",
+    },
+    Column {
+        label: "backups.time",
+        class: "text-xs whitespace-nowrap",
+    },
+    Column {
+        label: "backups.size",
+        class: "font-mono text-xs whitespace-nowrap",
+    },
+    Column {
+        label: "settings.dr_files_count",
+        class: "text-xs",
+    },
+    Column {
+        label: "backups.status",
+        class: "",
+    },
+];
 
 /// The backup settings form state.
 #[derive(Clone, PartialEq, Default)]
@@ -246,9 +324,7 @@ pub fn backups() -> Html {
 
                         { render_filter_bar(locale, &search, &engine) }
 
-                        <div class="rounded-lg border border-neutral-800 bg-neutral-900/60 overflow-hidden">
-                            { render_backups_table(locale, &filtered, can_edit, reload_cb.clone(), on_select_drill) }
-                        </div>
+                        { render_backups_table(locale, &filtered, can_edit, reload_cb.clone(), on_select_drill) }
 
                         { drill_modal }
 
@@ -272,29 +348,17 @@ fn render_tabs(locale: Locale, active_tab: &UseStateHandle<BackupTab>) -> Html {
         (BackupTab::DisasterRecovery, "backups.tab_disaster_recovery"),
         (BackupTab::Configuration, "backups.tab_configuration"),
     ];
-    html! {
-        <div class="border-b border-neutral-800">
-            <nav class="flex space-x-6">
-                { for tabs.into_iter().map(|(tab, label)| {
-                    let is_active = **active_tab == tab;
-                    let active_cls = if is_active {
-                        "border-blue-500 text-blue-400 font-semibold border-b-2"
-                    } else {
-                        "border-transparent text-neutral-400 hover:text-neutral-200"
-                    };
-                    let onclick = {
-                        let active_tab = active_tab.clone();
-                        Callback::from(move |_| active_tab.set(tab))
-                    };
-                    html! {
-                        <button type="button" {onclick} class={classes!("py-3", "px-1", "text-sm", "transition-colors", active_cls)}>
-                            { locale.t(label) }
-                        </button>
-                    }
-                }) }
-            </nav>
-        </div>
-    }
+    let tabs = tabs
+        .into_iter()
+        .map(|(tab, label)| {
+            let onclick = {
+                let active_tab = active_tab.clone();
+                Callback::from(move |_: MouseEvent| active_tab.set(tab))
+            };
+            TabItem::click(locale.t(label), onclick, **active_tab == tab)
+        })
+        .collect::<Vec<_>>();
+    html! { <Tabs {tabs} /> }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -331,44 +395,44 @@ fn render_header(
 ) -> Html {
     let s3_btn = {
         let s = show_s3.clone();
-        Callback::from(move |_| s.set(!*s))
+        Callback::from(move |_: MouseEvent| s.set(!*s))
     };
     let settings_btn = {
         let s = show_settings.clone();
-        Callback::from(move |_| s.set(true))
+        Callback::from(move |_: MouseEvent| s.set(true))
     };
     let take_btn = {
         let s = show_take.clone();
-        Callback::from(move |_| s.set(true))
+        Callback::from(move |_: MouseEvent| s.set(true))
     };
 
     html! {
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-                <h1 class="text-2xl font-semibold tracking-tight">{locale.t("backups.title")}</h1>
-                <p class="text-sm text-neutral-400 mt-1">{locale.t("backups.subtitle")}</p>
+                <h1 class="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">{locale.t("backups.title")}</h1>
+                <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{locale.t("backups.subtitle")}</p>
             </div>
             if can_edit && active_tab == BackupTab::Databases {
                 <div class="flex flex-wrap items-center gap-2">
-                    <button type="button" class={BUTTON_SECONDARY} onclick={s3_btn}>
+                    <Button kind={ButtonKind::Secondary} onclick={s3_btn}>
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 00-9.78 2.096A4.001 4.001 0 003 15z" />
                         </svg>
                         {locale.t("backups.s3_snapshots")}
-                    </button>
-                    <button type="button" class={BUTTON_SECONDARY} onclick={settings_btn}>
+                    </Button>
+                    <Button kind={ButtonKind::Secondary} onclick={settings_btn}>
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         </svg>
                         {locale.t("backups.settings")}
-                    </button>
-                    <button type="button" class={BUTTON_PRIMARY} onclick={take_btn}>
+                    </Button>
+                    <Button kind={ButtonKind::Success} onclick={take_btn}>
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                         </svg>
                         {locale.t("backups.action_backup_now")}
-                    </button>
+                    </Button>
                 </div>
             }
         </div>
@@ -409,7 +473,7 @@ fn render_filter_bar(
                 />
             </div>
             <div class="flex items-center gap-2">
-                <select class="rounded bg-neutral-800 text-neutral-100 border border-neutral-700 px-3 py-1.5 text-sm focus:outline-none"
+                <select class={INPUT_CLASS}
                     value={(**engine).clone()}
                     onchange={on_engine}
                 >
@@ -443,42 +507,36 @@ fn render_kpi_cards(overview: Option<&BackupsOverview>, locale: Locale) -> Html 
 
     html! {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900/60">
-                <div class="text-xs text-neutral-400 font-medium">{locale.t("backups.overview_total")}</div>
+            <div class={TILE}>
+                <div class={TILE_LABEL}>{locale.t("backups.overview_total")}</div>
                 <div class="mt-2 flex items-baseline gap-2">
-                    <span class="text-2xl font-bold text-neutral-100">{total_count}</span>
-                    <span class="text-xs text-neutral-400 font-mono">{"("}{total_bytes_str}{")"}</span>
+                    <span class="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{total_count}</span>
+                    <span class="text-xs text-neutral-500 dark:text-neutral-400 font-mono">{"("}{total_bytes_str}{")"}</span>
                 </div>
             </div>
 
-            <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900/60">
-                <div class="text-xs text-neutral-400 font-medium">{locale.t("backups.overview_last")}</div>
-                <div class="mt-2 text-sm font-semibold text-neutral-100 truncate">{last_backup_str}</div>
+            <div class={TILE}>
+                <div class={TILE_LABEL}>{locale.t("backups.overview_last")}</div>
+                <div class="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">{last_backup_str}</div>
             </div>
 
-            <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900/60">
-                <div class="text-xs text-neutral-400 font-medium">{locale.t("backups.overview_schedule")}</div>
+            <div class={TILE}>
+                <div class={TILE_LABEL}>{locale.t("backups.overview_schedule")}</div>
                 <div class="mt-2 flex items-center gap-1.5 flex-wrap">
-                    <span class="text-sm font-semibold text-neutral-100">{schedule_str}</span>
+                    <span class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{schedule_str}</span>
                     if heartbeat_active {
-                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-950 text-emerald-400 border border-emerald-800">
-                            {locale.t("backups.heartbeat_active")}
-                        </span>
+                        <span class={classes!(BADGE, BADGE_OK)}>{locale.t("backups.heartbeat_active")}</span>
                     }
                 </div>
             </div>
 
-            <div class="p-4 rounded-lg border border-neutral-800 bg-neutral-900/60">
-                <div class="text-xs text-neutral-400 font-medium">{locale.t("backups.overview_remote")}</div>
+            <div class={TILE}>
+                <div class={TILE_LABEL}>{locale.t("backups.overview_remote")}</div>
                 <div class="mt-2">
                     if s3_active {
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-950 text-blue-400 border border-blue-800">
-                            {locale.t("backups.s3_active")}
-                        </span>
+                        <span class={classes!(BADGE, BADGE_INFO)}>{locale.t("backups.s3_active")}</span>
                     } else {
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-neutral-800 text-neutral-400 border border-neutral-700">
-                            {locale.t("backups.local_only")}
-                        </span>
+                        <span class={classes!(BADGE, BADGE_MUTED)}>{locale.t("backups.local_only")}</span>
                     }
                 </div>
             </div>
@@ -493,33 +551,17 @@ fn render_backups_table(
     reload: Callback<()>,
     on_select_drill: Callback<BackupEntry>,
 ) -> Html {
-    if backups.is_empty() {
-        return html! {
-            <div class="p-8 text-center text-neutral-400 text-sm">
-                {locale.t("backups.empty")}
-            </div>
-        };
-    }
-
-    html! {
-        <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm">
-                <thead class="border-b border-neutral-800 bg-neutral-900/90 text-xs text-neutral-400 font-medium">
-                    <tr>
-                        <th class="px-4 py-3">{locale.t("backups.database")}</th>
-                        <th class="px-4 py-3">{locale.t("backups.backup_id")}</th>
-                        <th class="px-4 py-3">{locale.t("backups.size")}</th>
-                        <th class="px-4 py-3">{locale.t("backups.time")}</th>
-                        <th class="px-4 py-3">{locale.t("backups.verified")}</th>
-                        <th class="px-4 py-3 text-right">{locale.t("common.actions")}</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-neutral-800/60">
-                    { for backups.iter().map(|b| render_backup_row(locale, b, can_edit, reload.clone(), on_select_drill.clone())) }
-                </tbody>
-            </table>
-        </div>
-    }
+    let rows = backups
+        .iter()
+        .map(|b| render_backup_row(locale, b, can_edit, reload.clone(), on_select_drill.clone()))
+        .collect::<Vec<_>>();
+    let content = ListContent {
+        loaded: true,
+        empty: "backups.empty",
+        columns: &BACKUP_COLUMNS,
+        rows: &rows,
+    };
+    list_view(locale, content, None, &ListOptions::default())
 }
 
 fn render_backup_row(
@@ -528,7 +570,7 @@ fn render_backup_row(
     can_edit: bool,
     reload: Callback<()>,
     on_select_drill: Callback<BackupEntry>,
-) -> Html {
+) -> Row {
     let download_url = format!(
         "{API_ENDPOINT}/databases/{}/backups/{}/download",
         entry.app, entry.id
@@ -557,7 +599,7 @@ fn render_backup_row(
                 locale.t("backups.verified").to_string()
             };
             html! {
-                <button type="button" class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-950 text-emerald-400 border border-emerald-800 hover:bg-emerald-900/60 cursor-pointer transition" onclick={on_drill_click} title={locale.t("backups.view_drill")}>
+                <button type="button" class={classes!(BADGE, BADGE_OK, "cursor-pointer", "hover:opacity-80")} onclick={on_drill_click} title={locale.t("backups.view_drill")}>
                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                     </svg>
@@ -566,7 +608,7 @@ fn render_backup_row(
             }
         }
         (Some(_), _) => html! {
-            <button type="button" class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-red-950 text-red-400 border border-red-800 hover:bg-red-900/60 cursor-pointer transition" onclick={on_drill_click} title={locale.t("backups.view_drill")}>
+            <button type="button" class={classes!(BADGE, BADGE_FAIL, "cursor-pointer", "hover:opacity-80")} onclick={on_drill_click} title={locale.t("backups.view_drill")}>
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
@@ -574,7 +616,7 @@ fn render_backup_row(
             </button>
         },
         _ => html! {
-            <button type="button" class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-neutral-800 text-neutral-400 border border-neutral-700 hover:bg-neutral-700/60 cursor-pointer transition" onclick={on_drill_click} title={locale.t("backups.view_drill")}>
+            <button type="button" class={classes!(BADGE, BADGE_MUTED, "cursor-pointer", "hover:opacity-80")} onclick={on_drill_click} title={locale.t("backups.view_drill")}>
                 {locale.t("backups.untested")}
             </button>
         },
@@ -648,34 +690,35 @@ fn render_backup_row(
         }
     });
 
-    html! {
-        <tr class="hover:bg-neutral-800/30 transition-colors">
-            <td class="px-4 py-3">
+    Row {
+        key: entry.id.clone(),
+        cells: vec![
+            html! {
                 <div class="flex items-center gap-2">
-                    <span class="font-medium text-neutral-200">{&entry.name}</span>
-                    <span class="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase bg-neutral-800 text-neutral-300 border border-neutral-700">
+                    <span class="font-medium text-neutral-900 dark:text-neutral-200">{&entry.name}</span>
+                    <span class={classes!(BADGE, BADGE_MUTED, "font-mono", "uppercase", "text-[10px]")}>
                         {&entry.engine}
                     </span>
                 </div>
-            </td>
-            <td class="px-4 py-3 font-mono text-xs text-neutral-400">{&entry.id}</td>
-            <td class="px-4 py-3 font-mono text-xs text-neutral-300">{format_bytes(entry.size)}</td>
-            <td class="px-4 py-3 text-xs text-neutral-400">{format_time(entry.created_at.max(0) as u64)}</td>
-            <td class="px-4 py-3">{verify_badge}</td>
-            <td class="px-4 py-3 text-right">
-                <div class="flex items-center justify-end gap-1.5">
-                    <ActionIconButton
-                        variant={ActionVariant::Download}
-                        title={locale.t("backups.download").to_string()}
-                        href={download_url}
-                        download={filename}
-                    />
-                    {verify_btn}
-                    {restore_btn}
-                    {delete_btn}
-                </div>
-            </td>
-        </tr>
+            },
+            html! { {&entry.id} },
+            html! { {format_bytes(entry.size)} },
+            html! { {format_time(entry.created_at.max(0) as u64)} },
+            verify_badge,
+        ],
+        actions: html! {
+            <>
+                <ActionIconButton
+                    variant={ActionVariant::Download}
+                    title={locale.t("backups.download").to_string()}
+                    href={download_url}
+                    download={filename}
+                />
+                {verify_btn}
+                {restore_btn}
+                {delete_btn}
+            </>
+        },
     }
 }
 
@@ -685,44 +728,33 @@ fn render_s3_drawer(
     can_edit: bool,
     reload: Callback<()>,
 ) -> Html {
-    let content = if snapshots.is_empty() {
-        html! {
-            <div class="p-6 text-center text-sm text-neutral-400">
-                {locale.t("databases.s3_empty")}
-            </div>
-        }
-    } else {
-        html! {
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-xs">
-                    <thead class="border-b border-neutral-800 text-neutral-400">
-                        <tr>
-                            <th class="px-4 py-2 font-medium">{locale.t("backups.database")}</th>
-                            <th class="px-4 py-2 font-medium">{locale.t("backups.snapshot_key")}</th>
-                            <th class="px-4 py-2 font-medium">{locale.t("backups.size")}</th>
-                            <th class="px-4 py-2 font-medium">{locale.t("backups.time")}</th>
-                            <th class="px-4 py-2 text-right font-medium">{locale.t("common.actions")}</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-neutral-800/50">
-                        { for snapshots.iter().map(|s| render_s3_row(locale, s, can_edit, reload.clone())) }
-                    </tbody>
-                </table>
-            </div>
-        }
+    let rows = snapshots
+        .iter()
+        .map(|s| render_s3_row(locale, s, can_edit, reload.clone()))
+        .collect::<Vec<_>>();
+    let content = ListContent {
+        loaded: true,
+        empty: "databases.s3_empty",
+        columns: &S3_COLUMNS,
+        rows: &rows,
+    };
+    let options = ListOptions {
+        embedded: true,
+        compact: true,
+        ..Default::default()
     };
 
     html! {
-        <div class="p-4 rounded-lg border border-neutral-700 bg-neutral-900/90 space-y-3">
-            <div class="flex items-center justify-between">
-                <h3 class="text-sm font-semibold text-neutral-200 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 00-9.78 2.096A4.001 4.001 0 003 15z" />
-                    </svg>
-                    {locale.t("databases.s3_dr_title")}
-                </h3>
+        <div class={classes!(CARD, "p-4", "space-y-3")}>
+            <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-200 flex items-center gap-2">
+                <svg class="w-4 h-4 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 00-9.78 2.096A4.001 4.001 0 003 15z" />
+                </svg>
+                {locale.t("databases.s3_dr_title")}
+            </h3>
+            <div class="rounded-md border border-neutral-300 dark:border-neutral-700">
+                { list_view(locale, content, None, &options) }
             </div>
-            {content}
         </div>
     }
 }
@@ -732,7 +764,7 @@ fn render_s3_row(
     snap: &S3BackupSnapshot,
     can_edit: bool,
     reload: Callback<()>,
-) -> Html {
+) -> Row {
     let download_url = format!("{API_ENDPOINT}/databases/s3/download?key={}", snap.key);
     let key = snap.key.clone();
     let restore_btn = can_edit.then(|| {
@@ -756,27 +788,33 @@ fn render_s3_row(
             });
         });
         html! {
-            <button type="button" class="text-blue-400 hover:text-blue-300 font-medium" {onclick}>
-                {locale.t("databases.s3_restore")}
-            </button>
+            <ActionIconButton
+                variant={ActionVariant::Restore}
+                title={locale.t("databases.s3_restore").to_string()}
+                {onclick}
+            />
         }
     });
 
-    html! {
-        <tr class="hover:bg-neutral-800/40">
-            <td class="px-4 py-2 font-medium text-neutral-200">{&snap.database_name}</td>
-            <td class="px-4 py-2 font-mono text-neutral-400">{&snap.key}</td>
-            <td class="px-4 py-2 font-mono text-neutral-300">{format_bytes(snap.size)}</td>
-            <td class="px-4 py-2 text-neutral-400">{format_rfc3339(&snap.last_modified)}</td>
-            <td class="px-4 py-2 text-right">
-                <div class="flex items-center justify-end gap-3">
-                    <a class="text-neutral-300 hover:text-white font-medium" href={download_url} download={format!("{}.dump.gz", snap.backup_id)}>
-                        {locale.t("backups.download")}
-                    </a>
-                    {restore_btn}
-                </div>
-            </td>
-        </tr>
+    Row {
+        key: snap.key.clone(),
+        cells: vec![
+            html! { <span class="font-medium">{&snap.database_name}</span> },
+            html! { {&snap.key} },
+            html! { {format_bytes(snap.size)} },
+            html! { {format_rfc3339(&snap.last_modified)} },
+        ],
+        actions: html! {
+            <>
+                <ActionIconButton
+                    variant={ActionVariant::Download}
+                    title={locale.t("backups.download").to_string()}
+                    href={download_url}
+                    download={format!("{}.dump.gz", snap.backup_id)}
+                />
+                {restore_btn}
+            </>
+        },
     }
 }
 
@@ -833,48 +871,43 @@ fn render_take_modal(
         })
     };
 
+    let on_close = {
+        let s = show_take.clone();
+        Callback::from(move |()| s.set(false))
+    };
+    let cancel = {
+        let on_close = on_close.clone();
+        Callback::from(move |_: MouseEvent| on_close.emit(()))
+    };
     html! {
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div class="w-full max-w-md rounded-lg border border-neutral-700 bg-neutral-900 p-6 space-y-4 shadow-xl">
-                <div class="flex items-center justify-between">
-                    <h3 class="text-base font-semibold text-neutral-100">{locale.t("backups.action_backup_now")}</h3>
-                    <button type="button" class="text-neutral-400 hover:text-neutral-200"
-                        onclick={let s = show_take.clone(); Callback::from(move |_| s.set(false))}
-                    >
-                        {"✕"}
-                    </button>
+        <Modal title={locale.t("backups.action_backup_now")} {on_close} size={ModalSize::Sm}>
+            <form onsubmit={submit} class="space-y-4">
+                <label class="block space-y-1">
+                    <span class={FIELD_LABEL}>{locale.t("backups.select_database")}</span>
+                    <select class={INPUT_CLASS} {onchange}>
+                        <option key="" value="" selected={current_selected.is_none()}>{locale.t("backups.select_database_placeholder")}</option>
+                        { for dbs.iter().map(|d| {
+                            let id = d.id;
+                            let is_sel = Some(id) == current_selected;
+                            html! {
+                                <option key={id.to_string()} value={id.to_string()} selected={is_sel}>
+                                    {format!("{} ({})", d.name, d.spec.database.as_deref().unwrap_or("db"))}
+                                </option>
+                            }
+                        }) }
+                    </select>
+                </label>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <Button kind={ButtonKind::Secondary} onclick={cancel}>
+                        {locale.t("common.cancel")}
+                    </Button>
+                    <Button kind={ButtonKind::Success} r#type="submit">
+                        {locale.t("backups.take")}
+                    </Button>
                 </div>
-
-                <form onsubmit={submit} class="space-y-4">
-                    <label class="block space-y-1">
-                        <span class="text-xs font-medium text-neutral-300">{locale.t("backups.select_database")}</span>
-                        <select class={INPUT_CLASS} {onchange}>
-                            <option key="" value="" selected={current_selected.is_none()}>{locale.t("backups.select_database_placeholder")}</option>
-                            { for dbs.iter().map(|d| {
-                                let id = d.id;
-                                let is_sel = Some(id) == current_selected;
-                                html! {
-                                    <option key={id.to_string()} value={id.to_string()} selected={is_sel}>
-                                        {format!("{} ({})", d.name, d.spec.database.as_deref().unwrap_or("db"))}
-                                    </option>
-                                }
-                            }) }
-                        </select>
-                    </label>
-
-                    <div class="flex justify-end gap-2 pt-2">
-                        <button type="button" class={BUTTON_SECONDARY}
-                            onclick={let s = show_take.clone(); Callback::from(move |_| s.set(false))}
-                        >
-                            {locale.t("common.cancel")}
-                        </button>
-                        <button type="submit" class={BUTTON_PRIMARY}>
-                            {locale.t("backups.take")}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
+            </form>
+        </Modal>
     }
 }
 
@@ -914,22 +947,15 @@ fn render_settings_modal(
         })
     };
 
-    html! {
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-            <div class="w-full max-w-xl rounded-lg border border-neutral-700 bg-neutral-900 p-6 space-y-4 shadow-xl my-8">
-                <div class="flex items-center justify-between border-b border-neutral-800 pb-3">
-                    <h3 class="text-base font-semibold text-neutral-100">{locale.t("backups.settings")}</h3>
-                    <button type="button" class="text-neutral-400 hover:text-neutral-200"
-                        onclick={let s = show_settings.clone(); Callback::from(move |_| s.set(false))}
-                    >
-                        {"✕"}
-                    </button>
-                </div>
-
-                <form onsubmit={submit} class="space-y-4 text-sm">
+    let on_close = {
+        let s = show_settings.clone();
+        Callback::from(move |()| s.set(false))
+    };
+    let fields = html! {
+                <div class="space-y-4 text-sm">
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <label class="block space-y-1">
-                            <span class="text-xs font-medium text-neutral-300">{locale.t("backups.schedule")}</span>
+                            <span class={FIELD_LABEL}>{locale.t("backups.schedule")}</span>
                             <input type="text" class={INPUT_CLASS} placeholder="03:00"
                                 value={form.schedule.clone()}
                                 oninput={
@@ -942,11 +968,11 @@ fn render_settings_modal(
                                     })
                                 }
                             />
-                            <span class="text-[11px] text-neutral-500">{locale.t("backups.schedule_hint")}</span>
+                            <span class={HINT}>{locale.t("backups.schedule_hint")}</span>
                         </label>
 
                         <label class="block space-y-1">
-                            <span class="text-xs font-medium text-neutral-300">{locale.t("backups.keep")}</span>
+                            <span class={FIELD_LABEL}>{locale.t("backups.keep")}</span>
                             <input type="number" min="1" max="999" class={INPUT_CLASS}
                                 value={form.keep.clone()}
                                 oninput={
@@ -974,11 +1000,11 @@ fn render_settings_modal(
                                 })
                             }
                         />
-                        <span class="text-xs text-neutral-300">{locale.t("backups.restore_test_enabled")}</span>
+                        <span class="text-xs text-neutral-700 dark:text-neutral-300">{locale.t("backups.restore_test_enabled")}</span>
                     </label>
 
-                    <label class="block space-y-1 pt-2 border-t border-neutral-800">
-                        <span class="text-xs font-medium text-neutral-300">{locale.t("backups.heartbeat_url")}</span>
+                    <label class="block space-y-1 pt-2 border-t border-neutral-200 dark:border-neutral-700">
+                        <span class={FIELD_LABEL}>{locale.t("backups.heartbeat_url")}</span>
                         <input type="text" class={INPUT_CLASS} placeholder="https://hc-ping.com/..."
                             value={form.heartbeat_url.clone()}
                             oninput={
@@ -991,14 +1017,14 @@ fn render_settings_modal(
                                 })
                             }
                         />
-                        <span class="text-[11px] text-neutral-500">{locale.t("backups.heartbeat_url_hint")}</span>
+                        <span class={HINT}>{locale.t("backups.heartbeat_url_hint")}</span>
                     </label>
 
-                    <div class="space-y-3 pt-3 border-t border-neutral-800">
-                        <h4 class="text-xs font-semibold uppercase text-neutral-400 tracking-wider">{locale.t("backups.s3")}</h4>
+                    <div class="space-y-3 pt-3 border-t border-neutral-200 dark:border-neutral-700">
+                        <h4 class="text-xs font-semibold uppercase text-neutral-500 dark:text-neutral-400 tracking-wider">{locale.t("backups.s3")}</h4>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <label class="block space-y-1">
-                                <span class="text-xs text-neutral-400">{locale.t("backups.endpoint")}</span>
+                                <span class="text-xs text-neutral-500 dark:text-neutral-400">{locale.t("backups.endpoint")}</span>
                                 <input type="text" class={INPUT_CLASS} placeholder="s3.eu-central-1.amazonaws.com"
                                     value={form.endpoint.clone()}
                                     oninput={
@@ -1014,7 +1040,7 @@ fn render_settings_modal(
                             </label>
 
                             <label class="block space-y-1">
-                                <span class="text-xs text-neutral-400">{locale.t("backups.region")}</span>
+                                <span class="text-xs text-neutral-500 dark:text-neutral-400">{locale.t("backups.region")}</span>
                                 <input type="text" class={INPUT_CLASS} placeholder="auto"
                                     value={form.region.clone()}
                                     oninput={
@@ -1030,7 +1056,7 @@ fn render_settings_modal(
                             </label>
 
                             <label class="block space-y-1">
-                                <span class="text-xs text-neutral-400">{locale.t("backups.prefix")}</span>
+                                <span class="text-xs text-neutral-500 dark:text-neutral-400">{locale.t("backups.prefix")}</span>
                                 <input type="text" class={INPUT_CLASS} placeholder="my-bucket/backups"
                                     value={form.prefix.clone()}
                                     oninput={
@@ -1046,7 +1072,7 @@ fn render_settings_modal(
                             </label>
 
                             <label class="block space-y-1">
-                                <span class="text-xs text-neutral-400">{locale.t("backups.access_key")}</span>
+                                <span class="text-xs text-neutral-500 dark:text-neutral-400">{locale.t("backups.access_key")}</span>
                                 <input type="text" class={INPUT_CLASS}
                                     value={form.access_key.clone()}
                                     oninput={
@@ -1062,7 +1088,7 @@ fn render_settings_modal(
                             </label>
 
                             <label class="block space-y-1 sm:col-span-2">
-                                <span class="text-xs text-neutral-400">{locale.t("backups.secret_key")}</span>
+                                <span class="text-xs text-neutral-500 dark:text-neutral-400">{locale.t("backups.secret_key")}</span>
                                 <input type="password" class={INPUT_CLASS}
                                     placeholder={locale.t("backups.secret_key_hint")}
                                     value={form.secret_key.clone()}
@@ -1080,20 +1106,18 @@ fn render_settings_modal(
                         </div>
                     </div>
 
-                    <div class="flex justify-end gap-2 pt-3 border-t border-neutral-800">
-                        <button type="button" class={BUTTON_SECONDARY}
-                            onclick={let s = show_settings.clone(); Callback::from(move |_| s.set(false))}
-                        >
-                            {locale.t("common.cancel")}
-                        </button>
-                        <button type="submit" class={BUTTON_PRIMARY}>
-                            {locale.t("common.update")}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    }
+                </div>
+    };
+    let card = FormCard {
+        title: locale.t("backups.settings").to_string(),
+        notice: html! {},
+        fields,
+        error: None,
+        cancel: None,
+        save_label: "common.update",
+        can_save: true,
+    };
+    form_modal(locale, card, submit, on_close)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1248,12 +1272,12 @@ fn disaster_recovery_tab(props: &SubTabProps) -> Html {
 
     html! {
         <div class="space-y-6">
-            <div class="rounded-lg border border-neutral-800 bg-neutral-900/60 p-5 space-y-4">
+            <div class={classes!(CARD, "p-5", "space-y-4")}>
                 <div>
-                    <h2 class="text-base font-semibold text-neutral-200">
+                    <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-200">
                         {locale.t("settings.disaster_recovery_title")}
                     </h2>
-                    <p class="mt-1 text-sm text-neutral-400">
+                    <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                         {locale.t("settings.disaster_recovery_hint")}
                     </p>
                 </div>
@@ -1383,28 +1407,23 @@ fn render_dr_controls(
                     class={INPUT_CLASS}
                 />
             </div>
-            <label class="inline-flex items-center gap-2 text-sm text-neutral-300 cursor-pointer">
+            <label class="inline-flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer">
                 <input
                     type="checkbox"
                     checked={**upload_s3}
                     onchange={on_s3_change}
-                    class="rounded border-neutral-700 bg-neutral-800 text-blue-600 focus:ring-blue-500"
+                    class="rounded border-neutral-300 dark:border-neutral-600 text-primary-600 focus:ring-primary-500"
                 />
                 {locale.t("settings.dr_upload_s3")}
             </label>
-            <button
-                type="button"
-                onclick={on_create}
-                disabled={**is_creating}
-                class={BUTTON_PRIMARY}
-            >
-                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <Button kind={ButtonKind::Success} onclick={on_create} disabled={**is_creating}>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                 </svg>
                 {locale.t("settings.create_dr_backup")}
-            </button>
-            <label class={classes!(BUTTON_SECONDARY, "cursor-pointer")}>
-                <svg class="w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            </Button>
+            <label class={button_class(ButtonKind::Secondary, ButtonSize::Md)}>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
                 </svg>
                 {locale.t("settings.upload_restore_dr")}
@@ -1427,30 +1446,23 @@ fn render_dr_table(
     can_edit: bool,
     load_backups: &Callback<()>,
 ) -> Html {
-    if backups.is_empty() {
-        return html! {
-            <div class="p-6 text-center text-sm text-neutral-400">
-                {locale.t("backups.empty")}
-            </div>
-        };
-    }
+    let rows = backups
+        .iter()
+        .map(|entry| render_dr_row(locale, entry, passphrase, can_edit, load_backups))
+        .collect::<Vec<_>>();
+    let content = ListContent {
+        loaded: true,
+        empty: "backups.empty",
+        columns: &DR_COLUMNS,
+        rows: &rows,
+    };
+    let options = ListOptions {
+        embedded: true,
+        ..Default::default()
+    };
     html! {
-        <div class="overflow-x-auto rounded border border-neutral-800">
-            <table class="w-full text-sm text-left text-neutral-400">
-                <thead class="text-xs uppercase bg-neutral-800/60 text-neutral-400 border-b border-neutral-800">
-                    <tr>
-                        <th class="px-4 py-2.5">{locale.t("backups.backup_id")}</th>
-                        <th class="px-4 py-2.5">{locale.t("backups.time")}</th>
-                        <th class="px-4 py-2.5 text-right">{locale.t("backups.size")}</th>
-                        <th class="px-4 py-2.5 text-center">{locale.t("settings.dr_files_count")}</th>
-                        <th class="px-4 py-2.5 text-center">{locale.t("backups.status")}</th>
-                        <th class="px-4 py-2.5 text-right">{locale.t("common.actions")}</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-neutral-800/50">
-                    { for backups.iter().map(|entry| render_dr_row(locale, entry, passphrase, can_edit, load_backups)) }
-                </tbody>
-            </table>
+        <div class="rounded-md border border-neutral-300 dark:border-neutral-700">
+            { list_view(locale, content, None, &options) }
         </div>
     }
 }
@@ -1461,7 +1473,7 @@ fn render_dr_row(
     passphrase: &UseStateHandle<String>,
     can_edit: bool,
     load_backups: &Callback<()>,
-) -> Html {
+) -> Row {
     let date_str = format_unix_time(locale, entry.created_at);
     let download_url = format!(
         "{API_ENDPOINT}/disaster-recovery/backups/{}/download",
@@ -1528,49 +1540,42 @@ fn render_dr_row(
     };
 
     let status_badge = if entry.s3_replicated {
-        html! {
-            <span class="bg-green-900/50 text-green-300 border border-green-800 text-xs px-2 py-0.5 rounded font-medium">
-                {locale.t("settings.dr_s3_badge")}
-            </span>
-        }
+        html! { <span class={classes!(BADGE, BADGE_OK)}>{locale.t("settings.dr_s3_badge")}</span> }
     } else {
-        html! {
-            <span class="bg-neutral-800 text-neutral-400 border border-neutral-700 text-xs px-2 py-0.5 rounded font-medium">
-                {locale.t("settings.dr_local_only")}
-            </span>
-        }
+        html! { <span class={classes!(BADGE, BADGE_MUTED)}>{locale.t("settings.dr_local_only")}</span> }
     };
 
-    html! {
-        <tr class="hover:bg-neutral-800/30 transition-colors border-b border-neutral-800">
-            <td class="px-4 py-3 font-mono text-xs text-neutral-300">{&entry.id}</td>
-            <td class="px-4 py-3 text-xs text-neutral-400">{date_str}</td>
-            <td class="px-4 py-3 text-right text-xs font-mono text-neutral-300">{format_bytes(entry.size)}</td>
-            <td class="px-4 py-3 text-center text-xs text-neutral-400">{entry.files_count}</td>
-            <td class="px-4 py-3 text-center text-xs">{status_badge}</td>
-            <td class="px-4 py-3 text-right">
-                <div class="flex items-center justify-end gap-1.5">
+    Row {
+        key: entry.id.clone(),
+        cells: vec![
+            html! { {&entry.id} },
+            html! { {date_str} },
+            html! { {format_bytes(entry.size)} },
+            html! { {entry.files_count} },
+            status_badge,
+        ],
+        actions: html! {
+            <>
+                <ActionIconButton
+                    variant={ActionVariant::Download}
+                    title={locale.t("backups.download").to_string()}
+                    href={download_url}
+                    download={format!("{}.r3bundle", entry.id)}
+                />
+                if can_edit {
                     <ActionIconButton
-                        variant={ActionVariant::Download}
-                        title={locale.t("backups.download").to_string()}
-                        href={download_url}
-                        download={format!("{}.r3bundle", entry.id)}
+                        variant={ActionVariant::Restore}
+                        title={locale.t("backups.restore").to_string()}
+                        onclick={on_restore}
                     />
-                    if can_edit {
-                        <ActionIconButton
-                            variant={ActionVariant::Restore}
-                            title={locale.t("backups.restore").to_string()}
-                            onclick={on_restore}
-                        />
-                        <ActionIconButton
-                            variant={ActionVariant::Delete}
-                            title={locale.t("common.delete").to_string()}
-                            onclick={on_delete}
-                        />
-                    }
-                </div>
-            </td>
-        </tr>
+                    <ActionIconButton
+                        variant={ActionVariant::Delete}
+                        title={locale.t("common.delete").to_string()}
+                        onclick={on_delete}
+                    />
+                }
+            </>
+        },
     }
 }
 
@@ -1628,26 +1633,21 @@ fn configuration_backup_tab(props: &SubTabProps) -> Html {
 
     html! {
         <div class="space-y-6">
-            <div class="rounded-lg border border-neutral-800 bg-neutral-900/60 p-5 space-y-4">
+            <div class={classes!(CARD, "p-5", "space-y-4")}>
                 <div>
-                    <h2 class="text-base font-semibold text-neutral-200">{locale.t("settings.backup_restore_title")}</h2>
-                    <p class="mt-1 text-sm text-neutral-400">{locale.t("settings.backup_restore_hint")}</p>
+                    <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.backup_restore_title")}</h2>
+                    <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.backup_restore_hint")}</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-4 pt-2">
-                    <button
-                        type="button"
-                        onclick={on_export}
-                        disabled={*is_exporting}
-                        class={BUTTON_SECONDARY}
-                    >
-                        <svg class="w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <Button kind={ButtonKind::Secondary} onclick={on_export} disabled={*is_exporting}>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
                         {locale.t("settings.export_backup")}
-                    </button>
+                    </Button>
                     if can_edit {
-                        <label class={classes!(BUTTON_PRIMARY, "cursor-pointer")}>
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <label class={button_class(ButtonKind::Success, ButtonSize::Md)}>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
                             </svg>
                             {locale.t("settings.restore_backup")}
