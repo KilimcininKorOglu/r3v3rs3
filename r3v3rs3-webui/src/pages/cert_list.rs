@@ -619,7 +619,9 @@ fn acme_row(
 
     let onchange = Callback::from(move |_: Event| {
         wasm_bindgen_futures::spawn_local(async move {
-            let _ = toggle_acme(id).await;
+            if let Err(err) = toggle_acme(locale, id).await {
+                dialog::message(locale, &err, dialog::Icon::Error).await;
+            }
         });
     });
 
@@ -757,18 +759,12 @@ async fn order_acme(locale: Locale, id: ShortId) -> Result<(), String> {
     crate::pages::settings::post_empty(locale, &format!("{API_ENDPOINT}/acme/{id}/order")).await
 }
 
-async fn toggle_acme(id: ShortId) -> Result<(), gloo_net::Error> {
-    let mut acme: AcmeInfo = Request::get(&format!("{API_ENDPOINT}/acme/{id}"))
-        .send()
-        .await?
-        .json()
-        .await?;
+async fn toggle_acme(locale: Locale, id: ShortId) -> Result<(), String> {
+    let path = format!("{API_ENDPOINT}/acme/{id}");
+    let mut acme: AcmeInfo =
+        crate::pages::settings::fetch_json(locale, Request::get(&path)).await?;
     acme.config.active = !acme.config.active;
-    Request::put(&format!("{API_ENDPOINT}/acme/{id}"))
-        .json(&acme.config)?
-        .send()
-        .await?;
-    Ok(())
+    crate::pages::settings::send_json(locale, Request::put(&path), &acme.config).await
 }
 
 mod location {
