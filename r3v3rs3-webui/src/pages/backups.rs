@@ -871,21 +871,15 @@ fn render_take_modal(
             };
             let (show_take, notice, reload) = (show_take.clone(), notice.clone(), reload.clone());
             spawn_local(async move {
-                let req = RunBackupRequest { database_id: id };
-                let body = serde_json::to_string(&req).unwrap_or_default();
-                let sent = Request::post(&format!("{API_ENDPOINT}/backups/run"))
-                    .header("Content-Type", "application/json")
-                    .body(body);
-                match sent {
-                    Ok(req) => match send_request(locale, req).await {
-                        Ok(_) => {
-                            notice.set(Some(Notice::Saved("backups.taken")));
-                            show_take.set(false);
-                            reload.emit(());
-                        }
-                        Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
-                    },
-                    Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
+                let body = RunBackupRequest { database_id: id };
+                let builder = Request::post(&format!("{API_ENDPOINT}/backups/run"));
+                match send_json(locale, builder, &body).await {
+                    Ok(()) => {
+                        notice.set(Some(Notice::Saved("backups.taken")));
+                        show_take.set(false);
+                        reload.emit(());
+                    }
+                    Err(err) => notice.set(Some(Notice::Failed(err))),
                 }
             });
         })
