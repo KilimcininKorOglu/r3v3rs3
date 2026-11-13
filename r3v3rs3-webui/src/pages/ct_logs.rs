@@ -539,11 +539,16 @@ fn render_entry_row(locale: Locale, entry: &CtLogEntry, reload_cb: Callback<()>)
             let entry_id = entry_id.clone();
             let domain = domain.clone();
             let reload_cb = reload_cb.clone();
-            spawn_local(async move {
-                let msg = locale.tf("certs.ct_confirm_dismiss", &[("domain", &domain)]);
-                if crate::dialog::confirm(locale, &msg).await {
-                    let _ = dismiss_ct_alert(&entry_id).await;
-                    reload_cb.emit(());
+            let msg = locale.tf("certs.ct_confirm_dismiss", &[("domain", &domain)]);
+            dialog::confirm_then(locale, msg, async move {
+                let body = DismissCtAlertRequest {
+                    id: entry_id,
+                    status: Some(CtAlertStatus::Dismissed),
+                };
+                let builder = Request::post(&format!("{API_ENDPOINT}/certs/ct/dismiss"));
+                match send_json(locale, builder, &body).await {
+                    Ok(()) => reload_cb.emit(()),
+                    Err(err) => dialog::message(locale, &err, Icon::Error).await,
                 }
             });
         })
@@ -672,18 +677,6 @@ fn build_update_config_request(
             ct_api_url: None,
         },
     }
-}
-
-async fn dismiss_ct_alert(id: &str) -> Result<(), gloo_net::Error> {
-    let body = DismissCtAlertRequest {
-        id: id.to_string(),
-        status: Some(CtAlertStatus::Dismissed),
-    };
-    Request::post(&format!("{API_ENDPOINT}/certs/ct/dismiss"))
-        .json(&body)?
-        .send()
-        .await?;
-    Ok(())
 }
 
 #[cfg(test)]
