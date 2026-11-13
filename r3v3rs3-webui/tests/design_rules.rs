@@ -42,9 +42,11 @@ const RULES: &[Rule] = &[
     },
     Rule {
         name: "a gray color; use neutral",
-        matches: |line| ["bg-gray-", "text-gray-", "border-gray-"]
-            .iter()
-            .any(|class| line.contains(class)),
+        matches: |line| {
+            ["bg-gray-", "text-gray-", "border-gray-"]
+                .iter()
+                .any(|class| line.contains(class))
+        },
         allowed: &[],
     },
     Rule {
