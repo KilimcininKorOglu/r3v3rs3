@@ -198,15 +198,9 @@ async fn etcd_keys_define_proxies_that_follow_changes() -> anyhow::Result<()> {
     mock.put("r3v3rs3/http/app/ports", "web");
     mock.put(URL_KEY, first.as_str());
     mock.put("r3v3rs3x/http/other/ports", "web");
-    let no_port = || anyhow::anyhow!("the URL has no port");
-    let etcd_port = serve_http_upstream(mock.router())
-        .await?
-        .port()
-        .ok_or_else(no_port)?;
+    let etcd_port = serve_mock_etcd(&mock).await?;
     // The first endpoint refuses connections, so the provider uses the second endpoint.
-    let closed_port = std::net::TcpListener::bind("127.0.0.1:0")?
-        .local_addr()?
-        .port();
+    let closed_port = unused_port()?;
 
     let mut config = AppConfig::default();
     config.discovery.etcd.enabled = true;
@@ -220,33 +214,75 @@ async fn etcd_keys_define_proxies_that_follow_changes() -> anyhow::Result<()> {
     let saved = storage.clone();
     let url = proxy_port.http_url("/").to_string();
     with_server(storage, |mut channels| async move {
-        call(&mut channels, SetConfig { config }).await??;
-        let masked = call(&mut channels, GetConfig).await??;
-        assert_eq!(masked.discovery.etcd.password, None);
-        assert!(masked.discovery.etcd.password_set);
-        let saved_password = saved.load_app_config().await.discovery.etcd.password;
-        assert_eq!(saved_password.as_deref(), Some(PASSWORD));
-
-        assert_eq!(wait_for_status(&url, 200).await?, "first");
-        wait_for_discovery(&mut channels, |statuses| {
-            statuses.iter().any(|status| {
-                status.state == DiscoveryState::Running
-                    && status.proxies == 1
-                    && status.issues.is_empty()
-            })
-        })
-        .await?;
-
-        // The watch stream reports the changed key.
-        mock.put(URL_KEY, second.as_str());
-        wait_for_body(&mut channels, &url, "second").await?;
-
-        // etcd rejects the token, so the provider authenticates again without an error.
-        mock.revoke_tokens();
-        mock.put(URL_KEY, first.as_str());
-        wait_for_body(&mut channels, &url, "first").await?;
-        assert_eq!(mock.authentications.load(Ordering::SeqCst), 2);
-        Ok(())
+        check_masked_password(&mut channels, config, &saved).await?;
+        check_first_proxy_runs(&mut channels, &url).await?;
+        check_watch_and_reauthentication(&mut channels, &mock, &url, &first, &second).await
     })
     .await
+}
+
+/// Serves the mock etcd gateway and returns its port.
+async fn serve_mock_etcd(mock: &MockEtcd) -> anyhow::Result<u16> {
+    let no_port = || anyhow::anyhow!("the URL has no port");
+    serve_http_upstream(mock.router())
+        .await?
+        .port()
+        .ok_or_else(no_port)
+}
+
+/// Returns a port that refuses connections, because its listener is closed again.
+fn unused_port() -> anyhow::Result<u16> {
+    Ok(std::net::TcpListener::bind("127.0.0.1:0")?
+        .local_addr()?
+        .port())
+}
+
+/// Saves the config and checks that the API masks the etcd password while the storage keeps it.
+async fn check_masked_password(
+    channels: &mut ServerChannels,
+    config: AppConfig,
+    saved: &TestStorage,
+) -> anyhow::Result<()> {
+    call(channels, SetConfig { config }).await??;
+    let masked = call(channels, GetConfig).await??;
+    assert_eq!(masked.discovery.etcd.password, None);
+    assert!(masked.discovery.etcd.password_set);
+    let saved_password = saved.load_app_config().await.discovery.etcd.password;
+    assert_eq!(saved_password.as_deref(), Some(PASSWORD));
+    Ok(())
+}
+
+/// Checks that the proxy serves the first upstream and the provider runs without issues.
+async fn check_first_proxy_runs(channels: &mut ServerChannels, url: &str) -> anyhow::Result<()> {
+    assert_eq!(wait_for_status(url, 200).await?, "first");
+    wait_for_discovery(channels, |statuses| {
+        statuses.iter().any(|status| {
+            status.state == DiscoveryState::Running
+                && status.proxies == 1
+                && status.issues.is_empty()
+        })
+    })
+    .await?;
+    Ok(())
+}
+
+/// Checks that the proxy follows a changed key, and that a rejected token makes the provider
+/// authenticate again without an error.
+async fn check_watch_and_reauthentication(
+    channels: &mut ServerChannels,
+    mock: &MockEtcd,
+    url: &str,
+    first: &url::Url,
+    second: &url::Url,
+) -> anyhow::Result<()> {
+    // The watch stream reports the changed key.
+    mock.put(URL_KEY, second.as_str());
+    wait_for_body(channels, url, "second").await?;
+
+    // etcd rejects the token, so the provider authenticates again without an error.
+    mock.revoke_tokens();
+    mock.put(URL_KEY, first.as_str());
+    wait_for_body(channels, url, "first").await?;
+    assert_eq!(mock.authentications.load(Ordering::SeqCst), 2);
+    Ok(())
 }
