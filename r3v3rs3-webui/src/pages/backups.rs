@@ -645,9 +645,14 @@ fn render_backup_row(
             let path = format!("{API_ENDPOINT}/databases/{id}/backups/{backup_id}/restore");
             let reload = reload.clone();
             dialog::confirm_then(locale, question, async move {
-                if let Ok(req) = Request::post(&path).build() {
-                    let _ = send_request(locale, req).await;
-                    reload.emit(());
+                match post_empty(locale, &path).await {
+                    Ok(()) => {
+                        dialog::message(locale, locale.t("backups.restored"), Icon::Success).await;
+                        reload.emit(());
+                    }
+                    Err(err) => {
+                        dialog::message(locale, &err, Icon::Error).await;
+                    }
                 }
             });
         });
