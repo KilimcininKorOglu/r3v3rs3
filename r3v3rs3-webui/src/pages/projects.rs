@@ -22,6 +22,7 @@ use r3v3rs3_api::platform::{
     EnvironmentSyncMode, EnvironmentSyncReport, EnvironmentSyncRequest, Project,
     ProjectEnvironmentSummary, ProjectSpec, ProjectSummary,
 };
+use std::rc::Rc;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
@@ -104,6 +105,41 @@ struct EnvModalState {
     sync_status_msg: Option<String>,
 }
 
+/// The environment dialog. Every change goes through the reducer, so a change that arrives after
+/// a request applies to the latest state of the dialog instead of a copy from before the request.
+struct EnvModal(Option<EnvModalState>);
+
+type ChangeFn = dyn FnOnce(&mut Option<EnvModalState>);
+
+/// A change of the environment dialog.
+struct EnvChange(Box<ChangeFn>);
+
+impl Reducible for EnvModal {
+    type Action = EnvChange;
+
+    fn reduce(self: Rc<Self>, action: EnvChange) -> Rc<Self> {
+        let mut next = self.0.clone();
+        (action.0)(&mut next);
+        Rc::new(EnvModal(next))
+    }
+}
+
+type EnvModalHandle = UseReducerHandle<EnvModal>;
+
+/// Changes the open dialog. A closed dialog stays closed.
+fn update_modal(modal: &EnvModalHandle, change: impl FnOnce(&mut EnvModalState) + 'static) {
+    modal.dispatch(EnvChange(Box::new(move |state| {
+        if let Some(state) = state {
+            change(state);
+        }
+    })));
+}
+
+/// Opens the dialog with `state`, or closes it.
+fn replace_modal(modal: &EnvModalHandle, state: Option<EnvModalState>) {
+    modal.dispatch(EnvChange(Box::new(move |current| *current = state)));
+}
+
 #[derive(Clone, PartialEq, Default, Debug)]
 struct EnvVarRow {
     key: String,
@@ -152,7 +188,7 @@ pub fn projects_page() -> Html {
     let list: ProjectsList = use_state(|| None);
     let reload = use_state(|| 0_u32);
     let form: UseStateHandle<Option<ProjectFormData>> = use_state(|| None);
-    let env_modal: UseStateHandle<Option<EnvModalState>> = use_state(|| None);
+    let env_modal: EnvModalHandle = use_reducer(|| EnvModal(None));
 
     let signed_in = session.info.is_some();
     let list_cloned = list.clone();
@@ -214,7 +250,7 @@ fn render_projects_table(
     form: &UseStateHandle<Option<ProjectFormData>>,
     reload: &UseStateHandle<u32>,
     can_edit: bool,
-    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    env_modal: &EnvModalHandle,
 ) -> Html {
     let loaded = list.is_some();
     let empty_vec = Vec::new();
@@ -234,7 +270,7 @@ fn render_project_row(
     form: &UseStateHandle<Option<ProjectFormData>>,
     reload: &UseStateHandle<u32>,
     can_edit: bool,
-    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    env_modal: &EnvModalHandle,
 ) -> Row {
     let p = project.clone();
     let edit_cb = {
@@ -348,14 +384,10 @@ async fn load_env_modal(
     }))
 }
 
-fn open_env_modal(
-    locale: Locale,
-    project_id: ShortId,
-    modal: UseStateHandle<Option<EnvModalState>>,
-) {
+fn open_env_modal(locale: Locale, project_id: ShortId, modal: EnvModalHandle) {
     spawn_local(async move {
         match load_env_modal(locale, project_id).await {
-            Ok(Some(state)) => modal.set(Some(state)),
+            Ok(Some(state)) => replace_modal(&modal, Some(state)),
             Ok(None) => {
                 let message = locale.t("projects.no_environments");
                 dialog::message(locale, message, dialog::Icon::Error).await;
@@ -365,12 +397,7 @@ fn open_env_modal(
     });
 }
 
-fn switch_env_tab(
-    locale: Locale,
-    modal: UseStateHandle<Option<EnvModalState>>,
-    project_id: ShortId,
-    env_id: ShortId,
-) {
+fn switch_env_tab(locale: Locale, modal: EnvModalHandle, project_id: ShortId, env_id: ShortId) {
     spawn_local(async move {
         let variables = match load_env_vars(locale, project_id, env_id).await {
             Ok(variables) => variables,
@@ -378,23 +405,17 @@ fn switch_env_tab(
                 return dialog::message(locale, &message, dialog::Icon::Error).await;
             }
         };
-        modal.set(modal.as_ref().map(|st| {
-            let mut updated = st.clone();
-            updated.selected_env_id = env_id;
-            updated.active_tab = EnvModalTab::Variables;
-            updated.variables = variables;
-            updated.sync_status_msg = None;
-            updated
-        }));
+        update_modal(&modal, move |st| {
+            st.selected_env_id = env_id;
+            st.active_tab = EnvModalTab::Variables;
+            st.variables = variables;
+            st.sync_status_msg = None;
+        });
     });
 }
 
-fn switch_compare_tab(
-    locale: Locale,
-    modal: UseStateHandle<Option<EnvModalState>>,
-    project_id: ShortId,
-) {
-    if let Some(st) = modal.as_ref() {
+fn switch_compare_tab(locale: Locale, modal: EnvModalHandle, project_id: ShortId) {
+    if let Some(st) = modal.0.as_ref() {
         let source_id = st.diff_source_id.unwrap_or(st.selected_env_id);
         let target_id = st.diff_target_id.or_else(|| {
             st.environments
@@ -402,12 +423,12 @@ fn switch_compare_tab(
                 .find(|e| e.id != source_id)
                 .map(|e| e.id)
         });
-        let mut updated = st.clone();
-        updated.active_tab = EnvModalTab::CompareSync;
-        updated.diff_source_id = Some(source_id);
-        updated.diff_target_id = target_id;
-        updated.sync_status_msg = None;
-        modal.set(Some(updated));
+        update_modal(&modal, move |st| {
+            st.active_tab = EnvModalTab::CompareSync;
+            st.diff_source_id = Some(source_id);
+            st.diff_target_id = target_id;
+            st.sync_status_msg = None;
+        });
 
         if let Some(tgt) = target_id
             && tgt != source_id
@@ -419,7 +440,7 @@ fn switch_compare_tab(
 
 fn fetch_environment_diff(
     locale: Locale,
-    modal: UseStateHandle<Option<EnvModalState>>,
+    modal: EnvModalHandle,
     project_id: ShortId,
     source_id: ShortId,
     target_id: ShortId,
@@ -428,11 +449,7 @@ fn fetch_environment_diff(
         let url =
             format!("{API_ENDPOINT}{PATH}/{project_id}/environments/{source_id}/diff/{target_id}");
         match fetch_json::<EnvironmentDiffReport>(locale, Request::get(&url)).await {
-            Ok(report) => modal.set(modal.as_ref().map(|st| {
-                let mut updated = st.clone();
-                updated.diff_report = Some(report);
-                updated
-            })),
+            Ok(report) => update_modal(&modal, move |st| st.diff_report = Some(report)),
             Err(message) => dialog::message(locale, &message, dialog::Icon::Error).await,
         }
     });
@@ -440,7 +457,7 @@ fn fetch_environment_diff(
 
 fn run_environment_sync(
     locale: Locale,
-    modal: UseStateHandle<Option<EnvModalState>>,
+    modal: EnvModalHandle,
     reload: UseStateHandle<u32>,
     req: EnvironmentSyncRequest,
     project_id: ShortId,
@@ -474,11 +491,7 @@ fn run_environment_sync(
                 req.source_env_id,
                 req.target_env_id,
             );
-            modal.set(modal.as_ref().map(|st| {
-                let mut updated = st.clone();
-                updated.sync_status_msg = Some(msg);
-                updated
-            }));
+            update_modal(&modal, move |st| st.sync_status_msg = Some(msg));
             reload.set(*reload + 1);
         }
     });
@@ -641,16 +654,16 @@ fn render_project_form(
 
 fn render_env_modal(
     locale: Locale,
-    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    env_modal: &EnvModalHandle,
     reload: &UseStateHandle<u32>,
 ) -> Html {
-    let Some(state) = env_modal.as_ref() else {
+    let Some(state) = env_modal.0.as_ref() else {
         return html!();
     };
 
     let on_close = {
         let env_modal = env_modal.clone();
-        Callback::from(move |()| env_modal.set(None))
+        Callback::from(move |()| replace_modal(&env_modal, None))
     };
     let close = {
         let on_close = on_close.clone();
@@ -689,7 +702,7 @@ fn render_env_modal(
 fn render_env_modal_tabs(
     locale: Locale,
     state: &EnvModalState,
-    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    env_modal: &EnvModalHandle,
 ) -> Html {
     let project_id = state.project_id;
     let is_compare_active = state.active_tab == EnvModalTab::CompareSync;
@@ -728,22 +741,19 @@ fn render_env_modal_tabs(
 fn render_env_variables_tab(
     locale: Locale,
     state: &EnvModalState,
-    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    env_modal: &EnvModalHandle,
 ) -> Html {
     let on_add_var = {
         let env_modal = env_modal.clone();
-        let state = state.clone();
         Callback::from(move |_: MouseEvent| {
-            let mut updated = state.clone();
-            updated.variables.push(EnvVarRow::default());
-            env_modal.set(Some(updated));
+            update_modal(&env_modal, |st| st.variables.push(EnvVarRow::default()));
         })
     };
 
     html! {
         <div class="py-4 space-y-3 min-h-[200px]">
             {state.variables.iter().enumerate().map(|(idx, row)| {
-                render_var_row(locale, idx, row, env_modal.clone(), state.clone())
+                render_var_row(locale, idx, row, env_modal)
             }).collect::<Html>()}
             <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_add_var}>
                 {locale.t("env_groups.add_variable")}
@@ -756,7 +766,7 @@ fn render_env_variables_tab(
 fn env_save_callback(
     locale: Locale,
     state: &EnvModalState,
-    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    env_modal: &EnvModalHandle,
     reload: &UseStateHandle<u32>,
 ) -> Callback<MouseEvent> {
     {
@@ -790,7 +800,7 @@ fn env_save_callback(
                 );
                 match send_json(locale, Request::put(&url), &spec).await {
                     Ok(()) => {
-                        env_modal.set(None);
+                        replace_modal(&env_modal, None);
                         reload.set(*reload + 1);
                     }
                     Err(err) => {
@@ -804,7 +814,7 @@ fn env_save_callback(
 
 fn create_source_change_callback(
     locale: Locale,
-    env_modal: UseStateHandle<Option<EnvModalState>>,
+    env_modal: EnvModalHandle,
     state: EnvModalState,
     project_id: ShortId,
 ) -> Callback<Event> {
@@ -812,9 +822,7 @@ fn create_source_change_callback(
         if let Some(target) = e.target_dyn_into::<HtmlSelectElement>()
             && let Ok(id) = target.value().parse::<ShortId>()
         {
-            let mut updated = state.clone();
-            updated.diff_source_id = Some(id);
-            env_modal.set(Some(updated));
+            update_modal(&env_modal, move |st| st.diff_source_id = Some(id));
             if let Some(tgt) = state.diff_target_id
                 && tgt != id
             {
@@ -826,7 +834,7 @@ fn create_source_change_callback(
 
 fn create_target_change_callback(
     locale: Locale,
-    env_modal: UseStateHandle<Option<EnvModalState>>,
+    env_modal: EnvModalHandle,
     state: EnvModalState,
     project_id: ShortId,
 ) -> Callback<Event> {
@@ -834,9 +842,7 @@ fn create_target_change_callback(
         if let Some(target) = e.target_dyn_into::<HtmlSelectElement>()
             && let Ok(id) = target.value().parse::<ShortId>()
         {
-            let mut updated = state.clone();
-            updated.diff_target_id = Some(id);
-            env_modal.set(Some(updated));
+            update_modal(&env_modal, move |st| st.diff_target_id = Some(id));
             if let Some(src) = state.diff_source_id
                 && src != id
             {
@@ -849,7 +855,7 @@ fn create_target_change_callback(
 fn render_compare_controls(
     locale: Locale,
     state: &EnvModalState,
-    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    env_modal: &EnvModalHandle,
 ) -> Html {
     let project_id = state.project_id;
     let source_id = state.diff_source_id;
@@ -912,7 +918,7 @@ fn render_compare_controls(
 fn render_compare_sync_tab(
     locale: Locale,
     state: &EnvModalState,
-    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    env_modal: &EnvModalHandle,
     reload: &UseStateHandle<u32>,
 ) -> Html {
     html! {
@@ -976,7 +982,7 @@ fn render_diff_actions(
     locale: Locale,
     state: &EnvModalState,
     report: &EnvironmentDiffReport,
-    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    env_modal: &EnvModalHandle,
     reload: &UseStateHandle<u32>,
 ) -> Html {
     let on_sync_missing = {
@@ -1040,7 +1046,7 @@ fn render_diff_table(
     locale: Locale,
     state: &EnvModalState,
     report: &EnvironmentDiffReport,
-    env_modal: &UseStateHandle<Option<EnvModalState>>,
+    env_modal: &EnvModalHandle,
     reload: &UseStateHandle<u32>,
 ) -> Html {
     let rows = report
@@ -1084,7 +1090,7 @@ fn render_diff_row(
     locale: Locale,
     state: &EnvModalState,
     entry: &EnvDiffEntry,
-    modal: &UseStateHandle<Option<EnvModalState>>,
+    modal: &EnvModalHandle,
     reload: &UseStateHandle<u32>,
 ) -> Row {
     let key_str = entry.key.as_str().to_string();
@@ -1202,64 +1208,48 @@ fn render_diff_val_cell(
     }
 }
 
-fn render_var_row(
-    locale: Locale,
-    idx: usize,
-    row: &EnvVarRow,
-    modal: UseStateHandle<Option<EnvModalState>>,
-    state: EnvModalState,
-) -> Html {
+/// Changes the variable at `idx` of the open dialog.
+fn update_row(modal: &EnvModalHandle, idx: usize, change: impl FnOnce(&mut EnvVarRow) + 'static) {
+    update_modal(modal, move |st| {
+        if let Some(row) = st.variables.get_mut(idx) {
+            change(row);
+        }
+    });
+}
+
+fn render_var_row(locale: Locale, idx: usize, row: &EnvVarRow, modal: &EnvModalHandle) -> Html {
     let on_key = {
         let modal = modal.clone();
-        let state = state.clone();
         Callback::from(move |e: InputEvent| {
-            if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
-                let mut updated = state.clone();
-                if let Some(v) = updated.variables.get_mut(idx) {
-                    v.key = target.value();
-                }
-                modal.set(Some(updated));
-            }
+            let value = e.target_unchecked_into::<HtmlInputElement>().value();
+            update_row(&modal, idx, move |v| v.key = value);
         })
     };
 
     let on_val = {
         let modal = modal.clone();
-        let state = state.clone();
         Callback::from(move |e: InputEvent| {
-            if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
-                let mut updated = state.clone();
-                if let Some(v) = updated.variables.get_mut(idx) {
-                    v.value = target.value();
-                }
-                modal.set(Some(updated));
-            }
+            let value = e.target_unchecked_into::<HtmlInputElement>().value();
+            update_row(&modal, idx, move |v| v.value = value);
         })
     };
 
     let on_secret = {
         let modal = modal.clone();
-        let state = state.clone();
         Callback::from(move |e: Event| {
-            if let Some(target) = e.target_dyn_into::<HtmlInputElement>() {
-                let mut updated = state.clone();
-                if let Some(v) = updated.variables.get_mut(idx) {
-                    v.secret = target.checked();
-                }
-                modal.set(Some(updated));
-            }
+            let checked = e.target_unchecked_into::<HtmlInputElement>().checked();
+            update_row(&modal, idx, move |v| v.secret = checked);
         })
     };
 
     let on_del = {
         let modal = modal.clone();
-        let state = state.clone();
-        Callback::from(move |_| {
-            let mut updated = state.clone();
-            if idx < updated.variables.len() {
-                updated.variables.remove(idx);
-            }
-            modal.set(Some(updated));
+        Callback::from(move |_: MouseEvent| {
+            update_modal(&modal, move |st| {
+                if idx < st.variables.len() {
+                    st.variables.remove(idx);
+                }
+            });
         })
     };
 
@@ -1298,5 +1288,45 @@ fn render_var_row(
                 onclick={on_del}
             />
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn change(f: impl FnOnce(&mut Option<EnvModalState>) + 'static) -> EnvChange {
+        EnvChange(Box::new(f))
+    }
+
+    #[test]
+    fn each_change_applies_to_the_latest_dialog_state() {
+        let open = Rc::new(EnvModal(Some(EnvModalState::default())));
+        // Two changes that arrive one after the other both stay: the second change sees the
+        // first one, as a diff that arrives after the sync message keeps the message.
+        let with_message = open.reduce(change(|state| {
+            if let Some(state) = state {
+                state.sync_status_msg = Some("synced".into());
+            }
+        }));
+        let with_tab = with_message.reduce(change(|state| {
+            if let Some(state) = state {
+                state.active_tab = EnvModalTab::CompareSync;
+            }
+        }));
+        let state = with_tab.0.as_ref().expect("the dialog stays open");
+        assert_eq!(state.sync_status_msg.as_deref(), Some("synced"));
+        assert_eq!(state.active_tab, EnvModalTab::CompareSync);
+    }
+
+    #[test]
+    fn a_change_of_a_closed_dialog_keeps_it_closed() {
+        let closed = Rc::new(EnvModal(None));
+        let after = closed.reduce(change(|state| {
+            if let Some(state) = state {
+                state.sync_status_msg = Some("late".into());
+            }
+        }));
+        assert!(after.0.is_none());
     }
 }
