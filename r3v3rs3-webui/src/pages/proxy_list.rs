@@ -116,12 +116,13 @@ pub fn proxy_list() -> Html {
     let ports_cloned = ports.clone();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(res) = get_ports().await {
-                ports_dispatcher.set(PortStore {
+            match get_ports(locale).await {
+                Ok(res) => ports_dispatcher.set(PortStore {
                     entries: res,
                     loaded: true,
                     ..(*ports_cloned).clone()
-                });
+                }),
+                Err(err) => dialog::message(locale, &err, Icon::Error).await,
             }
         });
     });
@@ -716,12 +717,8 @@ fn load_proxies(locale: Locale, dispatcher: Dispatch<ProxyStore>) {
     });
 }
 
-async fn get_ports() -> Result<Vec<PortEntry>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/ports"))
-        .send()
-        .await?
-        .json()
-        .await
+async fn get_ports(locale: Locale) -> Result<Vec<PortEntry>, String> {
+    crate::pages::settings::fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/ports"))).await
 }
 
 async fn get_list(locale: Locale) -> Result<Vec<ProxyEntry>, String> {
