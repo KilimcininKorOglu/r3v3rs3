@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.8] - 2026-11-13
+
+### Added
+- The WebUI has shared Button, Tabs and Modal components. Buttons take one of five colors by their role: primary (save, create, add), secondary (cancel, back, refresh), danger (delete), success (deploy, run, backup, restore) and warning (stop, maintenance, rollback). Tabs are underlined in the primary color.
+- The add and edit forms of the list pages open in a modal: access lists, accounts, databases, DNS credentials, environment groups, Git connections, registries, targets, webhooks, scheduled commands and the manual quarantine.
+- The sign-in, error and MCP consent pages share the colors and fonts of the WebUI. The consent page follows the language and theme cookies of the WebUI.
+- A test checks the WebUI sources for raw tables, own overlays, own tab bars, gray colors and dark backgrounds without a light counterpart.
+
+### Changed
+- Every table of the WebUI uses the shared list, every dialog uses the shared modal and the SweetAlert2 dialogs use the shared button colors.
+
+### Fixed
+- The compose editor, the compose topology, the terminal toolbar, the App Store, the security header audit and the ACME CNAME preview were drawn for the dark theme only and were hard to read in the light theme.
+- Many WebUI requests ignored the HTTP status: a failed load showed an empty list and a failed save showed nothing. Every admin API request now shows its translated error.
+- Untranslated texts are translated: the CT log, backup, project, volume backup and backup drill tables, the compose topology badges, the access log request count and the consent page.
+- A time before 1970 no longer panics the WebUI, and a CT serial number is cut on a character boundary.
+- Backup times show in the display time zone, and file sizes show in readable units.
+- The CT monitor keeps its API URL when its settings are saved.
+- The S3 snapshot download link encodes its key.
+- A point-in-time restore stops on an invalid or cancelled name.
+- The proxy and port pages open by their address without a redirect to the list.
+- The upgrade dialog polls the upgrade steps until the upgrade ends.
+
 ## [3.2.7] - 2026-11-13
 
 ### Fixed
