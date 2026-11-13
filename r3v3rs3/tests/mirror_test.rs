@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use url::Url;
 
 mod common;
-use common::{TestStorage, serve_http_upstream};
+use common::{TestPort, TestStorage, serve_http_upstream};
 use common::{alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server};
 
 type Copies = mpsc::UnboundedReceiver<(String, String)>;
@@ -39,8 +39,20 @@ async fn next_copy(copies: &mut Copies) -> anyhow::Result<Option<(String, String
 async fn requests_are_copied_without_waiting_for_the_mirror() -> anyhow::Result<()> {
     let echo =
         serve_http_upstream(Router::new().fallback(|body: String| async move { body })).await?;
-    let (shadow, mut copies) = start_slow_mirror().await?;
+    let (shadow, copies) = start_slow_mirror().await?;
     let port = alloc_tcp_port().await?;
+    let proxy = mirror_proxy(&echo, &shadow)?;
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("mirror", &port)])
+        .proxies(vec![http_proxy_entry("mirrorp", "mirror", proxy)])
+        .build();
+
+    with_server(config, |_| check_mirror_copies(port, copies)).await
+}
+
+/// Builds a proxy whose `/api` route goes to `echo` and copies every request with a body of
+/// at most 8 bytes to `copy/` on the mirror.
+fn mirror_proxy(echo: &Url, shadow: &Url) -> anyhow::Result<HttpProxy> {
     let route = Route {
         mirror: Some(Mirror {
             servers: vec![Server::new(shadow.join("copy/")?.as_str().parse()?)],
@@ -49,40 +61,37 @@ async fn requests_are_copied_without_waiting_for_the_mirror() -> anyhow::Result<
         }),
         ..http_route("/api", echo.as_str(), None)
     };
-    let proxy = HttpProxy {
+    Ok(HttpProxy {
         routes: vec![route],
         ..Default::default()
-    };
-    let config = TestStorage::builder()
-        .ports(vec![http_port_entry("mirror", &port)])
-        .proxies(vec![http_proxy_entry("mirrorp", "mirror", proxy)])
-        .build();
-
-    with_server(config, |_| async move {
-        let client = reqwest::Client::new();
-        let started = Instant::now();
-        let res = client
-            .post(port.http_url("/api/items?q=1"))
-            .body("hello")
-            .send()
-            .await?;
-        assert_eq!(res.text().await?, "hello");
-        assert!(started.elapsed() < Duration::from_secs(1));
-        let copy = ("/copy/items?q=1".to_string(), "hello".to_string());
-        assert_eq!(next_copy(&mut copies).await?, Some(copy));
-
-        // The body is longer than the copy limit, so only the next request reaches the mirror.
-        let res = client
-            .post(port.http_url("/api/large"))
-            .body("0123456789")
-            .send()
-            .await?;
-        assert_eq!(res.text().await?, "0123456789");
-        let res = client.get(port.http_url("/api/empty")).send().await?;
-        assert_eq!(res.status(), 200);
-        let copy = ("/copy/empty".to_string(), String::new());
-        assert_eq!(next_copy(&mut copies).await?, Some(copy));
-        Ok(())
     })
-    .await
+}
+
+/// Checks that the client gets the answer before the slow mirror answers, that the mirror gets
+/// the copy, and that a body above the copy limit is not copied.
+async fn check_mirror_copies(port: TestPort, mut copies: Copies) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    let started = Instant::now();
+    let res = client
+        .post(port.http_url("/api/items?q=1"))
+        .body("hello")
+        .send()
+        .await?;
+    assert_eq!(res.text().await?, "hello");
+    assert!(started.elapsed() < Duration::from_secs(1));
+    let copy = ("/copy/items?q=1".to_string(), "hello".to_string());
+    assert_eq!(next_copy(&mut copies).await?, Some(copy));
+
+    // The body is longer than the copy limit, so only the next request reaches the mirror.
+    let res = client
+        .post(port.http_url("/api/large"))
+        .body("0123456789")
+        .send()
+        .await?;
+    assert_eq!(res.text().await?, "0123456789");
+    let res = client.get(port.http_url("/api/empty")).send().await?;
+    assert_eq!(res.status(), 200);
+    let copy = ("/copy/empty".to_string(), String::new());
+    assert_eq!(next_copy(&mut copies).await?, Some(copy));
+    Ok(())
 }
