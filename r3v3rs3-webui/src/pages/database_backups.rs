@@ -3,7 +3,7 @@
 use super::Route;
 use super::app_deployments::back_header;
 use super::resource_page::{Notice, delete_on_click, notice_view};
-use super::settings::{fetch_json, send_json, send_request};
+use super::settings::{fetch_json, post_empty, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -291,11 +291,7 @@ fn archive_wal_action(
         let reload = reload.clone();
         spawn_local(async move {
             let path = format!("{API_ENDPOINT}/databases/{id}/wal/archive");
-            let sent = match Request::post(&path).build() {
-                Ok(request) => send_request(locale, request).await.map(|_| ()),
-                Err(err) => Err(err.to_string()),
-            };
-            match sent {
+            match post_empty(locale, &path).await {
                 Ok(()) => {
                     notice.set(Some(Notice::Saved("databases.wal_archived")));
                     reload.emit(());
@@ -417,15 +413,9 @@ async fn take_backup(
     reload: Callback<()>,
 ) {
     busy.set(true);
-    let sent = Request::post(&format!("{API_ENDPOINT}/databases/{id}/backups"))
-        .build()
-        .map(|request| send_request(locale, request));
-    match sent {
-        Ok(sent) => match sent.await {
-            Ok(_) => notice.set(Some(Notice::Saved("backups.taken"))),
-            Err(message) => notice.set(Some(Notice::Failed(message))),
-        },
-        Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
+    match post_empty(locale, &format!("{API_ENDPOINT}/databases/{id}/backups")).await {
+        Ok(()) => notice.set(Some(Notice::Saved("backups.taken"))),
+        Err(message) => notice.set(Some(Notice::Failed(message))),
     }
     busy.set(false);
     reload.emit(());
@@ -439,14 +429,11 @@ fn restore_on_click(locale: Locale, id: ShortId, entry: &BackupEntry) -> Callbac
         let question = locale.tf("backups.restore_question", &[("name", &entry.id)]);
         let path = format!("{API_ENDPOINT}/databases/{id}/backups/{}/restore", entry.id);
         dialog::confirm_then(locale, question, async move {
-            match Request::post(&path).build().map_err(|err| err.to_string()) {
-                Ok(request) => match send_request(locale, request).await {
-                    Ok(_) => {
-                        dialog::message(locale, locale.t("backups.restored"), Icon::Success).await
-                    }
-                    Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
-                },
-                Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
+            match post_empty(locale, &path).await {
+                Ok(()) => {
+                    dialog::message(locale, locale.t("backups.restored"), Icon::Success).await
+                }
+                Err(err) => dialog::message(locale, &err, Icon::Error).await,
             }
         });
     })
@@ -474,10 +461,7 @@ fn build_drill_modal(
             let path = format!("{API_ENDPOINT}/databases/{db_id}/backups/{backup_id}/test");
             drill_running.set(true);
             spawn_local(async move {
-                let sent = match Request::post(&path).build() {
-                    Ok(req) => send_request(locale, req).await.map(|_| ()),
-                    Err(err) => Err(err.to_string()),
-                };
+                let sent = post_empty(locale, &path).await;
                 drill_running.set(false);
                 reload.emit(());
                 match sent {
