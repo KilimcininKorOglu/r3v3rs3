@@ -2,7 +2,7 @@
 
 use super::access_lists::AccessLists;
 use super::resource_page::{FormCard, add_button, form_modal};
-use super::settings::{Notice, fetch_json, notice_view, send_request};
+use super::settings::{Notice, fetch_json, notice_view, send_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -407,7 +407,8 @@ fn quarantine_modal(
         error: (*form.error).clone(),
         cancel: None,
         save_label: "settings.quarantine_submit",
-        can_save: true,
+        // The address is required; the button stays off until it has one.
+        can_save: !form.ip.trim().is_empty(),
     };
     form_modal(locale, card, onsubmit, on_close)
 }
@@ -425,19 +426,18 @@ async fn submit_manual_quarantine(
         "reason": reason,
         "duration_seconds": 3600
     });
-    if let Ok(req) = Request::post(&format!("{API_ENDPOINT}/security/quarantine")).json(&body) {
-        match send_request(locale, req).await {
-            Ok(_) => {
-                notice.set(Some(Notice::Success(
-                    locale.t("settings.quarantined_success").to_string(),
-                )));
-                form.ip.set(String::new());
-                form.reason.set(String::new());
-                form.open.set(false);
-                reload.set(*reload + 1);
-            }
-            Err(err) => form.error.set(Some(err)),
+    let builder = Request::post(&format!("{API_ENDPOINT}/security/quarantine"));
+    match send_json(locale, builder, &body).await {
+        Ok(()) => {
+            notice.set(Some(Notice::Success(
+                locale.t("settings.quarantined_success").to_string(),
+            )));
+            form.ip.set(String::new());
+            form.reason.set(String::new());
+            form.open.set(false);
+            reload.set(*reload + 1);
         }
+        Err(err) => form.error.set(Some(err)),
     }
 }
 
