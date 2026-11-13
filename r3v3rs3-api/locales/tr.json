@@ -2249,6 +2249,7 @@
   "projects.clone_all": "Tümünü Klonla (Üzerine Yaz)",
   "projects.clone_confirm": "Hedef ortamdaki tüm değişkenlerin kaynak ortam ile üzerine yazılmasını istediğinizden emin misiniz?",
   "projects.diff_total": "Toplam: {count}",
+  "projects.diff_status": "Durum",
   "projects.diff_identical": "Birebir Aynı: {count}",
   "projects.diff_different": "Farklı Değer: {count}",
   "projects.diff_missing_target": "Hedefte Eksik: {count}",

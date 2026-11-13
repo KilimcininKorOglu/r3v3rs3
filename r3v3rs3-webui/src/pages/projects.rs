@@ -245,11 +245,8 @@ fn render_project_row(
             let reload = reload.clone();
             let p_name = p_name.clone();
             spawn_local(async move {
-                let confirmed = dialog::confirm(
-                    locale,
-                    &format!("Are you sure you want to delete project {p_name}?"),
-                )
-                .await;
+                let question = format!("{} ({p_name})", locale.t("projects.delete_confirm"));
+                let confirmed = dialog::confirm(locale, &question).await;
                 if confirmed {
                     let url = format!("{API_ENDPOINT}{PATH}/{p_id}");
                     match Request::delete(&url).send().await {
@@ -796,7 +793,7 @@ fn render_env_variables_tab(
         <>
             <div class="flex-1 overflow-y-auto py-4 space-y-3 min-h-[200px]">
                 {state.variables.iter().enumerate().map(|(idx, row)| {
-                    render_var_row(idx, row, env_modal.clone(), state.clone())
+                    render_var_row(locale, idx, row, env_modal.clone(), state.clone())
                 }).collect::<Html>()}
 
                 <button
@@ -1087,11 +1084,11 @@ fn render_diff_table(
             <table class="w-full text-left text-xs">
                 <thead class="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-semibold border-b dark:border-neutral-700">
                     <tr>
-                        <th class="py-2.5 px-3">{"Key"}</th>
+                        <th class="py-2.5 px-3">{locale.t("apps.env_key")}</th>
                         <th class="py-2.5 px-3">{format!("{} ({})", locale.t("projects.source_env"), report.source_env_name)}</th>
                         <th class="py-2.5 px-3">{format!("{} ({})", locale.t("projects.target_env"), report.target_env_name)}</th>
-                        <th class="py-2.5 px-3">{"Status"}</th>
-                        <th class="py-2.5 px-3 text-right">{"Action"}</th>
+                        <th class="py-2.5 px-3">{locale.t("projects.diff_status")}</th>
+                        <th class="py-2.5 px-3 text-right">{locale.t("common.actions")}</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y dark:divide-neutral-700">
@@ -1226,6 +1223,7 @@ fn render_diff_val_cell(
 }
 
 fn render_var_row(
+    locale: Locale,
     idx: usize,
     row: &EnvVarRow,
     modal: UseStateHandle<Option<EnvModalState>>,
@@ -1290,14 +1288,14 @@ fn render_var_row(
             <input
                 type="text"
                 class="input text-xs w-1/3"
-                placeholder="KEY"
+                placeholder={locale.t("apps.env_key")}
                 value={row.key.clone()}
                 oninput={on_key}
             />
             <input
                 type={if row.secret { "password" } else { "text" }}
                 class="input text-xs flex-1"
-                placeholder="VALUE"
+                placeholder={locale.t("apps.env_value")}
                 value={row.value.clone()}
                 oninput={on_val}
             />
@@ -1307,7 +1305,7 @@ fn render_var_row(
                     checked={row.secret}
                     onchange={on_secret}
                 />
-                <span>{"Secret"}</span>
+                <span>{locale.t("apps.env_secret")}</span>
             </label>
             <button
                 type="button"

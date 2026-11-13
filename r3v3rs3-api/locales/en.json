@@ -2249,6 +2249,7 @@
   "projects.clone_all": "Clone All (Overwrite)",
   "projects.clone_confirm": "Are you sure you want to overwrite all variables in the target environment with the source environment?",
   "projects.diff_total": "Total: {count}",
+  "projects.diff_status": "Status",
   "projects.diff_identical": "Identical: {count}",
   "projects.diff_different": "Different: {count}",
   "projects.diff_missing_target": "Missing in Target: {count}",
