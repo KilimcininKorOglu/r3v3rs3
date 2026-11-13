@@ -1860,6 +1860,68 @@ impl ApiClient {
         print_json(&res)
     }
 
+    pub async fn db_credentials(&self, id: &str) -> anyhow::Result<()> {
+        let credentials: r3v3rs3_api::platform::DatabaseCredentials = self
+            .get_json(&format!("/api/databases/{id}/credentials"))
+            .await?;
+        println!("{:<28} {:<28} {:<34} URL", "ACCOUNT", "USER", "PASSWORD");
+        for account in std::iter::once(&credentials.root).chain(&credentials.tenants) {
+            let label = account.tenant.as_deref().unwrap_or("root");
+            println!(
+                "{:<28} {:<28} {:<34} {}",
+                label, account.user, account.password, account.url
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn db_tenants(&self, id: &str) -> anyhow::Result<()> {
+        let tenants: Vec<r3v3rs3_api::platform::DatabaseTenant> = self
+            .get_json(&format!("/api/databases/{id}/tenants"))
+            .await?;
+        println!("{:<40} APPS", "TENANT");
+        for tenant in &tenants {
+            let apps = tenant
+                .apps
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("{:<40} {apps}", tenant.name);
+        }
+        Ok(())
+    }
+
+    pub async fn reset_db_password(&self, id: &str, tenant: Option<&str>) -> anyhow::Result<()> {
+        let request = r3v3rs3_api::platform::DatabasePasswordRequest {
+            tenant: tenant.map(String::from),
+        };
+        let reset: r3v3rs3_api::platform::DatabasePasswordReset = self
+            .post_json(&format!("/api/databases/{id}/password"), &request)
+            .await?;
+        println!("user:     {}", reset.account.user);
+        println!("password: {}", reset.account.password);
+        println!("url:      {}", reset.account.url);
+        for app in &reset.redeployed {
+            println!("redeployed: {app}");
+        }
+        for app in &reset.failed {
+            eprintln!("not redeployed, keeps the old password until its next deployment: {app}");
+        }
+        Ok(())
+    }
+
+    pub async fn delete_db_tenant(&self, id: &str, tenant: &str) -> anyhow::Result<()> {
+        self.request(
+            Method::DELETE,
+            &format!("/api/databases/{id}/tenants/{tenant}"),
+            None,
+        )
+        .await?;
+        println!("database/{id} tenant {tenant} deleted");
+        Ok(())
+    }
+
     // --- Target operations ---
 
     pub async fn list_targets(&self) -> anyhow::Result<()> {

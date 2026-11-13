@@ -542,6 +542,19 @@ pub enum DbCommand {
         #[arg(long, default_value = "100")]
         tail: usize,
     },
+    /// Shows the root account and every tenant with their passwords (Admin, audited).
+    Credentials { id: String },
+    /// Lists the tenants of a shared database server and the apps of each.
+    Tenants { id: String },
+    /// Gives the root account or a tenant a new password and redeploys its apps (Admin).
+    ResetPassword {
+        id: String,
+        /// The tenant whose password changes. Without it the root password changes.
+        #[arg(long)]
+        tenant: Option<String>,
+    },
+    /// Deletes a tenant that no app uses, with its user and its data (Admin).
+    DeleteTenant { id: String, tenant: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1542,6 +1555,20 @@ async fn run_db(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<(
         DbCommand::Clone { id, name } => api.clone_db(&id, &name).await,
         DbCommand::Replica { id, name } => api.replica_db(&id, &name).await,
         DbCommand::Logs { id, tail } => api.db_logs(&id, tail).await,
+        accounts => run_db_accounts(api, accounts).await,
+    }
+}
+
+/// The commands of the accounts and the tenants of a database.
+async fn run_db_accounts(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<()> {
+    match cmd {
+        DbCommand::Credentials { id } => api.db_credentials(&id).await,
+        DbCommand::Tenants { id } => api.db_tenants(&id).await,
+        DbCommand::ResetPassword { id, tenant } => {
+            api.reset_db_password(&id, tenant.as_deref()).await
+        }
+        DbCommand::DeleteTenant { id, tenant } => api.delete_db_tenant(&id, &tenant).await,
+        other => anyhow::bail!("{other:?} is not an account command"),
     }
 }
 

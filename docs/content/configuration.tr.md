@@ -1914,6 +1914,10 @@ r3 <server> db create --name my-db --engine postgres [--version postgres:18-alpi
 r3 <server> db clone <id> --name my-db-clone
 r3 <server> db replica <id> --name my-db-replica
 r3 <server> db logs <id> [--tail 100]
+r3 <server> db credentials <id>
+r3 <server> db tenants <id>
+r3 <server> db reset-password <id> [--tenant <name>]
+r3 <server> db delete-tenant <id> <tenant>
 r3 <server> db delete <id>
 
 # Yedekler, Otomatik Doğrulama, Belirli Bir Ana Geri Yükleme (PITR) ve WAL
