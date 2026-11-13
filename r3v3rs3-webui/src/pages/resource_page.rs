@@ -182,18 +182,6 @@ pub fn text_input<F: Clone + 'static>(
     })
 }
 
-/// Returns a callback that sets the state to `value`.
-pub fn set_on_click<T: Clone + 'static>(
-    state: &UseStateHandle<T>,
-    value: T,
-) -> Callback<MouseEvent> {
-    let state = state.clone();
-    Callback::from(move |event: MouseEvent| {
-        event.prevent_default();
-        state.set(value.clone());
-    })
-}
-
 /// A form that opens in a modal and whether its modal is open.
 pub type FormState<'a, F> = (&'a UseStateHandle<F>, &'a UseStateHandle<bool>);
 

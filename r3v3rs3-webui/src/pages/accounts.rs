@@ -1,11 +1,14 @@
 use super::Route;
 use super::resource_page::{
-    FormCard, Notice, delete_on_click, form_card, get_json, load, notice_view, reload_callback,
-    row_actions, save_result, set_on_click, submit_callback, text_input,
+    AddIcon, FormCard, FormState, Notice, add_button, close_callback, delete_on_click, failed_view,
+    form_modal, get_json, load, open_on_click, reload_callback, row_actions, save_result,
+    saved_view, submit_callback, text_input, then_close, use_form_modal,
 };
 use super::settings::{send_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::data_list::{Column, Row, list_card};
 #[cfg(target_arch = "wasm32")]
 use crate::format::format_passkey_error;
@@ -147,7 +150,7 @@ pub fn accounts() -> Html {
     let (session, _) = use_store::<SessionStore>();
     let (proxies, proxies_dispatch) = use_store::<ProxyStore>();
     let accounts = use_state(|| Option::<Vec<AccountInfo>>::None);
-    let form = use_state(Form::default);
+    let (form, open) = use_form_modal::<Form>();
     let notice = use_state(|| Option::<Notice<Option<String>>>::None);
 
     let accounts_cloned = accounts.clone();
@@ -167,20 +170,7 @@ pub fn accounts() -> Html {
         });
     });
 
-    use_effect_with(accounts.clone(), {
-        let form = form.clone();
-        move |accounts| {
-            if let Some(editing) = &form.editing
-                && let Some(list) = accounts.as_ref()
-                && let Some(info) = list.iter().find(|acc| &acc.username == editing)
-                && form.passkeys != info.passkeys
-            {
-                let mut updated = (*form).clone();
-                updated.passkeys = info.passkeys.clone();
-                form.set(updated);
-            }
-        }
-    });
+    use_passkey_sync(&form, &accounts);
 
     if session.info.is_some() && !session.is_admin() {
         return html! { <Redirect<Route> to={Route::Home} /> };
@@ -195,24 +185,68 @@ pub fn accounts() -> Html {
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(|info| account_row(locale, info, &proxies.entries, &own, &form, &accounts))
+        .map(|info| {
+            account_row(
+                locale,
+                info,
+                (&proxies.entries, &own),
+                (&form, &open),
+                &accounts,
+            )
+        })
         .collect::<Vec<_>>();
-    let onsubmit = submit(locale, &form, &notice, &accounts);
     html! {
         <>
+            { saved_view(&notice, |secret: &Option<String>| saved_message(locale, secret)) }
             { list_card(locale, accounts.is_some(), "accounts.empty", &COLUMNS, &rows) }
-            { form_view(locale, &form, &notice, &proxies.entries, &own, onsubmit, &accounts) }
+            { add_button(locale, open_on_click(&form, &open, Form::default())) }
+            if *open {
+                { form_view(locale, (&form, &open), &notice, &proxies.entries, &own, &accounts) }
+            }
+        </>
+    }
+}
+
+/// Copies the passkeys of the edited account into the form after the list reloads, so a passkey
+/// that the form added or removed shows at once.
+#[hook]
+fn use_passkey_sync(form: &UseStateHandle<Form>, accounts: &AccountList) {
+    use_effect_with(accounts.clone(), {
+        let form = form.clone();
+        move |accounts| {
+            if let Some(editing) = &form.editing
+                && let Some(list) = accounts.as_ref()
+                && let Some(info) = list.iter().find(|acc| &acc.username == editing)
+                && form.passkeys != info.passkeys
+            {
+                let mut updated = (*form).clone();
+                updated.passkeys = info.passkeys.clone();
+                form.set(updated);
+            }
+        }
+    });
+}
+
+/// The message of a saved account, with the TOTP secret of a new account.
+fn saved_message(locale: Locale, secret: &Option<String>) -> Html {
+    html! {
+        <>
+            <p>{locale.t("accounts.saved")}</p>
+            if let Some(secret) = secret {
+                <p class="mt-2 break-all">{locale.tf("accounts.totp_secret", &[("secret", secret)])}</p>
+            }
         </>
     }
 }
 
 fn submit(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     notice: &AccountNotice,
     accounts: &AccountList,
 ) -> Callback<SubmitEvent> {
-    let done = save_result(form, notice, reload_callback(accounts, PATH));
+    let saved = then_close(reload_callback(accounts, PATH), open);
+    let done = save_result(form, notice, saved);
     let form = form.clone();
     submit_callback(
         move || parse_form(locale, &form).ok(),
@@ -224,9 +258,8 @@ fn submit(
 fn account_row(
     locale: Locale,
     info: &AccountInfo,
-    proxies: &[ProxyEntry],
-    own: &str,
-    form: &UseStateHandle<Form>,
+    (proxies, own): (&[ProxyEntry], &str),
+    (form, open): FormState<Form>,
     accounts: &AccountList,
 ) -> Row {
     // An admin cannot delete its own account.
@@ -256,7 +289,7 @@ fn account_row(
             html! { <>{passkeys_text}</> },
             html! { <>{tokens_text}</> },
         ],
-        actions: row_actions(locale, set_on_click(form, Form::edit(info)), delete),
+        actions: row_actions(locale, open_on_click(form, open, Form::edit(info)), delete),
     }
 }
 
@@ -301,11 +334,10 @@ fn account_fields(
 
 fn form_view(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     notice: &AccountNotice,
     proxies: &[ProxyEntry],
     own: &str,
-    onsubmit: Callback<SubmitEvent>,
     accounts: &AccountList,
 ) -> Html {
     let parsed = parse_form(locale, form);
@@ -317,28 +349,17 @@ fn form_view(
     let touched = editing.is_some() || !form.username.is_empty() || !form.password.is_empty();
     let own_account = editing.as_deref() == Some(own);
     let fields = account_fields(locale, form, own_account, proxies, accounts);
-    let notice = notice_view(notice, |secret: &Option<String>| {
-        html! {
-            <>
-                <p>{locale.t("accounts.saved")}</p>
-                if let Some(secret) = secret {
-                    <p class="mt-2 break-all">{locale.tf("accounts.totp_secret", &[("secret", secret)])}</p>
-                }
-            </>
-        }
-    });
     let card = FormCard {
         title,
-        notice,
+        notice: failed_view(notice),
         fields,
         error: parsed.as_ref().err().filter(|_| touched).cloned(),
-        cancel: editing
-            .is_some()
-            .then(|| set_on_click(form, Form::default())),
+        cancel: None,
         save_label: "accounts.save",
         can_save: parsed.is_ok(),
     };
-    form_card(locale, card, onsubmit)
+    let onsubmit = submit(locale, (form, open), notice, accounts);
+    form_modal(locale, card, onsubmit, close_callback(form, open))
 }
 
 fn checkbox(
@@ -552,10 +573,10 @@ fn passkey_list_view(
             <div class="flex justify-between items-center mb-2">
                 <label class="text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("accounts.passkeys")}</label>
                 if own_account && is_web_authn_supported() {
-                    <button type="button" class="text-xs font-semibold px-2.5 py-1 rounded bg-neutral-800 text-white dark:bg-neutral-700 hover:bg-neutral-600 transition flex items-center gap-1 cursor-pointer" onclick={on_add_passkey}>
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_add_passkey}>
+                        <AddIcon />
                         {locale.t("accounts.add_passkey")}
-                    </button>
+                    </Button>
                 }
             </div>
             if form.passkeys.is_empty() {
@@ -592,9 +613,11 @@ fn passkey_item(
                 <span class="text-sm font-medium text-neutral-800 dark:text-neutral-200">{&pk.name}</span>
             </div>
             if own_account {
-                <button type="button" class="text-red-600 hover:text-red-800 dark:hover:text-red-400 p-1 cursor-pointer" onclick={on_delete}>
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                </button>
+                <ActionIconButton
+                    variant={ActionVariant::Delete}
+                    title={locale.t("common.delete").to_string()}
+                    onclick={on_delete}
+                />
             }
         </div>
     }
@@ -621,10 +644,10 @@ fn token_list_view(
             <div class="flex justify-between items-center mb-2">
                 <label class="text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("accounts.tokens")}</label>
                 if own_account {
-                    <button type="button" class="text-xs font-semibold px-2.5 py-1 rounded bg-neutral-800 text-white dark:bg-neutral-700 hover:bg-neutral-600 transition flex items-center gap-1 cursor-pointer" onclick={on_add_token}>
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_add_token}>
+                        <AddIcon />
                         {locale.t("accounts.add_token")}
-                    </button>
+                    </Button>
                 }
             </div>
             if form.tokens.is_empty() {
@@ -672,9 +695,11 @@ fn token_item(
                 </span>
             </div>
             if own_account {
-                <button type="button" class="text-red-600 hover:text-red-800 dark:hover:text-red-400 p-1 cursor-pointer" onclick={on_delete}>
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                </button>
+                <ActionIconButton
+                    variant={ActionVariant::Delete}
+                    title={locale.t("common.delete").to_string()}
+                    onclick={on_delete}
+                />
             }
         </div>
     }
