@@ -31,6 +31,7 @@ use tokio::{
 use url::Url;
 
 mod common;
+use common::closed_tcp_port;
 use common::{TestPort, TestStorage, serve_http_upstream};
 use common::{alloc_tcp_port, alloc_udp_port, http_route, port_entry, proxy_entry, with_server};
 
@@ -508,7 +509,7 @@ async fn cache_key_does_not_depend_on_the_upstream_server() -> anyhow::Result<()
 async fn tcp_load_balancing_and_failover() -> anyhow::Result<()> {
     let a = start_named_tcp_upstream("a").await?;
     let b = start_named_tcp_upstream("b").await?;
-    let closed = alloc_tcp_port().await?;
+    let closed = closed_tcp_port();
     let round_robin_port = alloc_tcp_port().await?;
     let failover_port = alloc_tcp_port().await?;
     let round_robin = TcpProxy {
@@ -801,7 +802,8 @@ async fn http_retries_503_only_for_idempotent_requests() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn http_replays_a_body_up_to_the_limit() -> anyhow::Result<()> {
-    let refused = alloc_tcp_port().await?.http_url("/");
+    let closed = closed_tcp_port();
+    let refused = closed.http_url("/");
     let echo = start_echo_upstream().await?;
     let proxy_port = alloc_tcp_port().await?;
     let proxy = retrying_http(&[refused, echo], retry(2, &[RetryOn::Connect], 8));
@@ -986,7 +988,8 @@ async fn tcp_client_ip_hash_keeps_the_client_on_one_server() -> anyhow::Result<(
 
 #[tokio::test]
 async fn http_one_attempt_disables_retries() -> anyhow::Result<()> {
-    let refused = alloc_tcp_port().await?.http_url("/");
+    let closed = closed_tcp_port();
+    let refused = closed.http_url("/");
     let live = start_named_upstream("b").await?;
     let proxy_port = alloc_tcp_port().await?;
     let proxy = retrying_http(&[refused, live], retry(1, &[RetryOn::Connect], 0));

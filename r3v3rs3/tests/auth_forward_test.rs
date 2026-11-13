@@ -8,7 +8,8 @@ use std::time::Duration;
 
 mod common;
 use common::{
-    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server,
+    TestStorage, alloc_tcp_port, closed_tcp_port, http_port_entry, http_proxy_entry, http_route,
+    with_server,
 };
 
 fn proxy(upstream: &str, auth_url: String) -> HttpProxy {
@@ -29,7 +30,7 @@ fn proxy(upstream: &str, auth_url: String) -> HttpProxy {
 async fn forward_auth_allows_and_denies_requests() -> anyhow::Result<()> {
     let port = alloc_tcp_port().await?;
     let broken_port = alloc_tcp_port().await?;
-    let closed_port = alloc_tcp_port().await?;
+    let closed_port = closed_tcp_port();
     let mut auth = mockito::Server::new_async().await;
     let mut upstream = mockito::Server::new_async().await;
 

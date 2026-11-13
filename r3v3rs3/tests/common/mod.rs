@@ -749,6 +749,17 @@ fn bind_reusable(addr: SocketAddr, kind: Type) -> Result<SocketAddr, std::io::Er
     })
 }
 
+/// A TCP port that refuses every connection. The port of `alloc_tcp_port` is free only at the
+/// moment of the call: a test running in parallel can listen on it, and a connection to a free
+/// port can pick it as its own source port and connect to itself. Port 1 is outside the
+/// ephemeral range, so neither can happen. A socket that is bound but does not listen is no
+/// replacement: macOS drops the connection attempt instead of refusing it.
+pub fn closed_tcp_port() -> TestPort {
+    TestPort {
+        addr: (std::net::Ipv4Addr::LOCALHOST, 1).into(),
+    }
+}
+
 pub struct TestPort {
     addr: SocketAddr,
 }
