@@ -9,6 +9,8 @@ use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::app_tabs::{AppTab, AppTabs};
 use crate::components::backup_drill_modal::BackupDrillModal;
+use crate::components::button::{Button, ButtonKind, ButtonSize, button_class};
+use crate::components::data_list::{Column, Row, list_card};
 use crate::components::wal_segments_modal::WalSegmentsModal;
 use crate::dialog::{self, Icon};
 use crate::format::{format_bytes, format_time};
@@ -23,9 +25,6 @@ use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux::prelude::*;
-
-const BUTTON_CLASS: &str =
-    "px-3 py-1.5 rounded bg-neutral-100 text-neutral-900 font-medium disabled:opacity-50";
 
 #[function_component(DatabaseBackups)]
 pub fn database_backups(props: &Props) -> Html {
@@ -334,43 +333,39 @@ fn pitr_banner_view(
         let def_time = pitr.latest.unwrap_or_else(|| pitr.earliest.unwrap_or(0));
         let onclick = pitr_restore_action(locale, id, def_time, reload.clone());
         html! {
-            <button type="button" class="px-3 py-1.5 rounded bg-blue-600 text-white font-medium hover:bg-blue-500 mr-2 text-sm" {onclick}>
+            <Button kind={ButtonKind::Primary} size={ButtonSize::Sm} {onclick}>
                 {locale.t("databases.pitr_restore")}
-            </button>
+            </Button>
         }
     });
     let wal_view_btn = html! {
-        <button
-            type="button"
-            class="px-3 py-1.5 rounded bg-neutral-700 text-neutral-200 font-medium hover:bg-neutral-600 text-sm mr-2 inline-flex items-center gap-1.5"
-            onclick={on_open_wal.clone()}
-        >
-            <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_open_wal.clone()}>
+            <svg class="w-4 h-4 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
             </svg>
             {locale.t("databases.wal_segments")}
-        </button>
+        </Button>
     };
     let wal_btn = can_edit.then(|| {
         let onclick = archive_wal_action(id, notice.clone(), reload.clone());
         html! {
-            <button type="button" class="px-3 py-1.5 rounded bg-neutral-700 text-neutral-200 font-medium hover:bg-neutral-600 text-sm" {onclick}>
+            <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} {onclick}>
                 {locale.t("databases.wal_archive")}
-            </button>
+            </Button>
         }
     });
     html! {
-        <div class="mb-4 p-3 bg-neutral-800/80 rounded border border-neutral-700 flex flex-wrap items-center justify-between gap-2">
+        <div class="mb-4 p-3 bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 rounded-md flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center flex-wrap gap-2">
-                <span class="font-medium text-neutral-200 mr-1">{locale.t("databases.pitr_window")}</span>
-                <span class="font-mono text-neutral-300 text-sm">{window_text}</span>
-                <span class="text-xs text-neutral-400">
+                <span class="font-medium text-neutral-900 dark:text-neutral-200 mr-1">{locale.t("databases.pitr_window")}</span>
+                <span class="font-mono text-neutral-700 dark:text-neutral-300 text-sm">{window_text}</span>
+                <span class="text-xs text-neutral-500 dark:text-neutral-400">
                     {format!("({} base,", pitr.base_backups_count)}
                 </span>
                 <button
                     type="button"
-                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono bg-neutral-700/80 hover:bg-neutral-600 text-cyan-300 hover:text-cyan-200 transition cursor-pointer"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono bg-neutral-100 hover:bg-neutral-200 text-cyan-700 dark:bg-neutral-700 dark:hover:bg-neutral-600 dark:text-cyan-300 transition cursor-pointer"
                     onclick={on_open_wal}
                     title={locale.t("databases.view_wal_segments")}
                 >
@@ -381,7 +376,7 @@ fn pitr_banner_view(
                     <span>{format!("{} WAL)", pitr.wal_segments_count)}</span>
                 </button>
             </div>
-            <div class="flex items-center">
+            <div class="flex flex-wrap items-center gap-2">
                 { restore_btn }
                 { wal_view_btn }
                 { wal_btn }
@@ -397,18 +392,23 @@ fn take_backup_button(
     notice: UseStateHandle<Option<Notice<&'static str>>>,
     reload: Callback<()>,
 ) -> Html {
+    let onclick = {
+        let (busy, notice, reload) = (busy.clone(), notice.clone(), reload.clone());
+        Callback::from(move |_| {
+            spawn_local(take_backup(
+                locale,
+                id,
+                busy.clone(),
+                notice.clone(),
+                reload.clone(),
+            ));
+        })
+    };
     html! {
         <div class="mb-4">
-            <button type="button" class={BUTTON_CLASS} disabled={*busy}
-                onclick={{
-                    let (busy, notice, reload) = (busy.clone(), notice.clone(), reload.clone());
-                    Callback::from(move |_| {
-                        spawn_local(take_backup(locale, id, busy.clone(), notice.clone(), reload.clone()));
-                    })
-                }}
-            >
+            <Button kind={ButtonKind::Success} disabled={*busy} {onclick}>
                 {locale.t("backups.take")}
-            </button>
+            </Button>
         </div>
     }
 }
@@ -498,7 +498,109 @@ fn build_drill_modal(
     })
 }
 
-/// The table of the backups of the database.
+const COLUMNS: [Column; 4] = [
+    Column {
+        label: "backups.time",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "backups.size",
+        class: "whitespace-nowrap font-mono",
+    },
+    Column {
+        label: "backups.sha256",
+        class: "font-mono",
+    },
+    Column {
+        label: "common.status",
+        class: "whitespace-nowrap",
+    },
+];
+
+const DRILL_BUTTON: &str = "text-xs font-medium cursor-pointer hover:underline";
+
+/// The verification of a backup; a click opens its drill.
+fn verification_cell(locale: Locale, entry: &BackupEntry, onclick: Callback<MouseEvent>) -> Html {
+    match entry.verification_status.as_deref() {
+        Some("valid") => {
+            let label = if let Some(drill) = &entry.drill
+                && drill.table_count > 0
+            {
+                locale.tf(
+                    "backups.drill_passed_tables",
+                    &[("count", &drill.table_count.to_string())],
+                )
+            } else {
+                format!("✓ {}", locale.t("backups.verified"))
+            };
+            html! {
+                <button type="button" class={classes!(DRILL_BUTTON, "text-green-600", "dark:text-green-400")} {onclick} title={locale.t("backups.view_drill")}>
+                    {label}
+                </button>
+            }
+        }
+        Some(err) => html! {
+            <button type="button" class={classes!(DRILL_BUTTON, "text-red-600", "dark:text-red-400")} {onclick} title={err.to_string()}>
+                {"✗ "}{locale.t("backups.verify_failed")}
+            </button>
+        },
+        None => html! {
+            <button type="button" class={classes!(DRILL_BUTTON, "text-neutral-500", "dark:text-neutral-400")} {onclick} title={locale.t("backups.view_drill")}>
+                {locale.t("backups.test")}
+            </button>
+        },
+    }
+}
+
+/// The download, restore and delete actions of a backup.
+fn backup_actions(
+    locale: Locale,
+    id: ShortId,
+    entry: &BackupEntry,
+    can_edit: bool,
+    reload: &Callback<()>,
+) -> Html {
+    let download = format!(
+        "{API_ENDPOINT}/databases/{id}/backups/{}/download",
+        entry.id
+    );
+    let restore = can_edit.then(|| restore_on_click(locale, id, entry));
+    let delete = can_edit.then(|| {
+        let question = locale.tf("backups.delete_question", &[("name", entry.id.as_str())]);
+        delete_on_click(
+            locale,
+            question,
+            format!("/databases/{id}/backups/{}", entry.id),
+            reload.clone(),
+        )
+    });
+    html! {
+        <>
+            <ActionIconButton
+                variant={ActionVariant::Download}
+                title={locale.t("backups.download").to_string()}
+                href={download}
+                download={format!("{}.dump.gz", entry.id)}
+            />
+            if let Some(restore) = restore {
+                <ActionIconButton
+                    variant={ActionVariant::Restore}
+                    title={locale.t("backups.restore").to_string()}
+                    onclick={restore}
+                />
+            }
+            if let Some(delete) = delete {
+                <ActionIconButton
+                    variant={ActionVariant::Delete}
+                    title={locale.t("common.delete").to_string()}
+                    onclick={delete}
+                />
+            }
+        </>
+    }
+}
+
+/// The list of the backups of the database.
 fn list_view(
     locale: Locale,
     id: ShortId,
@@ -507,25 +609,9 @@ fn list_view(
     reload: Callback<()>,
     selected_drill_backup: UseStateHandle<Option<BackupEntry>>,
 ) -> Html {
-    if backups.is_empty() {
-        return html! { <p class="text-neutral-400 mt-2">{locale.t("backups.empty")}</p> };
-    }
     let rows = backups
         .iter()
         .map(|entry| {
-            let download =
-                format!("{API_ENDPOINT}/databases/{id}/backups/{}/download", entry.id);
-            let restore = can_edit.then(|| restore_on_click(locale, id, entry));
-            let delete = can_edit.then(|| {
-                let question =
-                    locale.tf("backups.delete_question", &[("name", entry.id.as_str())]);
-                delete_on_click(
-                    locale,
-                    question,
-                    format!("/databases/{id}/backups/{}", entry.id),
-                    reload.clone(),
-                )
-            });
             let on_drill_click = {
                 let s = selected_drill_backup.clone();
                 let e = entry.clone();
@@ -534,92 +620,31 @@ fn list_view(
                     s.set(Some(e.clone()));
                 })
             };
-            let status_badge = match entry.verification_status.as_deref() {
-                Some("valid") => {
-                    let label = if let Some(drill) = &entry.drill && drill.table_count > 0 {
-                        locale.tf(
-                            "backups.drill_passed_tables",
-                            &[("count", &drill.table_count.to_string())],
-                        )
-                    } else {
-                        format!("✓ {}", locale.t("backups.verified"))
-                    };
-                    html! {
-                        <button type="button" class="text-xs text-green-400 hover:text-green-300 mr-3 cursor-pointer inline-flex items-center gap-1 font-medium" onclick={on_drill_click} title={locale.t("backups.view_drill")}>
-                            {label}
-                        </button>
-                    }
-                }
-                Some(err) => html! {
-                    <button type="button" class="text-xs text-red-400 hover:text-red-300 mr-3 cursor-pointer inline-flex items-center gap-1 font-medium" onclick={on_drill_click} title={err.to_string()}>
-                        {"✗ "}{locale.t("backups.verify_failed")}
-                    </button>
-                },
-                None => html! {
-                    <button type="button" class="text-xs text-neutral-400 hover:text-neutral-200 mr-3 cursor-pointer font-medium" onclick={on_drill_click} title={locale.t("backups.view_drill")}>
-                        {locale.t("backups.test")}
-                    </button>
-                },
-            };
-            html! {
-                <tr class="border-b border-neutral-700">
-                    <td class="py-1.5">{format_time(entry.created_at.max(0) as u64)}</td>
-                    <td class="py-1.5 font-mono text-neutral-400">{format_bytes(entry.size)}</td>
-                    <td class="py-1.5 font-mono text-neutral-400">{entry.sha256.chars().take(12).collect::<String>()}</td>
-                    <td class="py-1.5 text-right">
-                        <div class="inline-flex items-center justify-end gap-1.5">
-                            {status_badge}
-                            <ActionIconButton
-                                variant={ActionVariant::Download}
-                                title={locale.t("backups.download").to_string()}
-                                href={download}
-                                download={format!("{}.dump.gz", entry.id)}
-                            />
-                            if let Some(restore) = restore {
-                                <ActionIconButton
-                                    variant={ActionVariant::Restore}
-                                    title={locale.t("backups.restore").to_string()}
-                                    onclick={restore}
-                                />
-                            }
-                            if let Some(delete) = delete {
-                                <ActionIconButton
-                                    variant={ActionVariant::Delete}
-                                    title={locale.t("common.delete").to_string()}
-                                    onclick={delete}
-                                />
-                            }
-                        </div>
-                    </td>
-                </tr>
+            Row {
+                key: entry.id.clone(),
+                cells: vec![
+                    html! { {format_time(entry.created_at.max(0) as u64)} },
+                    html! { {format_bytes(entry.size)} },
+                    html! { {entry.sha256.chars().take(12).collect::<String>()} },
+                    verification_cell(locale, entry, on_drill_click),
+                ],
+                actions: backup_actions(locale, id, entry, can_edit, &reload),
             }
         })
         .collect::<Vec<_>>();
-    html! {
-        <table class="w-full text-sm mt-3">
-            <thead>
-                <tr class="text-left text-neutral-400">
-                    <th class="py-1.5 font-medium">{locale.t("backups.time")}</th>
-                    <th class="py-1.5 font-medium">{locale.t("backups.size")}</th>
-                    <th class="py-1.5 font-medium">{locale.t("backups.sha256")}</th>
-                    <th />
-                </tr>
-            </thead>
-            <tbody>{ for rows }</tbody>
-        </table>
-    }
+    list_card(locale, true, "backups.empty", &COLUMNS, &rows)
 }
 
 fn storage_settings_redirect(locale: Locale) -> Html {
     html! {
-        <div class="mt-6 rounded border border-neutral-700 p-4 bg-neutral-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div class="mt-6 p-4 bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 rounded-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-                <p class="font-medium text-neutral-200">{locale.t("backups.storage_settings_title")}</p>
-                <p class="text-xs text-neutral-400 mt-1">{locale.t("backups.storage_settings_hint")}</p>
+                <p class="font-medium text-neutral-900 dark:text-neutral-200">{locale.t("backups.storage_settings_title")}</p>
+                <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">{locale.t("backups.storage_settings_hint")}</p>
             </div>
             <Link<Route>
                 to={Route::Backups}
-                classes="px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-500 text-sm font-medium shrink-0 inline-flex items-center gap-1.5 justify-center"
+                classes={button_class(ButtonKind::Secondary, ButtonSize::Md)}
             >
                 {locale.t("backups.manage_storage")}
             </Link<Route>>
