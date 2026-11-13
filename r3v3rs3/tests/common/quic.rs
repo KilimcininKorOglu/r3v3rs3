@@ -12,6 +12,16 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
 /// Builds a client endpoint that trusts `root`. `identity` sends a client certificate.
 pub fn quic_endpoint(root: &Cert, identity: Option<&Cert>) -> anyhow::Result<quinn::Endpoint> {
+    let tls = client_tls(root, identity)?;
+    let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
+    endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+        QuicClientConfig::try_from(tls)?,
+    )));
+    Ok(endpoint)
+}
+
+/// The HTTP/3 TLS client config that trusts `root` and sends `identity` when it is set.
+fn client_tls(root: &Cert, identity: Option<&Cert>) -> anyhow::Result<ClientConfig> {
     let mut roots = RootCertStore::empty();
     for der in root.certificates()? {
         roots.add(der)?;
@@ -24,12 +34,7 @@ pub fn quic_endpoint(root: &Cert, identity: Option<&Cert>) -> anyhow::Result<qui
         None => builder.with_no_client_auth(),
     };
     tls.alpn_protocols = vec![b"h3".to_vec()];
-
-    let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
-    endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-        QuicClientConfig::try_from(tls)?,
-    )));
-    Ok(endpoint)
+    Ok(tls)
 }
 
 /// Sends one HTTP/3 GET request and returns the status and the body.
@@ -51,15 +56,22 @@ pub async fn h3_get(
         builder = builder.header(*name, *value);
     }
     let mut stream = send_request.send_request(builder.body(())?).await?;
-    stream.finish().await?;
+    let response = read_response(&mut stream).await?;
+    drop(send_request);
+    driver.abort();
+    Ok(response)
+}
 
+/// Finishes the request stream, then reads the status and the whole body of the response.
+async fn read_response(
+    stream: &mut h3::client::RequestStream<h3_quinn::BidiStream<bytes::Bytes>, bytes::Bytes>,
+) -> anyhow::Result<(StatusCode, String)> {
+    stream.finish().await?;
     let response = stream.recv_response().await?;
     let mut body = Vec::new();
     while let Some(mut chunk) = stream.recv_data().await? {
         body.extend_from_slice(chunk.copy_to_bytes(chunk.remaining()).as_ref());
     }
-    drop(send_request);
-    driver.abort();
     Ok((response.status(), String::from_utf8(body)?))
 }
 
