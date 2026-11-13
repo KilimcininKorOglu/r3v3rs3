@@ -46,7 +46,7 @@ mod projects;
 mod proxy_list;
 mod proxy_view;
 mod registries;
-mod resource_page;
+pub mod resource_page;
 pub mod security;
 mod self_sign;
 pub mod settings;

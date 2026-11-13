@@ -1,7 +1,8 @@
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{
-    FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback, row_actions,
-    save_result, set_on_click, submit_callback, text_input,
+    FormCard, Notice, add_button, close_callback, delete_on_click, form_modal, load, notice_view,
+    open_on_click, reload_callback, row_actions, save_result, submit_callback, text_input,
+    then_close, use_form_modal,
 };
 use super::settings::send_json;
 use crate::API_ENDPOINT;
@@ -116,7 +117,7 @@ pub fn access_lists() -> Html {
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
     let lists = use_state(|| Option::<Vec<AccessListEntry>>::None);
-    let form = use_state(Form::default);
+    let (form, open) = use_form_modal::<Form>();
     let notice = use_state(|| Option::<Notice<()>>::None);
 
     let lists_cloned = lists.clone();
@@ -128,13 +129,17 @@ pub fn access_lists() -> Html {
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(|entry| list_row(locale, entry, can_edit, &form, &lists))
+        .map(|entry| list_row(locale, entry, can_edit, (&form, &open), &lists))
         .collect::<Vec<_>>();
     html! {
         <>
+            { notice_view(&notice, |()| html! { <p>{locale.t("access_lists.saved")}</p> }) }
             { list_card(locale, lists.is_some(), "access_lists.empty", &COLUMNS, &rows) }
             if can_edit {
-                { form_view(locale, &form, &notice, &lists) }
+                { add_button(locale, open_on_click(&form, &open, Form::default())) }
+                if *open {
+                    { form_view(locale, (&form, &open), &notice, &lists) }
+                }
             }
         </>
     }
@@ -144,14 +149,18 @@ fn list_row(
     locale: Locale,
     entry: &AccessListEntry,
     can_edit: bool,
-    form: &UseStateHandle<Form>,
+    (form, open): (&UseStateHandle<Form>, &UseStateHandle<bool>),
     lists: &Lists,
 ) -> Row {
     let actions = if can_edit {
         let question = locale.tf("access_lists.confirm_delete", &[("name", &entry.list.name)]);
         let path = format!("{PATH}/{}", entry.id);
         let delete = delete_on_click(locale, question, path, reload_callback(lists, PATH));
-        row_actions(locale, set_on_click(form, Form::edit(entry)), Some(delete))
+        row_actions(
+            locale,
+            open_on_click(form, open, Form::edit(entry)),
+            Some(delete),
+        )
     } else {
         html! {}
     };
@@ -168,7 +177,7 @@ fn list_row(
 
 fn form_view(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): (&UseStateHandle<Form>, &UseStateHandle<bool>),
     notice: &UseStateHandle<Option<Notice<()>>>,
     lists: &Lists,
 ) -> Html {
@@ -223,29 +232,29 @@ fn form_view(
     };
     let card = FormCard {
         title,
-        notice: notice_view(
-            notice,
-            |()| html! { <p>{locale.t("access_lists.saved")}</p> },
-        ),
+        notice: html! {},
         fields,
         error: parsed.as_ref().err().filter(|_| touched).cloned(),
-        cancel: form
-            .editing
-            .is_some()
-            .then(|| set_on_click(form, Form::default())),
+        cancel: None,
         save_label: "access_lists.save",
         can_save: parsed.is_ok(),
     };
-    form_card(locale, card, submit(locale, form, notice, lists))
+    form_modal(
+        locale,
+        card,
+        submit(locale, (form, open), notice, lists),
+        close_callback(form, open),
+    )
 }
 
 fn submit(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): (&UseStateHandle<Form>, &UseStateHandle<bool>),
     notice: &UseStateHandle<Option<Notice<()>>>,
     lists: &Lists,
 ) -> Callback<SubmitEvent> {
-    let done = save_result(form, notice, reload_callback(lists, PATH));
+    let saved = then_close(reload_callback(lists, PATH), open);
+    let done = save_result(form, notice, saved);
     let form = form.clone();
     submit_callback(
         move || form.parse(locale).ok().map(|list| (form.editing, list)),

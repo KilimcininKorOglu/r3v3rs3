@@ -1,3 +1,5 @@
+use crate::components::button::{ButtonKind, ButtonSize, button_class};
+use crate::components::tabs::{TabItem, Tabs};
 use crate::i18n::use_locale;
 use crate::pages::Route;
 use r3v3rs3_api::id::ShortId;
@@ -97,9 +99,9 @@ pub fn app_tabs(props: &Props) -> Html {
                 <div class="flex items-center gap-3">
                     <Link<Route>
                         to={back_route}
-                        classes="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 hover:dark:bg-neutral-900 font-medium rounded-lg text-sm px-3 py-1.5"
+                        classes={button_class(ButtonKind::Secondary, ButtonSize::Sm)}
                     >
-                        <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 mr-1" />
+                        <img src="/assets/icons/arrow-back.svg" class="w-4 h-4" />
                         {locale.t("common.back")}
                     </Link<Route>>
                     <h1 class="text-xl font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
@@ -136,23 +138,9 @@ pub fn app_tabs(props: &Props) -> Html {
                 }
             </div>
 
-            <div class="border-b border-neutral-200 dark:border-neutral-800">
-                <nav class="flex space-x-6 overflow-x-auto">
-                    { for tabs.into_iter().map(|(tab, route, label)| {
-                        let is_active = tab == props.active;
-                        let active_cls = if is_active {
-                            "border-blue-600 text-blue-600 dark:text-blue-400 font-semibold border-b-2"
-                        } else {
-                            "border-transparent text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
-                        };
-                        html! {
-                            <Link<Route> to={route} classes={classes!("py-3", "px-1", "text-sm", "whitespace-nowrap", active_cls)}>
-                                { locale.t(label) }
-                            </Link<Route>>
-                        }
-                    }) }
-                </nav>
-            </div>
+            <Tabs tabs={tabs.into_iter().map(|(tab, route, label)| {
+                TabItem::route(locale.t(label), route, tab == props.active)
+            }).collect::<Vec<_>>()} />
         </div>
     }
 }

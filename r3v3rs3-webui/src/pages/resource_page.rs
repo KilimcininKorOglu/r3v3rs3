@@ -3,6 +3,8 @@
 use super::settings::{failure_box, send_request, success_box};
 use crate::API_ENDPOINT;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind};
+use crate::components::modal::{Modal, ModalSize};
 use crate::dialog::{self, Icon};
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
@@ -41,16 +43,77 @@ pub fn form_card(locale: Locale, card: FormCard, onsubmit: Callback<SubmitEvent>
             { card.notice }
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{card.title}</h2>
             { card.fields }
-            if let Some(error) = card.error {
+            { form_buttons(locale, card.error, card.cancel, card.save_label, card.can_save) }
+        </form>
+    }
+}
+
+/// The add or edit form of a list page in a modal. The cancel button, Escape and a click on the
+/// backdrop call `on_close`; the notice of the form shows above the list, not in the modal.
+pub fn form_modal(
+    locale: Locale,
+    card: FormCard,
+    onsubmit: Callback<SubmitEvent>,
+    on_close: Callback<()>,
+) -> Html {
+    let cancel = {
+        let on_close = on_close.clone();
+        Callback::from(move |event: MouseEvent| {
+            event.prevent_default();
+            on_close.emit(());
+        })
+    };
+    html! {
+        <Modal title={card.title} on_close={on_close} size={ModalSize::Lg}>
+            <form {onsubmit}>
+                { card.fields }
+                { form_buttons(locale, card.error, Some(cancel), card.save_label, card.can_save) }
+            </form>
+        </Modal>
+    }
+}
+
+fn form_buttons(
+    locale: Locale,
+    error: Option<String>,
+    cancel: Option<Callback<MouseEvent>>,
+    save_label: &'static str,
+    can_save: bool,
+) -> Html {
+    html! {
+        <>
+            if let Some(error) = error {
                 <p class="mt-2 text-sm text-red-600 dark:text-red-500">{error}</p>
             }
             <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
-                if let Some(onclick) = card.cancel {
-                    <button type="button" {onclick} class={BUTTON_CLASS}>{locale.t("common.cancel")}</button>
+                if let Some(onclick) = cancel {
+                    <Button kind={ButtonKind::Secondary} {onclick}>{locale.t("common.cancel")}</Button>
                 }
-                <button type="submit" disabled={!card.can_save} class={BUTTON_CLASS}>{locale.t(card.save_label)}</button>
+                <Button kind={ButtonKind::Primary} r#type="submit" disabled={!can_save}>{locale.t(save_label)}</Button>
             </div>
-        </form>
+        </>
+    }
+}
+
+/// The add button of a list page, shown below the list on the right.
+pub fn add_button(locale: Locale, onclick: Callback<MouseEvent>) -> Html {
+    html! {
+        <div class="flex items-center justify-end my-4">
+            <Button kind={ButtonKind::Primary} {onclick}>
+                <AddIcon />
+                {locale.t("common.add")}
+            </Button>
+        </div>
+    }
+}
+
+/// The plus icon of the add buttons.
+#[function_component(AddIcon)]
+pub fn add_icon() -> Html {
+    html! {
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14m-7-7h14" />
+        </svg>
     }
 }
 
@@ -110,6 +173,47 @@ pub fn set_on_click<T: Clone + 'static>(
     Callback::from(move |event: MouseEvent| {
         event.prevent_default();
         state.set(value.clone());
+    })
+}
+
+/// The state of a form that opens in a modal: the form and whether the modal is open.
+#[hook]
+pub fn use_form_modal<F: Default + 'static>() -> (UseStateHandle<F>, UseStateHandle<bool>) {
+    (use_state(F::default), use_state(bool::default))
+}
+
+/// Returns a callback that fills the form with `value` and opens its modal.
+pub fn open_on_click<F: Clone + 'static>(
+    form: &UseStateHandle<F>,
+    open: &UseStateHandle<bool>,
+    value: F,
+) -> Callback<MouseEvent> {
+    let (form, open) = (form.clone(), open.clone());
+    Callback::from(move |event: MouseEvent| {
+        event.prevent_default();
+        form.set(value.clone());
+        open.set(true);
+    })
+}
+
+/// Returns a callback that closes the modal of the form and empties the form.
+pub fn close_callback<F: Default + 'static>(
+    form: &UseStateHandle<F>,
+    open: &UseStateHandle<bool>,
+) -> Callback<()> {
+    let (form, open) = (form.clone(), open.clone());
+    Callback::from(move |()| {
+        open.set(false);
+        form.set(F::default());
+    })
+}
+
+/// Returns a callback that runs `first`, then closes the modal of the form.
+pub fn then_close(first: Callback<()>, open: &UseStateHandle<bool>) -> Callback<()> {
+    let open = open.clone();
+    Callback::from(move |()| {
+        first.emit(());
+        open.set(false);
     })
 }
 

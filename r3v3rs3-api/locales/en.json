@@ -405,6 +405,7 @@
   "common.selected_count": "{count} selected",
   "common.select_all": "Select all",
   "common.clear_selection": "Clear selection",
+  "common.close": "Close",
   "common.edit": "Edit",
   "common.friendly_name": "Friendly Name (Optional)",
   "common.friendly_name_placeholder": "My Website",

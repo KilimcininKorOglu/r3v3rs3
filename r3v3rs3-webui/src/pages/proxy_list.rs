@@ -4,13 +4,16 @@ use std::collections::{HashMap, HashSet};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::data_list::{
     Column, LINK_CLASS, Row, SelectionProps, active_toggle, selectable_list_card, status_badge,
 };
 use crate::components::discovery_status::DiscoveryStatusCard;
 use crate::components::error_page_themes::ErrorPageThemesCard;
+use crate::components::tabs::{TabItem, Tabs};
 use crate::i18n::use_locale;
 use crate::pages::Route;
+use crate::pages::resource_page::add_button;
 use crate::store::{PortStore, ProxyStore, SessionStore};
 use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
@@ -66,30 +69,18 @@ fn render_tabs(locale: Locale, active_tab: &UseStateHandle<ProxyTab>) -> Html {
     let tabs = [
         (ProxyTab::Proxies, "proxies.tab_proxies"),
         (ProxyTab::ErrorPageThemes, "proxies.tab_error_page_themes"),
-    ];
-    html! {
-        <div class="border-b border-neutral-200 dark:border-neutral-700">
-            <nav class="flex space-x-6">
-                { for tabs.into_iter().map(|(tab, label)| {
-                    let is_active = **active_tab == tab;
-                    let active_cls = if is_active {
-                        "border-blue-500 text-blue-500 dark:text-blue-400 font-semibold border-b-2"
-                    } else {
-                        "border-transparent text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
-                    };
-                    let onclick = {
-                        let active_tab = active_tab.clone();
-                        Callback::from(move |_| active_tab.set(tab))
-                    };
-                    html! {
-                        <button type="button" {onclick} class={classes!("py-3", "px-1", "text-sm", "transition-colors", active_cls)}>
-                            { locale.t(label) }
-                        </button>
-                    }
-                }) }
-            </nav>
-        </div>
-    }
+    ]
+    .into_iter()
+    .map(|(tab, label)| {
+        let active = active_tab.clone();
+        TabItem::click(
+            locale.t(label),
+            Callback::from(move |_| active.set(tab)),
+            **active_tab == tab,
+        )
+    })
+    .collect::<Vec<_>>();
+    html! { <Tabs {tabs} /> }
 }
 
 #[function_component(ProxyList)]
@@ -180,14 +171,7 @@ pub fn proxy_list() -> Html {
                             />
                         }
                         if can_edit {
-                            <div class="flex items-center justify-end my-4">
-                                <div>
-                                    <button onclick={new_proxy_onclick} class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2" type="button">
-                                        <img src="/assets/icons/add.svg" class="w-4 h-4 mr-1" />
-                                        {locale.t("common.add")}
-                                    </button>
-                                </div>
-                            </div>
+                            { add_button(locale, new_proxy_onclick) }
                         }
                     </>
                 },
@@ -285,13 +269,9 @@ fn build_selection(
     let bulk_delete = bulk_delete_callback(locale, selected, proxies_dispatcher);
 
     let bulk_actions = Some(html! {
-        <button
-            type="button"
-            onclick={bulk_delete}
-            class="inline-flex items-center text-red-600 dark:text-red-400 bg-white dark:bg-neutral-800 border border-red-300 dark:border-red-700 focus:outline-none hover:bg-red-50 hover:dark:bg-red-950 focus:ring-4 focus:ring-red-200 dark:focus:ring-red-900 font-medium rounded-lg text-xs px-2.5 py-1.5"
-        >
+        <Button kind={ButtonKind::Danger} size={ButtonSize::Sm} onclick={bulk_delete}>
             {locale.t("common.bulk_delete")}
-        </button>
+        </Button>
     });
 
     Some(SelectionProps {

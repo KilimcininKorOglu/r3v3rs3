@@ -405,6 +405,7 @@
   "common.selected_count": "{count} seçildi",
   "common.select_all": "Tümünü seç",
   "common.clear_selection": "Seçimi temizle",
+  "common.close": "Kapat",
   "common.edit": "Düzenle",
   "common.friendly_name": "Görünen Ad (İsteğe Bağlı)",
   "common.friendly_name_placeholder": "Web Sitem",

@@ -5,14 +5,17 @@
 use super::Route;
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{
-    BUTTON_CLASS, FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback,
-    save_result, submit_callback, text_input,
+    FormCard, Notice, add_button, close_callback, delete_on_click, form_modal, load, notice_view,
+    open_on_click, reload_callback, save_result, submit_callback, text_input, then_close,
+    use_form_modal,
 };
 use super::settings::{fetch_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind};
 use crate::components::data_list::{Column, Row, list_card, status_badge};
+use crate::components::modal::{Modal, ModalSize};
 use crate::dialog::{self, Icon};
 use crate::format::{format_disk_bytes, format_time};
 use crate::i18n::use_locale;
@@ -81,7 +84,7 @@ pub fn targets() -> Html {
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
     let targets = use_state(|| Option::<Vec<TargetEntry>>::None);
-    let form = use_state(Form::default);
+    let (form, open) = use_form_modal::<Form>();
     let notice = use_state(|| Option::<Notice<TargetToken>>::None);
     let editing_region = use_state(|| Option::<TargetEntry>::None);
 
@@ -107,38 +110,62 @@ pub fn targets() -> Html {
         .iter()
         .map(|target| target_row(locale, target, admin, &targets, &notice, &editing_region))
         .collect::<Vec<_>>();
-    let token = notice_view(&notice, |token: &TargetToken| token_view(locale, token));
-    let modal = editing_region.as_ref().map(|target| {
-        let target = target.clone();
-        let editing_region_close = editing_region.clone();
-        let on_close = Callback::from(move |()| editing_region_close.set(None));
-        let editing_region_saved = editing_region.clone();
-        let reload = reload_callback(&targets, PATH);
-        let on_saved = Callback::from(move |()| {
-            editing_region_saved.set(None);
-            reload.emit(());
-        });
-        html! {
-            <EditRegionModal
-                {locale}
-                {target}
-                {on_close}
-                {on_saved}
-            />
-        }
-    });
     html! {
         <>
-            { token }
+            { notice_view(&notice, |token: &TargetToken| token_view(locale, token)) }
             { upgrade_all_button(locale, &targets, admin) }
             { list_card(locale, targets.is_some(), "targets.empty", &COLUMNS, &rows) }
             if admin {
-                { form_view(locale, &form, &notice, &targets) }
-                <PruneSettings />
-                <NodeAlertSettings />
+                { admin_sections(locale, (&form, &open), &notice, &targets) }
             }
-            { modal }
+            { region_modal(locale, &editing_region, &targets) }
         </>
+    }
+}
+
+/// The add button with its modal, and the prune and node alert settings.
+fn admin_sections(
+    locale: Locale,
+    (form, open): (&UseStateHandle<Form>, &UseStateHandle<bool>),
+    notice: &TokenNotice,
+    targets: &TargetList,
+) -> Html {
+    html! {
+        <>
+            { add_button(locale, open_on_click(form, open, Form::default())) }
+            if **open {
+                { form_view(locale, (form, open), notice, targets) }
+            }
+            <PruneSettings />
+            <NodeAlertSettings />
+        </>
+    }
+}
+
+/// The modal that changes the region of the target in `editing_region`.
+fn region_modal(
+    locale: Locale,
+    editing_region: &UseStateHandle<Option<TargetEntry>>,
+    targets: &TargetList,
+) -> Html {
+    let Some(target) = editing_region.as_ref().cloned() else {
+        return html! {};
+    };
+    let editing_region_close = editing_region.clone();
+    let on_close = Callback::from(move |()| editing_region_close.set(None));
+    let editing_region_saved = editing_region.clone();
+    let reload = reload_callback(targets, PATH);
+    let on_saved = Callback::from(move |()| {
+        editing_region_saved.set(None);
+        reload.emit(());
+    });
+    html! {
+        <EditRegionModal
+            {locale}
+            {target}
+            {on_close}
+            {on_saved}
+        />
     }
 }
 
@@ -155,9 +182,9 @@ fn upgrade_all_button(locale: Locale, targets: &TargetList, admin: bool) -> Html
     let onclick = upgrade_on_click(locale, question, format!("{PATH}/upgrade"), targets);
     html! {
         <div class="mb-4 flex justify-end">
-            <button type="button" class={BUTTON_CLASS} {onclick}>
+            <Button kind={ButtonKind::Success} {onclick}>
                 {locale.t("targets.upgrade_all")}
-            </button>
+            </Button>
         </div>
     }
 }
@@ -530,12 +557,16 @@ fn new_token_on_click(
 
 fn form_view(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): (&UseStateHandle<Form>, &UseStateHandle<bool>),
     notice: &TokenNotice,
     targets: &TargetList,
 ) -> Html {
     let parsed = form.name.parse::<AppName>();
-    let done = save_result(form, notice, reload_callback(targets, PATH));
+    let done = save_result(
+        form,
+        notice,
+        then_close(reload_callback(targets, PATH), open),
+    );
     let state = form.clone();
     let onsubmit = submit_callback(
         move || {
@@ -569,7 +600,7 @@ fn form_view(
         save_label: "common.add",
         can_save: parsed.is_ok(),
     };
-    form_card(locale, card, onsubmit)
+    form_modal(locale, card, onsubmit, close_callback(form, open))
 }
 
 async fn add(locale: Locale, name: AppName, region: Option<String>) -> Result<TargetToken, String> {
@@ -663,51 +694,34 @@ fn edit_region_modal(props: &EditRegionModalProps) -> Html {
     };
     let on_submit = submit_region_callback(props, &region, &saving);
 
+    let title = locale.tf("targets.edit_region_title", &[("name", &target.name)]);
     html! {
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div class="bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg max-w-md w-full p-4 sm:p-6 shadow-xl space-y-4">
-                <div class="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-700 pb-3">
-                    <h4 class="font-semibold text-neutral-900 dark:text-neutral-100">
-                        {locale.tf("targets.edit_region_title", &[("name", &target.name)])}
-                    </h4>
-                    <button onclick={on_close_click.clone()} type="button" class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 text-lg">
-                        {"✕"}
-                    </button>
+        <Modal {title} on_close={props.on_close.clone()} size={ModalSize::Sm}>
+            <form onsubmit={on_submit} class="space-y-3">
+                <div>
+                    <label class={LABEL_CLASS}>
+                        {locale.t("targets.region")}
+                    </label>
+                    <input
+                        type="text"
+                        placeholder="eu, na, tr, apac..."
+                        value={(*region).clone()}
+                        oninput={on_region}
+                        class={INPUT_CLASS}
+                    />
+                    <p class={HINT_CLASS}>{locale.t("targets.region_hint")}</p>
+                    <p class={HINT_CLASS}>{locale.t("targets.region_clear")}</p>
                 </div>
-                <form onsubmit={on_submit} class="space-y-3">
-                    <div>
-                        <label class={LABEL_CLASS}>
-                            {locale.t("targets.region")}
-                        </label>
-                        <input
-                            type="text"
-                            placeholder="eu, na, tr, apac..."
-                            value={(*region).clone()}
-                            oninput={on_region}
-                            class={INPUT_CLASS}
-                        />
-                        <p class={HINT_CLASS}>{locale.t("targets.region_hint")}</p>
-                        <p class={HINT_CLASS}>{locale.t("targets.region_clear")}</p>
-                    </div>
-                    <div class="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-700">
-                        <button
-                            onclick={on_close_click}
-                            type="button"
-                            class="text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700"
-                        >
-                            {locale.t("common.cancel")}
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={*saving}
-                            class="text-xs sm:text-sm px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-50"
-                        >
-                            {if *saving { locale.t("common.loading") } else { locale.t("settings.save") }}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <Button kind={ButtonKind::Secondary} onclick={on_close_click}>
+                        {locale.t("common.cancel")}
+                    </Button>
+                    <Button kind={ButtonKind::Primary} r#type="submit" disabled={*saving}>
+                        {if *saving { locale.t("common.loading") } else { locale.t("settings.save") }}
+                    </Button>
+                </div>
+            </form>
+        </Modal>
     }
 }
 
@@ -1048,15 +1062,15 @@ fn prune_stats_and_actions(
                 <div>{locale.tf("targets.prune_last_reclaimed", &[("size", &reclaimed)])}</div>
             </div>
             <div class="flex flex-wrap gap-2">
-                <button type="button" class={BUTTON_CLASS} disabled={busy} onclick={run_prune}>
+                <Button kind={ButtonKind::Warning} disabled={busy} onclick={run_prune}>
                     if busy { {locale.t("targets.prune_running")} } else { {locale.t("targets.prune_run_now")} }
-                </button>
-                <button type="button" class={BUTTON_CLASS} disabled={busy} onclick={vacuum_logs}>
+                </Button>
+                <Button kind={ButtonKind::Warning} disabled={busy} onclick={vacuum_logs}>
                     {locale.t("targets.vacuum_logs_now")}
-                </button>
-                <button type="button" class={BUTTON_CLASS} disabled={busy} onclick={save_policy}>
+                </Button>
+                <Button kind={ButtonKind::Primary} disabled={busy} onclick={save_policy}>
                     {locale.t("targets.prune_save")}
-                </button>
+                </Button>
             </div>
         </div>
     }
@@ -1234,9 +1248,9 @@ fn node_alert_settings() -> Html {
             { notice_view(&notice, |key| html! { {locale.t(key)} }) }
             { node_alerts_form_view(locale, &rules) }
             <div class="flex justify-end pt-4 mt-4 border-t border-neutral-200 dark:border-neutral-700">
-                <button type="button" class={BUTTON_CLASS} disabled={*busy} onclick={save_rules}>
+                <Button kind={ButtonKind::Primary} disabled={*busy} onclick={save_rules}>
                     {locale.t("targets.node_alerts_save")}
-                </button>
+                </Button>
             </div>
         </div>
     }

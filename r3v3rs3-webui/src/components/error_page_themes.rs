@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 use crate::API_ENDPOINT;
-use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind, ButtonSize};
+use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
 use crate::components::error_pages_editor::ErrorPagesEditor;
 use crate::components::http_proxy_config::{ErrorPageForm, parse_error_pages};
+use crate::components::modal::{Modal, ModalSize};
 use crate::dialog;
 use crate::i18n::use_locale;
+use crate::pages::resource_page::{AddIcon, row_actions};
 use crate::pages::settings::{Notice, fetch_json, notice_view, post_json, send_json, send_request};
 use gloo_net::http::Request;
 use r3v3rs3_api::error_page_theme::ErrorPageTheme;
@@ -54,12 +57,27 @@ fn error_page_theme_status_badges(pages: &[r3v3rs3_api::proxy::CustomErrorPage])
     }
 }
 
+const COLUMNS: [Column; 3] = [
+    Column {
+        label: "settings.error_page_theme_name",
+        class: "",
+    },
+    Column {
+        label: "settings.error_page_theme_desc",
+        class: "",
+    },
+    Column {
+        label: "settings.error_page_theme_pages",
+        class: "",
+    },
+];
+
 fn error_page_theme_row(
     locale: Locale,
     theme: &ErrorPageTheme,
     on_edit: &Callback<ErrorPageTheme>,
     on_delete: &Callback<(ShortId, String)>,
-) -> Html {
+) -> Row {
     let theme_id = theme.id;
     let theme_name = theme.name.clone();
     let on_del = {
@@ -71,42 +89,28 @@ fn error_page_theme_row(
         let theme = theme.clone();
         Callback::from(move |_| on_edit.emit(theme.clone()))
     };
-    html! {
-        <tr class="border-b dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700/50">
-            <td class="px-4 py-2 font-medium text-neutral-900 dark:text-white">
+    Row {
+        key: theme.id.to_string(),
+        cells: vec![
+            html! {
                 <div class="flex items-center gap-2">
-                    <span class="font-semibold">{&theme.name}</span>
-                    <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-700 text-neutral-500">
+                    <span>{&theme.name}</span>
+                    <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-300">
                         {theme.id.to_string()}
                     </span>
                 </div>
-            </td>
-            <td class="px-4 py-2 text-neutral-500 dark:text-neutral-400">
-                {&theme.description}
-            </td>
-            <td class="px-4 py-2">
+            },
+            html! { <span class="text-neutral-500 dark:text-neutral-400">{&theme.description}</span> },
+            html! {
                 <div class="flex items-center gap-2 flex-wrap">
-                    <span class="px-2 py-0.5 rounded text-[11px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">
+                    <span class="px-2 py-0.5 rounded text-[11px] font-medium bg-primary-100 text-primary-800 dark:bg-primary-900/60 dark:text-primary-300">
                         {format!("{} {}", theme.pages.len(), locale.t("settings.error_page_theme_pages_suffix"))}
                     </span>
                     { error_page_theme_status_badges(&theme.pages) }
                 </div>
-            </td>
-            <td class="px-4 py-2 text-right">
-                <div class="flex items-center justify-end gap-1">
-                    <ActionIconButton
-                        variant={ActionVariant::Edit}
-                        title={locale.t("common.edit").to_string()}
-                        onclick={on_edit_click}
-                    />
-                    <ActionIconButton
-                        variant={ActionVariant::Delete}
-                        title={locale.t("common.delete").to_string()}
-                        onclick={on_del}
-                    />
-                </div>
-            </td>
-        </tr>
+            },
+        ],
+        actions: row_actions(locale, on_edit_click, Some(on_del)),
     }
 }
 
@@ -116,59 +120,21 @@ fn error_page_themes_table(
     on_edit: &Callback<ErrorPageTheme>,
     on_delete: &Callback<(ShortId, String)>,
 ) -> Html {
-    if list.is_empty() {
-        return html! {
-            <div class="text-xs text-neutral-400 py-3 text-center">
-                {locale.t("settings.no_error_page_themes")}
-            </div>
-        };
-    }
-    html! {
-        <div class="overflow-x-auto">
-            <table class="w-full text-xs text-left text-neutral-600 dark:text-neutral-300">
-                <thead class="text-xs uppercase bg-neutral-100 dark:bg-neutral-700/50 text-neutral-500 dark:text-neutral-400">
-                    <tr>
-                        <th class="px-4 py-2">{locale.t("settings.error_page_theme_name")}</th>
-                        <th class="px-4 py-2">{locale.t("settings.error_page_theme_desc")}</th>
-                        <th class="px-4 py-2">{locale.t("settings.error_page_theme_pages")}</th>
-                        <th class="px-4 py-2 text-right">{locale.t("common.actions")}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    { for list.iter().map(|theme| error_page_theme_row(locale, theme, on_edit, on_delete)) }
-                </tbody>
-            </table>
-        </div>
-    }
-}
-
-fn render_theme_modal_header(locale: Locale, is_new: bool, on_close: &Callback<()>) -> Html {
-    let title = if is_new {
-        locale.t("settings.error_page_theme_new")
-    } else {
-        locale.t("settings.error_page_theme_edit")
+    let rows = list
+        .iter()
+        .map(|theme| error_page_theme_row(locale, theme, on_edit, on_delete))
+        .collect::<Vec<_>>();
+    let content = ListContent {
+        loaded: true,
+        empty: "settings.no_error_page_themes",
+        columns: &COLUMNS,
+        rows: &rows,
     };
-    let on_click = {
-        let on_close = on_close.clone();
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            on_close.emit(());
-        })
+    let options = ListOptions {
+        embedded: true,
+        ..Default::default()
     };
-    html! {
-        <div class="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
-            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                {title}
-            </h3>
-            <button
-                type="button"
-                onclick={on_click}
-                class="text-neutral-400 hover:text-neutral-200 text-lg leading-none p-1"
-            >
-                {"✕"}
-            </button>
-        </div>
-    }
+    list_view(locale, content, None, &options)
 }
 
 fn render_theme_modal_id_field(locale: Locale, modal: &UseStateHandle<ThemeModalState>) -> Html {
@@ -289,27 +255,18 @@ fn render_theme_modal_footer(
         })
     };
     html! {
-        <div class="flex items-center justify-end gap-2 border-t border-neutral-200 dark:border-neutral-800 pt-3">
-            <button
-                type="button"
-                onclick={on_cancel_click}
-                class="px-4 py-2 text-xs font-medium rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
-            >
+        <>
+            <Button kind={ButtonKind::Secondary} onclick={on_cancel_click}>
                 {locale.t("common.cancel")}
-            </button>
-            <button
-                type="button"
-                disabled={saving}
-                onclick={on_save_click}
-                class="px-4 py-2 text-xs font-medium rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors"
-            >
+            </Button>
+            <Button kind={ButtonKind::Primary} disabled={saving} onclick={on_save_click}>
                 if saving {
                     {locale.t("common.loading")}
                 } else {
                     {locale.t("settings.save")}
                 }
-            </button>
-        </div>
+            </Button>
+        </>
     }
 }
 
@@ -322,14 +279,6 @@ fn render_theme_modal(
     if !modal.open {
         return html! {};
     }
-    let on_backdrop = {
-        let on_close = on_close.clone();
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
-            on_close.emit(());
-        })
-    };
-    let on_card_click = Callback::from(|e: MouseEvent| e.stop_propagation());
     let on_pages_change = {
         let modal = modal.clone();
         Callback::from(move |pages: Vec<ErrorPageForm>| {
@@ -339,13 +288,15 @@ fn render_theme_modal(
         })
     };
 
+    let title = if modal.is_new {
+        locale.t("settings.error_page_theme_new")
+    } else {
+        locale.t("settings.error_page_theme_edit")
+    };
+    let footer = render_theme_modal_footer(locale, modal.saving, on_close, on_save);
     html! {
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onclick={on_backdrop}>
-            <div
-                class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl max-w-4xl w-full p-6 flex flex-col gap-4 max-h-[90vh] overflow-y-auto"
-                onclick={on_card_click}
-            >
-                { render_theme_modal_header(locale, modal.is_new, on_close) }
+        <Modal {title} on_close={on_close.clone()} size={ModalSize::Xl} {footer}>
+            <div class="flex flex-col gap-4">
                 if let Some(err) = modal.errors.get("submit") {
                     <div class="p-3 text-xs rounded-lg bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">
                         {err}
@@ -357,9 +308,8 @@ fn render_theme_modal(
                     on_change={on_pages_change}
                     errors={modal.errors.clone()}
                 />
-                { render_theme_modal_footer(locale, modal.saving, on_close, on_save) }
             </div>
-        </div>
+        </Modal>
     }
 }
 
@@ -630,20 +580,13 @@ pub fn error_page_themes_card() -> Html {
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onclick={on_open_create}
-                        class="px-3 py-1.5 text-xs font-medium rounded-lg bg-primary-600 hover:bg-primary-700 text-white transition-colors"
-                    >
-                        {format!("+ {}", locale.t("settings.error_page_theme_add"))}
-                    </button>
-                    <button
-                        type="button"
-                        onclick={on_reset_defaults}
-                        class="px-3 py-1.5 text-xs font-medium rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-600 transition-colors"
-                    >
+                    <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_reset_defaults}>
                         {locale.t("settings.error_page_theme_reset")}
-                    </button>
+                    </Button>
+                    <Button kind={ButtonKind::Primary} size={ButtonSize::Sm} onclick={on_open_create}>
+                        <AddIcon />
+                        {locale.t("settings.error_page_theme_add")}
+                    </Button>
                 </div>
             </div>
             { error_page_themes_table(locale, &list, &on_edit, &on_delete) }
