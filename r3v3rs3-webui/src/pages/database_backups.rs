@@ -53,7 +53,7 @@ pub fn database_backups(props: &Props) -> Html {
         use_effect_with((signed_in, id), move |&(signed_in, id)| {
             if signed_in {
                 reload(locale, &backups, &notice, &pitr_range, id);
-                load_app(id, &app);
+                load_app(locale, id, &app);
             }
         });
     }
@@ -130,14 +130,11 @@ pub fn database_backups(props: &Props) -> Html {
     }
 }
 
-fn load_app(id: ShortId, app: &UseStateHandle<Option<AppEntry>>) {
+fn load_app(locale: Locale, id: ShortId, app: &UseStateHandle<Option<AppEntry>>) {
     let app = app.clone();
     spawn_local(async move {
-        if let Ok(entry) = fetch_json::<AppEntry>(
-            Locale::En,
-            Request::get(&format!("{API_ENDPOINT}/apps/{id}")),
-        )
-        .await
+        if let Ok(entry) =
+            fetch_json::<AppEntry>(locale, Request::get(&format!("{API_ENDPOINT}/apps/{id}"))).await
         {
             app.set(Some(entry));
         }

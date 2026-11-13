@@ -50,7 +50,7 @@ pub fn app_files(props: &Props) -> Html {
         let (app, failed) = (app.clone(), failed.clone());
         use_effect_with(signed_in, move |&signed_in| {
             if signed_in {
-                load_app(app_id, &app, &failed);
+                load_app(locale, app_id, &app, &failed);
             }
         });
     }
@@ -62,7 +62,14 @@ pub fn app_files(props: &Props) -> Html {
                 return;
             };
             if dir.is_empty() {
-                open_dir(app_id, mount.target.as_str(), &dir, &entries, &notice);
+                open_dir(
+                    locale,
+                    app_id,
+                    mount.target.as_str(),
+                    &dir,
+                    &entries,
+                    &notice,
+                );
             }
         });
     }
@@ -75,7 +82,7 @@ pub fn app_files(props: &Props) -> Html {
         let vol_name = vol_name.clone();
         use_effect_with((signed_in, vol_name), move |(signed_in, vol)| {
             if *signed_in && !vol.is_empty() {
-                load_volume_backups(app_id, vol, &backups);
+                load_volume_backups(locale, app_id, vol, &backups);
             }
         });
     }
@@ -108,12 +115,14 @@ fn render_files_page(
     let actions = build_row_actions(app_id, locale, dir, entries, notice, editing);
     let uploaded = {
         let (dir, entries, notice) = (dir.clone(), entries.clone(), notice.clone());
-        Callback::from(move |e: Event| upload(e, app_id, &dir, &entries, &notice))
+        Callback::from(move |e: Event| upload(locale, e, app_id, &dir, &entries, &notice))
     };
     let imported = {
         let (dir, entries, notice) = (dir.clone(), entries.clone(), notice.clone());
         let vol = vol_name.to_string();
-        Callback::from(move |e: Event| import_archive(e, app_id, &vol, &dir, &entries, &notice))
+        Callback::from(move |e: Event| {
+            import_archive(locale, e, app_id, &vol, &dir, &entries, &notice)
+        })
     };
     html! {
         <>
@@ -145,7 +154,7 @@ fn build_row_actions(
 ) -> RowActions {
     let navigate = {
         let (dir, entries, notice) = (dir.clone(), entries.clone(), notice.clone());
-        Callback::from(move |path: String| open_dir(app_id, &path, &dir, &entries, &notice))
+        Callback::from(move |path: String| open_dir(locale, app_id, &path, &dir, &entries, &notice))
     };
     let edit = {
         let (editing, notice) = (editing.clone(), notice.clone());
@@ -166,6 +175,7 @@ fn build_row_actions(
 
 /// Reads the app of the page once the session is up.
 fn load_app(
+    locale: Locale,
     app_id: ShortId,
     app: &UseStateHandle<Option<AppEntry>>,
     failed: &UseStateHandle<Option<String>>,
@@ -173,7 +183,7 @@ fn load_app(
     let (app, failed) = (app.clone(), failed.clone());
     wasm_bindgen_futures::spawn_local(async move {
         match fetch_json::<AppEntry>(
-            Locale::En,
+            locale,
             Request::get(&format!("{API_ENDPOINT}/apps/{app_id}")),
         )
         .await
@@ -210,7 +220,7 @@ fn browser_view(
                         let notice = notice.clone();
                         Callback::from(move |event: Event| {
                             let select: web_sys::HtmlSelectElement = event.target_unchecked_into();
-                            open_dir(app_id, &select.value(), &dir, &entries, &notice);
+                            open_dir(locale, app_id, &select.value(), &dir, &entries, &notice);
                         })
                     }}
                 >
@@ -227,7 +237,7 @@ fn browser_view(
                         let entries = entries.clone();
                         let notice = notice.clone();
                         Callback::from(move |_| {
-                            open_dir(app_id, &parent_of(&dir), &dir, &entries, &notice);
+                            open_dir(locale, app_id, &parent_of(&dir), &dir, &entries, &notice);
                         })
                     }}
                 >
@@ -297,6 +307,7 @@ fn child_path(dir: &str, name: &str) -> String {
 
 /// Reads the entries of `path` and moves the table there.
 fn open_dir(
+    locale: Locale,
     app_id: ShortId,
     path: &str,
     dir: &UseStateHandle<String>,
@@ -309,7 +320,7 @@ fn open_dir(
     let path = path.to_string();
     wasm_bindgen_futures::spawn_local(async move {
         match fetch_json::<Vec<FileEntry>>(
-            Locale::En,
+            locale,
             Request::get(&format!("{API_ENDPOINT}/apps/{app_id}/files"))
                 .query([("path", path.as_str())]),
         )
@@ -482,7 +493,7 @@ fn editor_view(
                                 return;
                             };
                             editing.set(None);
-                            save_file(app_id, &file, &dir, &entries, &notice);
+                            save_file(locale, app_id, &file, &dir, &entries, &notice);
                         })
                     }}>
                         {locale.t("apps.files_save")}
@@ -495,6 +506,7 @@ fn editor_view(
 
 /// Writes the text of the editor back into the file and reads the directory again.
 fn save_file(
+    locale: Locale,
     app_id: ShortId,
     file: &Editing,
     dir: &UseStateHandle<String>,
@@ -521,7 +533,7 @@ fn save_file(
             notice.set(Some(message));
             return;
         }
-        open_dir(app_id, &current, &dir, &entries, &notice);
+        open_dir(locale, app_id, &current, &dir, &entries, &notice);
     });
 }
 
@@ -550,7 +562,7 @@ fn confirm_delete(
         let entries = entries.clone();
         let notice = notice.clone();
         let current = dir.to_string();
-        move || open_dir(app_id, &current, &dir, &entries, &notice)
+        move || open_dir(locale, app_id, &current, &dir, &entries, &notice)
     };
     let notice = notice.clone();
     dialog::confirm_then(locale, question, async move {
@@ -574,6 +586,7 @@ async fn send_ok(request: Request) -> Result<(), String> {
 
 /// Uploads the file of the input into the current directory.
 fn upload(
+    locale: Locale,
     event: Event,
     app_id: ShortId,
     dir: &UseStateHandle<String>,
@@ -606,7 +619,7 @@ fn upload(
         if let Err(message) = sent.await {
             notice.set(Some(message));
         }
-        open_dir(app_id, &current, &dir, &entries, &notice);
+        open_dir(locale, app_id, &current, &dir, &entries, &notice);
     });
 }
 
@@ -748,6 +761,7 @@ fn backup_row(
 pub(crate) use crate::format::format_bytes;
 
 fn load_volume_backups(
+    locale: Locale,
     app_id: ShortId,
     volume: &str,
     backups: &UseStateHandle<Vec<VolumeBackupEntry>>,
@@ -758,7 +772,7 @@ fn load_volume_backups(
         let request = Request::get(&format!(
             "{API_ENDPOINT}/apps/{app_id}/volumes/{volume}/backups"
         ));
-        if let Ok(entries) = fetch_json::<Vec<VolumeBackupEntry>>(Locale::En, request).await {
+        if let Ok(entries) = fetch_json::<Vec<VolumeBackupEntry>>(locale, request).await {
             backups.set(entries);
         }
     });
@@ -817,7 +831,7 @@ fn restore_snapshot(
             notice.set(Some(msg));
             return;
         }
-        open_dir(app_id, &current, &dir, &entries, &notice);
+        open_dir(locale, app_id, &current, &dir, &entries, &notice);
     });
 }
 
@@ -854,6 +868,7 @@ fn delete_snapshot(
 }
 
 fn import_archive(
+    locale: Locale,
     event: Event,
     app_id: ShortId,
     volume: &str,
@@ -887,7 +902,7 @@ fn import_archive(
         if let Err(message) = sent.await {
             notice.set(Some(message));
         }
-        open_dir(app_id, &current, &dir, &entries, &notice);
+        open_dir(locale, app_id, &current, &dir, &entries, &notice);
     });
 }
 

@@ -276,6 +276,7 @@ struct TerminalState {
 
 #[hook]
 fn use_terminal_state(app_id: ShortId, signed_in: bool) -> TerminalState {
+    let locale = crate::i18n::use_locale();
     let app = use_state(|| Option::<AppEntry>::None);
     let failed = use_state(|| Option::<String>::None);
     let tabs = use_state(initial_tabs);
@@ -294,7 +295,7 @@ fn use_terminal_state(app_id: ShortId, signed_in: bool) -> TerminalState {
     let copied = use_state(|| false);
     let sessions_ref = use_mut_ref(HashMap::<usize, TerminalSession>::new);
 
-    use_app_fetch(app_id, signed_in, &app, &failed, &tabs);
+    use_app_fetch(locale, app_id, signed_in, &app, &failed, &tabs);
     use_tab_sessions_lifecycle(app_id, &app, &tabs, &active_tab_id, &sessions_ref);
     use_cleanup_on_unmount(&sessions_ref);
 
@@ -467,6 +468,7 @@ fn terminal_title(locale: Locale, app: Option<&AppEntry>) -> String {
 
 #[hook]
 fn use_app_fetch(
+    locale: Locale,
     app_id: ShortId,
     signed_in: bool,
     app: &UseStateHandle<Option<AppEntry>>,
@@ -481,7 +483,7 @@ fn use_app_fetch(
             let (app, failed, tabs) = (app.clone(), failed.clone(), tabs.clone());
             wasm_bindgen_futures::spawn_local(async move {
                 match fetch_json::<AppEntry>(
-                    Locale::En,
+                    locale,
                     Request::get(&format!("{API_ENDPOINT}/apps/{app_id}")),
                 )
                 .await

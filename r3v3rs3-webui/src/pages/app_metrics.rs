@@ -40,7 +40,7 @@ pub fn app_metrics(props: &Props) -> Html {
                 let diagnostics = diagnostics.clone();
                 spawn_local(async move {
                     let result = fetch_json::<Vec<AppMetricsPoint>>(
-                        Locale::En,
+                        locale,
                         Request::get(&format!("{API_ENDPOINT}/apps/{id}/metrics")),
                     )
                     .await
@@ -48,7 +48,7 @@ pub fn app_metrics(props: &Props) -> Html {
                     points.set(Some(result));
 
                     if let Ok(diag) = fetch_json::<AppResourceDiagnostics>(
-                        Locale::En,
+                        locale,
                         Request::get(&format!("{API_ENDPOINT}/apps/{id}/diagnostics")),
                     )
                     .await
