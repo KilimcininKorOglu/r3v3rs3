@@ -2,7 +2,7 @@
 
 use super::access_lists::AccessLists;
 use super::resource_page::{FormCard, add_button, delete, form_modal};
-use super::settings::{Notice, fetch_json, notice_view, send_json};
+use super::settings::{Notice, failure_box, fetch_json, notice_view, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -16,6 +16,7 @@ use gloo_net::http::Request;
 use r3v3rs3_api::auth::BannedIpEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::quarantine::QuarantinedIpEntry;
+use serde::de::DeserializeOwned;
 use serde_json::json;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
@@ -143,23 +144,8 @@ fn remaining_text(seconds: u64) -> String {
 fn banned_ips_card() -> Html {
     let locale = use_locale();
     let reload = use_state(|| 0);
-    let list = use_state(Vec::<BannedIpEntry>::new);
+    let list = use_list::<BannedIpEntry>(locale, "/banned-ips", *reload);
     let notice = use_state(|| Option::<Notice>::None);
-
-    let reload_val = *reload;
-    let list_handle = list.clone();
-    use_effect_with(reload_val, move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(entries) = fetch_json::<Vec<BannedIpEntry>>(
-                locale,
-                Request::get(&format!("{API_ENDPOINT}/banned-ips")),
-            )
-            .await
-            {
-                list_handle.set(entries);
-            }
-        });
-    });
 
     let unban = release_callback(
         locale,
@@ -184,8 +170,48 @@ fn banned_ips_card() -> Html {
     }
 }
 
-fn banned_table_view(locale: Locale, list: &[BannedIpEntry], unban: Callback<String>) -> Html {
-    let rows = list
+/// A list of the admin API: `None` until it loads, then the entries or the error of the load.
+type Loaded<T> = Option<Result<Vec<T>, String>>;
+
+/// Loads the list at `path` of the admin API, again each time `reload` changes.
+#[hook]
+fn use_list<T: DeserializeOwned + 'static>(
+    locale: Locale,
+    path: &'static str,
+    reload: usize,
+) -> UseStateHandle<Loaded<T>> {
+    let list = use_state(|| None);
+    {
+        let list = list.clone();
+        use_effect_with(reload, move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                let url = format!("{API_ENDPOINT}{path}");
+                list.set(Some(fetch_json(locale, Request::get(&url)).await));
+            });
+        });
+    }
+    list
+}
+
+/// The entries of a list and whether it has loaded, or the error of its load.
+fn loaded_entries<T>(list: &Loaded<T>) -> Result<(bool, &[T]), &str> {
+    match list {
+        Some(Ok(entries)) => Ok((true, entries)),
+        Some(Err(err)) => Err(err),
+        None => Ok((false, &[])),
+    }
+}
+
+fn banned_table_view(
+    locale: Locale,
+    list: &Loaded<BannedIpEntry>,
+    unban: Callback<String>,
+) -> Html {
+    let (loaded, entries) = match loaded_entries(list) {
+        Ok(found) => found,
+        Err(err) => return failure_box(err),
+    };
+    let rows = entries
         .iter()
         .map(|entry| {
             let ip = entry.ip.to_string();
@@ -214,7 +240,7 @@ fn banned_table_view(locale: Locale, list: &[BannedIpEntry], unban: Callback<Str
         })
         .collect::<Vec<_>>();
     let content = ListContent {
-        loaded: true,
+        loaded,
         empty: "settings.banned_ips_empty",
         columns: &BANNED_COLUMNS,
         rows: &rows,
@@ -268,24 +294,9 @@ fn table_options() -> ListOptions {
 fn quarantined_ips_card() -> Html {
     let locale = use_locale();
     let reload = use_state(|| 0);
-    let list = use_state(Vec::<QuarantinedIpEntry>::new);
+    let list = use_list::<QuarantinedIpEntry>(locale, "/security/quarantine", *reload);
     let notice = use_state(|| Option::<Notice>::None);
     let form = use_quarantine_form();
-
-    let reload_val = *reload;
-    let list_handle = list.clone();
-    use_effect_with(reload_val, move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(entries) = fetch_json::<Vec<QuarantinedIpEntry>>(
-                locale,
-                Request::get(&format!("{API_ENDPOINT}/security/quarantine")),
-            )
-            .await
-            {
-                list_handle.set(entries);
-            }
-        });
-    });
 
     let unquarantine = release_callback(
         locale,
@@ -450,10 +461,14 @@ async fn submit_manual_quarantine(
 
 fn quarantined_table_view(
     locale: Locale,
-    list: &[QuarantinedIpEntry],
+    list: &Loaded<QuarantinedIpEntry>,
     unquarantine: Callback<String>,
 ) -> Html {
-    let rows = list
+    let (loaded, entries) = match loaded_entries(list) {
+        Ok(found) => found,
+        Err(err) => return html! { <div class="mt-4">{ failure_box(err) }</div> },
+    };
+    let rows = entries
         .iter()
         .map(|entry| {
             let ip = entry.ip.to_string();
@@ -480,7 +495,7 @@ fn quarantined_table_view(
         })
         .collect::<Vec<_>>();
     let content = ListContent {
-        loaded: true,
+        loaded,
         empty: "settings.quarantined_ips_empty",
         columns: &QUARANTINE_COLUMNS,
         rows: &rows,
