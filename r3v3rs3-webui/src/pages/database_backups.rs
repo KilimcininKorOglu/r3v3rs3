@@ -3,7 +3,7 @@
 use super::Route;
 use super::app_deployments::back_header;
 use super::resource_page::{Notice, delete_on_click, notice_view};
-use super::settings::{fetch_json, send_request};
+use super::settings::{fetch_json, send_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -235,18 +235,29 @@ fn pitr_restore_action(
                 return;
             };
             let branch_prompt = locale.t("databases.pitr_branch_prompt");
-            let branch_input = dialog::prompt(locale, branch_prompt, "")
-                .await
-                .unwrap_or_default();
-            let trimmed = branch_input.trim();
-            let new_name = if !trimmed.is_empty() {
-                trimmed.parse().ok()
-            } else {
-                None
+            // A cancelled prompt stops the restore; an empty name restores in place.
+            let Some(branch_input) = dialog::prompt(locale, branch_prompt, "").await else {
+                return;
             };
-            send_pitr_restore(locale, id, target_time, new_name, reload).await;
+            match branch_name(locale, &branch_input) {
+                Ok(new_name) => send_pitr_restore(locale, id, target_time, new_name, reload).await,
+                Err(message) => dialog::message(locale, &message, Icon::Error).await,
+            }
         });
     })
+}
+
+/// The name of the new database of a restore: `None` for an empty input, which restores in
+/// place, or the error of an invalid name.
+fn branch_name(locale: Locale, input: &str) -> Result<Option<AppName>, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    trimmed
+        .parse()
+        .map(Some)
+        .map_err(|err| locale.error_message(&err))
 }
 
 async fn send_pitr_restore(
@@ -261,25 +272,13 @@ async fn send_pitr_restore(
         new_name,
         host_port: None,
     };
-    let Ok(body) = serde_json::to_string(&req_body) else {
-        return;
-    };
-    let req = Request::post(&format!("{API_ENDPOINT}/databases/{id}/pitr/restore"))
-        .header("Content-Type", "application/json")
-        .body(body);
-    match req {
-        Ok(b) => match b.send().await {
-            Ok(res) if res.ok() => {
-                dialog::message(locale, locale.t("databases.pitr_restored"), Icon::Success).await;
-                reload.emit(());
-            }
-            Ok(res) => {
-                let msg = res.text().await.unwrap_or_default();
-                dialog::message(locale, &msg, Icon::Error).await;
-            }
-            Err(e) => dialog::message(locale, &e.to_string(), Icon::Error).await,
-        },
-        Err(e) => dialog::message(locale, &e.to_string(), Icon::Error).await,
+    let builder = Request::post(&format!("{API_ENDPOINT}/databases/{id}/pitr/restore"));
+    match send_json(locale, builder, &req_body).await {
+        Ok(()) => {
+            dialog::message(locale, locale.t("databases.pitr_restored"), Icon::Success).await;
+            reload.emit(());
+        }
+        Err(message) => dialog::message(locale, &message, Icon::Error).await,
     }
 }
 
@@ -649,5 +648,20 @@ fn storage_settings_redirect(locale: Locale) -> Html {
                 {locale.t("backups.manage_storage")}
             </Link<Route>>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_invalid_branch_name_stops_the_restore() {
+        assert_eq!(branch_name(Locale::En, "  "), Ok(None));
+        assert_eq!(
+            branch_name(Locale::En, " orders-copy ").map(|name| name.map(|n| n.to_string())),
+            Ok(Some("orders-copy".to_string()))
+        );
+        assert!(branch_name(Locale::En, "Not A Name!").is_err());
     }
 }
