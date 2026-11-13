@@ -33,7 +33,7 @@ pub fn footer() -> Html {
         version_cloned.set(None);
         if *signed_in {
             wasm_bindgen_futures::spawn_local(async move {
-                match get_app_version().await {
+                match get_app_version(locale).await {
                     Ok(info) => version_cloned.set(Some(info.version)),
                     Err(err) => web_sys::console::error_1(
                         &format!("the server version is not readable: {err}").into(),
@@ -67,11 +67,8 @@ fn docs_url(locale: Locale) -> &'static str {
     }
 }
 
-async fn get_app_version() -> Result<AppVersion, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/app_info"))
-        .send()
-        .await?
-        .json()
+async fn get_app_version(locale: Locale) -> Result<AppVersion, String> {
+    crate::pages::settings::fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/app_info")))
         .await
 }
 
