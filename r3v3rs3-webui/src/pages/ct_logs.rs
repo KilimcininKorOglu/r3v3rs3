@@ -642,11 +642,11 @@ fn render_status_badge(locale: Locale, entry: &CtLogEntry) -> Html {
     }
 }
 
+/// The first 16 characters of a serial number, cut on a character boundary.
 fn truncate_serial(serial: &str) -> String {
-    if serial.len() > 16 {
-        format!("{}…", &serial[..16])
-    } else {
-        serial.to_string()
+    match serial.char_indices().nth(16) {
+        Some((end, _)) => format!("{}…", &serial[..end]),
+        None => serial.to_string(),
     }
 }
 
@@ -757,5 +757,7 @@ mod tests {
     fn test_truncate_serial() {
         assert_eq!(truncate_serial("123456"), "123456");
         assert_eq!(truncate_serial("12345678901234567890"), "1234567890123456…");
+        assert_eq!(truncate_serial("1234567890123456"), "1234567890123456");
+        assert_eq!(truncate_serial("123456789012345ğğ"), "123456789012345ğ…");
     }
 }
