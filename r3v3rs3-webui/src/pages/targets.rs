@@ -9,7 +9,7 @@ use super::resource_page::{
     notice_view, open_on_click, reload_callback, save_result, saved_view, submit_callback,
     text_input, then_close, use_form_modal,
 };
-use super::settings::{fetch_json, send_request};
+use super::settings::fetch_json;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -1418,13 +1418,10 @@ fn save_node_alerts_callback(
         spawn_local(async move {
             busy.set(true);
             let val = *rules;
-            let req = Request::put(&format!("{API_ENDPOINT}/platform/node_alerts")).json(&val);
-            match req {
-                Ok(req) => match send_request(locale, req).await {
-                    Ok(_) => notice.set(Some(Notice::Saved("targets.node_alerts_saved"))),
-                    Err(err) => notice.set(Some(Notice::Failed(err))),
-                },
-                Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
+            let req = Request::put(&format!("{API_ENDPOINT}/platform/node_alerts"));
+            match super::settings::send_json(locale, req, &val).await {
+                Ok(()) => notice.set(Some(Notice::Saved("targets.node_alerts_saved"))),
+                Err(err) => notice.set(Some(Notice::Failed(err))),
             }
             busy.set(false);
         });
