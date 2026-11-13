@@ -120,14 +120,17 @@ pub fn login() -> Html {
     let oninput_password = text_oninput(password.clone());
     let oninput_totp = totp_oninput(totp.clone());
 
-    let onsubmit = submit_callback(LoginForm {
-        navigator: navigator.clone(),
-        query: query.clone(),
-        username: username.clone(),
-        password: password.clone(),
-        totp: totp.clone(),
-        error: error.clone(),
-    });
+    let onsubmit = submit_callback(
+        locale,
+        LoginForm {
+            navigator: navigator.clone(),
+            query: query.clone(),
+            username: username.clone(),
+            password: password.clone(),
+            totp: totp.clone(),
+            error: error.clone(),
+        },
+    );
 
     let on_passkey_login = {
         let form = LoginForm {
@@ -276,63 +279,39 @@ impl LoginForm {
     }
 }
 
-fn submit_callback(form: LoginForm) -> Callback<SubmitEvent> {
+fn submit_callback(locale: Locale, form: LoginForm) -> Callback<SubmitEvent> {
     Callback::from(move |event: SubmitEvent| {
         event.prevent_default();
         let form = form.clone_state();
         let method = form.method();
         let username = form.username.to_string();
         wasm_bindgen_futures::spawn_local(async move {
-            form.apply(send_login(username, method).await);
+            form.apply(send_login(locale, username, method).await);
         });
     })
 }
 
-/// Sends the sign-in request. The connection is insecure outside HTTPS.
-async fn send_login(username: String, method: LoginMethod) -> ApiResult<LoginResponse> {
+/// Sends the sign-in request. The connection is insecure outside HTTPS. Every failure carries
+/// its translated message.
+async fn send_login(
+    locale: Locale,
+    username: String,
+    method: LoginMethod,
+) -> ApiResult<LoginResponse> {
     let insecure = web_sys::window()
         .and_then(|window| window.location().protocol().ok())
         .unwrap_or_default()
         != "https:";
-    let request = Request::post(&format!("{API_ENDPOINT}/login"));
-    let request = match request.json(&LoginRequest {
+    let body = LoginRequest {
         username,
         method,
         insecure,
-    }) {
-        Ok(request) => request,
-        Err(err) => {
-            return ApiResult::Err(ErrorMessage {
-                message: err.to_string(),
-                error: None,
-                request_id: None,
-            });
-        }
     };
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(err) => {
-            return ApiResult::Err(ErrorMessage {
-                message: err.to_string(),
-                error: None,
-                request_id: None,
-            });
-        }
-    };
-    if !response.ok() {
-        return match response.json::<ErrorMessage>().await {
-            Ok(err) => ApiResult::Err(err),
-            Err(err) => ApiResult::Err(ErrorMessage {
-                message: err.to_string(),
-                error: None,
-                request_id: None,
-            }),
-        };
-    }
-    match response.json::<LoginResponse>().await {
+    let request = Request::post(&format!("{API_ENDPOINT}/login"));
+    match crate::pages::settings::post_json(locale, request, &body).await {
         Ok(response) => ApiResult::Ok(response),
-        Err(err) => ApiResult::Err(ErrorMessage {
-            message: err.to_string(),
+        Err(message) => ApiResult::Err(ErrorMessage {
+            message,
             error: None,
             request_id: None,
         }),
@@ -407,5 +386,5 @@ async fn passkey_login(
         client_data_json: assertion.client_data_json,
         signature: assertion.signature,
     };
-    Ok(send_login(username, method).await)
+    Ok(send_login(locale, username, method).await)
 }
