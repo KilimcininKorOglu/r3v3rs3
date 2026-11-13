@@ -667,28 +667,33 @@ fn acme_row(
     }
 }
 
+/// The CNAME records of the dialog. The colors are neutral tints and status colors that read on
+/// the light and the dark dialog.
 fn format_cname_instructions_html(
+    locale: Locale,
     instructions: &[r3v3rs3_api::acme::AcmeCnameInstruction],
 ) -> String {
+    let escape = r3v3rs3_api::error_page_theme::escape_html;
     let mut html_content =
         String::from("<div style=\"text-align:left;font-size:12px;font-family:monospace;\">");
     for item in instructions {
-        let status_color = if item.cname_verified {
-            "#10b981"
-        } else {
-            "#f59e0b"
+        let (status_color, status_key) = match item.cname_verified {
+            true => ("#059669", "certs.cname_verified_badge"),
+            false => ("#d97706", "certs.cname_needed_badge"),
         };
-        let status_text = if item.cname_verified {
-            "✓ Verified"
-        } else {
-            "⏳ Pending Verification"
+        let line = |label: &str, value: &str| {
+            format!(
+                "<div><strong>{}:</strong> <code>{value}</code></div>",
+                escape(locale.t(label))
+            )
         };
-        let domain = r3v3rs3_api::error_page_theme::escape_html(&item.domain);
-        let source_fqdn = r3v3rs3_api::error_page_theme::escape_html(&item.source_fqdn);
-        let target_fqdn = r3v3rs3_api::error_page_theme::escape_html(&item.target_fqdn);
         html_content.push_str(&format!(
-            "<div style=\"margin-bottom:12px;padding:8px;background:rgba(15,23,42,0.6);border-radius:6px;border:1px solid rgba(255,255,255,0.1);\"><div><strong style=\"color:#94a3b8;\">Domain:</strong> {}</div><div><strong>Host:</strong> <code style=\"color:#fcd34d;\">{}</code></div><div><strong>Type:</strong> <code>CNAME</code></div><div><strong>Target:</strong> <code style=\"color:#34d399;\">{}</code></div><div style=\"margin-top:4px;color:{status_color};font-weight:600;\">{status_text}</div></div>",
-            domain, source_fqdn, target_fqdn
+            "<div style=\"margin-bottom:12px;padding:8px;background:rgba(127,127,127,0.1);border-radius:6px;border:1px solid rgba(127,127,127,0.3);\">{}{}{}{}<div style=\"margin-top:4px;color:{status_color};font-weight:600;\">{}</div></div>",
+            line("certs.cname_domain", &escape(&item.domain)),
+            line("certs.cname_host", &escape(&item.source_fqdn)),
+            line("certs.cname_record_type", "CNAME"),
+            line("certs.cname_target", &escape(&item.target_fqdn)),
+            escape(locale.t(status_key)),
         ));
     }
     html_content.push_str("</div>");
@@ -702,7 +707,7 @@ async fn show_cname_instructions_dialog(
     if instructions.is_empty() {
         return;
     }
-    let html_content = format_cname_instructions_html(instructions);
+    let html_content = format_cname_instructions_html(locale, instructions);
     let title = locale.t("certs.cname_instructions_title");
     crate::dialog::html(locale, title, &html_content).await;
 }
@@ -904,12 +909,30 @@ mod tests {
             cname_verified: false,
             message: String::new(),
         }];
-        let html = format_cname_instructions_html(&instructions);
+        let html = format_cname_instructions_html(Locale::En, &instructions);
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(!html.contains("<img"));
         assert!(html.contains("&lt;img src=x onerror=alert(1)&gt;"));
         assert!(!html.contains("' onmouseover='"));
         assert!(html.contains("&#x27; onmouseover=&#x27;alert(1)"));
+    }
+
+    #[test]
+    fn the_cname_instructions_use_the_labels_of_the_locale() {
+        let instruction = |verified| r3v3rs3_api::acme::AcmeCnameInstruction {
+            domain: "example.com".to_string(),
+            source_fqdn: "_acme-challenge.example.com".to_string(),
+            target_fqdn: "alias.example.net".to_string(),
+            cname_verified: verified,
+            message: String::new(),
+        };
+        let html = format_cname_instructions_html(Locale::Tr, &[instruction(false)]);
+        assert!(html.contains("<strong>Hedef:</strong> <code>alias.example.net</code>"));
+        assert!(html.contains(Locale::Tr.t("certs.cname_needed_badge")));
+        let html = format_cname_instructions_html(Locale::En, &[instruction(true)]);
+        assert!(html.contains("<strong>Target:</strong>"));
+        assert!(html.contains(Locale::En.t("certs.cname_verified_badge")));
+        assert!(!html.contains("Pending"));
     }
 }
