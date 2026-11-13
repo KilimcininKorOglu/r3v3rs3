@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.3] - 2026-11-13
+
+### Changed
+- Warm the release caches on `main`. A tag build may restore only the caches of its own tag and of the default branch, so every release compiled the WebUI and all server dependencies from scratch. A daily run, and a run after a dependency or toolchain change, now saves the caches under the keys that the release builds look for.
+- Compress the server archives on every core of the build runner.
+- The daily cleanup deletes the caches of release tags, which no later build can read, and its dry run no longer deletes the caches of dead branches.
+- The panel tests wait for their audit entries, because the audit log writes in the background.
+
+### Fixed
+- Finish an upgrade with `install.sh` on a server whose WebUI listener is off (`R3V3RS3_WEBUI_LISTEN=false`). The script waited for the listener, so the upgrade ended with an error although the new server was running.
+
 ## [3.2.2] - 2026-11-13
 
 ### Fixed
