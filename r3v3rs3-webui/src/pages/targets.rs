@@ -604,14 +604,8 @@ fn form_view(
 }
 
 async fn add(locale: Locale, name: AppName, region: Option<String>) -> Result<TargetToken, String> {
-    let request = Request::post(&format!("{API_ENDPOINT}{PATH}"))
-        .json(&TargetRequest { name, region })
-        .map_err(|err| err.to_string())?;
-    send_request(locale, request)
-        .await?
-        .json()
-        .await
-        .map_err(|err| err.to_string())
+    let request = Request::post(&format!("{API_ENDPOINT}{PATH}"));
+    super::settings::post_json(locale, request, &TargetRequest { name, region }).await
 }
 
 /// The new token with the commands that enroll an agent with it.
