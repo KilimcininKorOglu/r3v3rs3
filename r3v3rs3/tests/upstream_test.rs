@@ -1,13 +1,10 @@
 use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
-use r3v3rs3::{
-    command::ServerCommand,
-    server::rpc::{ErasedRpcMethod, RpcWrapper, proxies::GetProxyStatus},
-};
+use r3v3rs3::server::{ServerChannels, rpc::proxies::GetProxyStatus};
 use r3v3rs3_api::{
     cache::CacheConfig,
     multiaddr::Multiaddr,
     port::UpstreamServer,
-    proxy::{HttpProxy, ProxyKind, ProxyStatus, Route, Server, TcpProxy, UdpProxy},
+    proxy::{HttpProxy, ProxyKind, Route, Server, TcpProxy, UdpProxy},
     upstream::{
         CircuitBreaker, HealthCheck, LoadBalancing, RetryOn, RetryPolicy, StickyCookie,
         UpstreamTimeouts,
@@ -31,9 +28,9 @@ use tokio::{
 use url::Url;
 
 mod common;
-use common::closed_tcp_port;
 use common::{TestPort, TestStorage, serve_http_upstream};
 use common::{alloc_tcp_port, alloc_udp_port, http_route, port_entry, proxy_entry, with_server};
+use common::{call, closed_tcp_port};
 
 /// Starts a listener that accepts TCP connections and never sends a byte, so a TLS handshake
 /// with it does not finish.
@@ -335,6 +332,34 @@ async fn http_load_balancing_policies() -> anyhow::Result<()> {
     .await
 }
 
+/// The first server refuses the connection, so a request without a body goes to the next
+/// server. A request with a body is not sent again.
+async fn check_retry_without_body(port: &TestPort) -> anyhow::Result<()> {
+    let retried = count_names(2, || get_body(port.http_url("/"))).await?;
+    assert_eq!(retried, counts(&[("live", 2)]));
+    let resp = reqwest::Client::new()
+        .post(port.http_url("/"))
+        .body("data")
+        .send()
+        .await?;
+    assert_eq!(resp.status(), 523);
+    Ok(())
+}
+
+/// After one failure, the passive health check moves the first server behind the second
+/// server, so the next request with a body reaches the second server.
+async fn check_passive_reorder(port: &TestPort) -> anyhow::Result<()> {
+    assert_eq!(get_body(port.http_url("/")).await?, "live");
+    let resp = reqwest::Client::new()
+        .post(port.http_url("/"))
+        .body("data")
+        .send()
+        .await?;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.text().await?, "live");
+    Ok(())
+}
+
 #[tokio::test]
 async fn http_failover_and_passive_health_check() -> anyhow::Result<()> {
     let urls = [
@@ -357,32 +382,36 @@ async fn http_failover_and_passive_health_check() -> anyhow::Result<()> {
     ]);
 
     with_server(config, |_| async move {
-        let client = reqwest::Client::new();
-
-        // The first server refuses the connection, so a request without a body goes to the next
-        // server. A request with a body is not sent again.
-        let retried = count_names(2, || get_body(retry_port.http_url("/"))).await?;
-        assert_eq!(retried, counts(&[("live", 2)]));
-        let resp = client
-            .post(retry_port.http_url("/"))
-            .body("data")
-            .send()
-            .await?;
-        assert_eq!(resp.status(), 523);
-
-        // After one failure, the passive health check moves the first server behind the second
-        // server, so the next request with a body reaches the second server.
-        assert_eq!(get_body(passive_port.http_url("/")).await?, "live");
-        let resp = client
-            .post(passive_port.http_url("/"))
-            .body("data")
-            .send()
-            .await?;
-        assert_eq!(resp.status(), 200);
-        assert_eq!(resp.text().await?, "live");
-        Ok(())
+        check_retry_without_body(&retry_port).await?;
+        check_passive_reorder(&passive_port).await
     })
     .await
+}
+
+/// Requests the URL until the answer is `expected`, for up to five seconds.
+async fn wait_for_body(url: Url, expected: &str) -> anyhow::Result<()> {
+    let mut body = String::new();
+    for _ in 0..50 {
+        body = get_body(url.clone()).await?;
+        if body == expected {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("the last answer was {body:?}, not {expected:?}")
+}
+
+/// The address, the health and the last error of each upstream server of a proxy.
+async fn upstream_health(
+    channels: &mut ServerChannels,
+    id: &str,
+) -> anyhow::Result<Vec<(String, bool, Option<String>)>> {
+    let status = call(channels, GetProxyStatus { id: id.parse()? }).await??;
+    Ok(status
+        .upstreams
+        .into_iter()
+        .map(|server| (server.addr, server.healthy, server.last_error))
+        .collect())
 }
 
 #[tokio::test]
@@ -407,55 +436,13 @@ async fn active_health_check_marks_a_failing_server_unhealthy() -> anyhow::Resul
     )]);
 
     with_server(config, |mut channels| async move {
-        let mut body = String::new();
-        for _ in 0..50 {
-            body = get_body(proxy_port.http_url("/")).await?;
-            if body == "live" {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        assert_eq!(body, "live");
-
-        let id = "active".parse().unwrap();
-        let arg = Box::new(RpcWrapper::new(GetProxyStatus { id })) as Box<dyn ErasedRpcMethod>;
-        channels
-            .command
-            .send(ServerCommand::CallMethod {
-                id: 1,
-                arg,
-                caller: r3v3rs3::accounts::Caller::system(),
-            })
-            .await?;
-        let callback = channels
-            .callback
-            .recv()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("callback channel closed"))?;
-        let status = callback
-            .result?
-            .downcast::<ProxyStatus>()
-            .map_err(|_| anyhow::anyhow!("the RPC returned another type"))?;
-        let health = status
-            .upstreams
-            .iter()
-            .map(|server| {
-                (
-                    server.addr.as_str(),
-                    server.healthy,
-                    server.last_error.as_deref(),
-                )
-            })
-            .collect::<Vec<_>>();
+        wait_for_body(proxy_port.http_url("/"), "live").await?;
+        let error = "the active check received status 500 Internal Server Error";
         assert_eq!(
-            health,
+            upstream_health(&mut channels, "active").await?,
             vec![
-                (
-                    urls[0].as_str(),
-                    false,
-                    Some("the active check received status 500 Internal Server Error"),
-                ),
-                (urls[1].as_str(), true, None),
+                (urls[0].to_string(), false, Some(error.to_string())),
+                (urls[1].to_string(), true, None),
             ]
         );
         Ok(())
@@ -618,50 +605,60 @@ async fn http_weights_split_requests() -> anyhow::Result<()> {
     .await
 }
 
-#[tokio::test]
-async fn tcp_and_udp_servers_with_weight_zero_get_no_traffic() -> anyhow::Result<()> {
+/// The servers with the weight of the first set to zero.
+fn drained_first(mut servers: Vec<UpstreamServer>) -> Vec<UpstreamServer> {
+    if let Some(first) = servers.first_mut() {
+        first.weight = 0;
+    }
+    servers
+}
+
+/// A TCP and a UDP proxy, each with the servers `a` and `b`, where `a` has the weight zero.
+async fn drained_proxies() -> anyhow::Result<(TestStorage, TestPort, TestPort)> {
     let tcp_a = start_named_tcp_upstream("a").await?;
     let tcp_b = start_named_tcp_upstream("b").await?;
     let udp_a = start_named_udp_upstream("a").await?;
     let udp_b = start_named_udp_upstream("b").await?;
     let tcp_port = alloc_tcp_port().await?;
     let udp_port = alloc_udp_port().await?;
-    let mut drained_tcp = tcp_servers(&[&tcp_a, &tcp_b]);
-    drained_tcp[0].weight = 0;
     let tcp = TcpProxy {
-        upstream_servers: drained_tcp,
+        upstream_servers: drained_first(tcp_servers(&[&tcp_a, &tcp_b])),
         ..Default::default()
     };
     let udp = UdpProxy {
-        upstream_servers: vec![
-            UpstreamServer {
-                weight: 0,
-                ..UpstreamServer::new(udp_a.multiaddr_udp())
-            },
+        upstream_servers: drained_first(vec![
+            UpstreamServer::new(udp_a.multiaddr_udp()),
             UpstreamServer::new(udp_b.multiaddr_udp()),
-        ],
+        ]),
         ..Default::default()
     };
     let config = storage(vec![
         ("tcpdrn", tcp_port.multiaddr_tcp(), ProxyKind::Tcp(tcp)),
         ("udpdrn", udp_port.multiaddr_udp(), ProxyKind::Udp(udp)),
     ]);
+    Ok((config, tcp_port, udp_port))
+}
 
+#[tokio::test]
+async fn tcp_and_udp_servers_with_weight_zero_get_no_traffic() -> anyhow::Result<()> {
+    let (config, tcp_port, udp_port) = drained_proxies().await?;
     with_server(config, |_| async move {
         let names = count_names(4, || read_name(tcp_port.socket_addr())).await?;
         assert_eq!(names, counts(&[("b", 4)]));
-
-        let proxy = udp_port.socket_addr();
-        for _ in 0..3 {
-            let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
-            client.send_to(b"ping", proxy).await?;
-            let mut buf = [0; 64];
-            let (size, _) = timeout(Duration::from_secs(5), client.recv_from(&mut buf)).await??;
-            assert_eq!(&buf[..size], b"b");
-        }
+        let names = count_names(3, || read_udp_name(udp_port.socket_addr())).await?;
+        assert_eq!(names, counts(&[("b", 3)]));
         Ok(())
     })
     .await
+}
+
+/// Sends one datagram from a new socket and reads the name that answers.
+async fn read_udp_name(proxy: SocketAddr) -> anyhow::Result<String> {
+    let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
+    client.send_to(b"ping", proxy).await?;
+    let mut buf = [0; 64];
+    let (size, _) = timeout(Duration::from_secs(5), client.recv_from(&mut buf)).await??;
+    Ok(String::from_utf8_lossy(&buf[..size]).into_owned())
 }
 
 /// Starts an HTTP upstream server that answers 503 while `failing` is true, and its name
@@ -683,13 +680,30 @@ async fn start_switchable_upstream(
     .await
 }
 
-#[tokio::test]
-async fn http_circuit_breaker_opens_and_recovers() -> anyhow::Result<()> {
-    let failing = Arc::new(AtomicBool::new(true));
-    let a = start_switchable_upstream("a", failing.clone()).await?;
-    let b = start_named_upstream("b").await?;
-    let proxy_port = alloc_tcp_port().await?;
-    let proxy = http(HttpProxy {
+/// The status and the body of a GET request.
+async fn status_and_body(url: Url) -> anyhow::Result<(u16, String)> {
+    let res = reqwest::get(url).await?;
+    Ok((res.status().as_u16(), res.text().await?))
+}
+
+/// Two answers of 503 from `a` open the circuit of each route: the first route then answers
+/// from `b`, and the route with `a` alone answers without contacting it.
+async fn check_open_circuits(port: &TestPort) -> anyhow::Result<()> {
+    for path in ["/", "/", "/solo", "/solo"] {
+        let answer = status_and_body(port.http_url(path)).await?;
+        assert_eq!(answer, (503, "down".to_string()), "{path}");
+    }
+    let answer = status_and_body(port.http_url("/")).await?;
+    assert_eq!(answer, (200, "b".to_string()));
+    let (status, body) = status_and_body(port.http_url("/solo")).await?;
+    assert_eq!(status, 503);
+    assert_ne!(body, "down", "the proxy answers without contacting a");
+    Ok(())
+}
+
+/// The proxy with two routes and a circuit breaker that opens for one second.
+fn breaker_proxy(a: &Url, b: &Url) -> anyhow::Result<ProxyKind> {
+    Ok(http(HttpProxy {
         vhosts: vec!["localhost".parse().unwrap()],
         routes: vec![
             Route {
@@ -715,33 +729,27 @@ async fn http_circuit_breaker_opens_and_recovers() -> anyhow::Result<()> {
             open_duration: Duration::from_secs(1),
         },
         ..Default::default()
-    });
+    }))
+}
+
+#[tokio::test]
+async fn http_circuit_breaker_opens_and_recovers() -> anyhow::Result<()> {
+    let failing = Arc::new(AtomicBool::new(true));
+    let a = start_switchable_upstream("a", failing.clone()).await?;
+    let b = start_named_upstream("b").await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let proxy = breaker_proxy(&a, &b)?;
     let config = storage(vec![("breaker", proxy_port.multiaddr_http(), proxy)]);
 
     with_server(config, |_| async move {
-        let client = reqwest::Client::new();
-        let get = |path: &str| {
-            let request = client.get(proxy_port.http_url(path));
-            async move {
-                let res = request.send().await?;
-                anyhow::Ok((res.status().as_u16(), res.text().await?))
-            }
-        };
-
-        // Each route has its own circuit. Two 503 answers of a open both circuits.
-        for path in ["/", "/", "/solo", "/solo"] {
-            assert_eq!(get(path).await?, (503, "down".to_string()), "{path}");
-        }
-        assert_eq!(get("/").await?, (200, "b".to_string()));
-        let (status, body) = get("/solo").await?;
-        assert_eq!(status, 503);
-        assert_ne!(body, "down", "the proxy answers without contacting a");
+        // Each route has its own circuit.
+        check_open_circuits(&proxy_port).await?;
 
         // After the open duration, a trial request reaches a and closes the circuit.
         failing.store(false, Ordering::SeqCst);
         tokio::time::sleep(Duration::from_millis(1100)).await;
-        assert_eq!(get("/").await?, (200, "a".to_string()));
-        assert_eq!(get("/").await?, (200, "a".to_string()));
+        let names = count_names(2, || get_body(proxy_port.http_url("/"))).await?;
+        assert_eq!(names, counts(&[("a", 2)]));
         Ok(())
     })
     .await
