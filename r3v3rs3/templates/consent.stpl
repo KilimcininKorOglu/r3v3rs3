@@ -1,0 +1,81 @@
+<% let locale = self.preferences.locale; %><!DOCTYPE html>
+<html lang="<%= locale.code() %>"<% if let Some(theme) = self.preferences.theme_attribute() { %> data-theme="<%= theme %>"<% } %>>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>r3v3rs3 &middot; <%= locale.tf("consent.title", &[("name", self.client_name)]) %></title>
+<% include!("./theme.stpl"); %>
+    <style>
+        .consent { width: 100%; max-width: 480px; }
+        .brand { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 20px; }
+        .brand-logo { width: 36px; height: 36px; flex-shrink: 0; }
+        .brand-name { font-size: 20px; font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+        .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; background-color: var(--subtle-color); color: var(--muted-color); text-transform: uppercase; letter-spacing: 0.05em; }
+        .header { text-align: center; margin-bottom: 20px; }
+        h1 { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
+        .subtitle { margin: 0; font-size: 14px; }
+        .box { padding: 12px 14px; margin-bottom: 12px; background-color: var(--subtle-color); border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; }
+        .client-name { font-weight: 600; word-break: break-word; }
+        .meta { margin-top: 2px; font-size: 12px; word-break: break-all; }
+        code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+        .section-title { margin: 16px 0 8px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .scope { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; }
+        .scope input { width: 16px; height: 16px; margin-top: 3px; flex-shrink: 0; accent-color: var(--primary-color); cursor: pointer; }
+        .scope-label { display: inline-block; margin-bottom: 2px; padding: 1px 6px; font-size: 12px; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; border-radius: 4px; background-color: var(--primary-soft-color); color: var(--primary-soft-text-color); }
+        .scope-desc { font-size: 13px; }
+        .notice { margin: 16px 0 20px; font-size: 13px; text-align: center; }
+        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    </style>
+</head>
+<body>
+    <div class="consent">
+        <div class="brand">
+            <svg class="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 46 46" fill="none">
+                <rect width="32.527" height="32.527" x="23" fill="#FFE134" rx="6" transform="rotate(45 23 0)"/>
+                <g stroke="#202020" stroke-linecap="round" stroke-linejoin="round" stroke-width="3">
+                    <path d="M13 18h18M27 14l4 4-4 4"/><path d="M33 28H15M19 24l-4 4 4 4"/>
+                </g>
+            </svg>
+            <span class="brand-name">r3v3rs3</span>
+            <span class="badge">OAuth 2.1</span>
+        </div>
+        <div class="card">
+            <div class="header">
+                <h1><%= locale.tf("consent.title", &[("name", self.client_name)]) %></h1>
+                <p class="subtitle muted"><%= locale.t("consent.subtitle") %></p>
+            </div>
+            <div class="box">
+                <div class="client-name"><%= self.client_name %></div>
+                <div class="meta muted"><%= locale.t("consent.client_id") %>: <code><%= self.client_id %></code></div>
+                <div class="meta muted"><%= locale.t("consent.redirect") %>: <code><%= self.redirect_uri %></code></div>
+            </div>
+            <div class="box"><%= locale.t("consent.signed_in_as") %> <strong><%= self.username %></strong></div>
+            <form method="post" action="/oauth/authorize">
+                <div class="section-title muted"><%= locale.t("consent.permissions") %></div>
+                <% for scope in &self.scopes { %>
+                <label class="scope">
+                    <input type="checkbox" name="grant_<%= scope.name %>" value="1" checked>
+                    <div>
+                        <span class="scope-label"><%= scope.label %></span>
+                        <div class="scope-desc muted"><%= scope.description %></div>
+                    </div>
+                </label>
+                <% } %>
+                <p class="notice muted"><%= locale.tf("consent.notice", &[("name", self.client_name)]) %></p>
+                <input type="hidden" name="csrf_token" value="<%= self.csrf_token %>">
+                <input type="hidden" name="client_id" value="<%= self.client_id %>">
+                <input type="hidden" name="redirect_uri" value="<%= self.redirect_uri %>">
+                <input type="hidden" name="state" value="<%= self.state %>">
+                <input type="hidden" name="code_challenge" value="<%= self.code_challenge %>">
+                <input type="hidden" name="scope" value="<%= self.scope %>">
+                <input type="hidden" name="scope_choice" value="1">
+                <div class="actions">
+                    <button type="submit" name="decision" value="deny" class="btn btn-secondary"><%= locale.t("common.cancel") %></button>
+                    <button type="submit" name="decision" value="approve" class="btn btn-primary"><%= locale.t("consent.approve") %></button>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

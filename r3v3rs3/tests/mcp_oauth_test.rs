@@ -266,6 +266,43 @@ async fn an_authenticated_authorization_request_renders_the_consent_page() -> an
     .await
 }
 
+#[tokio::test]
+async fn the_consent_page_follows_the_webui_language_and_theme() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-consent-preferences")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let cookie = session(&client, &addr).await?;
+        let (_, challenge) = pkce();
+        let url = format!(
+            "http://{addr}/oauth/authorize?response_type=code&client_id={CLIENT_ID}\
+             &redirect_uri={REDIRECT_URI}&state=s1&code_challenge={challenge}\
+             &code_challenge_method=S256&scope=read"
+        );
+        let cookies = format!("{cookie}; r3v3rs3_lang=tr; r3v3rs3_theme=dark");
+        let text = client
+            .get(&url)
+            .header("cookie", cookies)
+            .send()
+            .await?
+            .text()
+            .await?;
+        assert!(
+            text.contains("<html lang=\"tr\" data-theme=\"dark\">"),
+            "{text}"
+        );
+        assert!(text.contains("İstenen İzinler"), "{text}");
+        assert!(text.contains("read (salt okunur)"), "{text}");
+        // The scope checkbox stays inside the form, so the browser submits it.
+        let form = &text[text.find("<form").context("no form")?..];
+        assert!(
+            form.contains("name=\"grant_read\" value=\"1\" checked"),
+            "{form}"
+        );
+        Ok(())
+    })
+    .await
+}
+
 fn extract_csrf_token(html: &str) -> anyhow::Result<String> {
     let marker = "name=\"csrf_token\" value=\"";
     let start = html

@@ -80,7 +80,7 @@ pub(crate) mod grpc_web;
 pub(crate) mod header_rules;
 pub(crate) mod hyper_tls;
 mod mirror;
-mod page;
+pub(crate) mod page;
 pub(crate) mod pool;
 pub(crate) mod rate_limit;
 pub mod rate_share;
