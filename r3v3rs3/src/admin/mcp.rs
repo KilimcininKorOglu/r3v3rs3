@@ -2509,19 +2509,14 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let mut request: r3v3rs3_api::platform::AppRequest = params.app;
-        request.spec.preview_of = None;
-        request.spec.replica_of = None;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let app = platform
-            .add_app(request, crate::clock::unix_ms())
-            .await
-            .map_err(any_error)?;
-        json_result(app)
+        let app = super::platform::add_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(params.app),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
     }
 
     /// Update an application's specification.
@@ -2534,20 +2529,15 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let mut request: r3v3rs3_api::platform::AppRequest = params.app;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let current = platform.app(id).await.map_err(any_error)?;
-        request.spec.preview_of = current.spec.preview_of;
-        request.spec.replica_of = current.spec.replica_of;
-        let app = platform
-            .update_app(id, request, crate::clock::unix_ms())
-            .await
-            .map_err(any_error)?;
-        json_result(app)
+        let app = super::platform::update_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(params.app),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
     }
 
     /// Delete an application.
@@ -2560,12 +2550,13 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        platform.delete_app(id).await.map_err(any_error)?;
+        let axum::Json(()) = super::platform::delete_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
         json_result(json!({ "deleted": id.to_string() }))
     }
 
@@ -2579,20 +2570,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let deployment = platform
-            .deploy(
-                id,
-                &caller.username,
-                r3v3rs3_api::platform::DeploymentTrigger::Manual,
-            )
-            .await
-            .map_err(any_error)?;
-        json_result(deployment)
+        let deployment = super::platform::deploy_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(deployment.0)
     }
 
     /// Retrieve container execution logs.
@@ -2738,13 +2723,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let entries: Vec<r3v3rs3_api::platform::EnvEntry> = params.entries;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        platform.set_env(id, entries).await.map_err(any_error)?;
+        let axum::Json(()) = super::platform::put_env(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(params.entries),
+        )
+        .await
+        .map_err(any_error)?;
         json_result(json!({ "updated": true }))
     }
 
@@ -2760,31 +2746,19 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let mut entries = platform.env(id).await.map_err(any_error)?;
-        let overwrite = params.overwrite.unwrap_or(false);
-        let save = params.save.unwrap_or(true);
-        let generated_keys = r3v3rs3_api::compose_env::resolve_env_entries(
-            &mut entries,
-            overwrite,
-            super::platform::generate_secret_for_key,
-        );
-        if save && !generated_keys.is_empty() {
-            platform
-                .set_env(id, entries.clone())
-                .await
-                .map_err(any_error)?;
-        }
-        json_result(r3v3rs3_api::compose_env::ResolveEnvTemplateResponse {
-            template: String::new(),
-            generated_count: generated_keys.len(),
-            generated_keys,
-            entries,
-        })
+        let request = r3v3rs3_api::compose_env::GenerateAppEnvSecretsRequest {
+            save: params.save.unwrap_or(true),
+            overwrite: params.overwrite.unwrap_or(false),
+        };
+        let generated = super::platform::generate_app_env(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(generated.0)
     }
 
     /// Resolve an environment variable template (.env text or entries) and generate cryptographically secure secrets.
@@ -2860,16 +2834,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let dep_id: ShortId = parse_id(&params.deployment_id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let deployment = platform
-            .rollback(dep_id, &caller.username)
-            .await
-            .map_err(any_error)?;
-        json_result(deployment)
+        let deployment = super::platform::rollback_deployment(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(dep_id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(deployment.0)
     }
 
     /// Cancel an in-progress or pending deployment.
@@ -2882,16 +2854,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let dep_id: ShortId = parse_id(&params.deployment_id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let deployment = platform
-            .cancel_deployment(dep_id, &caller.username)
-            .await
-            .map_err(any_error)?;
-        json_result(deployment)
+        let deployment = super::platform::cancel_deployment(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(dep_id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(deployment.0)
     }
 
     /// Check registry for updated container image.
@@ -2904,13 +2874,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let status = platform.check_app_update(id).await.map_err(any_error)?;
-        json_result(status)
+        let status = super::platform::check_app_update(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(status.0)
     }
 
     /// List scheduled commands and cron tasks configured for an application.
@@ -3132,23 +3103,20 @@ impl McpServer {
                 )
             })?;
         let request = build_store_app_request(&store_app, &params)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let app = platform
-            .add_app(request, crate::clock::unix_ms())
-            .await
-            .map_err(any_error)?;
-        let deployment = platform
-            .deploy(
-                app.id,
-                &caller.username,
-                r3v3rs3_api::platform::DeploymentTrigger::Manual,
-            )
-            .await
-            .map_err(any_error)?;
+        let axum::Json(app) = super::platform::add_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller.clone()),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        let axum::Json(deployment) = super::platform::deploy_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(app.id),
+        )
+        .await
+        .map_err(any_error)?;
         json_result(json!({
             "installed": true,
             "app": app,
@@ -3336,13 +3304,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let entry = platform.run_backup(id).await.map_err(any_error)?;
-        json_result(entry)
+        let entry = super::backups::create(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entry.0)
     }
 
     /// Delete a database backup snapshot.
@@ -3355,15 +3324,13 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.db_id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        platform
-            .delete_backup(id, &params.backup_id)
-            .await
-            .map_err(any_error)?;
+        let axum::Json(()) = super::backups::delete(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path((id, params.backup_id.clone())),
+        )
+        .await
+        .map_err(any_error)?;
         json_result(json!({ "deleted": params.backup_id }))
     }
 
@@ -3402,16 +3369,13 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let config = params.config;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        platform
-            .set_backup_config(config)
-            .await
-            .map_err(any_error)?;
+        let axum::Json(()) = super::backups::put_config(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(params.config),
+        )
+        .await
+        .map_err(any_error)?;
         json_result(json!({ "updated": true }))
     }
 
@@ -3586,17 +3550,14 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let request = params.request;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Admin)
-            .await
-            .map_err(any_error)?;
-        let token = platform
-            .add_target(request, crate::clock::unix_ms())
-            .await
-            .map_err(any_error)?;
-        json_result(token)
+        let token = super::platform::add_target(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(params.request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(token.0)
     }
 
     /// Delete an agent target node.
@@ -3609,13 +3570,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Admin)
-            .await
-            .map_err(any_error)?;
-        let entry = platform.delete_target(id).await.map_err(any_error)?;
-        json_result(json!({ "deleted": entry.name }))
+        let axum::Json(()) = super::platform::delete_target(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(json!({ "deleted": id.to_string() }))
     }
 
     /// Set or clear the geographical region of a target node.
@@ -3630,16 +3592,17 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Admin)
-            .await
-            .map_err(any_error)?;
-        let updated = platform
-            .set_target_region(id, params.region)
-            .await
-            .map_err(any_error)?;
-        json_result(updated)
+        let updated = super::platform::set_target_region(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(r3v3rs3_api::platform::SetTargetRegionRequest {
+                region: params.region,
+            }),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(updated.0)
     }
 
     /// Drain a target node for maintenance.
@@ -3652,16 +3615,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Admin)
-            .await
-            .map_err(any_error)?;
-        let updated = platform
-            .set_target_drained(id, true)
-            .await
-            .map_err(any_error)?;
-        json_result(updated)
+        let updated = super::platform::drain_target(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(updated.0)
     }
 
     /// Undrain a target node, restoring it to the active traffic pool.
@@ -3676,16 +3637,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Admin)
-            .await
-            .map_err(any_error)?;
-        let updated = platform
-            .set_target_drained(id, false)
-            .await
-            .map_err(any_error)?;
-        json_result(updated)
+        let updated = super::platform::undrain_target(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(updated.0)
     }
 
     /// Generate a new enrollment token for an agent target node.
@@ -3752,13 +3711,13 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Admin)
-            .await
-            .map_err(any_error)?;
-        let upgraded = platform.upgrade_all_targets().await.map_err(any_error)?;
-        json_result(upgraded)
+        let upgraded = super::platform::upgrade_all_targets(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(upgraded.0)
     }
 
     // ==========================================
@@ -3790,17 +3749,14 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let spec = params.spec;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let project = platform
-            .create_project(spec, crate::clock::unix_ms())
-            .await
-            .map_err(any_error)?;
-        json_result(project)
+        let project = super::platform::create_project(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(params.spec),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(project.0)
     }
 
     /// Delete a project by id.
@@ -3813,13 +3769,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let project = platform.delete_project(id).await.map_err(any_error)?;
-        json_result(project)
+        let project = super::platform::delete_project(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(project.0)
     }
 
     /// List all shared environment variable groups.
@@ -3847,17 +3804,14 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let group = params.group;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let created = platform
-            .create_env_group(group, crate::clock::unix_ms())
-            .await
-            .map_err(any_error)?;
-        json_result(created)
+        let created = super::platform::create_env_group(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(params.group),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(created.0)
     }
 
     /// Delete an environment variable group by id.
@@ -3870,13 +3824,14 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let platform = self
-            .state
-            .platform(&caller, Permission::Edit)
-            .await
-            .map_err(any_error)?;
-        let deleted = platform.delete_env_group(id).await.map_err(any_error)?;
-        json_result(deleted)
+        let deleted = super::platform::delete_env_group(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(deleted.0)
     }
 
     /// List all environments belonging to a project.

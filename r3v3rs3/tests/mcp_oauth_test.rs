@@ -39,13 +39,9 @@ impl Drop for TempDir {
     }
 }
 
-/// Runs a server and its admin API with the MCP clients of the test.
-async fn with_admin<F, O>(dir: &Path, func: F) -> anyhow::Result<()>
-where
-    F: FnOnce(SocketAddr) -> O,
-    O: Future<Output = anyhow::Result<()>>,
-{
-    let config = AppConfig {
+/// The configuration with the MCP clients of the test.
+fn mcp_config() -> AppConfig {
+    AppConfig {
         mcp: McpConfig {
             enabled: true,
             clients: vec![McpClientConfig {
@@ -55,7 +51,24 @@ where
             }],
         },
         ..Default::default()
-    };
+    }
+}
+
+/// Runs a server and its admin API with the MCP clients of the test.
+async fn with_admin<F, O>(dir: &Path, func: F) -> anyhow::Result<()>
+where
+    F: FnOnce(SocketAddr) -> O,
+    O: Future<Output = anyhow::Result<()>>,
+{
+    with_admin_config(dir, mcp_config(), func).await
+}
+
+/// Runs a server and its admin API with a configuration.
+async fn with_admin_config<F, O>(dir: &Path, config: AppConfig, func: F) -> anyhow::Result<()>
+where
+    F: FnOnce(SocketAddr) -> O,
+    O: Future<Output = anyhow::Result<()>>,
+{
     let storage = TestStorage::builder()
         .config(config)
         .account("admin", "password", Role::Admin, None)
@@ -1549,6 +1562,80 @@ async fn run_server_upgrade_rejects_non_admin() -> anyhow::Result<()> {
                 || err.to_string().contains("-32603"),
             "{err}"
         );
+        client.cancel().await?;
+        Ok(())
+    })
+    .await
+}
+
+/// The actions of the audit log, newest first.
+async fn audit_actions(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<Vec<String>> {
+    let log: Value = serde_json::from_str(&mcp_call(client, "list_audit_log", json!({})).await?)?;
+    Ok(log
+        .as_array()
+        .context("the audit log is not a list")?
+        .iter()
+        .filter_map(|entry| entry["action"].as_str().map(String::from))
+        .collect())
+}
+
+/// Creates and deletes a project and an environment group through MCP.
+async fn change_platform_through_mcp(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let project: Value = serde_json::from_str(
+        &mcp_call(
+            client,
+            "create_project",
+            json!({ "spec": { "name": "shop" } }),
+        )
+        .await?,
+    )?;
+    let id = project["id"].as_str().context("the project id")?;
+    mcp_call(client, "delete_project", json!({ "id": id })).await?;
+    let group: Value = serde_json::from_str(
+        &mcp_call(
+            client,
+            "create_env_group",
+            json!({ "group": { "name": "shared" } }),
+        )
+        .await?,
+    )?;
+    let id = group["id"].as_str().context("the group id")?;
+    mcp_call(client, "delete_env_group", json!({ "id": id })).await?;
+    Ok(())
+}
+
+/// A change of the platform through MCP leaves the same audit entries as through the HTTP API.
+#[tokio::test]
+async fn mcp_platform_changes_are_audited() -> anyhow::Result<()> {
+    use rmcp::service::serve_client;
+    use rmcp::transport::streamable_http_client::{
+        StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+    };
+
+    let dir = TempDir::new("mcp-platform-audit")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let token = access_token(&addr).await?;
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(format!("http://{addr}/api/mcp"))
+                .auth_header(&token),
+        );
+        let client = serve_client(TestClient, transport).await?;
+        change_platform_through_mcp(&client).await?;
+        let actions = audit_actions(&client).await?;
+        for action in [
+            "add_project",
+            "delete_project",
+            "add_env_group",
+            "delete_env_group",
+        ] {
+            assert!(actions.iter().any(|a| a == action), "{action}: {actions:?}");
+        }
         client.cancel().await?;
         Ok(())
     })
