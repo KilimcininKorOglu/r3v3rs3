@@ -364,19 +364,28 @@ fn use_stream_priority_stats(
 ) {
     let stats = stats.clone();
     let trigger_val = **trigger;
+    let locale = use_locale();
     use_effect_with((trigger_val, active_tab), move |_| {
         if active_tab == TrafficTab::StreamPriority {
             spawn_local(async move {
-                let req = Request::get(&format!("{API_ENDPOINT}/traffic/priority"));
-                if let Ok(res) = req.send().await
-                    && let Ok(data) = res.json::<StreamPriorityStats>().await
-                {
-                    stats.set(data);
-                }
+                let path = format!("{API_ENDPOINT}/traffic/priority");
+                load_into(locale, &path, move |data| stats.set(data)).await;
             });
         }
         || ()
     });
+}
+
+/// Reads the JSON at `path` and gives it to `set`. A failed read shows its translated error.
+async fn load_into<T: serde::de::DeserializeOwned>(
+    locale: Locale,
+    path: &str,
+    set: impl FnOnce(T),
+) {
+    match super::settings::fetch_json::<T>(locale, Request::get(path)).await {
+        Ok(data) => set(data),
+        Err(err) => crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await,
+    }
 }
 
 #[hook]
@@ -387,15 +396,12 @@ fn use_active_connections(
 ) {
     let connections = connections.clone();
     let trigger_val = **trigger;
+    let locale = use_locale();
     use_effect_with((trigger_val, active_tab), move |_| {
         if active_tab == TrafficTab::ActiveConnections {
             spawn_local(async move {
-                let req = Request::get(&format!("{API_ENDPOINT}/traffic/connections"));
-                if let Ok(res) = req.send().await
-                    && let Ok(data) = res.json::<Vec<ActiveConnectionInfo>>().await
-                {
-                    connections.set(data);
-                }
+                let path = format!("{API_ENDPOINT}/traffic/connections");
+                load_into(locale, &path, move |data| connections.set(data)).await;
             });
         }
         || ()
@@ -413,9 +419,10 @@ fn terminate_connection_onclick(
         let text = locale.t("traffic.terminate_confirm").to_string();
         spawn_local(async move {
             if confirm(locale, &text).await {
-                let _ = Request::delete(&format!("{API_ENDPOINT}/traffic/connections/{id}"))
-                    .send()
-                    .await;
+                let path = format!("/traffic/connections/{id}");
+                if let Err(err) = super::resource_page::delete(locale, &path).await {
+                    crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await;
+                }
                 trigger.set(*trigger + 1);
             }
         });
@@ -1685,14 +1692,11 @@ pub fn export_traffic_json(entries: &[AccessLogEntry]) -> String {
 #[hook]
 fn use_initial_traffic_load(entries: &UseStateHandle<Vec<AccessLogEntry>>) {
     let entries = entries.clone();
+    let locale = use_locale();
     use_effect_with((), move |_| {
         spawn_local(async move {
-            let req = Request::get(&format!("{API_ENDPOINT}/traffic"));
-            if let Ok(resp) = req.send().await
-                && let Ok(list) = resp.json::<Vec<AccessLogEntry>>().await
-            {
-                entries.set(list);
-            }
+            let path = format!("{API_ENDPOINT}/traffic");
+            load_into(locale, &path, move |list| entries.set(list)).await;
         });
     });
 }
@@ -1755,18 +1759,17 @@ fn use_traffic_geo(
     selected_proxy: Option<ShortId>,
 ) {
     let server_geo = server_geo.clone();
+    let locale = use_locale();
     use_effect_with(selected_proxy, move |&proxy| {
         spawn_local(async move {
             let mut url = format!("{API_ENDPOINT}/traffic/geo");
             if let Some(id) = proxy {
                 url.push_str(&format!("?resource_id={id}"));
             }
-            let req = Request::get(&url);
-            if let Ok(res) = req.send().await
-                && let Ok(data) = res.json::<TrafficGeoDistribution>().await
-            {
-                server_geo.set(Some(data));
-            }
+            load_into(locale, &url, move |data: TrafficGeoDistribution| {
+                server_geo.set(Some(data))
+            })
+            .await;
         });
         || ()
     });
