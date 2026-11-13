@@ -1845,7 +1845,7 @@ impl ApiClient {
         let res = self
             .request(
                 Method::GET,
-                &format!("/api/databases/{id}/logs?tail={tail}"),
+                &format!("/api/apps/{id}/logs?tail={tail}"),
                 None,
             )
             .await?;
