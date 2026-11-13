@@ -221,11 +221,12 @@ fn get_request(
 }
 
 async fn request_self_sign(locale: Locale, req: &SelfSignedCertRequest) -> Result<(), String> {
-    let request = Request::post(&format!("{API_ENDPOINT}/certs/self_sign"))
-        .json(&req)
-        .map_err(|err| err.to_string())?;
-    crate::pages::settings::send_request(locale, request).await?;
-    Ok(())
+    crate::pages::settings::send_json(
+        locale,
+        Request::post(&format!("{API_ENDPOINT}/certs/self_sign")),
+        req,
+    )
+    .await
 }
 
 #[cfg(test)]
