@@ -723,20 +723,21 @@ async fn delete_site(locale: Locale, id: ShortId) -> Result<(), String> {
     crate::pages::resource_page::delete(locale, &format!("/proxies/{id}")).await
 }
 
+/// Reads the proxy, applies the change and saves it. A failed read or save returns its message.
+async fn change_proxy(
+    locale: Locale,
+    id: ShortId,
+    change: impl FnOnce(&mut ProxyEntry),
+) -> Result<(), String> {
+    let path = format!("{API_ENDPOINT}/proxies/{id}");
+    let mut entry: ProxyEntry =
+        crate::pages::settings::fetch_json(locale, Request::get(&path)).await?;
+    change(&mut entry);
+    crate::pages::settings::send_json(locale, Request::put(&path), &entry).await
+}
+
 async fn toggle_proxy(locale: Locale, id: ShortId) -> Result<(), String> {
-    let mut entry: ProxyEntry = Request::get(&format!("{API_ENDPOINT}/proxies/{id}"))
-        .send()
-        .await
-        .map_err(|err| err.to_string())?
-        .json()
-        .await
-        .map_err(|err| err.to_string())?;
-    entry.proxy.active = !entry.proxy.active;
-    let req = Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
-        .json(&entry)
-        .map_err(|err| err.to_string())?;
-    crate::pages::settings::send_request(locale, req).await?;
-    Ok(())
+    change_proxy(locale, id, |entry| entry.proxy.active = !entry.proxy.active).await
 }
 
 /// Turns the maintenance mode of the proxy on or off. A failed change shows its message.
