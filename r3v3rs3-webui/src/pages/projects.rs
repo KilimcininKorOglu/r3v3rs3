@@ -797,8 +797,11 @@ fn env_save_callback(
                     .map(|v| v.to_entry(locale))
                     .collect::<Result<Vec<_>, _>>();
 
-                let Ok(variables) = parsed_vars else {
-                    return;
+                let variables = match parsed_vars {
+                    Ok(variables) => variables,
+                    Err(message) => {
+                        return dialog::message(locale, &message, dialog::Icon::Error).await;
+                    }
                 };
 
                 let spec = EnvironmentEnvSpec { variables };
