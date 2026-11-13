@@ -117,6 +117,9 @@ jobs:
       - name: Build the server and the command line client for glibc 2.17
         run: cargo zigbuild --release --locked -p r3v3rs3 -p r3v3rs3-cli --target ${{ matrix.target }}.2.17
       - name: Make archives
+        env:
+          # xz compresses on one core unless told otherwise; -T0 uses every core of the runner.
+          XZ_OPT: -T0
         run: |
           tar -C "target/${{ matrix.target }}/release" -Jcvf r3-server-${{ matrix.target }}.tar.xz r3-server
           tar -C "target/${{ matrix.target }}/release" -zcvf r3-${{ matrix.target }}.tar.gz r3
