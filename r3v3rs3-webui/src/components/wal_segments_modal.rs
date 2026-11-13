@@ -4,7 +4,7 @@ use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_v
 use crate::components::modal::{Modal, ModalSize};
 use crate::format::{format_bytes, format_time};
 use crate::i18n::use_locale;
-use crate::pages::settings::{failure_box, fetch_json, send_request};
+use crate::pages::settings::{failure_box, fetch_json};
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
@@ -124,10 +124,7 @@ fn make_archive_callback(
         archiving.set(true);
         spawn_local(async move {
             let url = format!("{API_ENDPOINT}/databases/{db_id}/wal/archive");
-            let result = match Request::post(&url).build() {
-                Ok(request) => send_request(locale, request).await,
-                Err(err) => Err(err.to_string()),
-            };
+            let result = crate::pages::settings::post_empty(locale, &url).await;
             archiving.set(false);
             if let Err(message) = result {
                 error.set(Some(message));
