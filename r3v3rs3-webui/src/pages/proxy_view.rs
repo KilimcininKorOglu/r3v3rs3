@@ -1,4 +1,5 @@
 use crate::components::button::{ButtonKind, ButtonSize, button_class};
+use crate::pages::settings::{failure_box, fetch_json};
 use crate::{
     API_ENDPOINT,
     auth::use_ensure_auth,
@@ -31,7 +32,7 @@ pub fn proxy_view(props: &Props) -> Html {
     let (proxies, _) = use_store::<ProxyStore>();
     let (session, _) = use_store::<SessionStore>();
     let can_edit = session.can_edit_proxies();
-    let site = use_loaded_proxy(props.id, &proxies);
+    let site = use_loaded_proxy(locale, props.id, &proxies);
 
     let Some(navigator) = use_navigator() else {
         return html!();
@@ -52,50 +53,54 @@ pub fn proxy_view(props: &Props) -> Html {
     let is_loading = use_state(|| false);
     let onsubmit = submit_callback(locale, props.id, entry.clone(), is_loading, navigator);
 
+    let proxy_entry = match &*site {
+        Some(Ok(proxy_entry)) => proxy_entry,
+        Some(Err(err)) => return failure_box(err),
+        None => return html! {},
+    };
+    let read_only = proxy_entry.is_discovered() || !can_edit;
     html! {
-        <>
-            if let Some(proxy_entry) = &*site {
-                <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
-                    if let Some(source) = &proxy_entry.source {
-                        <p class="mb-4 p-3 text-sm text-blue-800 dark:text-blue-300 bg-blue-50 dark:bg-neutral-900 border border-blue-200 dark:border-blue-900 rounded-md">
-                            {locale.tf("proxies.read_only_notice", &[("provider", source.provider.name()), ("resource", &source.resource)])}
-                        </p>
-                    }
-                    <fieldset disabled={proxy_entry.is_discovered() || !can_edit}>
-                        <ProxyConfig proxy={proxy_entry.proxy.clone()} {onchanged} />
-                    </fieldset>
-
-                    <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
-                        <Link<Route> to={Route::Traffic} classes={button_class(ButtonKind::Secondary, ButtonSize::Md)}>
-                            {locale.t("proxies.view_traffic")}
-                        </Link<Route>>
-                        <button type="button" onclick={cancel_onclick} class={button_class(ButtonKind::Secondary, ButtonSize::Md)}>
-                            {locale.t(if proxy_entry.is_discovered() || !can_edit { "common.back" } else { "common.cancel" })}
-                        </button>
-                        if !proxy_entry.is_discovered() && can_edit {
-                            <button type="submit" disabled={entry.is_err()} class={button_class(ButtonKind::Primary, ButtonSize::Md)}>
-                                {locale.t("common.update")}
-                            </button>
-                        }
-                    </div>
-                </form>
-            } else {
-                <Redirect<Route> to={Route::Proxies}/>
+        <form {onsubmit} class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
+            if let Some(source) = &proxy_entry.source {
+                <p class="mb-4 p-3 text-sm text-blue-800 dark:text-blue-300 bg-blue-50 dark:bg-neutral-900 border border-blue-200 dark:border-blue-900 rounded-md">
+                    {locale.tf("proxies.read_only_notice", &[("provider", source.provider.name()), ("resource", &source.resource)])}
+                </p>
             }
-        </>
+            <fieldset disabled={read_only}>
+                <ProxyConfig proxy={proxy_entry.proxy.clone()} {onchanged} />
+            </fieldset>
+
+            <div class="flex flex-col-reverse gap-2 mt-4 sm:flex-row sm:items-center sm:justify-end">
+                <Link<Route> to={Route::Traffic} classes={button_class(ButtonKind::Secondary, ButtonSize::Md)}>
+                    {locale.t("proxies.view_traffic")}
+                </Link<Route>>
+                <button type="button" onclick={cancel_onclick} class={button_class(ButtonKind::Secondary, ButtonSize::Md)}>
+                    {locale.t(if read_only { "common.back" } else { "common.cancel" })}
+                </button>
+                if !read_only {
+                    <button type="submit" disabled={entry.is_err()} class={button_class(ButtonKind::Primary, ButtonSize::Md)}>
+                        {locale.t("common.update")}
+                    </button>
+                }
+            </div>
+        </form>
     }
 }
 
-/// The proxy of the id: the entry of the store first, then the entry that the admin API returns.
+/// The proxy of the id: the entry of the store first, then the entry or the error that the
+/// admin API returns. `None` while a proxy that is not in the store loads.
 #[hook]
-fn use_loaded_proxy(id: ShortId, proxies: &ProxyStore) -> UseStateHandle<Option<ProxyEntry>> {
-    let site = use_state(|| proxies.entries.iter().find(|e| e.id == id).cloned());
+fn use_loaded_proxy(
+    locale: Locale,
+    id: ShortId,
+    proxies: &ProxyStore,
+) -> UseStateHandle<Option<Result<ProxyEntry, String>>> {
+    let site = use_state(|| proxies.entries.iter().find(|e| e.id == id).cloned().map(Ok));
     let site_cloned = site.clone();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(entry) = get_site(id).await {
-                site_cloned.set(Some(entry));
-            }
+            let path = format!("{API_ENDPOINT}/proxies/{id}");
+            site_cloned.set(Some(fetch_json(locale, Request::get(&path)).await));
         });
     });
     site
@@ -132,14 +137,6 @@ fn submit_callback(
             is_loading.set(false);
         });
     })
-}
-
-async fn get_site(id: ShortId) -> Result<ProxyEntry, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/proxies/{id}"))
-        .send()
-        .await?
-        .json()
-        .await
 }
 
 async fn update_site(locale: Locale, id: ShortId, entry: &Proxy) -> Result<(), String> {
