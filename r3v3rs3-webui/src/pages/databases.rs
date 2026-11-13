@@ -14,7 +14,7 @@ use crate::components::modal::{Modal, ModalSize};
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
-use r3v3rs3_api::container::ResourceLimits;
+use r3v3rs3_api::container::{AppName, ResourceLimits};
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
@@ -453,15 +453,14 @@ fn render_nav_action_buttons(ctx: &RowContext<'_>, app: &AppEntry) -> Html {
 }
 
 fn render_lifecycle_action_buttons(ctx: &RowContext<'_>, app: &AppEntry, is_replica: bool) -> Html {
+    let target = CopyTarget {
+        reload: ctx.reload.clone(),
+        created: ctx.created.clone(),
+        notice: ctx.notice.clone(),
+    };
+    let source = (app.id, app.name.as_str());
     let clone_btn = ctx.can_edit.then(|| {
-        let onclick = clone_action(
-            ctx.locale,
-            app.id,
-            app.name.as_str(),
-            ctx.reload.clone(),
-            ctx.created.clone(),
-            ctx.notice.clone(),
-        );
+        let onclick = copy_action(ctx.locale, CopyKind::Clone, source, target.clone());
         html! {
             <ActionIconButton
                 variant={ActionVariant::Edit}
@@ -471,14 +470,7 @@ fn render_lifecycle_action_buttons(ctx: &RowContext<'_>, app: &AppEntry, is_repl
         }
     });
     let replica_btn = (ctx.can_edit && !is_replica).then(|| {
-        let onclick = replica_action(
-            ctx.locale,
-            app.id,
-            app.name.as_str(),
-            ctx.reload.clone(),
-            ctx.created.clone(),
-            ctx.notice.clone(),
-        );
+        let onclick = copy_action(ctx.locale, CopyKind::Replica, source, target.clone());
         html! {
             <ActionIconButton
                 variant={ActionVariant::Restore}
@@ -882,142 +874,96 @@ async fn send_create(locale: Locale, request: DatabaseRequest, done: Done) {
     }
 }
 
-/// Clones an existing database and shows its connection and password panel.
-async fn send_clone(
-    id: ShortId,
-    name: String,
-    created: UseStateHandle<Option<DatabaseCreated>>,
-    notice: UseStateHandle<Option<Notice<()>>>,
-    saved: Callback<()>,
-) {
-    let body = serde_json::json!({ "name": name });
-    let req = Request::post(&format!("{API_ENDPOINT}/databases/{id}/clone"))
-        .header("Content-Type", "application/json")
-        .body(body.to_string());
-    let sent = match req {
-        Ok(b) => b.send().await,
-        Err(e) => {
-            notice.set(Some(Notice::Failed(e.to_string())));
-            return;
+/// A new database made from an existing one.
+#[derive(Clone, Copy)]
+enum CopyKind {
+    Clone,
+    Replica,
+}
+
+impl CopyKind {
+    fn prompt(self) -> &'static str {
+        match self {
+            CopyKind::Clone => "databases.clone_prompt",
+            CopyKind::Replica => "databases.replica_prompt",
         }
-    };
-    match sent {
-        Ok(res) if res.ok() => match res.json::<DatabaseCreated>().await {
-            Ok(data) => {
-                created.set(Some(data));
-                notice.set(Some(Notice::Saved(())));
-                saved.emit(());
-            }
-            Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
-        },
-        Ok(res) => {
-            let msg = res.text().await.unwrap_or_default();
-            notice.set(Some(Notice::Failed(msg)));
+    }
+
+    fn suffix(self) -> &'static str {
+        match self {
+            CopyKind::Clone => "clone",
+            CopyKind::Replica => "replica",
         }
-        Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
+    }
+
+    fn path(self, id: ShortId) -> String {
+        match self {
+            CopyKind::Clone => format!("{API_ENDPOINT}/databases/{id}/clone"),
+            CopyKind::Replica => format!("{API_ENDPOINT}/databases/{id}/replicas"),
+        }
+    }
+
+    fn body(self, name: AppName) -> serde_json::Value {
+        match self {
+            CopyKind::Clone => serde_json::json!({ "name": name }),
+            CopyKind::Replica => serde_json::json!(DatabaseReplicaRequest {
+                name,
+                host_port: None,
+                limits: ResourceLimits::default(),
+                project_id: None,
+                environment_id: None,
+            }),
+        }
     }
 }
 
-fn clone_action(
-    locale: Locale,
-    id: ShortId,
-    name: &str,
+/// The states that a copy updates.
+#[derive(Clone)]
+struct CopyTarget {
     reload: Callback<()>,
     created: UseStateHandle<Option<DatabaseCreated>>,
     notice: UseStateHandle<Option<Notice<()>>>,
+}
+
+/// Asks the name of the copy, sends it, and shows its connection and password panel or the
+/// reason of a failure.
+fn copy_action(
+    locale: Locale,
+    kind: CopyKind,
+    (id, name): (ShortId, &str),
+    target: CopyTarget,
 ) -> Callback<MouseEvent> {
-    let default_name = format!("{name}-clone");
+    let default_name = format!("{name}-{}", kind.suffix());
     Callback::from(move |_| {
-        let (default_name, reload, created, notice) = (
-            default_name.clone(),
-            reload.clone(),
-            created.clone(),
-            notice.clone(),
-        );
+        let (default_name, target) = (default_name.clone(), target.clone());
         spawn_local(async move {
-            let prompt = locale.t("databases.clone_prompt");
-            if let Some(name) = crate::dialog::prompt(locale, prompt, &default_name).await {
-                let trimmed = name.trim().to_string();
-                if !trimmed.is_empty() {
-                    send_clone(id, trimmed, created, notice, reload).await;
+            let prompt = locale.t(kind.prompt());
+            let Some(name) = crate::dialog::prompt(locale, prompt, &default_name).await else {
+                return;
+            };
+            if name.trim().is_empty() {
+                return;
+            }
+            match send_copy(locale, kind, id, name.trim()).await {
+                Ok(data) => {
+                    target.created.set(Some(data));
+                    target.notice.set(None);
+                    target.reload.emit(());
                 }
+                Err(message) => target.notice.set(Some(Notice::Failed(message))),
             }
         });
     })
 }
 
-fn replica_action(
+async fn send_copy(
     locale: Locale,
+    kind: CopyKind,
     id: ShortId,
     name: &str,
-    reload: Callback<()>,
-    created: UseStateHandle<Option<DatabaseCreated>>,
-    notice: UseStateHandle<Option<Notice<()>>>,
-) -> Callback<MouseEvent> {
-    let default_name = format!("{name}-replica");
-    Callback::from(move |_| {
-        let (default_name, reload, created, notice) = (
-            default_name.clone(),
-            reload.clone(),
-            created.clone(),
-            notice.clone(),
-        );
-        spawn_local(async move {
-            let prompt = locale.t("databases.replica_prompt");
-            if let Some(name) = crate::dialog::prompt(locale, prompt, &default_name).await {
-                let trimmed = name.trim().to_string();
-                if !trimmed.is_empty() {
-                    send_replica(id, trimmed, created, notice, reload).await;
-                }
-            }
-        });
-    })
-}
-
-/// Creates a read replica of an existing database and displays its details.
-async fn send_replica(
-    id: ShortId,
-    name: String,
-    created: UseStateHandle<Option<DatabaseCreated>>,
-    notice: UseStateHandle<Option<Notice<()>>>,
-    saved: Callback<()>,
-) {
-    let Ok(app_name) = name.parse() else {
-        return;
-    };
-    let payload = DatabaseReplicaRequest {
-        name: app_name,
-        host_port: None,
-        limits: ResourceLimits::default(),
-        project_id: None,
-        environment_id: None,
-    };
-    let Ok(body) = serde_json::to_string(&payload) else {
-        return;
-    };
-    let req = Request::post(&format!("{API_ENDPOINT}/databases/{id}/replicas"))
-        .header("Content-Type", "application/json")
-        .body(body);
-    let sent = match req {
-        Ok(b) => b.send().await,
-        Err(e) => {
-            notice.set(Some(Notice::Failed(e.to_string())));
-            return;
-        }
-    };
-    match sent {
-        Ok(res) if res.ok() => match res.json::<DatabaseCreated>().await {
-            Ok(data) => {
-                created.set(Some(data));
-                notice.set(Some(Notice::Saved(())));
-                saved.emit(());
-            }
-            Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
-        },
-        Ok(res) => {
-            let msg = res.text().await.unwrap_or_default();
-            notice.set(Some(Notice::Failed(msg)));
-        }
-        Err(e) => notice.set(Some(Notice::Failed(e.to_string()))),
-    }
+) -> Result<DatabaseCreated, String> {
+    let name = name
+        .parse::<AppName>()
+        .map_err(|err| locale.error_message(&err))?;
+    post_json(locale, Request::post(&kind.path(id)), &kind.body(name)).await
 }
