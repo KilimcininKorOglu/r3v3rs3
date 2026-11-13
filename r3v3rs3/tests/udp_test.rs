@@ -60,20 +60,26 @@ async fn udp_proxy() -> anyhow::Result<()> {
     let config = udp_storage(&proxy_port, &upstream_port, Duration::from_secs(60));
 
     with_server(config, |_| async move {
-        let proxy = proxy_port.socket_addr();
-        let first = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
-        let second = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
-
-        // Each client gets the reply to its own packets, also when the packets interleave.
-        for _ in 0..2 {
-            first.send_to(b"first", proxy).await?;
-            second.send_to(b"second", proxy).await?;
-            assert_eq!(recv_reply(&first, proxy).await?, b"first");
-            assert_eq!(recv_reply(&second, proxy).await?, b"second");
-        }
-        Ok(())
+        check_interleaved_clients(&proxy_port).await
     })
     .await
+}
+
+/// Checks that two clients each get the replies to their own packets, also when the packets
+/// interleave.
+async fn check_interleaved_clients(proxy_port: &TestPort) -> anyhow::Result<()> {
+    let proxy = proxy_port.socket_addr();
+    let first = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
+    let second = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
+
+    // Each client gets the reply to its own packets, also when the packets interleave.
+    for _ in 0..2 {
+        first.send_to(b"first", proxy).await?;
+        second.send_to(b"second", proxy).await?;
+        assert_eq!(recv_reply(&first, proxy).await?, b"first");
+        assert_eq!(recv_reply(&second, proxy).await?, b"second");
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -84,27 +90,44 @@ async fn udp_session_closes_after_the_idle_timeout() -> anyhow::Result<()> {
     let config = udp_storage(&proxy_port, &upstream_port, Duration::from_millis(300));
 
     with_server(config, |_| async move {
-        let proxy = proxy_port.socket_addr();
-        let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
-
-        client.send_to(b"one", proxy).await?;
-        assert_eq!(recv_reply(&client, proxy).await?, b"one");
-        client.send_to(b"two", proxy).await?;
-        assert_eq!(recv_reply(&client, proxy).await?, b"two");
-        let first = sources.recv().await;
-        assert_eq!(sources.recv().await, first, "the session is still open");
-
-        tokio::time::sleep(Duration::from_millis(900)).await;
-        client.send_to(b"three", proxy).await?;
-        assert_eq!(recv_reply(&client, proxy).await?, b"three");
-        assert_ne!(
-            sources.recv().await,
-            first,
-            "a new session has a new socket"
-        );
-        Ok(())
+        check_idle_session_closes(&proxy_port, &mut sources).await
     })
     .await
+}
+
+/// Sends a packet and checks that the echo of the upstream comes back to the client.
+async fn send_and_expect_echo(
+    client: &UdpSocket,
+    proxy: SocketAddr,
+    payload: &[u8],
+) -> anyhow::Result<()> {
+    client.send_to(payload, proxy).await?;
+    assert_eq!(recv_reply(client, proxy).await?, payload);
+    Ok(())
+}
+
+/// Checks that a session keeps its upstream socket while it is active and gets a new one after
+/// the idle timeout.
+async fn check_idle_session_closes(
+    proxy_port: &TestPort,
+    sources: &mut mpsc::UnboundedReceiver<SocketAddr>,
+) -> anyhow::Result<()> {
+    let proxy = proxy_port.socket_addr();
+    let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
+
+    send_and_expect_echo(&client, proxy, b"one").await?;
+    send_and_expect_echo(&client, proxy, b"two").await?;
+    let first = sources.recv().await;
+    assert_eq!(sources.recv().await, first, "the session is still open");
+
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    send_and_expect_echo(&client, proxy, b"three").await?;
+    assert_ne!(
+        sources.recv().await,
+        first,
+        "a new session has a new socket"
+    );
+    Ok(())
 }
 
 #[tokio::test]
