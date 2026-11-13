@@ -880,23 +880,14 @@ async fn delete_token_action(
     if !crate::dialog::confirm(locale, locale.t("accounts.delete_token_confirm")).await {
         return;
     }
-    let res = Request::delete(&format!("{API_ENDPOINT}/auth/tokens/{id}"))
-        .send()
-        .await;
-    match res {
-        Ok(res) if res.ok() => {
+    match super::resource_page::delete(locale, &format!("/auth/tokens/{id}")).await {
+        Ok(()) => {
             let mut updated = (*form).clone();
             updated.tokens.retain(|t| t.id != id);
             form.set(updated);
             load(locale, accounts, PATH);
         }
-        Ok(res) => {
-            let msg = crate::pages::settings::error_message(locale, res).await;
-            crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await;
-        }
-        Err(err) => {
-            crate::dialog::message(locale, &err.to_string(), crate::dialog::Icon::Error).await;
-        }
+        Err(msg) => crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await,
     }
 }
 
