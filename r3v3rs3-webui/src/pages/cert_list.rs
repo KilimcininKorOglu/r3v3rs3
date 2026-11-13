@@ -604,15 +604,14 @@ fn acme_row(
     let cname_onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
         wasm_bindgen_futures::spawn_local(async move {
-            let fetch = async {
-                let res = Request::get(&format!("{API_ENDPOINT}/acme/{id}/cname_instructions"))
-                    .send()
-                    .await?;
-                res.json::<Vec<r3v3rs3_api::acme::AcmeCnameInstruction>>()
-                    .await
-            };
-            if let Ok(instructions) = fetch.await {
-                show_cname_instructions_dialog(locale, &instructions).await;
+            let path = format!("{API_ENDPOINT}/acme/{id}/cname_instructions");
+            let fetched = crate::pages::settings::fetch_json::<
+                Vec<r3v3rs3_api::acme::AcmeCnameInstruction>,
+            >(locale, Request::get(&path))
+            .await;
+            match fetched {
+                Ok(instructions) => show_cname_instructions_dialog(locale, &instructions).await,
+                Err(err) => dialog::message(locale, &err, dialog::Icon::Error).await,
             }
         });
     });
