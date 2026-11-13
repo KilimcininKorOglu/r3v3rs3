@@ -81,14 +81,14 @@ pub fn app_store() -> Html {
                 <div class="flex items-center gap-2">
                     <input
                         type="search"
-                        class="px-3 py-1.5 rounded bg-neutral-800 border border-neutral-700 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-neutral-500 w-full sm:w-64"
+                        class="px-3 py-1.5 rounded-lg bg-white border border-neutral-300 text-sm text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-primary-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-neutral-100 dark:placeholder-neutral-500 w-full sm:w-64"
                         placeholder={locale.t("apps.store_search")}
                         value={(*search).clone()}
                         oninput={on_search}
                     />
-                    <button type="button" class="px-3 py-1.5 rounded bg-neutral-700 text-neutral-100 hover:bg-neutral-600 disabled:opacity-50 text-sm shrink-0" disabled={*loading} onclick={onrefresh}>
+                    <crate::components::button::Button kind={crate::components::button::ButtonKind::Secondary} class="shrink-0" disabled={*loading} onclick={onrefresh}>
                         {locale.t("apps.store_refresh")}
-                    </button>
+                    </crate::components::button::Button>
                 </div>
             </div>
             { notice_view(&notice, |_: &()| html! { {locale.t("apps.store_refreshed")} }) }
