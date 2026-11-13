@@ -41,10 +41,16 @@ pub struct Credentials {
 }
 
 impl Credentials {
-    /// The root account of a database, which a database of a project gives to its apps.
+    /// The root account of a database, which a database of a project gives to its apps. A
+    /// Redis from before the password has no account to sign in with, so its connection names
+    /// no user.
     pub fn root(info: &EngineInfo, password: String) -> Self {
         Self {
-            user: info.user.clone(),
+            user: if password.is_empty() {
+                String::new()
+            } else {
+                info.user.clone()
+            },
             password,
             database: info.default_db.clone(),
             database_in_url: info.url_database,
@@ -173,6 +179,9 @@ pub(crate) fn root_password_script(
         "mongodb" => {
             format!("db.getSiblingDB('admin').changeUserPassword('{user}', '{password}');\n")
         }
+        // The server takes the password of its default user from the start command, so the
+        // next deployment keeps the new one.
+        "redis" => format!("CONFIG SET requirepass {password}\n"),
         other => bail!("the engine {other} has no root password"),
     };
     script(info, root_password, content)
@@ -258,7 +267,7 @@ fn script(info: &EngineInfo, root_password: &str, content: String) -> anyhow::Re
         "redis" => (
             format!("{SCRIPT_PATH}.redis"),
             format!("redis-cli < {SCRIPT_PATH}.redis"),
-            Vec::new(),
+            super::backup::redis_auth(root_password),
         ),
         other => bail!("the engine {other} has no tenants"),
     };
@@ -529,7 +538,12 @@ mod tests {
         for script in [pg, my, mongo] {
             assert!(!script.command.join(" ").contains("new456"));
         }
-        assert!(root_password_script(&info("redis"), "", "new456").is_err());
+        let redis = root_password_script(&info("redis"), "old123", "new456").unwrap();
+        assert_eq!(redis.content, "CONFIG SET requirepass new456\n");
+        assert_eq!(redis.env, ["REDISCLI_AUTH=old123"]);
+        // A Redis from before the password signs in without one.
+        let open = root_password_script(&info("redis"), "", "new456").unwrap();
+        assert!(open.env.is_empty());
         assert!(root_password_script(&info("postgres"), "old", "x'; DROP").is_err());
     }
 

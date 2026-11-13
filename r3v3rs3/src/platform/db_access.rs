@@ -196,15 +196,18 @@ impl Platform {
         Ok(Credentials::root(&db.info, password))
     }
 
-    /// Replaces the value of the password variable of the engine and keeps the others.
+    /// Replaces the value of the password variable of the engine and keeps the others. An empty
+    /// password removes the variable, as on a Redis from before the password.
     async fn set_root_password(&self, db: &Database, password: &str) -> anyhow::Result<()> {
         let mut entries = self.env(db.app.id).await?;
         entries.retain(|entry| entry.key.as_str() != db.info.password_env);
-        entries.push(EnvEntry {
-            key: db.info.password_env.parse()?,
-            value: Some(password.to_string()),
-            secret: true,
-        });
+        if !password.is_empty() {
+            entries.push(EnvEntry {
+                key: db.info.password_env.parse()?,
+                value: Some(password.to_string()),
+                secret: true,
+            });
+        }
         self.set_env(db.app.id, entries).await
     }
 

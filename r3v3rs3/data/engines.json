@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": 1794561881000,
+  "updated_at": 1794575968000,
   "engines": [
     {
       "engine": "postgres",
@@ -74,8 +74,8 @@
         "redis:8-alpine"
       ],
       "container_port": 6379,
-      "password_env": "",
-      "user": "",
+      "password_env": "REDIS_PASSWORD",
+      "user": "default",
       "default_db": "",
       "url_scheme": "redis",
       "env_prefix": "REDIS",

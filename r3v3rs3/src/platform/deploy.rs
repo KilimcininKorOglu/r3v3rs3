@@ -934,7 +934,7 @@ impl Platform {
             extra_hosts,
             log_max_size: None,
             log_max_file: None,
-            command: None,
+            command: database_command(job.spec.database.as_deref()),
         })
     }
 
@@ -1505,6 +1505,22 @@ async fn ensure_database_running(
     } else {
         bail!("the database {name} is not running")
     }
+}
+
+/// The start command of a database container, when the image does not read its password
+/// from the environment. Redis takes the password of its default user only on the command
+/// line, so the shell reads it from `REDIS_PASSWORD` and the container spec never holds it; a
+/// Redis without the variable starts without a password, as before. The image entrypoint runs
+/// the server as the `redis` user.
+pub(crate) fn database_command(engine: Option<&str>) -> Option<Vec<String>> {
+    (engine == Some("redis")).then(|| {
+        vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "exec docker-entrypoint.sh redis-server ${REDIS_PASSWORD:+--requirepass \"$REDIS_PASSWORD\"}"
+                .to_string(),
+        ]
+    })
 }
 
 /// The environment entries of a database connection: the variables of the engine,
@@ -2401,6 +2417,20 @@ mod tests {
         expected.sort();
         assert_eq!(platform.tenants(db_id).await?, expected);
         Ok(())
+    }
+
+    #[test]
+    fn only_redis_reads_its_password_on_the_start_command() {
+        let command = database_command(Some("redis")).expect("the redis command");
+        let shell = command.join(" ");
+        assert!(
+            shell.contains("--requirepass \"$REDIS_PASSWORD\""),
+            "{shell}"
+        );
+        // The value stays in the environment, out of the container spec.
+        assert!(shell.contains("${REDIS_PASSWORD:+"), "{shell}");
+        assert_eq!(database_command(Some("postgres")), None);
+        assert_eq!(database_command(None), None);
     }
 
     /// `setup_with_database` with the app deployed once.

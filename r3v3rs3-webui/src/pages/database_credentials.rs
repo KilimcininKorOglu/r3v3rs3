@@ -135,10 +135,9 @@ fn account_row(ctx: &RowContext<'_>, account: &DatabaseAccount) -> Html {
         .as_deref()
         .map(|tenant| app_names(ctx.apps, ctx.tenants, tenant))
         .unwrap_or_default();
-    // Redis has no root password to change.
-    let resettable = account.tenant.is_some() || !account.password.is_empty();
-    let reset = resettable
-        .then(|| reset_on_click(locale, ctx.id, account.tenant.clone(), ctx.reload.clone()));
+    // A root account without a password, a Redis from before the password, gets its first
+    // password through the same button.
+    let reset = reset_on_click(locale, ctx.id, account.tenant.clone(), ctx.reload.clone());
     let delete = account
         .tenant
         .as_ref()
@@ -157,13 +156,12 @@ fn account_row(ctx: &RowContext<'_>, account: &DatabaseAccount) -> Html {
             <td class="py-1.5 text-neutral-400">{apps}</td>
             <td class="py-1.5 text-right">
                 <div class="inline-flex items-center justify-end gap-1.5">
-                    if let Some(onclick) = reset {
-                        <ActionIconButton
-                            variant={ActionVariant::Restore}
-                            title={locale.t("databases.reset_password").to_string()}
-                            {onclick}
-                        />
-                    }
+                    <ActionIconButton
+                        variant={ActionVariant::Restore}
+                        title={locale.t("databases.reset_password").to_string()}
+                        onclick={reset}
+                    />
+
                     if let Some(onclick) = delete {
                         <ActionIconButton
                             variant={ActionVariant::Delete}

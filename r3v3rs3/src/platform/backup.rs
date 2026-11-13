@@ -1775,7 +1775,7 @@ async fn capture_engine_wal(
         "postgres" => capture_postgres_wal(runtime, container, info, password).await,
         "mariadb" | "mysql" => capture_mysql_wal(runtime, container, password).await,
         "mongodb" => capture_mongodb_oplog(runtime, container, info, password).await,
-        "redis" => capture_redis_aof(runtime, container, info).await,
+        "redis" => capture_redis_aof(runtime, container, info, password).await,
         other => anyhow::bail!("engine {other} does not support WAL archiving"),
     }
 }
@@ -1900,13 +1900,14 @@ async fn capture_redis_aof(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
     info: &EngineInfo,
+    password: &str,
 ) -> anyhow::Result<(String, Vec<u8>)> {
     let filename = format!("aof-{}.rdb", unix_ms());
     runtime
         .exec_capture(
             container,
             vec!["redis-cli".into(), "SAVE".into()],
-            Vec::new(),
+            redis_auth(password),
         )
         .await?;
     let path = format!("{}/dump.rdb", info.data_path);
@@ -2018,11 +2019,7 @@ async fn run_restore(
             match uploaded {
                 Ok(()) => Some(
                     runtime
-                        .exec_capture(
-                            container,
-                            vec!["redis-cli".into(), "SHUTDOWN".into(), "NOSAVE".into()],
-                            Vec::new(),
-                        )
+                        .exec_capture(container, plan.command.clone(), plan.env.clone())
                         .await,
                 ),
                 Err(err) => Some(Err(err)),
@@ -2085,7 +2082,7 @@ fn dump_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Result<
         "redis" => DumpPlan {
             // SAVE blocks until the dump file is complete, unlike BGSAVE.
             command: vec!["redis-cli".into(), "SAVE".into()],
-            env: Vec::new(),
+            env: redis_auth(password),
             file: Some(format!("{}/dump.rdb", info.data_path)),
         },
         other => anyhow::bail!("the engine {other} has no backup command"),
@@ -2143,11 +2140,21 @@ fn restore_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Resu
         "redis" => RestorePlan {
             upload: None,
             command: vec!["redis-cli".into(), "SHUTDOWN".into(), "NOSAVE".into()],
-            env: Vec::new(),
+            env: redis_auth(password),
         },
         other => anyhow::bail!("the engine {other} has no restore command"),
     };
     Ok(plan)
+}
+
+/// The environment that signs `redis-cli` in with the password of the default user. A Redis
+/// from before the password, which has none, takes no sign-in.
+pub(super) fn redis_auth(password: &str) -> Vec<String> {
+    if password.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!("REDISCLI_AUTH={password}")]
+    }
 }
 
 /// The id of a new backup: the time and four random bytes, both in hex.
