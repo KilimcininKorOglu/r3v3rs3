@@ -1136,13 +1136,15 @@ fn render_diff_row(
 
     html! {
         <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-700/30">
-            <td class="py-2.5 px-3 font-semibold text-neutral-900 dark:text-neutral-100 flex items-center space-x-1.5">
-                <span>{&key_str}</span>
-                {(entry.source_secret || entry.target_secret).then(|| html! {
-                    <span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300">
-                        {"🔒"}
-                    </span>
-                })}
+            <td class="py-2.5 px-3 font-semibold text-neutral-900 dark:text-neutral-100">
+                <div class="flex items-center gap-1.5">
+                    <span>{&key_str}</span>
+                    {(entry.source_secret || entry.target_secret).then(|| html! {
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300">
+                            {"🔒"}
+                        </span>
+                    })}
+                </div>
             </td>
             <td class="py-2.5 px-3">
                 {render_diff_val_cell(locale, entry.source_present, entry.source_secret, &entry.source_value)}
