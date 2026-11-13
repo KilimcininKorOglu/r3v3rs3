@@ -2,7 +2,7 @@
 
 use super::app_files::format_bytes;
 use super::resource_page::{FormCard, Notice, delete_on_click, form_modal, notice_view};
-use super::settings::{fetch_json, format_network_error, send_json, send_request};
+use super::settings::{failure_box, fetch_json, format_network_error, send_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -219,7 +219,7 @@ pub fn backups() -> Html {
     let overview = use_state(Option::<BackupsOverview>::default);
     let backups = use_state(Vec::<BackupEntry>::new);
     let databases = use_state(Vec::<AppEntry>::new);
-    let s3_snapshots = use_state(Vec::<S3BackupSnapshot>::new);
+    let s3_snapshots = use_state(|| Ok::<_, String>(Vec::<S3BackupSnapshot>::new()));
     let config = use_state(BackupConfig::default);
     let form = use_state(FormState::default);
     let search = use_state(String::new);
@@ -740,10 +740,14 @@ fn render_backup_row(
 
 fn render_s3_drawer(
     locale: Locale,
-    snapshots: &[S3BackupSnapshot],
+    snapshots: &Result<Vec<S3BackupSnapshot>, String>,
     can_edit: bool,
     reload: Callback<()>,
 ) -> Html {
+    let snapshots = match snapshots {
+        Ok(snapshots) => snapshots,
+        Err(err) => return html! { <div class={classes!(CARD, "p-4")}>{ failure_box(err) }</div> },
+    };
     let rows = snapshots
         .iter()
         .map(|s| render_s3_row(locale, s, can_edit, reload.clone()))
@@ -1140,72 +1144,64 @@ fn load_data(
     overview: UseStateHandle<Option<BackupsOverview>>,
     backups: UseStateHandle<Vec<BackupEntry>>,
     databases: UseStateHandle<Vec<AppEntry>>,
-    s3_snapshots: UseStateHandle<Vec<S3BackupSnapshot>>,
+    s3_snapshots: UseStateHandle<Result<Vec<S3BackupSnapshot>, String>>,
     config: UseStateHandle<BackupConfig>,
     form: UseStateHandle<FormState>,
     notice: UseStateHandle<Option<Notice<&'static str>>>,
 ) {
-    let ov = overview.clone();
+    let not = notice.clone();
     spawn_local(async move {
-        if let Ok(loaded) = fetch_json::<BackupsOverview>(
+        let loaded = fetch_json(
             locale,
             Request::get(&format!("{API_ENDPOINT}/backups/overview")),
         )
         .await
-        {
-            ov.set(Some(loaded));
-        }
+        .map(Some);
+        set_loaded(&overview, &not, loaded);
     });
 
-    let bk = backups.clone();
     let not = notice.clone();
     spawn_local(async move {
-        match fetch_json::<Vec<BackupEntry>>(
-            locale,
-            Request::get(&format!("{API_ENDPOINT}/backups")),
-        )
-        .await
-        {
-            Ok(loaded) => bk.set(loaded),
-            Err(err) => not.set(Some(Notice::Failed(err))),
-        }
+        let loaded = fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/backups"))).await;
+        set_loaded(&backups, &not, loaded);
     });
 
-    let db = databases.clone();
+    let not = notice.clone();
     spawn_local(async move {
-        if let Ok(loaded) =
-            fetch_json::<Vec<AppEntry>>(locale, Request::get(&format!("{API_ENDPOINT}/databases")))
-                .await
-        {
-            db.set(loaded);
-        }
+        let loaded = fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/databases"))).await;
+        set_loaded(&databases, &not, loaded);
     });
 
-    let s3 = s3_snapshots.clone();
+    // A missing S3 setup is an error of this request, so the S3 drawer shows it
+    // and the page notice stays free for the other loads.
     spawn_local(async move {
-        if let Ok(loaded) = fetch_json::<Vec<S3BackupSnapshot>>(
-            locale,
-            Request::get(&format!("{API_ENDPOINT}/databases/s3/backups")),
-        )
-        .await
-        {
-            s3.set(loaded);
-        }
+        let path = format!("{API_ENDPOINT}/databases/s3/backups");
+        s3_snapshots.set(fetch_json(locale, Request::get(&path)).await);
     });
 
-    let cfg = config.clone();
-    let frm = form.clone();
     spawn_local(async move {
-        if let Ok(loaded) = fetch_json::<BackupConfig>(
+        let loaded = fetch_json::<BackupConfig>(
             locale,
             Request::get(&format!("{API_ENDPOINT}/backup-config")),
         )
-        .await
-        {
-            frm.set(FormState::from_config(&loaded));
-            cfg.set(loaded);
+        .await;
+        if let Ok(loaded) = &loaded {
+            form.set(FormState::from_config(loaded));
         }
+        set_loaded(&config, &notice, loaded);
     });
+}
+
+/// Stores a loaded value, or shows the error of the load in the page notice.
+fn set_loaded<T>(
+    state: &UseStateHandle<T>,
+    notice: &UseStateHandle<Option<Notice<&'static str>>>,
+    loaded: Result<T, String>,
+) {
+    match loaded {
+        Ok(value) => state.set(value),
+        Err(err) => notice.set(Some(Notice::Failed(err))),
+    }
 }
 
 #[derive(Properties, PartialEq, Clone)]
