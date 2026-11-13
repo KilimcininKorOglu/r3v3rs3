@@ -1,7 +1,7 @@
 //! Service-level health, container status and architecture topology for Docker Compose applications.
 
 use super::Route;
-use super::settings::fetch_json;
+use super::settings::{failure_box, fetch_json};
 use crate::API_ENDPOINT;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::button::{Button, ButtonKind, ButtonSize};
@@ -33,25 +33,31 @@ pub struct Props {
 pub fn app_services(props: &Props) -> Html {
     let locale = props.locale;
     let id = props.id;
-    let services = use_state(|| Option::<Vec<ComposeServiceStatus>>::None);
-    let topology = use_state(|| Option::<ComposeTopology>::None);
+    let state = ServicesState {
+        services: use_state(|| None),
+        topology: use_state(|| None),
+        error: use_state(|| None),
+    };
     let view_mode = use_state(|| ComposeViewMode::Graph);
 
     {
-        let services = services.clone();
-        let topology = topology.clone();
+        let state = state.clone();
         use_effect_with(id, move |&id| {
-            load_data(locale, id, services, topology);
+            load_data(locale, id, state);
         });
     }
 
     let refresh = {
-        let services = services.clone();
-        let topology = topology.clone();
+        let state = state.clone();
         Callback::from(move |_: MouseEvent| {
-            load_data(locale, id, services.clone(), topology.clone());
+            load_data(locale, id, state.clone());
         })
     };
+    let ServicesState {
+        services,
+        topology,
+        error,
+    } = state;
 
     let navigator = use_navigator();
     let open_log = Callback::from(move |_: MouseEvent| {
@@ -60,6 +66,9 @@ pub fn app_services(props: &Props) -> Html {
         }
     });
 
+    if let Some(err) = error.as_deref() {
+        return html! { <div class="mt-8">{ failure_box(err) }</div> };
+    }
     let Some(list) = (*services).as_ref() else {
         return html! {};
     };
@@ -71,19 +80,28 @@ pub fn app_services(props: &Props) -> Html {
     html! {
         <div class="mt-8 bg-white dark:bg-neutral-800 shadow-sm border border-neutral-300 dark:border-neutral-700 rounded-md p-4 sm:p-6">
             { render_header(locale, &view_mode, &refresh) }
-
-            if *view_mode == ComposeViewMode::Graph {
-                if let Some(topo) = (*topology).as_ref() {
-                    <ComposeTopologyGraph topology={topo.clone()} {locale} />
-                } else {
-                    <div class="py-8 text-center text-xs text-neutral-400">
-                        {locale.t("compose.topology_empty")}
-                    </div>
-                }
-            } else {
-                { services_table(locale, &open_log, list) }
-            }
+            { render_body(locale, *view_mode, topology.as_ref(), list, &open_log) }
         </div>
+    }
+}
+
+fn render_body(
+    locale: Locale,
+    view_mode: ComposeViewMode,
+    topology: Option<&ComposeTopology>,
+    list: &[ComposeServiceStatus],
+    open_log: &Callback<MouseEvent>,
+) -> Html {
+    match (view_mode, topology) {
+        (ComposeViewMode::Table, _) => services_table(locale, open_log, list),
+        (ComposeViewMode::Graph, Some(topo)) => html! {
+            <ComposeTopologyGraph topology={topo.clone()} {locale} />
+        },
+        (ComposeViewMode::Graph, None) => html! {
+            <div class="py-8 text-center text-xs text-neutral-500 dark:text-neutral-400">
+                {locale.t("compose.topology_empty")}
+            </div>
+        },
     }
 }
 
@@ -125,21 +143,30 @@ fn render_header(
     }
 }
 
-fn load_data(
-    locale: Locale,
-    id: ShortId,
+/// The loaded services and topology of an app, and the error of the last load.
+#[derive(Clone)]
+struct ServicesState {
     services: UseStateHandle<Option<Vec<ComposeServiceStatus>>>,
     topology: UseStateHandle<Option<ComposeTopology>>,
-) {
+    error: UseStateHandle<Option<String>>,
+}
+
+fn load_data(locale: Locale, id: ShortId, state: ServicesState) {
     spawn_local(async move {
         let path = format!("{API_ENDPOINT}/apps/{id}/services");
-        if let Ok(list) = fetch_json::<Vec<ComposeServiceStatus>>(locale, Request::get(&path)).await
-        {
-            services.set(Some(list));
-        }
         let topo_path = format!("{API_ENDPOINT}/apps/{id}/topology");
-        if let Ok(topo) = fetch_json::<ComposeTopology>(locale, Request::get(&topo_path)).await {
-            topology.set(Some(topo));
+        let loaded = async {
+            let list = fetch_json::<Vec<ComposeServiceStatus>>(locale, Request::get(&path)).await?;
+            let topo = fetch_json::<ComposeTopology>(locale, Request::get(&topo_path)).await?;
+            Ok::<_, String>((list, topo))
+        };
+        match loaded.await {
+            Ok((list, topo)) => {
+                state.services.set(Some(list));
+                state.topology.set(Some(topo));
+                state.error.set(None);
+            }
+            Err(err) => state.error.set(Some(err)),
         }
     });
 }
