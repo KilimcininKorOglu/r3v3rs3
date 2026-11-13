@@ -1,7 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::{Router, routing::get};
+use axum::{
+    Router,
+    routing::{MethodRouter, get},
+};
 use r3v3rs3_api::policy::ConcurrencyLimit;
 use r3v3rs3_api::proxy::HttpProxy;
 use reqwest::{StatusCode, header::RETRY_AFTER};
@@ -9,38 +12,29 @@ use tokio::sync::Notify;
 
 mod common;
 use common::{
-    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route,
+    TestPort, TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route,
     serve_http_upstream, with_server,
 };
+
+/// Builds a GET route that answers with `body` only after `gate` is notified.
+fn gated_route(gate: Arc<Notify>, body: &'static str) -> MethodRouter {
+    get(move || {
+        let g = gate.clone();
+        async move {
+            g.notified().await;
+            body
+        }
+    })
+}
 
 #[tokio::test]
 async fn concurrency_limit_rejects_excess_in_flight_requests_per_ip() -> anyhow::Result<()> {
     let gate1 = Arc::new(Notify::new());
-    let g1 = gate1.clone();
     let gate2 = Arc::new(Notify::new());
-    let g2 = gate2.clone();
 
     let app = Router::new()
-        .route(
-            "/slow1",
-            get(move || {
-                let g = g1.clone();
-                async move {
-                    g.notified().await;
-                    "slow1 done"
-                }
-            }),
-        )
-        .route(
-            "/slow2",
-            get(move || {
-                let g = g2.clone();
-                async move {
-                    g.notified().await;
-                    "slow2 done"
-                }
-            }),
-        )
+        .route("/slow1", gated_route(gate1.clone(), "slow1 done"))
+        .route("/slow2", gated_route(gate2.clone(), "slow2 done"))
         .route("/fast", get(|| async { "fast done" }));
 
     let upstream = serve_http_upstream(app).await?;
@@ -61,68 +55,66 @@ async fn concurrency_limit_rejects_excess_in_flight_requests_per_ip() -> anyhow:
         .proxies(vec![http_proxy_entry("proxy", "test", proxy)])
         .build();
 
-    with_server(config, |_| async move {
-        let client = reqwest::Client::new();
+    with_server(config, |_| check_per_ip_limit(port, gate1, gate2)).await
+}
 
-        let slow1_url = port.http_url("/slow1");
-        let slow2_url = port.http_url("/slow2");
-        let fast_url = port.http_url("/fast");
+/// Holds two slow requests from one IP, checks that a third gets 429 with `Retry-After: 1`,
+/// and that a request passes again once a slot is free.
+async fn check_per_ip_limit(
+    port: TestPort,
+    gate1: Arc<Notify>,
+    gate2: Arc<Notify>,
+) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
 
-        let c1 = client.clone();
-        let h1 = tokio::spawn(async move { c1.get(slow1_url).send().await });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    let slow1_url = port.http_url("/slow1");
+    let slow2_url = port.http_url("/slow2");
+    let fast_url = port.http_url("/fast");
 
-        let c2 = client.clone();
-        let h2 = tokio::spawn(async move { c2.get(slow2_url).send().await });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    let c1 = client.clone();
+    let h1 = tokio::spawn(async move { c1.get(slow1_url).send().await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // 3rd concurrent request from the same IP must be rejected with 429
-        let resp3 = client.get(fast_url.clone()).send().await?;
-        assert_eq!(resp3.status(), StatusCode::TOO_MANY_REQUESTS);
-        assert_eq!(
-            resp3
-                .headers()
-                .get(RETRY_AFTER)
-                .and_then(|v| v.to_str().ok()),
-            Some("1")
-        );
+    let c2 = client.clone();
+    let h2 = tokio::spawn(async move { c2.get(slow2_url).send().await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // Release first request
-        gate1.notify_one();
-        let res1 = h1.await??;
-        assert_eq!(res1.status(), StatusCode::OK);
+    // 3rd concurrent request from the same IP must be rejected with 429
+    let resp3 = client.get(fast_url.clone()).send().await?;
+    assert_eq!(resp3.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(retry_after(&resp3), Some("1"));
 
-        // Now a slot is free, fast request succeeds
-        let resp4 = client.get(fast_url).send().await?;
-        assert_eq!(resp4.status(), StatusCode::OK);
+    // Release first request
+    gate1.notify_one();
+    let res1 = h1.await??;
+    assert_eq!(res1.status(), StatusCode::OK);
 
-        // Release second request
-        gate2.notify_one();
-        let res2 = h2.await??;
-        assert_eq!(res2.status(), StatusCode::OK);
+    // Now a slot is free, fast request succeeds
+    let resp4 = client.get(fast_url).send().await?;
+    assert_eq!(resp4.status(), StatusCode::OK);
 
-        Ok(())
-    })
-    .await
+    // Release second request
+    gate2.notify_one();
+    let res2 = h2.await??;
+    assert_eq!(res2.status(), StatusCode::OK);
+
+    Ok(())
+}
+
+/// Returns the `Retry-After` header of a response as text.
+fn retry_after(resp: &reqwest::Response) -> Option<&str> {
+    resp.headers()
+        .get(RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
 }
 
 #[tokio::test]
 async fn concurrency_limit_groups_by_custom_header_and_allows_route_override() -> anyhow::Result<()>
 {
     let gate = Arc::new(Notify::new());
-    let g = gate.clone();
 
     let app = Router::new()
-        .route(
-            "/hold",
-            get(move || {
-                let g = g.clone();
-                async move {
-                    g.notified().await;
-                    "held"
-                }
-            }),
-        )
+        .route("/hold", gated_route(gate.clone(), "held"))
         .route("/", get(|| async { "unlimited done" }))
         .route("/unlimited", get(|| async { "unlimited done" }));
 
@@ -150,45 +142,48 @@ async fn concurrency_limit_groups_by_custom_header_and_allows_route_override() -
         .proxies(vec![http_proxy_entry("proxy", "test", proxy)])
         .build();
 
-    with_server(config, |_| async move {
-        let client = reqwest::Client::new();
-        let hold_url = port.http_url("/hold");
-        let unlimited_url = port.http_url("/unlimited");
+    with_server(config, |_| check_header_groups(port, gate)).await
+}
 
-        // Key A takes the slot
-        let c = client.clone();
-        let u = hold_url.clone();
-        let h_a = tokio::spawn(async move { c.get(u).header("x-api-key", "key-a").send().await });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+/// Checks that each `x-api-key` value has its own slot, that a second request with the same key
+/// gets 429, and that a route with `max: 0` is not limited.
+async fn check_header_groups(port: TestPort, gate: Arc<Notify>) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    let hold_url = port.http_url("/hold");
+    let unlimited_url = port.http_url("/unlimited");
 
-        // Key B has its own concurrency slot, so Key B gets in to hold
-        let c = client.clone();
-        let u = hold_url.clone();
-        let h_b = tokio::spawn(async move { c.get(u).header("x-api-key", "key-b").send().await });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    // Key A takes the slot
+    let c = client.clone();
+    let u = hold_url.clone();
+    let h_a = tokio::spawn(async move { c.get(u).header("x-api-key", "key-a").send().await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // Second request with Key A is rejected
-        let resp_a2 = client
-            .get(hold_url)
-            .header("x-api-key", "key-a")
-            .send()
-            .await?;
-        assert_eq!(resp_a2.status(), StatusCode::TOO_MANY_REQUESTS);
+    // Key B has its own concurrency slot, so Key B gets in to hold
+    let c = client.clone();
+    let u = hold_url.clone();
+    let h_b = tokio::spawn(async move { c.get(u).header("x-api-key", "key-b").send().await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // Route with concurrency override (max: 0) is not limited
-        let resp_unlimited = client
-            .get(unlimited_url)
-            .header("x-api-key", "key-a")
-            .send()
-            .await?;
-        assert_eq!(resp_unlimited.status(), StatusCode::OK);
+    // Second request with Key A is rejected
+    let resp_a2 = client
+        .get(hold_url)
+        .header("x-api-key", "key-a")
+        .send()
+        .await?;
+    assert_eq!(resp_a2.status(), StatusCode::TOO_MANY_REQUESTS);
 
-        // Release both in-flight requests
-        gate.notify_waiters();
-        assert_eq!(h_a.await??.status(), StatusCode::OK);
-        assert_eq!(h_b.await??.status(), StatusCode::OK);
+    // Route with concurrency override (max: 0) is not limited
+    let resp_unlimited = client
+        .get(unlimited_url)
+        .header("x-api-key", "key-a")
+        .send()
+        .await?;
+    assert_eq!(resp_unlimited.status(), StatusCode::OK);
 
-        Ok(())
-    })
-    .await
+    // Release both in-flight requests
+    gate.notify_waiters();
+    assert_eq!(h_a.await??.status(), StatusCode::OK);
+    assert_eq!(h_b.await??.status(), StatusCode::OK);
+
+    Ok(())
 }
