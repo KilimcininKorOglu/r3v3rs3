@@ -10,7 +10,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ipnet::IpNet;
 use r3v3rs3::certs::Cert;
-use r3v3rs3::server::Server;
+use r3v3rs3::server::{Server, ServerChannels};
 use r3v3rs3::{
     admin::{start_admin, start_admin_in_process},
     config::new_appinfo,
@@ -153,21 +153,62 @@ where
     F: FnOnce(Panel) -> O,
     O: Future<Output = anyhow::Result<()>>,
 {
+    let dir = panel_dir().await?;
+    let (panel, storage) = new_panel(admin_trusted_proxies, username).await?;
+
+    let (server, channels) = Server::new(new_appinfo(&dir.0, &dir.0), storage).await;
+    let event = channels.event.clone();
+    let task = tokio::spawn(server.start());
+    spawn_admin(listen, &dir.0, panel.admin, channels);
+    wait_for_panel(&panel).await?;
+    let result = func(panel).await;
+    event.send(r3v3rs3_api::event::ServerEvent::Shutdown)?;
+    task.await??;
+    result
+}
+
+/// Allocates the HTTPS, HTTP and admin ports, creates the root certificate, and returns the
+/// panel with its storage.
+async fn new_panel(
+    admin_trusted_proxies: Vec<IpNet>,
+    username: &str,
+) -> anyhow::Result<(Panel, TestStorage)> {
+    let https = alloc_tcp_port().await?;
+    let http = alloc_tcp_port().await?;
+    let admin = alloc_tcp_port().await?.socket_addr();
+    let panel = Panel {
+        admin,
+        public: format!("https://{PANEL_HOST}:{}", https.socket_addr().port()),
+        plain: format!("http://{PANEL_HOST}:{}", http.socket_addr().port()),
+        root: Arc::new(Cert::new_ca()?),
+    };
+    let storage = panel_storage(&panel, &https, &http, admin_trusted_proxies, username)?;
+    Ok((panel, storage))
+}
+
+/// Creates a temporary directory with a log database for the admin API.
+async fn panel_dir() -> anyhow::Result<TempDir> {
     let unique = hex::encode(rand::random::<[u8; 8]>());
     let dir = TempDir(std::env::temp_dir().join(format!("r3v3rs3-panel-proxy-{unique}")));
     std::fs::create_dir_all(&dir.0)?;
     DatabaseLayer::new(&dir.0.join("log.db"), LevelFilter::INFO).await?;
+    Ok(dir)
+}
 
-    let https = alloc_tcp_port().await?;
-    let http = alloc_tcp_port().await?;
-    let admin = alloc_tcp_port().await?.socket_addr();
-    let public = format!("https://{PANEL_HOST}:{}", https.socket_addr().port());
-    let plain = format!("http://{PANEL_HOST}:{}", http.socket_addr().port());
-    let root = Arc::new(Cert::new_ca()?);
-    let cert = Arc::new(Cert::new_self_signed(&[PANEL_HOST.parse()?], &root)?);
+/// Builds the storage of the panel: the public URL with MCP on, the admin account, the HTTPS
+/// and HTTP ports, the panel proxy and a certificate for the panel host from the panel root.
+fn panel_storage(
+    panel: &Panel,
+    https: &TestPort,
+    http: &TestPort,
+    admin_trusted_proxies: Vec<IpNet>,
+    username: &str,
+) -> anyhow::Result<TestStorage> {
+    let root = &panel.root;
+    let cert = Arc::new(Cert::new_self_signed(&[PANEL_HOST.parse()?], root)?);
 
     let mut config = AppConfig {
-        public_url: Some(public.parse()?),
+        public_url: Some(panel.public.parse()?),
         mcp: McpConfig {
             enabled: true,
             clients: Vec::new(),
@@ -175,24 +216,24 @@ where
         ..Default::default()
     };
     config.admin.trusted_proxies = admin_trusted_proxies;
-    let mut proxy = http_proxy_entry("panel", "https", panel_proxy(admin));
+    let mut proxy = http_proxy_entry("panel", "https", panel_proxy(panel.admin));
     proxy.proxy.ports.push("http".parse()?);
-    let storage = TestStorage::builder()
+    Ok(TestStorage::builder()
         .config(config)
         .account(username, PASSWORD, Role::Admin, None)
-        .ports(vec![https_port(&https), http_port_entry("http", &http)])
+        .ports(vec![https_port(https), http_port_entry("http", http)])
         .proxies(vec![proxy])
         .certs(
             [(root.id, root.clone()), (cert.id, cert.clone())]
                 .into_iter()
                 .collect(),
         )
-        .build();
+        .build())
+}
 
-    let (server, channels) = Server::new(new_appinfo(&dir.0, &dir.0), storage).await;
-    let event = channels.event.clone();
-    let task = tokio::spawn(server.start());
-    let app_info = new_appinfo(&dir.0, &dir.0);
+/// Starts the admin API with its TCP listener, or in process only when `listen` is off.
+fn spawn_admin(listen: bool, dir: &std::path::Path, admin: SocketAddr, channels: ServerChannels) {
+    let app_info = new_appinfo(dir, dir);
     if listen {
         tokio::spawn(start_admin(
             app_info,
@@ -214,17 +255,6 @@ where
             upgrade,
         ));
     }
-    let panel = Panel {
-        admin,
-        public,
-        plain,
-        root,
-    };
-    wait_for_panel(&panel).await?;
-    let result = func(panel).await;
-    event.send(r3v3rs3_api::event::ServerEvent::Shutdown)?;
-    task.await??;
-    result
 }
 
 /// Waits until the proxy forwards to the admin API.
@@ -417,15 +447,8 @@ async fn approve(
         .ok_or_else(|| anyhow::anyhow!("the consent sent no code: {location}"))
 }
 
-/// An MCP host signs in through the proxy: the metadata names the public URL, the consent
-/// grants both scopes, the token opens the MCP endpoint, and the audit log records the internet
-/// address of the browser that approved it.
-async fn an_mcp_client_signs_in_through_the_proxy(
-    panel: Panel,
-    username: &str,
-) -> anyhow::Result<()> {
-    let client = "203.0.113.52";
-    let browser = panel.browser(client)?;
+/// Checks that the authorization server metadata names the public URL of the panel.
+async fn check_metadata(panel: &Panel, browser: &Client) -> anyhow::Result<()> {
     let metadata: Value = browser
         .get(panel.url("/.well-known/oauth-authorization-server"))
         .send()
@@ -435,29 +458,39 @@ async fn an_mcp_client_signs_in_through_the_proxy(
         .await?;
     assert_eq!(metadata["issuer"], json!(panel.public));
     assert_eq!(metadata["token_endpoint"], json!(panel.url("/oauth/token")));
+    Ok(())
+}
 
-    let client_id = register(&panel, &browser).await?;
-    let cookie = cookie_pair(&sign_in(&panel, &browser, username).await?);
-    let verifier = URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
-    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-    let code = approve(&panel, &browser, &cookie, &client_id, &challenge).await?;
-
-    let tokens: Value = browser
+/// Exchanges the authorization code with the PKCE verifier and returns the token answer.
+async fn exchange_code(
+    panel: &Panel,
+    browser: &Client,
+    code: &str,
+    client_id: &str,
+    verifier: &str,
+) -> anyhow::Result<Value> {
+    Ok(browser
         .post(panel.url("/oauth/token"))
         .form(&[
             ("grant_type", "authorization_code"),
-            ("code", code.as_str()),
+            ("code", code),
             ("redirect_uri", REDIRECT_URI),
-            ("client_id", client_id.as_str()),
-            ("code_verifier", verifier.as_str()),
+            ("client_id", client_id),
+            ("code_verifier", verifier),
         ])
         .send()
         .await?
         .error_for_status()?
         .json()
-        .await?;
-    assert_eq!(tokens["scope"], json!("read edit"));
+        .await?)
+}
 
+/// Checks that the access token opens the MCP endpoint with an `initialize` request.
+async fn check_mcp_initialize(
+    panel: &Panel,
+    browser: &Client,
+    tokens: &Value,
+) -> anyhow::Result<()> {
     let mcp = browser
         .post(panel.url("/api/mcp"))
         .bearer_auth(tokens["access_token"].as_str().unwrap_or_default())
@@ -470,6 +503,30 @@ async fn an_mcp_client_signs_in_through_the_proxy(
         .send()
         .await?;
     assert_eq!(mcp.status(), StatusCode::OK);
+    Ok(())
+}
+
+/// An MCP host signs in through the proxy: the metadata names the public URL, the consent
+/// grants both scopes, the token opens the MCP endpoint, and the audit log records the internet
+/// address of the browser that approved it.
+async fn an_mcp_client_signs_in_through_the_proxy(
+    panel: Panel,
+    username: &str,
+) -> anyhow::Result<()> {
+    let client = "203.0.113.52";
+    let browser = panel.browser(client)?;
+    check_metadata(&panel, &browser).await?;
+
+    let client_id = register(&panel, &browser).await?;
+    let cookie = cookie_pair(&sign_in(&panel, &browser, username).await?);
+    let verifier = URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
+    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    let code = approve(&panel, &browser, &cookie, &client_id, &challenge).await?;
+
+    let tokens = exchange_code(&panel, &browser, &code, &client_id, &verifier).await?;
+    assert_eq!(tokens["scope"], json!("read edit"));
+
+    check_mcp_initialize(&panel, &browser, &tokens).await?;
 
     assert_eq!(
         audit_client(&panel, &browser, &cookie, username, "authorize_mcp_client")
