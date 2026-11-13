@@ -1,4 +1,5 @@
 use super::resource_page::{FormCard, form_modal};
+use super::settings::{failure_box, fetch_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -66,36 +67,48 @@ struct CtDataHandles {
     config: UseStateHandle<Option<CtMonitorConfig>>,
     entries: UseStateHandle<Vec<CtLogEntry>>,
     loading: UseStateHandle<bool>,
+    /// The error of the last load.
+    error: UseStateHandle<Option<String>>,
 }
 
-fn create_load_data_callback(data: CtDataHandles, form: CtFormHandles) -> Callback<()> {
+fn create_load_data_callback(
+    locale: Locale,
+    data: CtDataHandles,
+    form: CtFormHandles,
+) -> Callback<()> {
     Callback::from(move |_: ()| {
         let d = data.clone();
         let f = form.clone();
         d.loading.set(true);
         spawn_local(async move {
-            refresh_all_ct_data(&d, &f).await;
+            let loaded = refresh_all_ct_data(locale, &d, &f).await;
+            d.error.set(loaded.err());
             d.loading.set(false);
         });
     })
 }
 
-async fn refresh_all_ct_data(d: &CtDataHandles, f: &CtFormHandles) {
-    if let Ok(st) = fetch_ct_status().await {
-        d.status.set(Some(st));
-    }
-    if let Ok(cfg) = fetch_ct_config().await {
-        f.enabled.set(cfg.enabled);
-        f.auto_discover.set(cfg.auto_discover_domains);
-        f.alert_unknown.set(cfg.alert_on_unknown_issuer);
-        f.interval_hours.set(cfg.check_interval_secs / 3600);
-        f.domains.set(cfg.monitored_domains.join(", "));
-        f.issuers.set(cfg.allowed_issuers.join(", "));
-        d.config.set(Some(cfg));
-    }
-    if let Ok(ents) = fetch_ct_entries().await {
-        d.entries.set(ents);
-    }
+fn ct_get(path: &str) -> gloo_net::http::RequestBuilder {
+    Request::get(&format!("{API_ENDPOINT}/certs/ct/{path}"))
+}
+
+async fn refresh_all_ct_data(
+    locale: Locale,
+    d: &CtDataHandles,
+    f: &CtFormHandles,
+) -> Result<(), String> {
+    d.status
+        .set(Some(fetch_json(locale, ct_get("status")).await?));
+    let cfg: CtMonitorConfig = fetch_json(locale, ct_get("config")).await?;
+    f.enabled.set(cfg.enabled);
+    f.auto_discover.set(cfg.auto_discover_domains);
+    f.alert_unknown.set(cfg.alert_on_unknown_issuer);
+    f.interval_hours.set(cfg.check_interval_secs / 3600);
+    f.domains.set(cfg.monitored_domains.join(", "));
+    f.issuers.set(cfg.allowed_issuers.join(", "));
+    d.config.set(Some(cfg));
+    d.entries.set(fetch_json(locale, ct_get("entries")).await?);
+    Ok(())
 }
 
 fn create_check_callback(
@@ -199,13 +212,14 @@ pub fn ct_logs() -> Html {
     let status = use_state(Option::default);
     let config = use_state(Option::default);
     let entries = use_state(Vec::default);
-    let loading = use_state(bool::default);
+    let loading = use_state(|| true);
 
     let data_handles = CtDataHandles {
         status,
         config,
         entries,
         loading,
+        error: use_state(Option::default),
     };
 
     let form_handles = CtFormHandles {
@@ -222,7 +236,7 @@ pub fn ct_logs() -> Html {
     let rogue_only = use_state(bool::default);
     let search_filter = use_state(String::default);
 
-    let load_data = create_load_data_callback(data_handles.clone(), form_handles.clone());
+    let load_data = create_load_data_callback(locale, data_handles.clone(), form_handles.clone());
     {
         let cb = load_data.clone();
         use_effect_with((), move |_| {
@@ -246,9 +260,10 @@ pub fn ct_logs() -> Html {
         <div class="space-y-6">
             { render_header(locale, *checking, check_now_onclick, toggle_settings) }
             { settings }
+            { data_handles.error.as_deref().map(failure_box).unwrap_or_default() }
             { summary }
             { render_filter_bar(locale, &rogue_only, &search_filter) }
-            { render_entries_table(locale, &filtered, load_data) }
+            { render_entries_table(locale, &filtered, !*data_handles.loading, load_data) }
         </div>
     }
 }
@@ -451,7 +466,12 @@ fn is_open_alert(entry: &CtLogEntry) -> bool {
     entry.is_rogue && entry.status != CtAlertStatus::Dismissed
 }
 
-fn render_entries_table(locale: Locale, entries: &[CtLogEntry], reload_cb: Callback<()>) -> Html {
+fn render_entries_table(
+    locale: Locale,
+    entries: &[CtLogEntry],
+    loaded: bool,
+    reload_cb: Callback<()>,
+) -> Html {
     let rows = entries
         .iter()
         .map(|entry| render_entry_row(locale, entry, reload_cb.clone()))
@@ -462,7 +482,7 @@ fn render_entries_table(locale: Locale, entries: &[CtLogEntry], reload_cb: Callb
         .map(|entry| (entry.id.clone(), ROGUE_ROW))
         .collect();
     let content = ListContent {
-        loaded: true,
+        loaded,
         empty: "certs.ct_no_entries",
         columns: &COLUMNS,
         rows: &rows,
@@ -624,30 +644,6 @@ fn build_update_config_request(
             ct_api_url: None,
         },
     }
-}
-
-async fn fetch_ct_status() -> Result<CtMonitorStatus, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/certs/ct/status"))
-        .send()
-        .await?
-        .json()
-        .await
-}
-
-async fn fetch_ct_config() -> Result<CtMonitorConfig, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/certs/ct/config"))
-        .send()
-        .await?
-        .json()
-        .await
-}
-
-async fn fetch_ct_entries() -> Result<Vec<CtLogEntry>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/certs/ct/entries"))
-        .send()
-        .await?
-        .json()
-        .await
 }
 
 async fn save_ct_config(req: UpdateCtConfigRequest) -> Result<(), gloo_net::Error> {
