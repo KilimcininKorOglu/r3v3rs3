@@ -373,6 +373,7 @@
   "certs.ct_serial": "Serial Number",
   "certs.ct_logged_at": "Logged At",
   "certs.ct_validity": "Validity",
+  "certs.ct_domain_sans": "Domain / SANs",
   "certs.ct_save_config": "Save Configuration",
   "certs.ct_config_saved": "Certificate Transparency settings saved.",
   "certs.ct_check_started": "Certificate Transparency check completed.",

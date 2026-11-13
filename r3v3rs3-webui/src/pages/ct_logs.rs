@@ -462,11 +462,11 @@ fn render_entries_table(locale: Locale, entries: &[CtLogEntry], reload_cb: Callb
             <table class="w-full text-left text-sm text-neutral-600 dark:text-neutral-300">
                 <thead class="text-xs uppercase bg-neutral-50 dark:bg-neutral-800/60 text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800">
                     <tr>
-                        <th class="px-4 py-3">{ "Domain / SANs" }</th>
+                        <th class="px-4 py-3">{ locale.t("certs.ct_domain_sans") }</th>
                         <th class="px-4 py-3">{ locale.t("certs.issuer") }</th>
                         <th class="px-4 py-3">{ locale.t("certs.ct_serial") }</th>
                         <th class="px-4 py-3">{ locale.t("certs.ct_validity") }</th>
-                        <th class="px-4 py-3">{ "Status" }</th>
+                        <th class="px-4 py-3">{ locale.t("common.status") }</th>
                         <th class="px-4 py-3 text-right">{ locale.t("common.actions") }</th>
                     </tr>
                 </thead>

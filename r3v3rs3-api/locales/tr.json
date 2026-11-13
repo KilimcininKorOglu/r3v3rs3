@@ -373,6 +373,7 @@
   "certs.ct_serial": "Seri Numarası",
   "certs.ct_logged_at": "Kayıt Zamanı",
   "certs.ct_validity": "Geçerlilik",
+  "certs.ct_domain_sans": "Alan adı / SAN'lar",
   "certs.ct_save_config": "Yapılandırmayı Kaydet",
   "certs.ct_config_saved": "Sertifika Şeffaflığı ayarları kaydedildi.",
   "certs.ct_check_started": "Sertifika Şeffaflığı denetimi tamamlandı.",
