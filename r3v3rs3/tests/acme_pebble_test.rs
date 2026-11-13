@@ -296,27 +296,45 @@ async fn a_discovered_host_gets_its_own_certificate_from_the_entry() -> anyhow::
     let (_provider, storage, request) = pebble_setup(&["site.test"], vec![port]).await?;
     let cert_storage = storage.clone();
     with_server(storage, move |mut channels| async move {
-        if let Err(err) = call(&mut channels, AddAcme { request }).await? {
-            anyhow::bail!("AddAcme failed: {err}");
-        }
-        let entries = call(&mut channels, GetAcmeList).await??;
-        let acme_id = entries
-            .first()
-            .ok_or_else(|| anyhow::anyhow!("no ACME entry"))?
-            .id;
+        let acme_id = add_acme_entry(&mut channels, request).await?;
         let entry_cert = wait_for_cert(&cert_storage, &["site.test"]).await?;
-
-        send_running_snapshot(&mut channels, acme_id).await?;
-        let host_cert = wait_for_cert(&cert_storage, &["app.site.test"]).await?;
-        let acme_ids =
-            [&entry_cert, &host_cert].map(|cert| cert.metadata.as_ref().map(|m| m.acme_id));
-        assert_eq!(acme_ids, [Some(acme_id), Some(acme_id)]);
-
-        // Each target has its own certificate, so the same snapshot starts no other order.
-        send_running_snapshot(&mut channels, acme_id).await?;
-        tokio::time::sleep(Duration::from_secs(3)).await;
-        assert_eq!(cert_storage.load_certs().await.len(), 2);
-        Ok(())
+        check_host_gets_its_own_certificate(&mut channels, &cert_storage, acme_id, entry_cert).await
     })
     .await
+}
+
+/// Adds the ACME entry and returns its id.
+async fn add_acme_entry(
+    channels: &mut ServerChannels,
+    request: AcmeRequest,
+) -> anyhow::Result<ShortId> {
+    if let Err(err) = call(channels, AddAcme { request }).await? {
+        anyhow::bail!("AddAcme failed: {err}");
+    }
+    let entries = call(channels, GetAcmeList).await??;
+    let acme_id = entries
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("no ACME entry"))?
+        .id;
+    Ok(acme_id)
+}
+
+/// Checks that the discovered host gets a certificate of the entry, and that the same snapshot
+/// starts no other order.
+async fn check_host_gets_its_own_certificate(
+    channels: &mut ServerChannels,
+    cert_storage: &TestStorage,
+    acme_id: ShortId,
+    entry_cert: Arc<Cert>,
+) -> anyhow::Result<()> {
+    send_running_snapshot(channels, acme_id).await?;
+    let host_cert = wait_for_cert(cert_storage, &["app.site.test"]).await?;
+    let acme_ids = [&entry_cert, &host_cert].map(|cert| cert.metadata.as_ref().map(|m| m.acme_id));
+    assert_eq!(acme_ids, [Some(acme_id), Some(acme_id)]);
+
+    // Each target has its own certificate, so the same snapshot starts no other order.
+    send_running_snapshot(channels, acme_id).await?;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(cert_storage.load_certs().await.len(), 2);
+    Ok(())
 }
