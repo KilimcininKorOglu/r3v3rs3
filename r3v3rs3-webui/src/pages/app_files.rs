@@ -590,6 +590,8 @@ fn upload(
     let Some(file) = input.files().and_then(|files| files.get(0)) else {
         return;
     };
+    // An emptied input sends the change event again when the same file is chosen next time.
+    input.set_value("");
     let name = file.name();
     let target = child_path(dir, &name);
     let entries = entries.clone();
@@ -879,6 +881,7 @@ fn import_archive(
     let Some(file) = input.files().and_then(|files| files.get(0)) else {
         return;
     };
+    input.set_value("");
     let volume = volume.to_string();
     let entries = entries.clone();
     let notice = notice.clone();
