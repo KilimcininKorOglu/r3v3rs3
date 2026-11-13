@@ -1,7 +1,7 @@
 //! The files of an app: the volumes of its running container.
 
 use super::Route;
-use super::settings::fetch_json;
+use super::settings::{fetch_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::dialog;
@@ -432,13 +432,10 @@ fn open_editor(
 
 /// The file as text, or the reason why it does not open in the editor.
 async fn read_text(locale: Locale, app_id: ShortId, path: &str) -> Result<String, String> {
-    let response = Request::get(&download_url(app_id, path))
-        .send()
-        .await
+    let request = Request::get(&download_url(app_id, path))
+        .build()
         .map_err(|err| err.to_string())?;
-    if !response.ok() {
-        return Err(response.status_text());
-    }
+    let response = send_request(locale, request).await?;
     let bytes = response.binary().await.map_err(|err| err.to_string())?;
     if bytes.len() > MAX_EDIT_SIZE {
         return Err(locale.t("apps.files_too_large").to_string());
@@ -529,7 +526,7 @@ fn save_file(
     let entries = entries.clone();
     let notice = notice.clone();
     wasm_bindgen_futures::spawn_local(async move {
-        if let Err(message) = send_ok(request).await {
+        if let Err(message) = send_ok(locale, request).await {
             notice.set(Some(message));
             return;
         }
@@ -566,7 +563,7 @@ fn confirm_delete(
     };
     let notice = notice.clone();
     dialog::confirm_then(locale, question, async move {
-        if let Err(message) = send_ok(request).await {
+        if let Err(message) = send_ok(locale, request).await {
             notice.set(Some(message));
             return;
         }
@@ -574,14 +571,10 @@ fn confirm_delete(
     });
 }
 
-/// Sends `request` and accepts only a 2xx response.
-async fn send_ok(request: Request) -> Result<(), String> {
-    let response = request.send().await.map_err(|err| err.to_string())?;
-    if response.ok() {
-        Ok(())
-    } else {
-        Err(response.status_text())
-    }
+/// Sends `request` and accepts only a 2xx response. The error is the message of the admin API in
+/// the selected language.
+async fn send_ok(locale: Locale, request: Request) -> Result<(), String> {
+    send_request(locale, request).await.map(|_| ())
 }
 
 /// Uploads the file of the input into the current directory.
@@ -614,7 +607,7 @@ fn upload(
                 .query([("path", target.as_str())])
                 .body(js_sys::Uint8Array::new(&buffer))
                 .map_err(|err| err.to_string())?;
-            send_ok(request).await
+            send_ok(locale, request).await
         };
         if let Err(message) = sent.await {
             notice.set(Some(message));
@@ -827,7 +820,7 @@ fn restore_snapshot(
     let notice = notice.clone();
     let current = dir.to_string();
     dialog::confirm_then(locale, question, async move {
-        if let Err(msg) = send_ok(request).await {
+        if let Err(msg) = send_ok(locale, request).await {
             notice.set(Some(msg));
             return;
         }
@@ -854,7 +847,7 @@ fn delete_snapshot(
     let notice = notice.clone();
     let backup_id = backup_id.to_string();
     dialog::confirm_then(locale, question, async move {
-        if let Err(msg) = send_ok(request).await {
+        if let Err(msg) = send_ok(locale, request).await {
             notice.set(Some(msg));
             return;
         }
@@ -897,7 +890,7 @@ fn import_archive(
             .header("content-type", "application/gzip")
             .body(js_sys::Uint8Array::new(&buffer))
             .map_err(|err| err.to_string())?;
-            send_ok(request).await
+            send_ok(locale, request).await
         };
         if let Err(message) = sent.await {
             notice.set(Some(message));
