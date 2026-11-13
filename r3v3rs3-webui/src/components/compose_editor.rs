@@ -126,7 +126,7 @@ pub fn compose_editor(props: &ComposeEditorProps) -> Html {
     };
 
     html! {
-        <div class="border border-neutral-700 rounded-lg overflow-hidden bg-neutral-900 text-neutral-100 flex flex-col">
+        <div class="border border-neutral-300 dark:border-neutral-700 rounded-lg overflow-hidden bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 flex flex-col">
             { render_toolbar(props.locale, &tab, &show_vars, &show_templates) }
             { render_templates_menu(props.locale, &show_templates, &on_apply_template) }
             { render_variables_bar(props.locale, &show_vars, &props.suggestions, &on_insert_var) }
@@ -155,10 +155,10 @@ fn render_tab_body(
 ) -> Html {
     match tab {
         EditorTab::Edit => html! {
-            <div class="flex font-mono text-xs leading-6 overflow-x-auto bg-neutral-950">
+            <div class="flex font-mono text-xs leading-6 overflow-x-auto bg-neutral-50 dark:bg-neutral-950">
                 { render_gutter(value, error_line) }
                 <textarea
-                    class="flex-1 bg-transparent text-neutral-200 p-2 outline-none resize-y min-h-[280px] font-mono text-xs leading-6"
+                    class="flex-1 bg-transparent text-neutral-800 dark:text-neutral-200 p-2 outline-none resize-y min-h-[280px] font-mono text-xs leading-6"
                     value={value.to_string()}
                     oninput={oninput.clone()}
                     placeholder={locale.t("compose.editor_title")}
@@ -168,7 +168,7 @@ fn render_tab_body(
         },
         EditorTab::Topology => render_editor_topology(locale, value, current_service),
         EditorTab::Preview => html! {
-            <div class="p-3 bg-neutral-950 min-h-[280px] overflow-x-auto font-mono text-xs leading-6">
+            <div class="p-3 bg-neutral-50 dark:bg-neutral-950 min-h-[280px] overflow-x-auto font-mono text-xs leading-6">
                 { render_preview(value) }
             </div>
         },
@@ -178,13 +178,13 @@ fn render_tab_body(
 fn render_editor_topology(locale: Locale, value: &str, current_service: Option<&str>) -> Html {
     match parse_compose_topology(value, None, current_service) {
         Ok(topo) => html! {
-            <div class="p-3 bg-neutral-950 min-h-[280px]">
+            <div class="p-3 bg-neutral-50 dark:bg-neutral-950 min-h-[280px]">
                 <ComposeTopologyGraph topology={topo} {locale} />
             </div>
         },
         Err(err) => html! {
-            <div class="p-6 bg-neutral-950 min-h-[280px] flex items-center justify-center text-center">
-                <div class="text-xs text-rose-400 font-mono">
+            <div class="p-6 bg-neutral-50 dark:bg-neutral-950 min-h-[280px] flex items-center justify-center text-center">
+                <div class="text-xs text-rose-600 dark:text-rose-400 font-mono">
                     <span class="font-bold">{locale.t("compose.syntax_error")}{": "}</span>
                     {err}
                 </div>
@@ -232,9 +232,9 @@ fn render_toolbar(
     let topology_class = tab_button_class(**tab == EditorTab::Topology);
 
     html! {
-        <div class="flex items-center justify-between px-3 py-2 bg-neutral-900 border-b border-neutral-700/80 flex-wrap gap-2">
+        <div class="flex items-center justify-between px-3 py-2 bg-neutral-100 dark:bg-neutral-900 border-b border-neutral-300 dark:border-neutral-700/80 flex-wrap gap-2">
             <div class="flex items-center gap-1.5">
-                <span class="text-xs font-semibold text-neutral-300 mr-2 flex items-center gap-1">
+                <span class="text-xs font-semibold text-neutral-700 dark:text-neutral-300 mr-2 flex items-center gap-1">
                     <svg class="w-3.5 h-3.5 text-primary-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                         <polyline points="14 2 14 8 20 8"></polyline>
@@ -243,7 +243,7 @@ fn render_toolbar(
                     </svg>
                     {locale.t("compose.editor_title")}
                 </span>
-                <div class="inline-flex rounded-md p-0.5 bg-neutral-900 border border-neutral-700">
+                <div class="inline-flex rounded-md p-0.5 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700">
                     <button type="button" class={edit_class} onclick={set_edit}>
                         {locale.t("compose.tab_edit")}
                     </button>
@@ -258,15 +258,15 @@ fn render_toolbar(
             <div class="flex items-center gap-2">
                 <button
                     type="button"
-                    class="px-2.5 py-1 text-xs font-medium rounded border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 flex items-center gap-1"
+                    class="px-2.5 py-1 text-xs font-medium rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 flex items-center gap-1"
                     onclick={toggle_vars}
                 >
-                    <span class="text-amber-400 font-bold">{"${}"}</span>
+                    <span class="text-amber-600 dark:text-amber-400 font-bold">{"${}"}</span>
                     {locale.t("compose.insert_var")}
                 </button>
                 <button
                     type="button"
-                    class="px-2.5 py-1 text-xs font-medium rounded border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 flex items-center gap-1"
+                    class="px-2.5 py-1 text-xs font-medium rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 flex items-center gap-1"
                     onclick={toggle_templates}
                 >
                     <svg class="w-3.5 h-3.5 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -298,7 +298,7 @@ fn render_templates_menu(
     ];
 
     html! {
-        <div class="p-2.5 bg-neutral-800 border-b border-neutral-700 flex flex-wrap gap-2 items-center">
+        <div class="p-2.5 bg-neutral-100 dark:bg-neutral-800 border-b border-neutral-300 dark:border-neutral-700 flex flex-wrap gap-2 items-center">
             <span class="text-xs text-neutral-400 font-medium mr-1">{locale.t("compose.templates")}{":"}</span>
             { for templates.iter().map(|(label, content)| {
                 let on_apply = on_apply.clone();
@@ -307,7 +307,7 @@ fn render_templates_menu(
                 html! {
                     <button
                         type="button"
-                        class="px-2 py-1 text-xs rounded bg-neutral-900 border border-neutral-700 hover:border-primary-500 hover:text-primary-300 text-neutral-300 transition-colors"
+                        class="px-2 py-1 text-xs rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-300 text-neutral-700 dark:text-neutral-300 transition-colors"
                         {onclick}
                     >
                         {locale.t(label)}
@@ -345,7 +345,7 @@ fn render_variables_bar(
     }
 
     html! {
-        <div class="p-2.5 bg-neutral-800 border-b border-neutral-700 flex flex-wrap gap-1.5 items-center">
+        <div class="p-2.5 bg-neutral-100 dark:bg-neutral-800 border-b border-neutral-300 dark:border-neutral-700 flex flex-wrap gap-1.5 items-center">
             <span class="text-xs text-neutral-400 font-medium mr-1">{locale.t("compose.variables_available")}</span>
             { for all_vars.into_iter().map(|var| {
                 let on_insert = on_insert.clone();
@@ -354,7 +354,7 @@ fn render_variables_bar(
                 html! {
                     <button
                         type="button"
-                        class="px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-900 border border-amber-800/60 text-amber-300 hover:bg-amber-950/60 transition-colors"
+                        class="px-1.5 py-0.5 text-xs font-mono rounded bg-amber-50 dark:bg-neutral-900 border border-amber-300 dark:border-amber-800/60 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors"
                         {onclick}
                     >
                         {format!("${{{var}}}")}
@@ -374,9 +374,9 @@ fn render_validation_status(
     match status {
         Ok(services) => {
             html! {
-                <div class="px-3 py-1.5 bg-emerald-950/40 border-b border-emerald-800/40 text-emerald-400 text-xs flex items-center justify-between flex-wrap gap-2">
+                <div class="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-800/40 text-emerald-700 dark:text-emerald-400 text-xs flex items-center justify-between flex-wrap gap-2">
                     <div class="flex items-center gap-1.5">
-                        <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="20 6 9 17 4 12"></polyline>
                         </svg>
                         <span class="font-medium">{locale.t("compose.syntax_valid")}</span>
@@ -387,8 +387,8 @@ fn render_validation_status(
         }
         Err(err) => {
             html! {
-                <div class="px-3 py-1.5 bg-rose-950/50 border-b border-rose-800/50 text-rose-300 text-xs flex items-center gap-1.5">
-                    <svg class="w-3.5 h-3.5 text-rose-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <div class="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/50 border-b border-rose-200 dark:border-rose-800/50 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="10"></circle>
                         <line x1="12" y1="8" x2="12" y2="12"></line>
                         <line x1="12" y1="16" x2="12.01" y2="16"></line>
@@ -421,7 +421,7 @@ fn render_services_list(
                 let pill_class = if is_selected {
                     "px-2 py-0.5 text-xs font-mono rounded bg-primary-600 text-white font-medium ring-1 ring-primary-400"
                 } else {
-                    "px-2 py-0.5 text-xs font-mono rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                    "px-2 py-0.5 text-xs font-mono rounded bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-300 dark:hover:bg-neutral-700"
                 };
 
                 let onclick = onservice_selected.map(|cb| {
@@ -448,11 +448,11 @@ fn render_services_list(
 fn render_gutter(value: &str, error_line: Option<usize>) -> Html {
     let line_count = value.lines().count().max(1);
     html! {
-        <div class="select-none text-right text-neutral-500 py-2 pl-3 pr-2 bg-neutral-900 border-r border-neutral-800 w-10">
+        <div class="select-none text-right text-neutral-500 py-2 pl-3 pr-2 bg-neutral-100 dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 w-10">
             { for (1..=line_count).map(|num| {
                 let is_err = error_line == Some(num);
                 let num_class = if is_err {
-                    "text-rose-400 font-bold bg-rose-950/60 block px-0.5 rounded"
+                    "text-rose-700 dark:text-rose-400 font-bold bg-rose-100 dark:bg-rose-950/60 block px-0.5 rounded"
                 } else {
                     "block"
                 };
@@ -469,7 +469,7 @@ fn render_preview(value: &str) -> Html {
         <div class="flex flex-col">
             { for value.lines().enumerate().map(|(idx, line)| {
                 html! {
-                    <div class="flex leading-6 hover:bg-neutral-900/60">
+                    <div class="flex leading-6 hover:bg-neutral-100 dark:hover:bg-neutral-900/60">
                         <span class="w-10 text-right pr-3 select-none text-neutral-600 font-mono text-xs">{idx + 1}</span>
                         <div class="flex-1 font-mono text-xs whitespace-pre">{ render_preview_line(line) }</div>
                     </div>
@@ -488,9 +488,9 @@ fn render_preview_line(line: &str) -> Html {
     if let Some((key, val)) = line.split_once(':') {
         let is_top_key = !line.starts_with("  ") && !line.is_empty();
         let key_class = if is_top_key {
-            "text-purple-400 font-bold"
+            "text-purple-700 dark:text-purple-400 font-bold"
         } else {
-            "text-sky-300"
+            "text-sky-700 dark:text-sky-300"
         };
 
         html! {
@@ -507,7 +507,7 @@ fn render_preview_line(line: &str) -> Html {
 
 fn render_tokens_with_vars(text: &str) -> Html {
     if !text.contains("${") {
-        return html! { <span class="text-neutral-300">{text}</span> };
+        return html! { <span class="text-neutral-800 dark:text-neutral-300">{text}</span> };
     }
 
     let mut parts = Vec::new();
@@ -515,26 +515,28 @@ fn render_tokens_with_vars(text: &str) -> Html {
 
     while let Some(start) = rest.find("${") {
         if start > 0 {
-            parts.push(html! { <span class="text-neutral-300">{&rest[..start]}</span> });
+            parts.push(html! { <span class="text-neutral-800 dark:text-neutral-300">{&rest[..start]}</span> });
         }
         let after_start = &rest[start..];
         if let Some(end) = after_start.find('}') {
             let var_token = &after_start[..=end];
             parts.push(html! {
-                <span class="text-amber-300 bg-amber-950/60 font-semibold px-1 rounded border border-amber-800/40">
+                <span class="text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 font-semibold px-1 rounded border border-amber-300 dark:border-amber-800/40">
                     {var_token}
                 </span>
             });
             rest = &after_start[end + 1..];
         } else {
-            parts.push(html! { <span class="text-amber-300">{after_start}</span> });
+            parts.push(
+                html! { <span class="text-amber-700 dark:text-amber-300">{after_start}</span> },
+            );
             rest = "";
             break;
         }
     }
 
     if !rest.is_empty() {
-        parts.push(html! { <span class="text-neutral-300">{rest}</span> });
+        parts.push(html! { <span class="text-neutral-800 dark:text-neutral-300">{rest}</span> });
     }
 
     html! { <>{ for parts }</> }
@@ -542,8 +544,8 @@ fn render_tokens_with_vars(text: &str) -> Html {
 
 fn tab_button_class(active: bool) -> &'static str {
     if active {
-        "px-2.5 py-1 text-xs font-medium rounded bg-neutral-800 text-white shadow-sm"
+        "px-2.5 py-1 text-xs font-medium rounded bg-primary-600 text-white shadow-sm"
     } else {
-        "px-2.5 py-1 text-xs font-medium text-neutral-400 hover:text-white"
+        "px-2.5 py-1 text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"
     }
 }
