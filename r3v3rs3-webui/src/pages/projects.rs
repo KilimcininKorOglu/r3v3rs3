@@ -382,7 +382,10 @@ fn open_env_modal(
     spawn_local(async move {
         match load_env_modal(locale, project_id).await {
             Ok(Some(state)) => modal.set(Some(state)),
-            Ok(None) => {}
+            Ok(None) => {
+                let message = locale.t("projects.no_environments");
+                dialog::message(locale, message, dialog::Icon::Error).await;
+            }
             Err(message) => dialog::message(locale, &message, dialog::Icon::Error).await,
         }
     });

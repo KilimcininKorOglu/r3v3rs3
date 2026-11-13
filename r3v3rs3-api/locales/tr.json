@@ -2265,6 +2265,7 @@
   "projects.secret_masked": "•••••••• (Gizli)",
   "projects.select_source_target": "Karşılaştırmak için lütfen farklı kaynak ve hedef ortamlar seçin.",
   "projects.no_diff_data": "Değişken farklarını incelemek için ortamları seçip Karşılaştır'a tıklayın.",
+  "projects.no_environments": "Projenin ortamı yok.",
   "webhooks.title": "Giden Webhook'lar",
   "webhooks.subtitle": "Harici uç noktalara gerçek zamanlı olay bildirimleri ve alarmlar iletin.",
   "webhooks.empty": "Henüz yapılandırılmış webhook yok.",

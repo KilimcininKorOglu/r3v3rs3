@@ -2265,6 +2265,7 @@
   "projects.secret_masked": "•••••••• (Secret)",
   "projects.select_source_target": "Please select different source and target environments to compare.",
   "projects.no_diff_data": "Select environments and click Compare to inspect variable differences.",
+  "projects.no_environments": "The project has no environment.",
   "webhooks.title": "Outbound Webhooks",
   "webhooks.subtitle": "Deliver real-time event notifications and alerts to external endpoints.",
   "webhooks.empty": "No webhooks configured yet.",
