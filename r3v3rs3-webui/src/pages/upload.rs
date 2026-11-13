@@ -112,21 +112,19 @@ async fn upload_cert(
     key: Option<&web_sys::File>,
     kind: CertKind,
 ) -> Result<(), String> {
-    let form_data =
-        web_sys::FormData::new().map_err(|err| format!("the form could not be built: {err:?}"))?;
-    form_data
-        .append_with_blob("chain", chain)
-        .map_err(|err| format!("the chain could not be attached: {err:?}"))?;
+    // The browser fails to build form data only in an error state of its own, which has no
+    // message for the user, so every such failure shows the request failure.
+    let failed = |_| locale.t("common.request_failed").to_string();
+    let form_data = web_sys::FormData::new().map_err(failed)?;
+    form_data.append_with_blob("chain", chain).map_err(failed)?;
     if let Some(key) = key {
-        form_data
-            .append_with_blob("key", key)
-            .map_err(|err| format!("the key could not be attached: {err:?}"))?;
+        form_data.append_with_blob("key", key).map_err(failed)?;
     }
 
     let req = Request::post(&format!("{API_ENDPOINT}/certs/upload"))
         .query([("kind", kind.to_string())])
         .body(form_data)
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| crate::pages::settings::format_network_error(locale, &err))?;
 
     crate::pages::settings::send_request(locale, req).await?;
 
