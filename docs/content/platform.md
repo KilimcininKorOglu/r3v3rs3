@@ -964,7 +964,7 @@ The **Targets** page lists the local target and the agent targets with their **K
 
 An admin account also sees:
 
-- **Add an agent target** below the list. The form accepts an agent name and an optional geographical **Region** identifier (e.g. `eu`, `na`, `tr`, `apac`) for proximity-based steering. **Add** creates the target and shows its **Token** once at the top of the page, with the `install.sh` command and the `docker run` command of the agent. Copy them before you leave the page.
+- **Add** below the list, which opens the **Add an agent target** form in a modal. The form accepts an agent name and an optional geographical **Region** identifier (e.g. `eu`, `na`, `tr`, `apac`) for proximity-based steering. **Add** creates the target and shows its **Token** once at the top of the page, with the `install.sh` command and the `docker run` command of the agent. Copy them before you leave the page.
 - **Edit Region** on any target row (local or agent), which opens a modal to assign or update the node's geographical region code (`PUT /api/targets/{id}/region`) or leave it empty to clear the region.
 - **New token** on the row of an agent target, which creates a new enrollment token after a confirmation.
 - **Delete** on the row of an agent target, which deletes it after a confirmation.

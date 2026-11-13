@@ -23,7 +23,7 @@ r3v3rs3 bunları şu sırayla uygular: IP filtresi, rate limit, HTTPS yönlendir
 
 Erişim listesi bir IP filtresini ve bir kimlik doğrulamayı tek bir adın altında tutar. Birkaç proxy ve route aynı listeyi kullanır, tek bir değişiklik hepsine uygulanır.
 
-1. Menüde **Erişim Listeleri** linkine tıklayın. **Erişim listesi ekle** formu listenin altındadır.
+1. Menüde **Erişim Listeleri** linkine tıklayın, sonra listenin altındaki **Ekle** butonuna tıklayın. **Erişim listesi ekle** formu bir modal içinde açılır.
 2. Ad alanına `Office` yazın.
 3. **İzin Verilen IP Adresleri** alanına ofis ağınızı yazın, örneğin `203.0.113.0/24`. Proxy'ye yalnız bu istemciler ulaşır. Bütün adreslere izin vermek için alanı boş bırakın.
 4. Kimlik doğrulama bölümünde **Basic Auth** seçin.

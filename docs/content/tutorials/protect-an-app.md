@@ -23,7 +23,7 @@ Follow [Getting Started](@/tutorials/getting-started.md) first. This guide conti
 
 An access list holds an IP filter and an authentication under one name. Several proxies and routes use the same list, and one change applies to all of them.
 
-1. Click **Access Lists** in the menu. The **Add an access list** form is below the list.
+1. Click **Access Lists** in the menu, then click **Add** below the list. The **Add an access list** form opens in a modal.
 2. Write `Office` in the name field.
 3. Write your office network in **Allowed IP Addresses**, for example `203.0.113.0/24`. Only these clients reach the proxy. Leave it empty to allow every address.
 4. Select **Basic Auth** in the authentication section.

@@ -964,7 +964,7 @@ Sunucu, süresi gelen komutları kontrol edip çalıştırmak için her 30 saniy
 
 Admin hesabı ayrıca şunları görür:
 
-- Listenin altındaki **Agent hedefi ekle** formu. Form bir agent adı ve coğrafi yakınlık yönlendirmesi için isteğe bağlı bir **Bölge** kodu (ör. `eu`, `na`, `tr`, `apac`) kabul eder. **Ekle** hedefi oluşturur ve **Token** değerini, agent'ın `install.sh` komutu ve `docker run` komutuyla birlikte sayfanın üstünde bir kez gösterir. Sayfadan ayrılmadan önce bunları kopyalayın.
+- Listenin altındaki **Ekle** butonu. **Agent hedefi ekle** formunu bir modal içinde açar. Form bir agent adı ve coğrafi yakınlık yönlendirmesi için isteğe bağlı bir **Bölge** kodu (ör. `eu`, `na`, `tr`, `apac`) kabul eder. **Ekle** hedefi oluşturur ve **Token** değerini, agent'ın `install.sh` komutu ve `docker run` komutuyla birlikte sayfanın üstünde bir kez gösterir. Sayfadan ayrılmadan önce bunları kopyalayın.
 - Herhangi bir hedefin satırındaki (yerel veya agent) **Bölgeyi Düzenle** butonu. Düğümün coğrafi bölge kodunu atamak veya güncellemek (`PUT /api/targets/{id}/region`) ya da boş bırakarak bölge atamasını kaldırmak için bir modal açar.
 - Bir agent hedefinin satırındaki **Yeni token**. Onaydan sonra yeni bir kayıt token'ı oluşturur.
 - Bir agent hedefinin satırındaki **Sil**. Onaydan sonra hedefi siler.
