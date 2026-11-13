@@ -1,8 +1,5 @@
 use super::common::*;
-use crate::API_ENDPOINT;
 use crate::components::auth_config::AuthForm;
-use crate::pages::cert_list::get_cert_list;
-use gloo_net::http::Request;
 use r3v3rs3_api::access_list::AccessListEntry;
 use r3v3rs3_api::cert::{CertInfo, CertKind};
 use r3v3rs3_api::cidr::parse_cidr_list;
@@ -226,15 +223,7 @@ pub fn access_list_view(
 
 #[hook]
 pub fn use_access_lists() -> UseStateHandle<Vec<AccessListEntry>> {
-    use_loaded_list(get_access_lists, |_| true)
-}
-
-pub async fn get_access_lists() -> Result<Vec<AccessListEntry>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/access_lists"))
-        .send()
-        .await?
-        .json()
-        .await
+    use_loaded_list("/access_lists", |_| true)
 }
 
 pub fn is_upstream_client_cert(cert: &CertInfo) -> bool {
@@ -282,7 +271,7 @@ pub fn client_cert_label(cert: &CertInfo) -> String {
 
 #[hook]
 pub fn use_client_certs() -> UseStateHandle<Vec<CertInfo>> {
-    use_loaded_list(get_cert_list, is_upstream_client_cert)
+    use_loaded_list("/certs", is_upstream_client_cert)
 }
 
 pub fn security_grade_badge(grade: SecurityGrade, score: u8) -> Html {

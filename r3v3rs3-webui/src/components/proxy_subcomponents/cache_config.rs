@@ -1,8 +1,6 @@
 use super::common::*;
-use crate::API_ENDPOINT;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::error_pages_editor::ErrorPagesEditor;
-use gloo_net::http::Request;
 use r3v3rs3_api::cache::CacheConfig;
 use r3v3rs3_api::compression::{
     Compression, CompressionAlgorithm, format_mime_list, parse_mime_list,
@@ -709,15 +707,7 @@ pub fn parse_error_pages(
 
 #[hook]
 pub fn use_error_page_themes() -> UseStateHandle<Vec<ErrorPageTheme>> {
-    use_loaded_list(get_error_page_themes, |_| true)
-}
-
-pub async fn get_error_page_themes() -> Result<Vec<ErrorPageTheme>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/error-page-themes"))
-        .send()
-        .await?
-        .json()
-        .await
+    use_loaded_list("/error-page-themes", |_| true)
 }
 
 pub fn stream_priority_subtoggles(

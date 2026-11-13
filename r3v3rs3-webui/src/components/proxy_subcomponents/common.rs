@@ -316,21 +316,26 @@ pub fn parse_comma_list<T>(
     items
 }
 
-/// Loads a list once with `load` and keeps the items that `keep` accepts. A failed load keeps the
-/// list empty.
+/// Loads the list at `path` (relative to the API endpoint) once and keeps the items that `keep`
+/// accepts. A failed load keeps the list empty and shows its error in a dialog.
 #[hook]
-pub fn use_loaded_list<T, F>(load: fn() -> F, keep: fn(&T) -> bool) -> UseStateHandle<Vec<T>>
+pub fn use_loaded_list<T>(path: &'static str, keep: fn(&T) -> bool) -> UseStateHandle<Vec<T>>
 where
-    T: 'static,
-    F: std::future::Future<Output = Result<Vec<T>, gloo_net::Error>> + 'static,
+    T: serde::de::DeserializeOwned + 'static,
 {
+    let locale = crate::i18n::use_locale();
     let items = use_state(Vec::<T>::new);
     use_effect_with((), {
         let items = items.clone();
         move |_| {
             wasm_bindgen_futures::spawn_local(async move {
-                if let Ok(list) = load().await {
-                    items.set(list.into_iter().filter(keep).collect());
+                let request =
+                    gloo_net::http::Request::get(&format!("{}{path}", crate::API_ENDPOINT));
+                match crate::pages::settings::fetch_json::<Vec<T>>(locale, request).await {
+                    Ok(list) => items.set(list.into_iter().filter(keep).collect()),
+                    Err(err) => {
+                        crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await
+                    }
                 }
             });
         }
