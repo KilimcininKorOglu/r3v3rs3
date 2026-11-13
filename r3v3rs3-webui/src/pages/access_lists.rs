@@ -121,7 +121,7 @@ pub fn access_lists() -> Html {
     let notice = use_state(|| Option::<Notice<()>>::None);
 
     let lists_cloned = lists.clone();
-    use_effect_with((), move |_| load(lists_cloned, PATH));
+    use_effect_with((), move |_| load(locale, lists_cloned, PATH));
 
     // The admin API rejects a change from an account that cannot change the ports.
     let can_edit = session.can_edit();
@@ -155,7 +155,7 @@ fn list_row(
     let actions = if can_edit {
         let question = locale.tf("access_lists.confirm_delete", &[("name", &entry.list.name)]);
         let path = format!("{PATH}/{}", entry.id);
-        let delete = delete_on_click(locale, question, path, reload_callback(lists, PATH));
+        let delete = delete_on_click(locale, question, path, reload_callback(locale, lists, PATH));
         row_actions(
             locale,
             open_on_click(form, open, Form::edit(entry)),
@@ -253,7 +253,7 @@ fn submit(
     notice: &UseStateHandle<Option<Notice<()>>>,
     lists: &Lists,
 ) -> Callback<SubmitEvent> {
-    let saved = then_close(reload_callback(lists, PATH), open);
+    let saved = then_close(reload_callback(locale, lists, PATH), open);
     let done = save_result(form, notice, saved);
     let form = form.clone();
     submit_callback(

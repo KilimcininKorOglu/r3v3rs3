@@ -295,7 +295,7 @@ fn start(
 ) {
     match installed {
         Some(id) => install(locale, id, installation, connections),
-        None => load(connections, PATH),
+        None => load(locale, connections, PATH),
     }
     // The result stays on the page, not in the address.
     if let Some(navigator) = navigator {
@@ -308,7 +308,7 @@ fn install(locale: Locale, id: ShortId, installation: Installation, connections:
     wasm_bindgen_futures::spawn_local(async move {
         let result = github_app::install(locale, id).await.map(|_| ());
         installation.set(Some(result));
-        load(connections, PATH);
+        load(locale, connections, PATH);
     });
 }
 
@@ -410,7 +410,12 @@ fn admin_actions(
         &[("name", entry.name.as_str())],
     );
     let path = format!("{PATH}/{}", entry.id);
-    let delete = delete_on_click(locale, question, path, reload_callback(connections, PATH));
+    let delete = delete_on_click(
+        locale,
+        question,
+        path,
+        reload_callback(locale, connections, PATH),
+    );
     html! {
         <>
             <ActionIconButton
@@ -597,7 +602,7 @@ fn submit(
     notice: &UseStateHandle<Option<Notice<()>>>,
     connections: &Connections,
 ) -> Callback<SubmitEvent> {
-    let saved = then_close(reload_callback(connections, PATH), open);
+    let saved = then_close(reload_callback(locale, connections, PATH), open);
     let done = save_result(form, notice, saved);
     let form = form.clone();
     submit_callback(

@@ -132,7 +132,7 @@ pub fn dns_credentials() -> Html {
     let notice = use_state(|| Option::<Notice<()>>::None);
 
     let list_cloned = credentials.clone();
-    use_effect_with((), move |_| load(list_cloned, PATH));
+    use_effect_with((), move |_| load(locale, list_cloned, PATH));
 
     let can_edit = session.can_edit();
     let rows = credentials
@@ -165,7 +165,12 @@ fn list_row(
     let actions = if can_edit {
         let question = locale.tf("dns_credentials.confirm_delete", &[("name", &entry.name)]);
         let path = format!("{PATH}/{}", entry.id);
-        let delete = delete_on_click(locale, question, path, reload_callback(credentials, PATH));
+        let delete = delete_on_click(
+            locale,
+            question,
+            path,
+            reload_callback(locale, credentials, PATH),
+        );
         row_actions(
             locale,
             open_on_click(form, open, Form::edit(entry)),
@@ -284,7 +289,7 @@ fn submit(
     notice: &UseStateHandle<Option<Notice<()>>>,
     credentials: &Credentials,
 ) -> Callback<SubmitEvent> {
-    let saved = then_close(reload_callback(credentials, PATH), open);
+    let saved = then_close(reload_callback(locale, credentials, PATH), open);
     let done = save_result(form, notice, saved);
     let form = form.clone();
     submit_callback(

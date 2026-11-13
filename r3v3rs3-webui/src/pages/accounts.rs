@@ -1,10 +1,10 @@
 use super::Route;
 use super::resource_page::{
     AddIcon, FormCard, FormState, Notice, add_button, close_callback, delete_on_click, failed_view,
-    form_modal, get_json, load, open_on_click, reload_callback, row_actions, save_result,
-    saved_view, submit_callback, text_input, then_close, use_form_modal,
+    form_modal, load, open_on_click, reload_callback, row_actions, save_result, saved_view,
+    submit_callback, text_input, then_close, use_form_modal,
 };
-use super::settings::{send_json, send_request};
+use super::settings::{fetch_json, send_json, send_request};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -155,17 +155,21 @@ pub fn accounts() -> Html {
 
     let accounts_cloned = accounts.clone();
     use_effect_with((), move |_| {
-        load(accounts_cloned, PATH);
+        load(locale, accounts_cloned, PATH);
         spawn_local(async move {
-            if let Ok(entries) = get_json::<Vec<ProxyEntry>>("/proxies").await {
-                proxies_dispatch.reduce(|state| {
+            let request = Request::get(&format!("{API_ENDPOINT}/proxies"));
+            match fetch_json::<Vec<ProxyEntry>>(locale, request).await {
+                Ok(entries) => proxies_dispatch.reduce(|state| {
                     ProxyStore {
                         entries,
                         loaded: true,
                         ..(*state).clone()
                     }
                     .into()
-                });
+                }),
+                Err(message) => {
+                    crate::dialog::message(locale, &message, crate::dialog::Icon::Error).await
+                }
             }
         });
     });
@@ -245,7 +249,7 @@ fn submit(
     notice: &AccountNotice,
     accounts: &AccountList,
 ) -> Callback<SubmitEvent> {
-    let saved = then_close(reload_callback(accounts, PATH), open);
+    let saved = then_close(reload_callback(locale, accounts, PATH), open);
     let done = save_result(form, notice, saved);
     let form = form.clone();
     submit_callback(
@@ -266,7 +270,12 @@ fn account_row(
     let delete = (info.username != own).then(|| {
         let question = locale.tf("accounts.confirm_delete", &[("username", &info.username)]);
         let path = format!("{PATH}/{}", path_segment(&info.username));
-        delete_on_click(locale, question, path, reload_callback(accounts, PATH))
+        delete_on_click(
+            locale,
+            question,
+            path,
+            reload_callback(locale, accounts, PATH),
+        )
     });
     let totp = if info.totp { "common.yes" } else { "common.no" };
     let passkeys_text = if info.passkeys.is_empty() {
@@ -815,7 +824,7 @@ async fn add_passkey_flow(locale: Locale, form: UseStateHandle<Form>, accounts: 
     };
 
     match register_passkey_request(locale, &req).await {
-        Ok(()) => load(accounts, PATH),
+        Ok(()) => load(locale, accounts, PATH),
         Err(msg) => crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await,
     }
 }
@@ -829,7 +838,7 @@ async fn delete_passkey_action(locale: Locale, id: String, accounts: AccountList
         .await;
     match res {
         Ok(res) if res.ok() => {
-            load(accounts, PATH);
+            load(locale, accounts, PATH);
         }
         Ok(res) => {
             let msg = crate::pages::settings::error_message(locale, res).await;
@@ -885,7 +894,7 @@ async fn add_token_flow(locale: Locale, form: UseStateHandle<Form>, accounts: Ac
                     created_at: created.created_at,
                 });
                 form.set(updated);
-                load(accounts, PATH);
+                load(locale, accounts, PATH);
             }
         }
         Ok(res) => {
@@ -918,7 +927,7 @@ async fn delete_token_action(
             let mut updated = (*form).clone();
             updated.tokens.retain(|t| t.id != id);
             form.set(updated);
-            load(accounts, PATH);
+            load(locale, accounts, PATH);
         }
         Ok(res) => {
             let msg = crate::pages::settings::error_message(locale, res).await;

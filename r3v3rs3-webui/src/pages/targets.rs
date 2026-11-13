@@ -93,7 +93,7 @@ pub fn targets() -> Html {
     let targets_cloned = targets.clone();
     use_effect_with(signed_in, move |&signed_in| {
         let interval = signed_in.then(|| {
-            let load_now = move || load(targets_cloned.clone(), PATH);
+            let load_now = move || load(locale, targets_cloned.clone(), PATH);
             load_now();
             Interval::new(REFRESH_MS, load_now)
         });
@@ -154,7 +154,7 @@ fn region_modal(
     let editing_region_close = editing_region.clone();
     let on_close = Callback::from(move |()| editing_region_close.set(None));
     let editing_region_saved = editing_region.clone();
-    let reload = reload_callback(targets, PATH);
+    let reload = reload_callback(locale, targets, PATH);
     let on_saved = Callback::from(move |()| {
         editing_region_saved.set(None);
         reload.emit(());
@@ -445,7 +445,7 @@ fn target_actions(
         locale,
         question,
         path.clone(),
-        reload_callback(targets, PATH),
+        reload_callback(locale, targets, PATH),
     );
     let question = locale.tf("targets.confirm_new_token", &[("name", name)]);
     let renew = new_token_on_click(locale, question, format!("{path}/token"), notice, targets);
@@ -485,7 +485,7 @@ fn drain_on_click(
     path: String,
     targets: &TargetList,
 ) -> Callback<MouseEvent> {
-    let reload = reload_callback(targets, PATH);
+    let reload = reload_callback(locale, targets, PATH);
     Callback::from(move |event: MouseEvent| {
         event.prevent_default();
         let (path, reload) = (path.clone(), reload.clone());
@@ -509,7 +509,7 @@ fn upgrade_on_click(
     path: String,
     targets: &TargetList,
 ) -> Callback<MouseEvent> {
-    let reload = reload_callback(targets, PATH);
+    let reload = reload_callback(locale, targets, PATH);
     Callback::from(move |event: MouseEvent| {
         event.prevent_default();
         let (path, reload) = (path.clone(), reload.clone());
@@ -537,7 +537,7 @@ fn new_token_on_click(
     notice: &TokenNotice,
     targets: &TargetList,
 ) -> Callback<MouseEvent> {
-    let reload = reload_callback(targets, PATH);
+    let reload = reload_callback(locale, targets, PATH);
     let notice = notice.clone();
     Callback::from(move |event: MouseEvent| {
         event.prevent_default();
@@ -565,7 +565,7 @@ fn form_view(
     let done = save_result(
         form,
         notice,
-        then_close(reload_callback(targets, PATH), open),
+        then_close(reload_callback(locale, targets, PATH), open),
     );
     let state = form.clone();
     let onsubmit = submit_callback(

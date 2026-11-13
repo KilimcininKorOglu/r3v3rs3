@@ -117,7 +117,7 @@ pub fn webhooks() -> Html {
     let list_cloned = list.clone();
     use_effect_with(signed_in, move |&signed_in| {
         if signed_in {
-            load(list_cloned, PATH);
+            load(locale, list_cloned, PATH);
         }
         || ()
     });
@@ -210,7 +210,7 @@ fn list_row(
 ) -> Row {
     let question = locale.t("webhooks.delete_confirm").to_string();
     let path = format!("{PATH}/{}", entry.id);
-    let delete = delete_on_click(locale, question, path, reload_callback(list, PATH));
+    let delete = delete_on_click(locale, question, path, reload_callback(locale, list, PATH));
     let test_cb = test_webhook_click(locale, entry.id);
 
     let edit_cb = open_on_click(form, open, Form::edit(entry));
@@ -568,7 +568,7 @@ fn submit_webhook(
                     form_state.set(Form::default());
                     open_state.set(false);
                     notice_state.set(Some(Notice::Saved(())));
-                    load(list_state, PATH);
+                    load(locale, list_state, PATH);
                 }
                 Err(err) => {
                     notice_state.set(Some(Notice::Failed(err.to_string())));

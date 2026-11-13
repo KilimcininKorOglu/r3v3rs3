@@ -1,6 +1,6 @@
 //! The parts of the pages that list resources and add or change one with a form.
 
-use super::settings::{failure_box, send_request, success_box};
+use super::settings::{failure_box, fetch_json, send_request, success_box};
 use crate::API_ENDPOINT;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::button::{Button, ButtonKind};
@@ -295,26 +295,26 @@ async fn delete(locale: Locale, path: &str) -> Result<(), String> {
 
 /// Returns a callback that reads the value at `path` of the admin API into the state.
 pub fn reload_callback<T: DeserializeOwned + 'static>(
+    locale: Locale,
     state: &UseStateHandle<Option<T>>,
     path: &'static str,
 ) -> Callback<()> {
     let state = state.clone();
-    Callback::from(move |()| load(state.clone(), path))
+    Callback::from(move |()| load(locale, state.clone(), path))
 }
 
-/// Reads the value at `path` of the admin API into the state. A failed read keeps the state.
-pub fn load<T: DeserializeOwned + 'static>(state: UseStateHandle<Option<T>>, path: &'static str) {
+/// Reads the value at `path` of the admin API into the state. A failed read keeps the state and
+/// shows its message.
+pub fn load<T: DeserializeOwned + 'static>(
+    locale: Locale,
+    state: UseStateHandle<Option<T>>,
+    path: &'static str,
+) {
     spawn_local(async move {
-        if let Ok(value) = get_json(path).await {
-            state.set(Some(value));
+        let request = Request::get(&format!("{API_ENDPOINT}{path}"));
+        match fetch_json(locale, request).await {
+            Ok(value) => state.set(Some(value)),
+            Err(message) => dialog::message(locale, &message, Icon::Error).await,
         }
     });
-}
-
-pub async fn get_json<T: DeserializeOwned>(path: &str) -> Result<T, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}{path}"))
-        .send()
-        .await?
-        .json()
-        .await
 }

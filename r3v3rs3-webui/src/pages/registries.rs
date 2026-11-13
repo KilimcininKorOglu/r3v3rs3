@@ -93,7 +93,7 @@ pub fn registries() -> Html {
     let list_cloned = registries.clone();
     use_effect_with(signed_in, move |&signed_in| {
         if signed_in {
-            load(list_cloned, PATH);
+            load(locale, list_cloned, PATH);
         }
         || ()
     });
@@ -133,7 +133,12 @@ fn list_row(
     let actions = if can_edit {
         let question = locale.tf("registries.delete_confirm", &[("server", &entry.server)]);
         let path = format!("{PATH}/{}", entry.id);
-        let delete = delete_on_click(locale, question, path, reload_callback(registries, PATH));
+        let delete = delete_on_click(
+            locale,
+            question,
+            path,
+            reload_callback(locale, registries, PATH),
+        );
         row_actions(
             locale,
             open_on_click(form, open, Form::edit(entry)),
@@ -225,7 +230,7 @@ fn submit(
     notice: &UseStateHandle<Option<Notice<()>>>,
     registries: &RegistriesList,
 ) -> Callback<SubmitEvent> {
-    let saved = then_close(reload_callback(registries, PATH), open);
+    let saved = then_close(reload_callback(locale, registries, PATH), open);
     let done = save_result(form, notice, saved);
     let form = form.clone();
     submit_callback(

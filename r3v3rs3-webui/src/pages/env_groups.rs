@@ -160,7 +160,7 @@ pub fn env_groups() -> Html {
     let list_cloned = groups.clone();
     use_effect_with(signed_in, move |&signed_in| {
         if signed_in {
-            load(list_cloned, PATH);
+            load(locale, list_cloned, PATH);
         }
         || ()
     });
@@ -234,7 +234,7 @@ fn list_row(
                 locale,
                 question,
                 format!("{PATH}/{}", entry.id),
-                reload_callback(list, PATH),
+                reload_callback(locale, list, PATH),
             );
             row_actions(locale, edit, Some(delete))
         }
@@ -440,7 +440,7 @@ fn submit(
         save_result(
             form,
             notice,
-            then_close(reload_callback(groups, PATH), open),
+            then_close(reload_callback(locale, groups, PATH), open),
         ),
     )
 }
