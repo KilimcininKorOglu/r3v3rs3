@@ -1,6 +1,6 @@
 use super::resource_page::{Loaded, delete, loaded_entries, use_list};
 use crate::components::action_button::{ActionIconButton, ActionVariant};
-use crate::components::button::{Button, ButtonKind, ButtonSize, button_class};
+use crate::components::button::{Button, ButtonKind};
 use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
 use crate::components::http_proxy_config::{
     client_cert_label, parse_optional_id, use_client_certs,
@@ -8,7 +8,6 @@ use crate::components::http_proxy_config::{
 use crate::components::modal::{Modal, ModalSize};
 use crate::components::worker_status::WorkerStatusCard;
 use crate::format::format_unix_time;
-use crate::pages::Route;
 use crate::{API_ENDPOINT, auth::use_ensure_auth, dialog, i18n::use_locale};
 use gloo_net::http::{Request, RequestBuilder, Response};
 use r3v3rs3_api::{
@@ -35,7 +34,7 @@ use std::{collections::HashMap, net::SocketAddr};
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
-use yew_router::prelude::{Link, use_location};
+use yew_router::prelude::use_location;
 
 const INPUT_CLASS: &str = "bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5";
 const LABEL_CLASS: &str =
@@ -359,8 +358,6 @@ pub fn settings() -> Html {
         <CdnStatusCard />
         <WorkerStatusCard />
         <McpSessionsCard />
-        { security_hub_redirect(locale) }
-        { error_page_themes_redirect(locale) }
         <div ref={upgrade_card_ref}>
             <UpgradeCard />
         </div>
@@ -1520,55 +1517,6 @@ fn cdn_status_view(locale: Locale, status: &CdnStatus) -> Html {
                 <p class="mt-2 text-sm text-red-600 dark:text-red-500">{err}</p>
             }).collect::<Html>() }
         </>
-    }
-}
-
-fn security_hub_redirect(locale: Locale) -> Html {
-    html! {
-        <div class="mt-6 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                    { locale.t("settings.security_hub_title") }
-                </h3>
-                <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                    { locale.t("settings.security_hub_hint") }
-                </p>
-            </div>
-            <Link<Route>
-                to={Route::Security}
-                classes="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm whitespace-nowrap self-start sm:self-auto"
-            >
-                <img src="/assets/icons/shield-checkmark.svg" class="w-4 h-4 filter invert" alt="" />
-                { locale.t("settings.manage_security") }
-            </Link<Route>>
-        </div>
-    }
-}
-
-fn error_page_themes_redirect(locale: Locale) -> Html {
-    html! {
-        <div class="mt-4 bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md flex items-center justify-between flex-wrap gap-4">
-            <div class="flex items-center gap-3">
-                <div class="p-2.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
-                    <img src="/assets/icons/swap-horizontal.svg" class="w-6 h-6" alt="" />
-                </div>
-                <div>
-                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-                        { locale.t("settings.error_page_themes_redirect_title") }
-                    </h3>
-                    <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                        { locale.t("settings.error_page_themes_redirect_hint") }
-                    </p>
-                </div>
-            </div>
-            <Link<Route>
-                to={Route::Proxies}
-                classes={classes!(button_class(ButtonKind::Primary, ButtonSize::Md), "whitespace-nowrap", "self-start", "sm:self-auto")}
-            >
-                <img src="/assets/icons/swap-horizontal.svg" class="w-4 h-4 filter invert" alt="" />
-                { locale.t("settings.manage_error_page_themes") }
-            </Link<Route>>
-        </div>
     }
 }
 
