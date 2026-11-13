@@ -1,10 +1,11 @@
 use super::resource_page::{FormCard, form_modal};
-use super::settings::{failure_box, fetch_json};
+use super::settings::{failure_box, fetch_json, post_empty};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::button::{Button, ButtonKind};
 use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
+use crate::dialog::{self, Icon};
 use crate::format::format_duration;
 use crate::i18n::use_locale;
 use gloo_net::http::Request;
@@ -112,6 +113,7 @@ async fn refresh_all_ct_data(
 }
 
 fn create_check_callback(
+    locale: Locale,
     checking: UseStateHandle<bool>,
     reload: Callback<()>,
 ) -> Callback<MouseEvent> {
@@ -120,9 +122,16 @@ fn create_check_callback(
         let rel = reload.clone();
         chk.set(true);
         spawn_local(async move {
-            let _ = trigger_ct_check().await;
+            let checked = post_empty(locale, &format!("{API_ENDPOINT}/certs/ct/check")).await;
             chk.set(false);
             rel.emit(());
+            match checked {
+                Ok(()) => {
+                    dialog::message(locale, locale.t("certs.ct_check_started"), Icon::Success)
+                        .await;
+                }
+                Err(err) => dialog::message(locale, &err, Icon::Error).await,
+            }
         });
     })
 }
@@ -244,7 +253,7 @@ pub fn ct_logs() -> Html {
         });
     }
 
-    let check_now_onclick = create_check_callback(checking.clone(), load_data.clone());
+    let check_now_onclick = create_check_callback(locale, checking.clone(), load_data.clone());
     let toggle_settings = create_toggle_settings(show_settings.clone());
     let save_settings = create_save_callback(
         form_handles.clone(),
@@ -652,14 +661,6 @@ async fn save_ct_config(req: UpdateCtConfigRequest) -> Result<(), gloo_net::Erro
         .send()
         .await?;
     Ok(())
-}
-
-async fn trigger_ct_check() -> Result<usize, gloo_net::Error> {
-    Request::post(&format!("{API_ENDPOINT}/certs/ct/check"))
-        .send()
-        .await?
-        .json()
-        .await
 }
 
 async fn dismiss_ct_alert(id: &str) -> Result<(), gloo_net::Error> {

@@ -2,7 +2,9 @@
 
 use super::app_files::format_bytes;
 use super::resource_page::{FormCard, Notice, delete_on_click, form_modal, notice_view};
-use super::settings::{failure_box, fetch_json, format_network_error, send_json, send_request};
+use super::settings::{
+    failure_box, fetch_json, format_network_error, post_empty, send_json, send_request,
+};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -345,15 +347,6 @@ pub fn backups() -> Html {
             } }
         </div>
     }
-}
-
-/// Sends a POST request without a body. The error is the message of the failure in the
-/// selected language.
-async fn post_empty(locale: Locale, path: &str) -> Result<(), String> {
-    let request = Request::post(path)
-        .build()
-        .map_err(|err| format_network_error(locale, &err))?;
-    send_request(locale, request).await.map(|_| ())
 }
 
 fn render_tabs(locale: Locale, active_tab: &UseStateHandle<BackupTab>) -> Html {

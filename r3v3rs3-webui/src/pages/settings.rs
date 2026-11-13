@@ -1399,6 +1399,15 @@ pub async fn post_json<T: serde::de::DeserializeOwned>(
         .map_err(|_| locale.t("common.response_parse_failed").to_string())
 }
 
+/// Sends a POST request without a body. The error is the message of the failure in the
+/// selected language.
+pub async fn post_empty(locale: Locale, path: &str) -> Result<(), String> {
+    let request = Request::post(path)
+        .build()
+        .map_err(|err| format_network_error(locale, &err))?;
+    send_request(locale, request).await.map(|_| ())
+}
+
 /// Sends the request and returns a successful response. The error is the message of the failure
 /// in the selected language.
 pub async fn send_request(locale: Locale, request: Request) -> Result<Response, String> {
