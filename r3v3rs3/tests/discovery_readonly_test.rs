@@ -13,6 +13,7 @@ use r3v3rs3::{
 use r3v3rs3_api::{
     discovery::{DiscoveryIssue, DiscoveryProvider, DiscoverySource, DiscoveryState},
     error::Error,
+    id::ShortId,
     port::PortEntry,
     proxy::{HttpProxy, ProxyEntry, ProxyKind},
 };
@@ -133,27 +134,7 @@ async fn discovered_proxies_serve_traffic_but_are_read_only_and_not_saved() -> a
         send_snapshot(&mut channels, DiscoveryState::Running, Some(proxies)).await?;
         assert_eq!(wait_for_status(&url, 200).await?, "discovered");
 
-        let entry = discovered_entry(&mut channels).await?;
-        let update = UpdateProxy {
-            entry: ProxyEntry::from((entry.id, entry.proxy.clone())),
-        };
-        assert!(matches!(
-            call(&mut channels, update).await?,
-            Err(Error::ProxyReadOnly { .. })
-        ));
-        let delete = DeleteProxy { id: entry.id };
-        assert!(matches!(
-            call(&mut channels, delete).await?,
-            Err(Error::ProxyReadOnly { .. })
-        ));
-
-        let unknown_update = UpdateProxy {
-            entry: ProxyEntry::from(("xyz-123".parse().unwrap(), entry.proxy.clone())),
-        };
-        assert!(matches!(
-            call(&mut channels, unknown_update).await?,
-            Err(Error::IdNotFound { .. })
-        ));
+        check_discovered_proxy_is_read_only(&mut channels).await?;
 
         // Changing the manual proxy writes the proxy list to the storage.
         let update = UpdateProxy {
@@ -172,6 +153,33 @@ async fn discovered_proxies_serve_traffic_but_are_read_only_and_not_saved() -> a
     Ok(())
 }
 
+/// Checks that the discovered proxy can be neither updated nor deleted, and that an update of
+/// an unknown id is not found.
+async fn check_discovered_proxy_is_read_only(channels: &mut ServerChannels) -> anyhow::Result<()> {
+    let entry = discovered_entry(channels).await?;
+    let update = UpdateProxy {
+        entry: ProxyEntry::from((entry.id, entry.proxy.clone())),
+    };
+    assert!(matches!(
+        call(channels, update).await?,
+        Err(Error::ProxyReadOnly { .. })
+    ));
+    let delete = DeleteProxy { id: entry.id };
+    assert!(matches!(
+        call(channels, delete).await?,
+        Err(Error::ProxyReadOnly { .. })
+    ));
+
+    let unknown_update = UpdateProxy {
+        entry: ProxyEntry::from(("xyz-123".parse().unwrap(), entry.proxy.clone())),
+    };
+    assert!(matches!(
+        call(channels, unknown_update).await?,
+        Err(Error::IdNotFound { .. })
+    ));
+    Ok(())
+}
+
 #[tokio::test]
 async fn discovery_status_reports_issues_and_follows_port_names() -> anyhow::Result<()> {
     let Setup {
@@ -182,55 +190,84 @@ async fn discovery_status_reports_issues_and_follows_port_names() -> anyhow::Res
         ..
     } = setup().await?;
     with_server(storage, |mut channels| async move {
-        let proxies = vec![
-            discovered("web-1", "web", &upstream),
-            discovered("web-2", "missing", &upstream),
-        ];
-        send_snapshot(&mut channels, DiscoveryState::Running, Some(proxies)).await?;
-        assert_eq!(wait_for_status(&url, 200).await?, "discovered");
-        let entry = discovered_entry(&mut channels).await?;
-        assert_eq!(entry.proxy.ports, [port.id]);
-
-        let statuses = call(&mut channels, GetDiscoveryStatus).await??;
-        assert_eq!(statuses.len(), 1);
-        assert_eq!(statuses[0].state, DiscoveryState::Running);
-        assert_eq!(statuses[0].proxies, 1);
-        assert_eq!(
-            statuses[0].issues,
-            [DiscoveryIssue {
-                resource: "web-2".into(),
-                message: "http.app: port not found: missing".into(),
-            }]
-        );
-
-        // A snapshot without proxies keeps the proxies of the previous snapshot.
-        send_snapshot(&mut channels, DiscoveryState::Error, None).await?;
-        let statuses = call(&mut channels, GetDiscoveryStatus).await??;
-        assert_eq!(statuses[0].state, DiscoveryState::Error);
-        assert_eq!(wait_for_status(&url, 200).await?, "discovered");
-
-        // The definition names the port `web`, so renaming the port removes the proxy.
-        let mut renamed_port = port.clone();
-        renamed_port.port.name = "other".into();
-        call(
-            &mut channels,
-            UpdatePort {
-                entry: renamed_port,
-            },
-        )
-        .await??;
-        wait_for_status(&url, 502).await?;
-        let statuses = call(&mut channels, GetDiscoveryStatus).await??;
-        assert_eq!(statuses[0].proxies, 0);
-        assert_eq!(statuses[0].issues.len(), 2);
-
-        // The proxy comes back with the same id.
-        call(&mut channels, UpdatePort { entry: port }).await??;
-        assert_eq!(wait_for_status(&url, 200).await?, "discovered");
-        assert_eq!(discovered_entry(&mut channels).await?.id, entry.id);
-        Ok(())
+        let id = check_issue_of_missing_port(&mut channels, &upstream, &url, &port).await?;
+        check_error_snapshot_keeps_proxies(&mut channels, &url).await?;
+        check_port_rename(&mut channels, &url, port, id).await
     })
     .await
+}
+
+/// Sends one proxy on the port `web` and one on a missing port, then checks that the first
+/// serves traffic and the second is an issue. Returns the id of the discovered proxy.
+async fn check_issue_of_missing_port(
+    channels: &mut ServerChannels,
+    upstream: &str,
+    url: &str,
+    port: &PortEntry,
+) -> anyhow::Result<ShortId> {
+    let proxies = vec![
+        discovered("web-1", "web", upstream),
+        discovered("web-2", "missing", upstream),
+    ];
+    send_snapshot(channels, DiscoveryState::Running, Some(proxies)).await?;
+    assert_eq!(wait_for_status(url, 200).await?, "discovered");
+    let entry = discovered_entry(channels).await?;
+    assert_eq!(entry.proxy.ports, [port.id]);
+
+    let statuses = call(channels, GetDiscoveryStatus).await??;
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(statuses[0].state, DiscoveryState::Running);
+    assert_eq!(statuses[0].proxies, 1);
+    assert_eq!(
+        statuses[0].issues,
+        [DiscoveryIssue {
+            resource: "web-2".into(),
+            message: "http.app: port not found: missing".into(),
+        }]
+    );
+    Ok(entry.id)
+}
+
+/// Checks that a snapshot without proxies keeps the proxies of the previous snapshot.
+async fn check_error_snapshot_keeps_proxies(
+    channels: &mut ServerChannels,
+    url: &str,
+) -> anyhow::Result<()> {
+    send_snapshot(channels, DiscoveryState::Error, None).await?;
+    let statuses = call(channels, GetDiscoveryStatus).await??;
+    assert_eq!(statuses[0].state, DiscoveryState::Error);
+    assert_eq!(wait_for_status(url, 200).await?, "discovered");
+    Ok(())
+}
+
+/// Checks that renaming the port removes the proxy and that the old name brings it back with
+/// the same id.
+async fn check_port_rename(
+    channels: &mut ServerChannels,
+    url: &str,
+    port: PortEntry,
+    id: ShortId,
+) -> anyhow::Result<()> {
+    // The definition names the port `web`, so renaming the port removes the proxy.
+    let mut renamed_port = port.clone();
+    renamed_port.port.name = "other".into();
+    call(
+        channels,
+        UpdatePort {
+            entry: renamed_port,
+        },
+    )
+    .await??;
+    wait_for_status(url, 502).await?;
+    let statuses = call(channels, GetDiscoveryStatus).await??;
+    assert_eq!(statuses[0].proxies, 0);
+    assert_eq!(statuses[0].issues.len(), 2);
+
+    // The proxy comes back with the same id.
+    call(channels, UpdatePort { entry: port }).await??;
+    assert_eq!(wait_for_status(url, 200).await?, "discovered");
+    assert_eq!(discovered_entry(channels).await?.id, id);
+    Ok(())
 }
 
 #[tokio::test]
