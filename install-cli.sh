@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs the newest r3 command line client from the GitHub releases of r3v3rs3.
-# Runs on Linux and macOS. Pass a release tag with --version v3.2.6, or set
+# Runs on Linux and macOS. Pass a release tag with --version v3.2.7, or set
 # INSTALL_DIR (the default is /usr/local/bin).
 set -eu
 
