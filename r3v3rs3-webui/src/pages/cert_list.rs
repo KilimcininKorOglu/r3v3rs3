@@ -590,12 +590,13 @@ fn acme_row(
     let order_onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
         wasm_bindgen_futures::spawn_local(async move {
-            let icon = match order_acme(id).await {
-                Ok(()) => dialog::Icon::Success,
-                Err(_) => dialog::Icon::Error,
-            };
-            let text = locale.t("certs.acme_ordered");
-            dialog::message(locale, text, icon).await;
+            match order_acme(locale, id).await {
+                Ok(()) => {
+                    let text = locale.t("certs.acme_ordered");
+                    dialog::message(locale, text, dialog::Icon::Success).await;
+                }
+                Err(err) => dialog::message(locale, &err, dialog::Icon::Error).await,
+            }
         });
     });
 
@@ -751,19 +752,9 @@ async fn delete_acme(locale: Locale, id: ShortId) -> Result<(), String> {
     super::resource_page::delete(locale, &format!("/acme/{id}")).await
 }
 
-/// Orders the certificates of the ACME entry again. A 404 means that the entry is gone.
-async fn order_acme(id: ShortId) -> Result<(), gloo_net::Error> {
-    let response = Request::post(&format!("{API_ENDPOINT}/acme/{id}/order"))
-        .send()
-        .await?;
-    if response.ok() {
-        Ok(())
-    } else {
-        Err(gloo_net::Error::GlooError(format!(
-            "the order failed: {}",
-            response.status()
-        )))
-    }
+/// Orders the certificates of the ACME entry again. A failure returns the translated error.
+async fn order_acme(locale: Locale, id: ShortId) -> Result<(), String> {
+    crate::pages::settings::post_empty(locale, &format!("{API_ENDPOINT}/acme/{id}/order")).await
 }
 
 async fn toggle_acme(id: ShortId) -> Result<(), gloo_net::Error> {
