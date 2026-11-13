@@ -791,15 +791,16 @@ fn render_s3_row(
             let question = locale.tf("databases.s3_restore_question", &[("key", &key)]);
             let reload = reload.clone();
             dialog::confirm_then(locale, question, async move {
-                let req_body = serde_json::json!({
-                    "key": key,
-                });
-                if let Ok(req) = Request::post(&format!("{API_ENDPOINT}/databases/s3/restore"))
-                    .header("Content-Type", "application/json")
-                    .body(req_body.to_string())
-                {
-                    let _ = send_request(locale, req).await;
-                    reload.emit(());
+                let builder = Request::post(&format!("{API_ENDPOINT}/databases/s3/restore"));
+                match send_json(locale, builder, &serde_json::json!({ "key": key })).await {
+                    Ok(()) => {
+                        dialog::message(locale, locale.t("databases.s3_restored"), Icon::Success)
+                            .await;
+                        reload.emit(());
+                    }
+                    Err(err) => {
+                        dialog::message(locale, &err, Icon::Error).await;
+                    }
                 }
             });
         });
