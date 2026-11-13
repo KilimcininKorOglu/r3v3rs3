@@ -511,9 +511,10 @@ fn load_commands(
 ) {
     spawn_local(async move {
         let path = format!("{API_ENDPOINT}/apps/{id}/commands");
-        let result: Result<Vec<AppScheduledCommand>, _> =
-            fetch_json(locale, Request::get(&path)).await;
-        commands.set(result.ok());
+        match fetch_json::<Vec<AppScheduledCommand>>(locale, Request::get(&path)).await {
+            Ok(list) => commands.set(Some(list)),
+            Err(message) => dialog::message(locale, &message, Icon::Error).await,
+        }
     });
 }
 
