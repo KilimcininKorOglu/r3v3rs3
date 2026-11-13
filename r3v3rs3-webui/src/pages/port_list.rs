@@ -1,6 +1,8 @@
+use super::resource_page::add_button;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::data_list::{
     Column, Row, SelectionProps, active_toggle, selectable_list_card, status_badge,
 };
@@ -102,14 +104,7 @@ pub fn post_list() -> Html {
         <>
             { selectable_list_card(locale, ports.loaded, "ports.empty", &COLUMNS, &rows, selection.as_ref()) }
             if can_edit {
-                <div class="flex items-center justify-end my-4">
-                    <div>
-                        <button onclick={new_port_onclick} class="inline-flex items-center text-neutral-500 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 focus:outline-none hover:bg-neutral-100 hover:dark:bg-neutral-900 focus:ring-4 focus:ring-neutral-200 dark:focus:ring-neutral-600 font-medium rounded-lg text-sm px-4 py-2" type="button">
-                            <img src="/assets/icons/add.svg" class="w-4 h-4 mr-1" />
-                            {locale.t("common.add")}
-                        </button>
-                    </div>
-                </div>
+                { add_button(locale, new_port_onclick) }
             }
         </>
     }
@@ -195,13 +190,9 @@ fn build_selection(
     let bulk_delete = bulk_delete_callback(locale, selected, dispatcher);
 
     let bulk_actions = Some(html! {
-        <button
-            type="button"
-            onclick={bulk_delete}
-            class="inline-flex items-center text-red-600 dark:text-red-400 bg-white dark:bg-neutral-800 border border-red-300 dark:border-red-700 focus:outline-none hover:bg-red-50 hover:dark:bg-red-950 focus:ring-4 focus:ring-red-200 dark:focus:ring-red-900 font-medium rounded-lg text-xs px-2.5 py-1.5"
-        >
+        <Button kind={ButtonKind::Danger} size={ButtonSize::Sm} onclick={bulk_delete}>
             {locale.t("common.bulk_delete")}
-        </button>
+        </Button>
     });
 
     Some(SelectionProps {
