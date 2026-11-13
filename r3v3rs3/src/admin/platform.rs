@@ -301,6 +301,14 @@ pub async fn upgrade_all_targets(
         .upgrade_all_targets()
         .await
         .map_err(platform_error)?;
+    for target in &upgraded {
+        let record = AuditRecord::new(AuditAction::UpgradeTarget)
+            .id(target.id)
+            .summary(format!("{} -> {}", target.name, env!("CARGO_PKG_VERSION")));
+        state
+            .record_audit(&caller.username, caller.client, record)
+            .await;
+    }
     Ok(Json(upgraded))
 }
 
