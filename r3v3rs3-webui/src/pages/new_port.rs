@@ -75,9 +75,10 @@ pub fn new_port() -> Html {
 }
 
 async fn create_port(locale: Locale, entry: &Port) -> Result<(), String> {
-    let req = Request::post(&format!("{API_ENDPOINT}/ports"))
-        .json(entry)
-        .map_err(|err| err.to_string())?;
-    crate::pages::settings::send_request(locale, req).await?;
-    Ok(())
+    crate::pages::settings::send_json(
+        locale,
+        Request::post(&format!("{API_ENDPOINT}/ports")),
+        entry,
+    )
+    .await
 }
