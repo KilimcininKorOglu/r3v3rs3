@@ -182,9 +182,8 @@ async fn check_running(runtime: &DockerRuntime, names: &Names, id: &str) -> anyh
         .get(&80)
         .copied()
         .context("published port")?;
-    let reply = http_get(host_port).await?;
+    let reply = http_get_ready(host_port, "Name: r3v3rs3").await?;
     ensure!(reply.starts_with("HTTP/1.1 200"), "{reply}");
-    ensure!(reply.contains("Name: r3v3rs3"), "{reply}");
     Ok(())
 }
 
@@ -197,6 +196,26 @@ async fn http_get(port: u16) -> anyhow::Result<String> {
     let mut reply = String::new();
     stream.read_to_string(&mut reply).await?;
     Ok(reply)
+}
+
+/// Sends `GET /` until the reply contains `expected`, for up to 30 seconds, and returns the
+/// reply. A container that has just started can refuse the connection, or close it without
+/// a reply, before its server listens.
+async fn http_get_ready(port: u16, expected: &str) -> anyhow::Result<String> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let reply = http_get(port).await;
+        if let Ok(text) = &reply
+            && text.contains(expected)
+        {
+            return reply;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let last = reply.map_err(|err| format!("{err:#}"));
+            anyhow::bail!("port {port} never answered with {expected:?}; last reply: {last:?}");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 /// A name that is only a prefix of the container id must not find the container.
@@ -319,8 +338,7 @@ async fn check_answer(name: &ProjectName) -> anyhow::Result<()> {
         .await?
         .context("the web container")?;
     let host_port = container.published.get(&80).copied().context("port")?;
-    let reply = http_get(host_port).await?;
-    ensure!(reply.contains("Name: compose"), "{reply}");
+    http_get_ready(host_port, "Name: compose").await?;
     Ok(())
 }
 
