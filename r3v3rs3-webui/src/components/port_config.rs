@@ -192,23 +192,28 @@ fn use_interfaces(interface: &str) -> UseStateHandle<Vec<String>> {
     let interfaces = use_state(|| vec![interface.to_string()]);
     let interfaces_cloned = interfaces.clone();
     let interface = interface.to_string();
+    let locale = use_locale();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(entry) = get_interfaces().await {
-                let mut list = vec!["0.0.0.0".into(), "::".into()]
-                    .into_iter()
-                    .chain(
-                        entry
-                            .into_iter()
-                            .flat_map(|ifs| ifs.addrs)
-                            .map(|addr| addr.ip.to_string()),
-                    )
-                    .collect::<Vec<_>>();
-                if !list.contains(&interface) {
-                    list.push(interface);
+            let entry = match get_interfaces(locale).await {
+                Ok(entry) => entry,
+                Err(err) => {
+                    return crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await;
                 }
-                interfaces_cloned.set(list);
+            };
+            let mut list = vec!["0.0.0.0".into(), "::".into()]
+                .into_iter()
+                .chain(
+                    entry
+                        .into_iter()
+                        .flat_map(|ifs| ifs.addrs)
+                        .map(|addr| addr.ip.to_string()),
+                )
+                .collect::<Vec<_>>();
+            if !list.contains(&interface) {
+                list.push(interface);
             }
+            interfaces_cloned.set(list);
         });
     });
     interfaces
@@ -794,12 +799,9 @@ fn listen_addr(
     parsed
 }
 
-async fn get_interfaces() -> Result<Vec<NetworkInterface>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/ports/interfaces"))
-        .send()
-        .await?
-        .json()
-        .await
+async fn get_interfaces(locale: Locale) -> Result<Vec<NetworkInterface>, String> {
+    let request = Request::get(&format!("{API_ENDPOINT}/ports/interfaces"));
+    crate::pages::settings::fetch_json(locale, request).await
 }
 
 fn interface_options(interfaces: &[String], selected: &str) -> Html {
