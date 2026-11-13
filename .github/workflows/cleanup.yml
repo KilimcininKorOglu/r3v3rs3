@@ -141,9 +141,12 @@ jobs:
             async function refIsLive(ref) {
               const pull = ref.match(/^refs\/pull\/(\d+)\//);
               if (pull) return pullIsOpen(Number(pull[1]));
-              if (ref.includes('/tags/')) return true;
+              // A release tag builds once. Its caches are readable only by runs of the same
+              // tag, never by the next tag or by main, so they only take quota. GitHub reports
+              // them as refs/heads/refs/tags/<tag>.
+              if (ref.includes('/tags/')) return false;
               if (ref.startsWith('refs/heads/')) return branchRefs.has(ref);
-              // A tag ref or a shape this step does not know: never guess, keep it.
+              // A shape this step does not know: never guess, keep it.
               return true;
             }
 
