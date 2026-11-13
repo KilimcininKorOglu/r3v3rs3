@@ -2035,6 +2035,17 @@ async fn run_restore(
     Ok(())
 }
 
+/// Takes the dump of a database container, for the tests on a Docker Engine.
+#[cfg(test)]
+pub(super) async fn dump_for_test(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    info: &EngineInfo,
+    password: &str,
+) -> anyhow::Result<Vec<u8>> {
+    take_dump(runtime, container, dump_plan(&info.engine, info, password)?).await
+}
+
 /// The dump command of one engine over the local connection of the container itself. The
 /// engines with a dump command are the ones that the catalog of the `r3v3rs3-apps`
 /// repository carries; an engine without a command cannot be backed up.

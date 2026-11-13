@@ -34,6 +34,8 @@ mod s3;
 pub mod scheduler;
 pub mod store;
 pub mod tenant;
+#[cfg(test)]
+mod tenant_docker_tests;
 pub mod terminal;
 pub mod volume_backup;
 pub mod webhook;
