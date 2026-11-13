@@ -476,10 +476,10 @@ fn purge_onclick(locale: Locale, id: ShortId) -> Callback<MouseEvent> {
         e.prevent_default();
         let question = locale.tf("proxies.confirm_purge", &[("id", &id.to_string())]);
         dialog::confirm_then(locale, question, async move {
-            match purge_cache(id).await {
+            match purge_cache(locale, id).await {
                 Ok(()) => dialog::message(locale, locale.t("proxies.purged"), Icon::Success).await,
                 Err(err) => {
-                    let text = locale.tf("proxies.purge_failed", &[("error", &err.to_string())]);
+                    let text = locale.tf("proxies.purge_failed", &[("error", &err)]);
                     dialog::message(locale, &text, Icon::Error).await;
                 }
             }
@@ -715,18 +715,8 @@ async fn get_list() -> Result<Vec<ProxyEntry>, gloo_net::Error> {
         .await
 }
 
-async fn purge_cache(id: ShortId) -> Result<(), gloo_net::Error> {
-    let res = Request::delete(&format!("{API_ENDPOINT}/proxies/{id}/cache"))
-        .send()
-        .await?;
-    if res.ok() {
-        Ok(())
-    } else {
-        Err(gloo_net::Error::GlooError(format!(
-            "HTTP status {}",
-            res.status()
-        )))
-    }
+async fn purge_cache(locale: Locale, id: ShortId) -> Result<(), String> {
+    crate::pages::resource_page::delete(locale, &format!("/proxies/{id}/cache")).await
 }
 
 async fn delete_site(locale: Locale, id: ShortId) -> Result<(), String> {
