@@ -9,7 +9,7 @@ use crate::components::data_list::{
 use crate::format::{format_disk_bytes, format_time};
 use crate::i18n::use_locale;
 use crate::pages::Route;
-use crate::pages::settings::fetch_json;
+use crate::pages::settings::{failure_box, fetch_json};
 use crate::store::SessionStore;
 use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
@@ -55,18 +55,24 @@ pub fn dashboard() -> Html {
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
     let summary = use_state(|| Option::<DashboardSummary>::None);
+    // The error of the last refresh; the next successful refresh clears it.
+    let error = use_state(|| Option::<String>::None);
 
     let signed_in = session.info.is_some();
     let summary_cloned = summary.clone();
+    let error_cloned = error.clone();
     use_effect_with((signed_in,), move |&(signed_in,)| {
         let interval = signed_in.then(|| {
             let load = move || {
-                let summary = summary_cloned.clone();
+                let (summary, error) = (summary_cloned.clone(), error_cloned.clone());
                 wasm_bindgen_futures::spawn_local(async move {
-                    if let Ok(data) =
-                        fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/dashboard"))).await
-                    {
-                        summary.set(Some(data));
+                    let path = format!("{API_ENDPOINT}/dashboard");
+                    match fetch_json(locale, Request::get(&path)).await {
+                        Ok(data) => {
+                            summary.set(Some(data));
+                            error.set(None);
+                        }
+                        Err(message) => error.set(Some(message)),
                     }
                 });
             };
@@ -76,7 +82,11 @@ pub fn dashboard() -> Html {
         move || drop(interval)
     });
 
+    let failure = error.as_deref().map(failure_box).unwrap_or_default();
     let Some(data) = (*summary).clone() else {
+        if error.is_some() {
+            return failure;
+        }
         return html! {
             <div class="p-4 text-center text-neutral-500 dark:text-neutral-400">
                 {locale.t("dashboard.loading")}
@@ -86,6 +96,7 @@ pub fn dashboard() -> Html {
 
     html! {
         <div class="space-y-6">
+            { failure }
             { render_stat_cards(locale, &data) }
             if let Some(disk) = &data.disk {
                 { render_disk_card(locale, disk) }
