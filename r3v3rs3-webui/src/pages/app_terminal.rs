@@ -6,6 +6,7 @@ use super::settings::fetch_json;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::button::{Button, ButtonKind, ButtonSize};
+use crate::components::modal::Modal;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
 use gloo_net::http::Request;
@@ -1072,31 +1073,28 @@ fn history_modal_view(
         let on_close = on_close.clone();
         Callback::from(move |_| on_close.emit(()))
     };
+    let title = format!(
+        "{} ({})",
+        locale.t("apps.terminal_history_title"),
+        history.len()
+    );
+    let footer = html! {
+        <>
+            <Button kind={ButtonKind::Danger} size={ButtonSize::Sm} onclick={Callback::from(move |_| on_clear.emit(()))}>
+                {locale.t("apps.terminal_history_clear")}
+            </Button>
+            <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_close_click}>
+                {locale.t("apps.terminal_history_close")}
+            </Button>
+        </>
+    };
 
     html! {
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onclick={on_close_click.clone()}>
-            <div class="bg-neutral-900 border border-neutral-700 rounded-2xl shadow-2xl max-w-xl w-full p-5 text-neutral-100 space-y-4" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                <div class="flex items-center justify-between border-b border-neutral-800 pb-3">
-                    <div class="flex items-center gap-2">
-                        <span class="p-1 rounded bg-neutral-800 text-neutral-300">
-                            <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                        </span>
-                        <h3 class="text-base font-semibold">{locale.t("apps.terminal_history_title")}</h3>
-                        <span class="text-xs px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 font-mono">
-                            {history.len()}
-                        </span>
-                    </div>
-                    <button type="button" class="text-neutral-400 hover:text-white p-1 rounded hover:bg-neutral-800 transition" onclick={on_close_click.clone()}>
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
+        <Modal {title} on_close={Some(on_close)} {footer}>
+            <div class="space-y-4">
                 <input
                     type="text"
-                    class="w-full px-3 py-1.5 text-xs bg-neutral-950 border border-neutral-700 rounded-lg text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+                    class="w-full px-3 py-1.5 text-xs bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-neutral-900 dark:text-neutral-200 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-primary-500"
                     placeholder={locale.t("apps.terminal_history_search")}
                     value={(**search_query).clone()}
                     oninput={on_search_input}
@@ -1108,16 +1106,8 @@ fn history_modal_view(
                         { for filtered.into_iter().rev().map(|cmd| render_history_row(locale, cmd, &on_run, &on_insert)) }
                     }
                 </div>
-                <div class="flex items-center justify-between border-t border-neutral-800 pt-3">
-                    <Button kind={ButtonKind::Danger} size={ButtonSize::Sm} onclick={Callback::from(move |_| on_clear.emit(()))}>
-                        {locale.t("apps.terminal_history_clear")}
-                    </Button>
-                    <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={on_close_click}>
-                        {locale.t("apps.terminal_history_close")}
-                    </Button>
-                </div>
             </div>
-        </div>
+        </Modal>
     }
 }
 
@@ -1141,12 +1131,12 @@ fn render_history_row(
     let on_copy_click = Callback::from(move |_| copy_to_clipboard(&cmd_copy));
 
     html! {
-        <div class="flex items-center justify-between gap-2 p-2 rounded bg-neutral-950/80 border border-neutral-800 hover:border-neutral-700 transition">
-            <span class="font-mono text-xs text-neutral-200 truncate select-all">{&cmd}</span>
+        <div class="flex items-center justify-between gap-2 p-2 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 transition">
+            <span class="font-mono text-xs text-neutral-800 dark:text-neutral-200 truncate select-all">{&cmd}</span>
             <div class="flex items-center gap-1 shrink-0">
                 <button
                     type="button"
-                    class="p-1 rounded text-emerald-400 hover:bg-emerald-950/40 transition cursor-pointer"
+                    class="p-1 rounded text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition cursor-pointer"
                     onclick={on_run_click}
                     title={locale.t("apps.terminal_history_run")}
                 >
@@ -1156,7 +1146,7 @@ fn render_history_row(
                 </button>
                 <button
                     type="button"
-                    class="p-1 rounded text-amber-400 hover:bg-amber-950/40 transition cursor-pointer"
+                    class="p-1 rounded text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition cursor-pointer"
                     onclick={on_insert_click}
                     title={locale.t("apps.terminal_history_insert")}
                 >
@@ -1166,7 +1156,7 @@ fn render_history_row(
                 </button>
                 <button
                     type="button"
-                    class="p-1 rounded text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                    class="p-1 rounded text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-800 transition cursor-pointer"
                     onclick={on_copy_click}
                     title={locale.t("apps.terminal_copy")}
                 >
