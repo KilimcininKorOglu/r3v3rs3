@@ -1748,9 +1748,10 @@ impl ApiClient {
         Ok(())
     }
 
+    /// A database is an app, so the app route returns it.
     pub async fn get_db(&self, id: &str) -> anyhow::Result<()> {
         let res = self
-            .request(Method::GET, &format!("/api/databases/{id}"), None)
+            .request(Method::GET, &format!("/api/apps/{id}"), None)
             .await?;
         print_json(&res)
     }
