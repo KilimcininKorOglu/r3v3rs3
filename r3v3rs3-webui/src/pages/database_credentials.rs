@@ -3,9 +3,12 @@
 //! tenants that no app uses.
 
 use super::resource_page::delete_on_click;
-use super::settings::{fetch_json, post_json};
+use super::settings::{failure_box, fetch_json, post_json};
 use crate::API_ENDPOINT;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::button::{Button, ButtonKind};
+use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
+use crate::components::modal::{Modal, ModalSize};
 use crate::dialog::{self, Icon};
 use gloo_net::http::Request;
 use r3v3rs3_api::i18n::Locale;
@@ -16,6 +19,29 @@ use r3v3rs3_api::platform::{
 };
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
+
+const COLUMNS: [Column; 5] = [
+    Column {
+        label: "databases.account",
+        class: "whitespace-nowrap",
+    },
+    Column {
+        label: "databases.user",
+        class: "font-mono",
+    },
+    Column {
+        label: "databases.password",
+        class: "font-mono break-all",
+    },
+    Column {
+        label: "databases.connection",
+        class: "font-mono break-all",
+    },
+    Column {
+        label: "databases.apps",
+        class: "",
+    },
+];
 
 #[derive(Properties, PartialEq)]
 pub struct CredentialsPanelProps {
@@ -124,7 +150,7 @@ struct RowContext<'a> {
     reload: Callback<()>,
 }
 
-fn account_row(ctx: &RowContext<'_>, account: &DatabaseAccount) -> Html {
+fn account_row(ctx: &RowContext<'_>, account: &DatabaseAccount) -> Row {
     let locale = ctx.locale;
     let label = account
         .tenant
@@ -147,58 +173,58 @@ fn account_row(ctx: &RowContext<'_>, account: &DatabaseAccount) -> Html {
             let path = format!("/databases/{}/tenants/{tenant}", ctx.id);
             delete_on_click(locale, question, path, ctx.reload.clone())
         });
-    html! {
-        <tr key={label.clone()} class="border-b border-neutral-700 align-top">
-            <td class="py-1.5 font-medium">{label}</td>
-            <td class="py-1.5 font-mono">{account.user.clone()}</td>
-            <td class="py-1.5 font-mono break-all">{account.password.clone()}</td>
-            <td class="py-1.5 font-mono break-all">{account.url.clone()}</td>
-            <td class="py-1.5 text-neutral-400">{apps}</td>
-            <td class="py-1.5 text-right">
-                <div class="inline-flex items-center justify-end gap-1.5">
+    Row {
+        key: label.clone(),
+        cells: vec![
+            html! { {label} },
+            html! { {account.user.clone()} },
+            html! { {account.password.clone()} },
+            html! { {account.url.clone()} },
+            html! { {apps} },
+        ],
+        actions: html! {
+            <>
+                <ActionIconButton
+                    variant={ActionVariant::Restore}
+                    title={locale.t("databases.reset_password").to_string()}
+                    onclick={reset}
+                />
+                if let Some(onclick) = delete {
                     <ActionIconButton
-                        variant={ActionVariant::Restore}
-                        title={locale.t("databases.reset_password").to_string()}
-                        onclick={reset}
+                        variant={ActionVariant::Delete}
+                        title={locale.t("databases.delete_tenant").to_string()}
+                        {onclick}
                     />
-
-                    if let Some(onclick) = delete {
-                        <ActionIconButton
-                            variant={ActionVariant::Delete}
-                            title={locale.t("databases.delete_tenant").to_string()}
-                            {onclick}
-                        />
-                    }
-                </div>
-            </td>
-        </tr>
+                }
+            </>
+        },
     }
 }
 
-fn accounts_table(ctx: &RowContext<'_>, credentials: &DatabaseCredentials) -> Html {
-    let locale = ctx.locale;
-    let rows = std::iter::once(&credentials.root)
-        .chain(credentials.tenants.iter())
-        .map(|account| account_row(ctx, account))
-        .collect::<Vec<_>>();
-    html! {
-        <table class="w-full text-sm">
-            <thead>
-                <tr class="text-left text-neutral-400">
-                    <th class="py-1.5 font-medium">{locale.t("databases.account")}</th>
-                    <th class="py-1.5 font-medium">{locale.t("databases.user")}</th>
-                    <th class="py-1.5 font-medium">{locale.t("databases.password")}</th>
-                    <th class="py-1.5 font-medium">{locale.t("databases.connection")}</th>
-                    <th class="py-1.5 font-medium">{locale.t("databases.apps")}</th>
-                    <th />
-                </tr>
-            </thead>
-            <tbody>{ for rows }</tbody>
-        </table>
-    }
+fn accounts_table(ctx: &RowContext<'_>, credentials: Option<&DatabaseCredentials>) -> Html {
+    let rows = credentials
+        .map(|credentials| {
+            std::iter::once(&credentials.root)
+                .chain(credentials.tenants.iter())
+                .map(|account| account_row(ctx, account))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let content = ListContent {
+        loaded: credentials.is_some(),
+        empty: "common.list_empty",
+        columns: &COLUMNS,
+        rows: &rows,
+    };
+    let options = ListOptions {
+        embedded: true,
+        compact: true,
+        ..Default::default()
+    };
+    list_view(ctx.locale, content, None, &options)
 }
 
-/// The accounts of a database with their passwords, above the list of the databases.
+/// The accounts of a database with their passwords, in a modal over the list of the databases.
 #[function_component(CredentialsPanel)]
 pub fn credentials_panel(props: &CredentialsPanelProps) -> Html {
     let locale = props.locale;
@@ -227,21 +253,17 @@ pub fn credentials_panel(props: &CredentialsPanelProps) -> Html {
         tenants: &loaded.tenants,
         reload,
     };
+    let footer = html! {
+        <Button kind={ButtonKind::Secondary} onclick={close}>{locale.t("common.close")}</Button>
+    };
     html! {
-        <div class="rounded border border-neutral-600 p-4 mb-4">
-            <div class="flex items-center justify-between mb-2">
-                <p class="font-medium">{title}</p>
-                <button type="button" class="px-3 py-1.5 rounded bg-neutral-700 text-neutral-100 hover:bg-neutral-600 text-sm" onclick={close}>
-                    {locale.t("common.ok")}
-                </button>
-            </div>
-            <p class="text-sm text-neutral-400 mb-3">{locale.t("databases.credentials_hint")}</p>
+        <Modal {title} on_close={props.close.clone()} size={ModalSize::Xl} {footer}>
+            <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3">{locale.t("databases.credentials_hint")}</p>
             if let Some(error) = loaded.error.clone() {
-                <p class="text-red-500">{error}</p>
+                { failure_box(&error) }
+            } else {
+                { accounts_table(&ctx, loaded.credentials.as_ref()) }
             }
-            if let Some(credentials) = loaded.credentials.as_ref() {
-                { accounts_table(&ctx, credentials) }
-            }
-        </div>
+        </Modal>
     }
 }
