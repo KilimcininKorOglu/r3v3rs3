@@ -3,7 +3,7 @@
 //! returns to this page, which connects the connection.
 
 use super::accounts::{HINT_CLASS, LABEL_CLASS};
-use super::settings::{fetch_json, send_request};
+use super::settings::{fetch_json, post_json};
 use crate::API_ENDPOINT;
 use gloo_net::http::Request;
 use r3v3rs3_api::git_connection::{GitConnectionEntry, GithubAppForm, GithubAppRequest};
@@ -31,15 +31,9 @@ pub(super) fn fields_view(locale: Locale, address: Html, organization: Html) -> 
 /// Starts the creation of the GitHub App and posts its manifest to GitHub. The browser leaves the
 /// page when the post starts.
 pub(super) async fn create(locale: Locale, request: GithubAppRequest) -> Result<(), String> {
-    let request = Request::post(&format!("{API_ENDPOINT}/git/github_apps"))
-        .json(&request)
-        .map_err(|err| err.to_string())?;
-    let form: GithubAppForm = send_request(locale, request)
-        .await?
-        .json()
-        .await
-        .map_err(|err| err.to_string())?;
-    post_manifest(&form).map_err(|_| "the GitHub page did not open".to_string())
+    let builder = Request::post(&format!("{API_ENDPOINT}/git/github_apps"));
+    let form: GithubAppForm = post_json(locale, builder, &request).await?;
+    post_manifest(&form).map_err(|_| locale.t("git_connections.provider_page_failed").to_string())
 }
 
 /// Posts the manifest with a form, because GitHub takes the manifest only from a form post.
