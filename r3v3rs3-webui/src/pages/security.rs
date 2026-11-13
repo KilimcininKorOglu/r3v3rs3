@@ -6,7 +6,9 @@ use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::anomaly_rules::AnomalyRulesCard;
+use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
 use crate::components::geoip_card::GeoIpCard;
+use crate::components::tabs::{TabItem, Tabs};
 use crate::dialog;
 use crate::i18n::use_locale;
 use gloo_net::http::Request;
@@ -16,6 +18,42 @@ use r3v3rs3_api::quarantine::QuarantinedIpEntry;
 use serde_json::json;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
+
+const TABLE_FRAME: &str = "mt-4 rounded-md border border-neutral-300 dark:border-neutral-700";
+
+const BANNED_COLUMNS: [Column; 3] = [
+    Column {
+        label: "settings.banned_ips",
+        class: "font-mono",
+    },
+    Column {
+        label: "settings.failures_count",
+        class: "",
+    },
+    Column {
+        label: "settings.remaining_time",
+        class: "font-mono whitespace-nowrap",
+    },
+];
+
+const QUARANTINE_COLUMNS: [Column; 4] = [
+    Column {
+        label: "settings.quarantined_ips",
+        class: "font-mono",
+    },
+    Column {
+        label: "settings.quarantine_reason",
+        class: "",
+    },
+    Column {
+        label: "settings.quarantine_violations",
+        class: "font-mono",
+    },
+    Column {
+        label: "settings.remaining_time",
+        class: "font-mono whitespace-nowrap",
+    },
+];
 
 /// The active security section tab.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -81,29 +119,22 @@ fn render_tabs(locale: Locale, active_tab: &UseStateHandle<SecurityTab>) -> Html
         (SecurityTab::AnomalyRules, "security.tab_anomaly_rules"),
         (SecurityTab::GeoIp, "security.tab_geoip"),
     ];
-    html! {
-        <div class="border-b border-neutral-300 dark:border-neutral-800">
-            <nav class="flex space-x-6">
-                { for tabs.into_iter().map(|(tab, label)| {
-                    let is_active = **active_tab == tab;
-                    let active_cls = if is_active {
-                        "border-blue-500 text-blue-500 dark:text-blue-400 font-semibold border-b-2"
-                    } else {
-                        "border-transparent text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
-                    };
-                    let onclick = {
-                        let active_tab = active_tab.clone();
-                        Callback::from(move |_| active_tab.set(tab))
-                    };
-                    html! {
-                        <button type="button" {onclick} class={classes!("py-3", "px-1", "text-sm", "transition-colors", active_cls)}>
-                            { locale.t(label) }
-                        </button>
-                    }
-                }) }
-            </nav>
-        </div>
-    }
+    let tabs = tabs
+        .into_iter()
+        .map(|(tab, label)| {
+            let onclick = {
+                let active_tab = active_tab.clone();
+                Callback::from(move |_: MouseEvent| active_tab.set(tab))
+            };
+            TabItem::click(locale.t(label), onclick, **active_tab == tab)
+        })
+        .collect::<Vec<_>>();
+    html! { <Tabs {tabs} /> }
+}
+
+/// Minutes and seconds of a remaining ban time.
+fn remaining_text(seconds: u64) -> String {
+    format!("{}m {}s", seconds / 60, seconds % 60)
 }
 
 #[function_component(BannedIpsCard)]
@@ -157,53 +188,57 @@ fn banned_ips_card() -> Html {
             { notice_view(&notice) }
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.banned_ips")}</h2>
             <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.banned_ips_hint")}</p>
-            if list.is_empty() {
-                <p class="mt-4 text-sm text-neutral-400 dark:text-neutral-500 italic">{locale.t("settings.banned_ips_empty")}</p>
-            } else {
-                <div class="mt-4 overflow-x-auto">
-                    <table class="w-full text-sm text-left text-neutral-500 dark:text-neutral-400">
-                        <thead class="text-xs uppercase bg-neutral-50 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
-                            <tr>
-                                <th class="px-4 py-2">{"IP"}</th>
-                                <th class="px-4 py-2">{locale.t("settings.failures_count")}</th>
-                                <th class="px-4 py-2">{locale.t("settings.remaining_time")}</th>
-                                <th class="px-4 py-2"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            { for list.iter().map(|entry| {
-                                let ip_str = entry.ip.to_string();
-                                let on_unban = {
-                                    let unban = unban.clone();
-                                    let ip_str = ip_str.clone();
-                                    Callback::from(move |e: MouseEvent| {
-                                        e.prevent_default();
-                                        unban.emit(ip_str.clone());
-                                    })
-                                };
-                                let mins = entry.remaining_seconds / 60;
-                                let secs = entry.remaining_seconds % 60;
-                                let time_str = format!("{mins}m {secs}s");
-                                html! {
-                                    <tr class="border-b dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700/50">
-                                        <td class="px-4 py-2 font-mono font-medium text-neutral-900 dark:text-white">{entry.ip.to_string()}</td>
-                                        <td class="px-4 py-2">{entry.failures}</td>
-                                        <td class="px-4 py-2 font-mono text-amber-600 dark:text-amber-400">{time_str}</td>
-                                        <td class="px-4 py-2 text-right">
-                                            <ActionIconButton
-                                                variant={ActionVariant::Delete}
-                                                title={locale.t("settings.unban").to_string()}
-                                                onclick={on_unban}
-                                            />
-                                        </td>
-                                    </tr>
-                                }
-                            }) }
-                        </tbody>
-                    </table>
-                </div>
-            }
+            <div class={TABLE_FRAME}>
+                { banned_table_view(locale, &list, unban) }
+            </div>
         </div>
+    }
+}
+
+fn banned_table_view(locale: Locale, list: &[BannedIpEntry], unban: Callback<String>) -> Html {
+    let rows = list
+        .iter()
+        .map(|entry| {
+            let ip = entry.ip.to_string();
+            let on_unban = {
+                let (unban, ip) = (unban.clone(), ip.clone());
+                Callback::from(move |e: MouseEvent| {
+                    e.prevent_default();
+                    unban.emit(ip.clone());
+                })
+            };
+            Row {
+                key: ip.clone(),
+                cells: vec![
+                    html! { {ip} },
+                    html! { {entry.failures} },
+                    html! { {remaining_text(entry.remaining_seconds)} },
+                ],
+                actions: html! {
+                    <ActionIconButton
+                        variant={ActionVariant::Delete}
+                        title={locale.t("settings.unban").to_string()}
+                        onclick={on_unban}
+                    />
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    let content = ListContent {
+        loaded: true,
+        empty: "settings.banned_ips_empty",
+        columns: &BANNED_COLUMNS,
+        rows: &rows,
+    };
+    list_view(locale, content, None, &table_options())
+}
+
+/// The options of the tables inside the cards: the address column keeps its untranslated name.
+fn table_options() -> ListOptions {
+    ListOptions {
+        embedded: true,
+        headings: Some(vec!["IP".to_string()]),
+        ..Default::default()
     }
 }
 
@@ -367,55 +402,41 @@ fn quarantined_table_view(
     list: &[QuarantinedIpEntry],
     unquarantine: Callback<String>,
 ) -> Html {
-    if list.is_empty() {
-        return html! {
-            <p class="mt-4 text-sm text-neutral-400 dark:text-neutral-500 italic">{locale.t("settings.quarantined_ips_empty")}</p>
-        };
-    }
-
+    let rows = list
+        .iter()
+        .map(|entry| {
+            let ip = entry.ip.to_string();
+            let on_release = {
+                let (unquarantine, ip) = (unquarantine.clone(), ip.clone());
+                Callback::from(move |_| unquarantine.emit(ip.clone()))
+            };
+            Row {
+                key: ip.clone(),
+                cells: vec![
+                    html! { {ip} },
+                    html! { {&entry.reason} },
+                    html! { {entry.violations} },
+                    html! { {remaining_text(entry.remaining_seconds)} },
+                ],
+                actions: html! {
+                    <ActionIconButton
+                        variant={ActionVariant::Delete}
+                        title={locale.t("settings.unquarantine").to_string()}
+                        onclick={on_release}
+                    />
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    let content = ListContent {
+        loaded: true,
+        empty: "settings.quarantined_ips_empty",
+        columns: &QUARANTINE_COLUMNS,
+        rows: &rows,
+    };
     html! {
-        <div class="mt-4 overflow-x-auto">
-            <table class="w-full text-sm text-left text-neutral-500 dark:text-neutral-400">
-                <thead class="text-xs uppercase bg-neutral-50 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
-                    <tr>
-                        <th class="px-4 py-2">{"IP"}</th>
-                        <th class="px-4 py-2">{locale.t("settings.quarantine_reason")}</th>
-                        <th class="px-4 py-2">{locale.t("settings.quarantine_violations")}</th>
-                        <th class="px-4 py-2">{locale.t("settings.remaining_time")}</th>
-                        <th class="px-4 py-2"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    { for list.iter().map(|entry| {
-                        let ip_str = entry.ip.to_string();
-                        let on_release = {
-                            let unquarantine = unquarantine.clone();
-                            let ip_str = ip_str.clone();
-                            Callback::from(move |_| {
-                                unquarantine.emit(ip_str.clone());
-                            })
-                        };
-                        let mins = entry.remaining_seconds / 60;
-                        let secs = entry.remaining_seconds % 60;
-                        let time_str = format!("{mins}m {secs}s");
-                        html! {
-                            <tr class="border-b dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700/50">
-                                <td class="px-4 py-2 font-mono font-medium text-neutral-900 dark:text-white">{entry.ip.to_string()}</td>
-                                <td class="px-4 py-2 text-neutral-700 dark:text-neutral-300">{&entry.reason}</td>
-                                <td class="px-4 py-2 font-mono text-amber-600 dark:text-amber-400">{entry.violations}</td>
-                                <td class="px-4 py-2 font-mono text-neutral-500 dark:text-neutral-400">{time_str}</td>
-                                <td class="px-4 py-2 text-right">
-                                    <ActionIconButton
-                                        variant={ActionVariant::Delete}
-                                        title={locale.t("settings.unquarantine").to_string()}
-                                        onclick={on_release}
-                                    />
-                                </td>
-                            </tr>
-                        }
-                    }) }
-                </tbody>
-            </table>
+        <div class={TABLE_FRAME}>
+            { list_view(locale, content, None, &table_options()) }
         </div>
     }
 }
