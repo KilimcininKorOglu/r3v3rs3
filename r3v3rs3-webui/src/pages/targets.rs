@@ -1175,13 +1175,10 @@ fn save_policy_callback(
         spawn_local(async move {
             busy.set(true);
             let val = (*policy).clone();
-            let req = Request::put(&format!("{API_ENDPOINT}/platform/prune")).json(&val);
-            match req {
-                Ok(req) => match send_request(locale, req).await {
-                    Ok(_) => notice.set(Some(Notice::Saved("targets.prune_saved"))),
-                    Err(err) => notice.set(Some(Notice::Failed(err))),
-                },
-                Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
+            let req = Request::put(&format!("{API_ENDPOINT}/platform/prune"));
+            match super::settings::send_json(locale, req, &val).await {
+                Ok(()) => notice.set(Some(Notice::Saved("targets.prune_saved"))),
+                Err(err) => notice.set(Some(Notice::Failed(err))),
             }
             busy.set(false);
         });
