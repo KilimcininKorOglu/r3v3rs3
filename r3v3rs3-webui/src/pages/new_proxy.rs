@@ -182,11 +182,12 @@ fn preset_field(locale: Locale, preset: &UseStateHandle<Preset>) -> Html {
 }
 
 async fn create_proxy(locale: Locale, entry: &Proxy) -> Result<(), String> {
-    let req = Request::post(&format!("{API_ENDPOINT}/proxies"))
-        .json(entry)
-        .map_err(|err| err.to_string())?;
-    crate::pages::settings::send_request(locale, req).await?;
-    Ok(())
+    crate::pages::settings::send_json(
+        locale,
+        Request::post(&format!("{API_ENDPOINT}/proxies")),
+        entry,
+    )
+    .await
 }
 
 #[cfg(test)]
