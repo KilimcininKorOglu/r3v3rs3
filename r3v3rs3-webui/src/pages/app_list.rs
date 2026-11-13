@@ -8,7 +8,7 @@ use crate::components::data_list::{
 use crate::dialog;
 use crate::i18n::use_locale;
 use crate::pages::Route;
-use crate::pages::settings::{failure_box, fetch_json, send_request};
+use crate::pages::settings::{failure_box, fetch_json};
 use crate::store::SessionStore;
 use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
@@ -183,15 +183,9 @@ fn bulk_delete_callback(
         dialog::confirm_then(locale, question, async move {
             let mut last_err = None;
             for id_str in selected_ids {
-                let path = format!("{API_ENDPOINT}/apps/{id_str}");
-                let request = Request::delete(&path).build().map_err(|e| e.to_string());
-                match request {
-                    Ok(req) => {
-                        if let Err(err) = send_request(locale, req).await {
-                            last_err = Some(err);
-                        }
-                    }
-                    Err(err) => last_err = Some(err),
+                let path = format!("/apps/{id_str}");
+                if let Err(err) = super::resource_page::delete(locale, &path).await {
+                    last_err = Some(err);
                 }
             }
             if let Some(err) = last_err {
