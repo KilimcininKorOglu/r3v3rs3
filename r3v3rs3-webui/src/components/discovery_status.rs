@@ -19,14 +19,14 @@ pub fn discovery_status_card() -> Html {
     let handle = manual.clone();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(entries) = get_statuses().await {
-                dispatch.set(DiscoveryStore { entries });
-            }
-        });
-        wasm_bindgen_futures::spawn_local(async move {
-            match get_proxies().await {
-                Ok(entries) => handle.set(Some(manual_count(&entries))),
-                Err(_) => handle.set(None),
+            let statuses = get_statuses(locale)
+                .await
+                .map(|entries| dispatch.set(DiscoveryStore { entries }));
+            let proxies = get_proxies(locale)
+                .await
+                .map(|entries| handle.set(Some(manual_count(&entries))));
+            if let Err(err) = statuses.and(proxies) {
+                crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await;
             }
         });
     });
@@ -98,19 +98,13 @@ fn issue_text(issue: &DiscoveryIssue) -> String {
     format!("{}: {}", issue.resource, issue.message)
 }
 
-async fn get_statuses() -> Result<Vec<DiscoveryStatus>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/discovery"))
-        .send()
-        .await?
-        .json()
+async fn get_statuses(locale: Locale) -> Result<Vec<DiscoveryStatus>, String> {
+    crate::pages::settings::fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/discovery")))
         .await
 }
 
-async fn get_proxies() -> Result<Vec<ProxyEntry>, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/proxies"))
-        .send()
-        .await?
-        .json()
+async fn get_proxies(locale: Locale) -> Result<Vec<ProxyEntry>, String> {
+    crate::pages::settings::fetch_json(locale, Request::get(&format!("{API_ENDPOINT}/proxies")))
         .await
 }
 
