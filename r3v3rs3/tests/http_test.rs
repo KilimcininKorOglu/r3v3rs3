@@ -9,7 +9,7 @@ use reqwest::{Body, header::HOST, redirect::Policy};
 use serde_json::json;
 
 mod common;
-use common::{TestStorage, alloc_tcp_port, with_server};
+use common::{TestPort, TestStorage, alloc_tcp_port, with_server};
 
 #[tokio::test]
 async fn http_proxy() -> anyhow::Result<()> {
@@ -158,90 +158,7 @@ async fn http_proxy() -> anyhow::Result<()> {
         }])
         .build();
 
-    with_server(config, |_| async move {
-        let client = reqwest::Client::builder().build()?;
-        let resp = client
-            .get(proxy_port.http_url("/hello?world=1"))
-            .header("x-forwarded-for", "0.0.0.0")
-            .header("x-real-ip", "0.0.0.0")
-            .send()
-            .await?;
-
-        assert_eq!(resp.status(), 200);
-        assert!(resp.headers().get(ALT_SVC).is_none());
-        let resp = resp.text().await?;
-        assert_eq!(resp, "Hello");
-
-        let resp = client
-            .get(proxy_port.http_url("/was/ist/passiert/Hello?world=1"))
-            .header("x-forwarded-for", "0.0.0.0")
-            .header("x-real-ip", "0.0.0.0")
-            .send()
-            .await?;
-
-        assert_eq!(resp.status(), 200);
-        assert!(resp.headers().get(ALT_SVC).is_none());
-        let resp = resp.text().await?;
-        assert_eq!(resp, "Bye");
-
-        let resp = client
-            .get(proxy_port.http_url("/hello/?world=1"))
-            .header("x-forwarded-for", "0.0.0.0")
-            .header("x-real-ip", "0.0.0.0")
-            .send()
-            .await?;
-
-        assert_eq!(resp.status(), 200);
-        assert!(resp.headers().get(ALT_SVC).is_none());
-        let resp = resp.text().await?;
-        assert_eq!(resp, "Hello");
-
-        let resp = client
-            .post(proxy_port.http_url("/hello?world=1"))
-            .header("x-forwarded-for", "0.0.0.0")
-            .header("x-real-ip", "0.0.0.0")
-            .json(&json!({"hello": "world"}))
-            .send()
-            .await?;
-
-        assert_eq!(resp.status(), 200);
-        assert!(resp.headers().get(ALT_SVC).is_none());
-        let resp = resp.text().await?;
-        assert_eq!(resp, "Hello");
-
-        let stream = tokio_stream::iter(chunks.into_iter().map(Ok::<_, ::std::io::Error>));
-        let body = Body::wrap_stream(stream);
-
-        let resp = client
-            .post(proxy_port.http_url("/hello?world=1"))
-            .header("x-forwarded-for", "0.0.0.0")
-            .header("x-real-ip", "0.0.0.0")
-            .body(body)
-            .send()
-            .await?;
-
-        assert_eq!(resp.status(), 200);
-        assert!(resp.headers().get(ALT_SVC).is_none());
-        let resp = resp.text().await?;
-        assert_eq!(resp, "Hello");
-
-        let client = reqwest::Client::builder().build()?;
-        let resp = client
-            .get(proxy_port.http_url("/hello?world=1"))
-            .header("x-forwarded-for", "0.0.0.0")
-            .header("x-real-ip", "0.0.0.0")
-            .header(HOST, "sphinx.of.black.quartz.judge.my.vow")
-            .send()
-            .await?;
-
-        assert_eq!(resp.status(), 200);
-        assert!(resp.headers().get(ALT_SVC).is_none());
-        let resp = resp.text().await?;
-        assert_eq!(resp, "Hello");
-
-        Ok(())
-    })
-    .await?;
+    with_server(config, |_| check_http_routes(proxy_port, chunks)).await?;
 
     mock_get.assert_async().await;
     mock_get_host.assert_async().await;
@@ -249,6 +166,74 @@ async fn http_proxy() -> anyhow::Result<()> {
     mock_get_trailing_slash.assert_async().await;
     mock_post.assert_async().await;
     mock_stream.assert_async().await;
+    Ok(())
+}
+
+/// Adds spoofed `x-forwarded-for` and `x-real-ip` headers that the proxy must not pass on.
+fn spoofed(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    request
+        .header("x-forwarded-for", "0.0.0.0")
+        .header("x-real-ip", "0.0.0.0")
+}
+
+/// Sends the request and checks that the proxy answers 200 with `expected` and without the
+/// `alt-svc` header of the upstream.
+async fn check_proxied(request: reqwest::RequestBuilder, expected: &str) -> anyhow::Result<()> {
+    let resp = request.send().await?;
+
+    assert_eq!(resp.status(), 200);
+    assert!(resp.headers().get(ALT_SVC).is_none());
+    let resp = resp.text().await?;
+    assert_eq!(resp, expected);
+    Ok(())
+}
+
+/// Sends GET, path route, trailing slash, JSON POST, streamed POST and regex vhost requests
+/// through the proxy.
+async fn check_http_routes(proxy_port: TestPort, chunks: Vec<&'static str>) -> anyhow::Result<()> {
+    let client = reqwest::Client::builder().build()?;
+    check_proxied(
+        spoofed(client.get(proxy_port.http_url("/hello?world=1"))),
+        "Hello",
+    )
+    .await?;
+
+    check_proxied(
+        spoofed(client.get(proxy_port.http_url("/was/ist/passiert/Hello?world=1"))),
+        "Bye",
+    )
+    .await?;
+
+    check_proxied(
+        spoofed(client.get(proxy_port.http_url("/hello/?world=1"))),
+        "Hello",
+    )
+    .await?;
+
+    check_proxied(
+        spoofed(client.post(proxy_port.http_url("/hello?world=1")))
+            .json(&json!({"hello": "world"})),
+        "Hello",
+    )
+    .await?;
+
+    let stream = tokio_stream::iter(chunks.into_iter().map(Ok::<_, ::std::io::Error>));
+    let body = Body::wrap_stream(stream);
+
+    check_proxied(
+        spoofed(client.post(proxy_port.http_url("/hello?world=1"))).body(body),
+        "Hello",
+    )
+    .await?;
+
+    let client = reqwest::Client::builder().build()?;
+    check_proxied(
+        spoofed(client.get(proxy_port.http_url("/hello?world=1")))
+            .header(HOST, "sphinx.of.black.quartz.judge.my.vow"),
+        "Hello",
+    )
+    .await?;
+
     Ok(())
 }
 
