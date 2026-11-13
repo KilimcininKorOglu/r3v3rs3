@@ -79,19 +79,12 @@ async fn etcd_put(token: &str, key: &str, value: &str) -> anyhow::Result<()> {
 #[tokio::test]
 #[ignore = "needs the discovery containers, run it with make test-discovery-e2e"]
 async fn etcd_keys_define_proxies_that_follow_changes() -> anyhow::Result<()> {
-    const URL_KEY: &str = "r3v3rs3/http/etcd/routes/0/servers/0/url";
-    let first = format!(
-        "http://127.0.0.1:{}/",
-        serve_ipv4(Ipv4Addr::LOCALHOST, "first").await?
-    );
-    let second = format!(
-        "http://127.0.0.1:{}/",
-        serve_ipv4(Ipv4Addr::LOCALHOST, "second").await?
-    );
+    let first = serve_local_url("first").await?;
+    let second = serve_local_url("second").await?;
     let token = etcd_token().await?;
     etcd_put(&token, "r3v3rs3/http/etcd/ports", "web").await?;
     etcd_put(&token, "r3v3rs3/http/etcd/vhosts", "etcd.e2e.test").await?;
-    etcd_put(&token, URL_KEY, &first).await?;
+    etcd_put(&token, ETCD_URL_KEY, &first).await?;
 
     let (port, url) = web_port().await?;
     let mut config = AppConfig::default();
@@ -100,16 +93,39 @@ async fn etcd_keys_define_proxies_that_follow_changes() -> anyhow::Result<()> {
     config.discovery.etcd.username = "root".into();
     config.discovery.etcd.password = Some(ETCD_PASSWORD.into());
     let storage = TestStorage::builder().ports(vec![port]).build();
-    with_server(storage, |mut channels| async move {
-        call(&mut channels, SetConfig { config }).await??;
-        wait_for_proxies(&mut channels, DiscoveryProvider::Etcd, 1).await?;
-        wait_for_host_body(&url, "etcd.e2e.test", "first").await?;
-
-        // The watch stream reports the changed key.
-        etcd_put(&token, URL_KEY, &second).await?;
-        wait_for_host_body(&url, "etcd.e2e.test", "second").await
+    with_server(storage, |channels| {
+        check_etcd_proxy(channels, config, url, token, second)
     })
     .await
+}
+
+/// The etcd key of the upstream URL of the first server of the first route.
+const ETCD_URL_KEY: &str = "r3v3rs3/http/etcd/routes/0/servers/0/url";
+
+/// Serves `body` on 127.0.0.1 and returns its URL.
+async fn serve_local_url(body: &'static str) -> anyhow::Result<String> {
+    Ok(format!(
+        "http://127.0.0.1:{}/",
+        serve_ipv4(Ipv4Addr::LOCALHOST, body).await?
+    ))
+}
+
+/// Checks that the etcd proxy serves the first upstream, then follows the changed URL key to
+/// the second upstream.
+async fn check_etcd_proxy(
+    mut channels: ServerChannels,
+    config: AppConfig,
+    url: String,
+    token: String,
+    second: String,
+) -> anyhow::Result<()> {
+    call(&mut channels, SetConfig { config }).await??;
+    wait_for_proxies(&mut channels, DiscoveryProvider::Etcd, 1).await?;
+    wait_for_host_body(&url, "etcd.e2e.test", "first").await?;
+
+    // The watch stream reports the changed key.
+    etcd_put(&token, ETCD_URL_KEY, &second).await?;
+    wait_for_host_body(&url, "etcd.e2e.test", "second").await
 }
 
 fn docker(args: &[&str]) -> anyhow::Result<String> {
@@ -126,6 +142,23 @@ fn docker(args: &[&str]) -> anyhow::Result<String> {
 #[tokio::test]
 #[ignore = "needs the discovery containers, run it with make test-discovery-e2e"]
 async fn docker_labels_of_a_running_container_define_a_proxy() -> anyhow::Result<()> {
+    start_whoami()?;
+
+    let (port, url) = web_port().await?;
+    let mut config = AppConfig::default();
+    config.discovery.docker.enabled = true;
+    config.discovery.docker.endpoint = "unix:///var/run/docker.sock".into();
+    let storage = TestStorage::builder().ports(vec![port]).build();
+    let result = with_server(storage, |channels| {
+        check_docker_proxy(channels, config, url)
+    })
+    .await;
+    docker(&["rm", "-f", WHOAMI])?;
+    result
+}
+
+/// Starts the labeled whoami container after it removes a container left by an earlier run.
+fn start_whoami() -> anyhow::Result<()> {
     // `rm -f` also succeeds without the container, so a failed earlier run does not break this run.
     docker(&["rm", "-f", WHOAMI])?;
     docker(&[
@@ -143,25 +176,24 @@ async fn docker_labels_of_a_running_container_define_a_proxy() -> anyhow::Result
         "r3v3rs3.http.whoami.port=80",
         "traefik/whoami:v1.11",
     ])?;
+    Ok(())
+}
 
-    let (port, url) = web_port().await?;
-    let mut config = AppConfig::default();
-    config.discovery.docker.enabled = true;
-    config.discovery.docker.endpoint = "unix:///var/run/docker.sock".into();
-    let storage = TestStorage::builder().ports(vec![port]).build();
-    let result = with_server(storage, |mut channels| async move {
-        call(&mut channels, SetConfig { config }).await??;
-        wait_for_proxies(&mut channels, DiscoveryProvider::Docker, 1).await?;
-        let body = wait_for_host_status(&url, Some("docker.e2e.test"), 200).await?;
-        // whoami answers with the container hostname, so the request reached the container.
-        assert!(body.contains("Hostname: "), "{body}");
+/// Checks that the container label proxy reaches whoami and that removing the container removes
+/// the proxy.
+async fn check_docker_proxy(
+    mut channels: ServerChannels,
+    config: AppConfig,
+    url: String,
+) -> anyhow::Result<()> {
+    call(&mut channels, SetConfig { config }).await??;
+    wait_for_proxies(&mut channels, DiscoveryProvider::Docker, 1).await?;
+    let body = wait_for_host_status(&url, Some("docker.e2e.test"), 200).await?;
+    // whoami answers with the container hostname, so the request reached the container.
+    assert!(body.contains("Hostname: "), "{body}");
 
-        // The removed container removes its proxy.
-        docker(&["rm", "-f", WHOAMI])?;
-        wait_for_host_status(&url, Some("docker.e2e.test"), 502).await?;
-        wait_for_proxies(&mut channels, DiscoveryProvider::Docker, 0).await
-    })
-    .await;
+    // The removed container removes its proxy.
     docker(&["rm", "-f", WHOAMI])?;
-    result
+    wait_for_host_status(&url, Some("docker.e2e.test"), 502).await?;
+    wait_for_proxies(&mut channels, DiscoveryProvider::Docker, 0).await
 }
