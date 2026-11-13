@@ -120,6 +120,7 @@ pub struct PageProps {
 }
 
 fn load_app(
+    locale: Locale,
     app_id: ShortId,
     app: &UseStateHandle<Option<AppEntry>>,
     failed: &UseStateHandle<Option<String>>,
@@ -127,7 +128,7 @@ fn load_app(
     let (app, failed) = (app.clone(), failed.clone());
     spawn_local(async move {
         match fetch_json::<AppEntry>(
-            Locale::En,
+            locale,
             Request::get(&format!("{API_ENDPOINT}/apps/{app_id}")),
         )
         .await
@@ -152,7 +153,7 @@ pub fn app_commands_page(props: &PageProps) -> Html {
         let (app, failed) = (app.clone(), failed.clone());
         use_effect_with(signed_in, move |&signed_in| {
             if signed_in {
-                load_app(app_id, &app, &failed);
+                load_app(locale, app_id, &app, &failed);
             }
         });
     }
