@@ -53,8 +53,13 @@ pub fn traffic_inspector(props: &Props) -> Html {
     };
 
     let on_copy_curl = create_copy_curl_callback(&props.entry, &target_url, &copied);
-    let on_replay =
-        create_replay_callback(&props.entry, &target_url, &replay_loading, &replay_result);
+    let on_replay = create_replay_callback(
+        locale,
+        &props.entry,
+        &target_url,
+        &replay_loading,
+        &replay_result,
+    );
 
     let replay_args = ReplayTabArgs {
         target_url: &target_url,
@@ -111,6 +116,7 @@ fn create_copy_curl_callback(
 }
 
 fn create_replay_callback(
+    locale: Locale,
     entry: &AccessLogEntry,
     target_url: &UseStateHandle<String>,
     replay_loading: &UseStateHandle<bool>,
@@ -136,14 +142,18 @@ fn create_replay_callback(
                 allow_internal: false,
                 insecure_skip_verify: false,
             };
-            let res = Request::post(&format!("{API_ENDPOINT}/traffic/replay")).json(&req_payload);
-            if let Ok(req) = res
-                && let Ok(resp) = req.send().await
-                && let Ok(data) = resp.json::<RequestReplayResponse>().await
-            {
-                replay_result.set(Some(data));
-            }
+            let request = Request::post(&format!("{API_ENDPOINT}/traffic/replay"));
+            let sent = crate::pages::settings::post_json::<RequestReplayResponse>(
+                locale,
+                request,
+                &req_payload,
+            )
+            .await;
             replay_loading.set(false);
+            match sent {
+                Ok(data) => replay_result.set(Some(data)),
+                Err(err) => crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await,
+            }
         });
     })
 }
