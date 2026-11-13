@@ -1784,6 +1784,8 @@
   "apps.files_binary": "The file is not a text file.",
   "apps.volume_backups_title": "Volume Snapshots & Backups",
   "apps.volume_backup_create": "Create Snapshot",
+  "apps.volume_backup_id": "Snapshot",
+  "apps.volume_backup_size": "Size",
   "apps.volume_backup_restore": "Restore",
   "apps.volume_backup_download": "Download",
   "apps.volume_backup_delete": "Delete",

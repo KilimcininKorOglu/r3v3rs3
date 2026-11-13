@@ -1784,6 +1784,8 @@
   "apps.files_binary": "Dosya bir metin dosyası değil.",
   "apps.volume_backups_title": "Volume Yedekleri ve Snapshot'lar",
   "apps.volume_backup_create": "Snapshot Oluştur",
+  "apps.volume_backup_id": "Snapshot",
+  "apps.volume_backup_size": "Boyut",
   "apps.volume_backup_restore": "Geri Yükle",
   "apps.volume_backup_download": "İndir",
   "apps.volume_backup_delete": "Sil",

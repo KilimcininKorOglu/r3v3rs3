@@ -681,9 +681,9 @@ fn volume_backups_view(
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-xs text-neutral-500 border-b border-neutral-800">
-                            <th class="py-1">{"ID"}</th>
-                            <th class="py-1 text-right">{"Size"}</th>
-                            <th class="py-1 text-right">{"Actions"}</th>
+                            <th class="py-1">{locale.t("apps.volume_backup_id")}</th>
+                            <th class="py-1 text-right">{locale.t("apps.volume_backup_size")}</th>
+                            <th class="py-1 text-right">{locale.t("common.actions")}</th>
                         </tr>
                     </thead>
                     <tbody>
