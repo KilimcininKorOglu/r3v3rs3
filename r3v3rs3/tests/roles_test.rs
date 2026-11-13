@@ -118,47 +118,69 @@ async fn an_editor_with_a_proxy_list_sees_and_changes_only_its_proxies() -> anyh
         let web: ShortId = "web".parse()?;
         let other: ShortId = "other".parse()?;
 
-        let proxies = call_as(&mut channels, editor.clone(), GetProxyList).await??;
-        let ids = proxies.iter().map(|entry| entry.id).collect::<Vec<_>>();
-        assert_eq!(ids, vec![web]);
-
-        let result = call_as(&mut channels, editor.clone(), GetProxy { id: other }).await?;
-        assert!(matches!(result, Err(Error::IdNotFound { .. })));
-        let entry = proxy_entry("other", "http://127.0.0.1:2/");
-        let result = call_as(&mut channels, editor.clone(), UpdateProxy { entry }).await?;
-        assert!(matches!(result, Err(Error::IdNotFound { .. })));
-        let result = call_as(&mut channels, editor.clone(), DeleteProxy { id: other }).await?;
-        assert!(matches!(result, Err(Error::IdNotFound { .. })));
-
-        let add = AddProxy {
-            entry: http_proxy("http://127.0.0.1:3/"),
-            owner: Some("editor".to_string()),
-        };
-        call_as(&mut channels, editor, add).await??;
-        let granted = storage.load_accounts().await?["editor"].proxies.clone();
-        let created = granted
-            .iter()
-            .flatten()
-            .copied()
-            .find(|id| *id != web)
-            .ok_or_else(|| anyhow::anyhow!("the new proxy is not in the account list"))?;
-        let directory = channels.accounts.borrow().clone();
-        assert_eq!(directory.get("editor").map(|a| &a.proxies), Some(&granted));
-
-        // The admin API builds the caller from the directory for each request.
-        let editor = caller(Role::Editor, granted.clone());
-        let proxies = call_as(&mut channels, editor, GetProxyList).await??;
-        let mut ids = proxies.iter().map(|entry| entry.id).collect::<Vec<_>>();
-        ids.sort();
-        let mut expected = vec![web, created];
-        expected.sort();
-        assert_eq!(ids, expected);
+        check_other_proxy_hidden(&mut channels, &editor, web, other).await?;
+        let created = check_new_proxy_granted(&mut channels, &storage, editor, web).await?;
 
         call(&mut channels, DeleteProxy { id: created }).await??;
         assert_eq!(storage.load_accounts().await?["editor"].proxies, web_only());
         Ok(())
     })
     .await
+}
+
+/// Checks that the editor lists only `web` and gets `id_not_found` for every method on `other`.
+async fn check_other_proxy_hidden(
+    channels: &mut ServerChannels,
+    editor: &Caller,
+    web: ShortId,
+    other: ShortId,
+) -> anyhow::Result<()> {
+    let proxies = call_as(channels, editor.clone(), GetProxyList).await??;
+    let ids = proxies.iter().map(|entry| entry.id).collect::<Vec<_>>();
+    assert_eq!(ids, vec![web]);
+
+    let result = call_as(channels, editor.clone(), GetProxy { id: other }).await?;
+    assert!(matches!(result, Err(Error::IdNotFound { .. })));
+    let entry = proxy_entry("other", "http://127.0.0.1:2/");
+    let result = call_as(channels, editor.clone(), UpdateProxy { entry }).await?;
+    assert!(matches!(result, Err(Error::IdNotFound { .. })));
+    let result = call_as(channels, editor.clone(), DeleteProxy { id: other }).await?;
+    assert!(matches!(result, Err(Error::IdNotFound { .. })));
+    Ok(())
+}
+
+/// Checks that a proxy the editor adds goes into its proxy list, in the storage and in the
+/// account directory, and returns the id of the new proxy.
+async fn check_new_proxy_granted(
+    channels: &mut ServerChannels,
+    storage: &TestStorage,
+    editor: Caller,
+    web: ShortId,
+) -> anyhow::Result<ShortId> {
+    let add = AddProxy {
+        entry: http_proxy("http://127.0.0.1:3/"),
+        owner: Some("editor".to_string()),
+    };
+    call_as(channels, editor, add).await??;
+    let granted = storage.load_accounts().await?["editor"].proxies.clone();
+    let created = granted
+        .iter()
+        .flatten()
+        .copied()
+        .find(|id| *id != web)
+        .ok_or_else(|| anyhow::anyhow!("the new proxy is not in the account list"))?;
+    let directory = channels.accounts.borrow().clone();
+    assert_eq!(directory.get("editor").map(|a| &a.proxies), Some(&granted));
+
+    // The admin API builds the caller from the directory for each request.
+    let editor = caller(Role::Editor, granted.clone());
+    let proxies = call_as(channels, editor, GetProxyList).await??;
+    let mut ids = proxies.iter().map(|entry| entry.id).collect::<Vec<_>>();
+    ids.sort();
+    let mut expected = vec![web, created];
+    expected.sort();
+    assert_eq!(ids, expected);
+    Ok(created)
 }
 
 fn port_vhost_proxy(port: ShortId, vhost: &str, upstream: &str) -> Proxy {
@@ -454,57 +476,70 @@ async fn the_admin_api_answers_403_to_an_action_that_the_role_does_not_allow() -
             channels.accounts.clone(),
         ));
         wait_for_listener(addr).await?;
-        let client = Client::new();
-
-        let viewer = session_cookie(addr, "viewer", "viewer-secret").await?;
-        let checks = [
-            (Method::GET, "/api/ports", 200),
-            (Method::POST, "/api/ports", 403),
-            (Method::GET, "/api/config", 403),
-            (Method::POST, "/api/cdn/refresh", 403),
-            (Method::GET, "/api/certs/abc/download", 403),
-            (Method::POST, "/api/grpc/reflect", 403),
-            (Method::POST, "/api/grpc/health", 403),
-            (Method::GET, "/api/databases/abc/backups/b1/download", 403),
-            (
-                Method::GET,
-                "/api/databases/s3/download?key=test.dump.gz",
-                403,
-            ),
-        ];
-        for (method, path, expected) in checks {
-            let actual = status(&client, addr, method.clone(), path, &viewer).await?;
-            assert_eq!(actual, expected, "viewer {method} {path}");
-        }
-
-        let editor = session_cookie(addr, "editor", "editor-secret").await?;
-        let checks = [
-            (Method::GET, "/api/certs", 200),
-            (Method::POST, "/api/ports", 403),
-            (Method::GET, "/api/config", 403),
-            (Method::POST, "/api/grpc/reflect", 403),
-            (Method::POST, "/api/grpc/health", 403),
-            (Method::GET, "/api/databases/abc/backups/b1/download", 403),
-            (
-                Method::GET,
-                "/api/databases/s3/download?key=test.dump.gz",
-                403,
-            ),
-            // The passwords of a database belong to the administrators only.
-            (Method::GET, "/api/databases/abc/credentials", 403),
-            (Method::POST, "/api/databases/abc/password", 403),
-            (Method::DELETE, "/api/databases/abc/tenants/p_one", 403),
-        ];
-        for (method, path, expected) in checks {
-            let actual = status(&client, addr, method.clone(), path, &editor).await?;
-            assert_eq!(actual, expected, "editor {method} {path}");
-        }
-        Ok(())
+        check_role_statuses(addr).await
     })
     .await?;
 
     std::fs::remove_dir_all(&dir)?;
     Ok(())
+}
+
+/// Checks the status of each request for the account, in order.
+async fn check_statuses(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    account: &str,
+    checks: &[(Method, &str, u16)],
+) -> anyhow::Result<()> {
+    for (method, path, expected) in checks {
+        let actual = status(client, addr, method.clone(), path, cookie).await?;
+        assert_eq!(actual, *expected, "{account} {method} {path}");
+    }
+    Ok(())
+}
+
+/// Checks that the viewer and the restricted editor get 403 for the actions of their role.
+async fn check_role_statuses(addr: SocketAddr) -> anyhow::Result<()> {
+    let client = Client::new();
+
+    let viewer = session_cookie(addr, "viewer", "viewer-secret").await?;
+    let checks = [
+        (Method::GET, "/api/ports", 200),
+        (Method::POST, "/api/ports", 403),
+        (Method::GET, "/api/config", 403),
+        (Method::POST, "/api/cdn/refresh", 403),
+        (Method::GET, "/api/certs/abc/download", 403),
+        (Method::POST, "/api/grpc/reflect", 403),
+        (Method::POST, "/api/grpc/health", 403),
+        (Method::GET, "/api/databases/abc/backups/b1/download", 403),
+        (
+            Method::GET,
+            "/api/databases/s3/download?key=test.dump.gz",
+            403,
+        ),
+    ];
+    check_statuses(&client, addr, &viewer, "viewer", &checks).await?;
+
+    let editor = session_cookie(addr, "editor", "editor-secret").await?;
+    let checks = [
+        (Method::GET, "/api/certs", 200),
+        (Method::POST, "/api/ports", 403),
+        (Method::GET, "/api/config", 403),
+        (Method::POST, "/api/grpc/reflect", 403),
+        (Method::POST, "/api/grpc/health", 403),
+        (Method::GET, "/api/databases/abc/backups/b1/download", 403),
+        (
+            Method::GET,
+            "/api/databases/s3/download?key=test.dump.gz",
+            403,
+        ),
+        // The passwords of a database belong to the administrators only.
+        (Method::GET, "/api/databases/abc/credentials", 403),
+        (Method::POST, "/api/databases/abc/password", 403),
+        (Method::DELETE, "/api/databases/abc/tenants/p_one", 403),
+    ];
+    check_statuses(&client, addr, &editor, "editor", &checks).await
 }
 
 /// Sends a method as the admin API itself. Nothing waits for the result.
@@ -557,45 +592,64 @@ async fn the_event_stream_holds_only_the_proxies_of_the_account_and_ends_when_th
         ));
         wait_for_listener(addr).await?;
         let client = Client::new();
-        let cookie = session_cookie(addr, "editor", "editor-secret").await?;
-
-        let logs = status(&client, addr, Method::GET, "/api/logs/other", &cookie).await?;
-        assert_eq!(logs, 404);
-
-        let mut events = client
-            .get(format!("http://{addr}/api/events"))
-            .header(COOKIE, &cookie)
-            .send()
-            .await?
-            .error_for_status()?;
-        let entry = proxy_entry("other", "http://127.0.0.1:2/");
-        send_system(&command, UpdateProxy { entry }).await?;
-        let text = read_for(&mut events, Duration::from_secs(1)).await?;
-        assert!(text.contains("proxies_updated"), "{text}");
-        assert!(text.contains("\"web\""), "{text}");
-        assert!(!text.contains("\"other\""), "{text}");
-
-        // The session of the editor ends when an admin removes its proxy list.
-        let admin_cookie = session_cookie(addr, "admin", "admin-secret").await?;
-        let resp = client
-            .put(format!("http://{addr}/api/accounts/editor"))
-            .header(COOKIE, &admin_cookie)
-            .json(&serde_json::json!({"role": "editor", "proxies": null}))
-            .send()
-            .await?
-            .error_for_status()?;
-        assert_eq!(resp.status(), StatusCode::OK);
-        let rest = tokio::time::timeout(Duration::from_secs(5), async {
-            while events.chunk().await?.is_some() {}
-            anyhow::Ok(())
-        });
-        rest.await
-            .map_err(|_| anyhow::anyhow!("the event stream did not end"))??;
-        Ok(())
+        let mut events = check_editor_event_stream(&client, addr, &command).await?;
+        check_event_stream_ends(&client, addr, &mut events).await
     })
     .await?;
 
     std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// Opens the event stream of the editor and checks that a proxy update shows only `web`.
+/// Returns the open event stream.
+async fn check_editor_event_stream(
+    client: &Client,
+    addr: SocketAddr,
+    command: &mpsc::Sender<ServerCommand>,
+) -> anyhow::Result<Response> {
+    let cookie = session_cookie(addr, "editor", "editor-secret").await?;
+
+    let logs = status(client, addr, Method::GET, "/api/logs/other", &cookie).await?;
+    assert_eq!(logs, 404);
+
+    let mut events = client
+        .get(format!("http://{addr}/api/events"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await?
+        .error_for_status()?;
+    let entry = proxy_entry("other", "http://127.0.0.1:2/");
+    send_system(command, UpdateProxy { entry }).await?;
+    let text = read_for(&mut events, Duration::from_secs(1)).await?;
+    assert!(text.contains("proxies_updated"), "{text}");
+    assert!(text.contains("\"web\""), "{text}");
+    assert!(!text.contains("\"other\""), "{text}");
+    Ok(events)
+}
+
+/// Checks that the event stream of the editor ends when an admin removes its proxy list.
+async fn check_event_stream_ends(
+    client: &Client,
+    addr: SocketAddr,
+    events: &mut Response,
+) -> anyhow::Result<()> {
+    // The session of the editor ends when an admin removes its proxy list.
+    let admin_cookie = session_cookie(addr, "admin", "admin-secret").await?;
+    let resp = client
+        .put(format!("http://{addr}/api/accounts/editor"))
+        .header(COOKIE, &admin_cookie)
+        .json(&serde_json::json!({"role": "editor", "proxies": null}))
+        .send()
+        .await?
+        .error_for_status()?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let rest = tokio::time::timeout(Duration::from_secs(5), async {
+        while events.chunk().await?.is_some() {}
+        anyhow::Ok(())
+    });
+    rest.await
+        .map_err(|_| anyhow::anyhow!("the event stream did not end"))??;
     Ok(())
 }
 
