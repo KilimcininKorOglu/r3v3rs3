@@ -439,6 +439,7 @@
   "common.yes": "Evet",
   "common.network_error": "Ağ bağlantısı kesildi. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.",
   "common.request_failed": "İstek işlenemedi. Lütfen tekrar deneyin.",
+  "common.file_read_failed": "Tarayıcı seçilen dosyayı okuyamadı.",
   "common.response_parse_failed": "Sunucudan geçersiz yanıt alındı. Lütfen daha sonra tekrar deneyin.",
   "common.unknown_error": "Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.",
   "compose.detected_services": "Tespit Edilen Servisler",

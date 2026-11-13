@@ -439,6 +439,7 @@
   "common.yes": "Yes",
   "common.network_error": "Network connection lost. Please check your internet connection and try again.",
   "common.request_failed": "The request could not be processed. Please try again.",
+  "common.file_read_failed": "The browser could not read the chosen file.",
   "common.response_parse_failed": "Invalid response from server. Please try again later.",
   "common.unknown_error": "An unexpected error occurred. Please try again.",
   "compose.detected_services": "Detected Services",

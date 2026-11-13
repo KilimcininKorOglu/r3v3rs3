@@ -556,7 +556,7 @@ fn upload(ctx: &Ctx, event: Event) {
             let buffer = file
                 .array_buffer()
                 .await
-                .map_err(|err| err.as_string().unwrap_or_default())?;
+                .map_err(|_| ctx.locale.t("common.file_read_failed").to_string())?;
             let request = Request::put(&format!("{API_ENDPOINT}/apps/{}/files", ctx.app_id))
                 .header("content-type", "application/octet-stream")
                 .query([("path", target.as_str())])
@@ -777,7 +777,7 @@ fn import_archive(ctx: &Ctx, volume: &str, event: Event) {
             let buffer = file
                 .array_buffer()
                 .await
-                .map_err(|err| err.as_string().unwrap_or_default())?;
+                .map_err(|_| ctx.locale.t("common.file_read_failed").to_string())?;
             let request = Request::post(&format!(
                 "{API_ENDPOINT}/apps/{}/volumes/{volume}/archive",
                 ctx.app_id
