@@ -39,7 +39,7 @@ pub fn notification_center(props: &Props) -> Html {
         })
     };
 
-    let on_dismiss = create_dismiss_callback(snapshot.clone(), is_dismissing.clone());
+    let on_dismiss = create_dismiss_callback(locale, snapshot.clone(), is_dismissing.clone());
 
     let active_anomalies = snapshot
         .as_ref()
@@ -78,7 +78,10 @@ fn use_polling_effect(snapshot: UseStateHandle<Option<SystemAnomaliesSnapshot>>)
     });
 }
 
+/// Dismisses the active anomalies. The list clears only after the server accepted the request;
+/// a refused request shows its error.
 fn create_dismiss_callback(
+    locale: Locale,
     snapshot: UseStateHandle<Option<SystemAnomaliesSnapshot>>,
     is_dismissing: UseStateHandle<bool>,
 ) -> Callback<MouseEvent> {
@@ -88,16 +91,18 @@ fn create_dismiss_callback(
         let is_dismissing = is_dismissing.clone();
         is_dismissing.set(true);
         spawn_local(async move {
-            let res = Request::post(&format!("{API_ENDPOINT}/system/anomalies/dismiss"))
-                .send()
-                .await;
-            if res.is_ok()
-                && let Some(mut current) = (*snapshot).clone()
-            {
-                current.active_anomalies.clear();
-                snapshot.set(Some(current));
-            }
+            let path = format!("{API_ENDPOINT}/system/anomalies/dismiss");
+            let sent = crate::pages::settings::post_empty(locale, &path).await;
             is_dismissing.set(false);
+            match sent {
+                Ok(()) => {
+                    if let Some(mut current) = (*snapshot).clone() {
+                        current.active_anomalies.clear();
+                        snapshot.set(Some(current));
+                    }
+                }
+                Err(err) => crate::dialog::message(locale, &err, crate::dialog::Icon::Error).await,
+            }
         });
     })
 }
