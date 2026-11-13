@@ -32,13 +32,10 @@ pub fn calc_percentage(part: u64, total: u64) -> f64 {
     }
 }
 
+/// The share of failed requests. The server counts every request, failed ones included, so the
+/// errors are a part of `requests`.
 pub fn calc_error_rate(errors: u64, requests: u64) -> f64 {
-    let total = errors + requests;
-    if total == 0 {
-        0.0
-    } else {
-        (errors as f64 / total as f64) * 100.0
-    }
+    calc_percentage(errors.min(requests), requests)
 }
 
 pub fn format_rtt(rtt_ms: Option<f64>) -> String {
@@ -307,7 +304,9 @@ mod tests {
     #[test]
     fn test_calc_error_rate() {
         assert_eq!(calc_error_rate(0, 100), 0.0);
-        assert_eq!(calc_error_rate(5, 95), 5.0);
+        // Five failed requests out of ten are half of the requests.
+        assert_eq!(calc_error_rate(5, 10), 50.0);
+        assert_eq!(calc_error_rate(10, 10), 100.0);
         assert_eq!(calc_error_rate(0, 0), 0.0);
     }
 
