@@ -47,11 +47,8 @@ fn tcp_proxy_to(upstream: &SocketAddr) -> Proxy {
     }
 }
 
-#[tokio::test]
-async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> {
-    let upstream_port = alloc_tcp_port().await?;
-    let proxy_port = alloc_tcp_port().await?;
-    let upstream_addr = upstream_port.socket_addr();
+/// Starts the echo upstream on the given address.
+fn spawn_echo_upstream(upstream_addr: SocketAddr) {
     tokio::spawn(async move {
         let upstream = tokio::net::TcpListener::bind(upstream_addr).await.unwrap();
         loop {
@@ -60,10 +57,15 @@ async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> 
             }
         }
     });
+}
 
-    let dir = std::env::temp_dir().join(format!("r3v3rs3-upgrade-{}", std::process::id()));
-    std::fs::create_dir_all(&dir)?;
-    let storage = SqliteStorage::open(&dir).await?;
+/// Writes the config of a TCP proxy from the proxy address to the upstream into the directory.
+async fn write_config(
+    dir: &std::path::Path,
+    proxy_port: &common::TestPort,
+    upstream_addr: &SocketAddr,
+) -> anyhow::Result<()> {
+    let storage = SqliteStorage::open(dir).await?;
     storage.save_app_config(&AppConfig::default()).await?;
     storage
         .save_ports(&[port_entry("test", proxy_port.multiaddr_tcp())])
@@ -73,12 +75,46 @@ async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> 
             id: "test2".parse().unwrap(),
             source: None,
             status: None,
-            proxy: tcp_proxy_to(&upstream_port.socket_addr()),
+            proxy: tcp_proxy_to(upstream_addr),
         }])
         .await?;
+    Ok(())
+}
+
+/// Writes the payload and checks that the upstream echoes it back.
+async fn expect_echo(stream: &mut tokio::net::TcpStream, payload: &[u8]) -> anyhow::Result<()> {
+    let mut buf = [0u8; 6];
+    stream.write_all(payload).await?;
+    stream.read_exact(&mut buf[..payload.len()]).await?;
+    assert_eq!(&buf[..payload.len()], payload);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> {
+    let upstream_port = alloc_tcp_port().await?;
+    let proxy_port = alloc_tcp_port().await?;
+    spawn_echo_upstream(upstream_port.socket_addr());
+
+    let dir = std::env::temp_dir().join(format!("r3v3rs3-upgrade-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    write_config(&dir, &proxy_port, &upstream_port.socket_addr()).await?;
 
     let exe = env!("CARGO_BIN_EXE_r3-server");
-    let mut first = std::process::Command::new(exe)
+    let first = start_server(exe, &dir)?;
+    check_handover(first, proxy_port.socket_addr()).await?;
+
+    // Stop the new process, which the old one left running on its own.
+    let _ = std::process::Command::new("pkill")
+        .args(["-f", &format!("^{} start", exe)])
+        .status();
+    std::fs::remove_dir_all(&dir).ok();
+    Ok(())
+}
+
+/// Starts the server binary without the WebUI on the config directory.
+fn start_server(exe: &str, dir: &std::path::Path) -> anyhow::Result<std::process::Child> {
+    Ok(std::process::Command::new(exe)
         .args([
             "start",
             "--no-webui",
@@ -88,14 +124,17 @@ async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> 
             &dir.display().to_string(),
         ])
         .stdin(std::process::Stdio::null())
-        .spawn()?;
+        .spawn()?)
+}
 
-    let proxy_addr = proxy_port.socket_addr();
+/// Checks that after a SIGUSR2 a new process serves the port, the open connection keeps
+/// streaming, and the old process exits successfully after its drain.
+async fn check_handover(
+    mut first: std::process::Child,
+    proxy_addr: SocketAddr,
+) -> anyhow::Result<()> {
     let mut open = wait_for_proxy(&proxy_addr).await?;
-    open.write_all(b"before").await?;
-    let mut buf = [0u8; 6];
-    open.read_exact(&mut buf).await?;
-    assert_eq!(&buf, b"before");
+    expect_echo(&mut open, b"before").await?;
 
     // The upgrade: the old process hands the listeners over and drains.
     unsafe {
@@ -104,26 +143,16 @@ async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> 
 
     // The port keeps serving while the old process drains.
     let mut client = wait_for_proxy(&proxy_addr).await?;
-    client.write_all(b"second").await?;
-    client.read_exact(&mut buf).await?;
-    assert_eq!(&buf, b"second");
+    expect_echo(&mut client, b"second").await?;
 
     // The connection that was open before the upgrade keeps streaming until its end.
-    open.write_all(b"after").await?;
-    open.read_exact(&mut buf[..5]).await?;
-    assert_eq!(&buf[..5], b"after");
+    expect_echo(&mut open, b"after").await?;
 
     // Closing the old connections lets the old process finish its drain.
     drop(open);
     drop(client);
     let status = tokio::task::spawn_blocking(move || first.wait()).await??;
     assert!(status.success(), "{status}");
-
-    // Stop the new process, which the old one left running on its own.
-    let _ = std::process::Command::new("pkill")
-        .args(["-f", &format!("^{} start", exe)])
-        .status();
-    std::fs::remove_dir_all(&dir).ok();
     Ok(())
 }
 
