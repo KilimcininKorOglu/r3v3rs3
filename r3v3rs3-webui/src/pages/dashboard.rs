@@ -319,15 +319,15 @@ fn quick_link(to: Route, label: String) -> Html {
 }
 
 fn render_quick_links(locale: Locale, platform_enabled: bool) -> Html {
-    let add = |what: &str| format!("+ {} {}", locale.t("common.add"), locale.t(what));
+    let add = |key: &str| format!("+ {}", locale.t(key));
     html! {
         <div class={CARD}>
             <h3 class="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mb-3">{locale.t("dashboard.quick_links")}</h3>
             <div class="flex flex-wrap gap-3">
-                { quick_link(Route::NewProxy, add("nav.proxies")) }
-                { quick_link(Route::NewPort, add("nav.ports")) }
+                { quick_link(Route::NewProxy, add("dashboard.add_proxy")) }
+                { quick_link(Route::NewPort, add("dashboard.add_port")) }
                 if platform_enabled {
-                    { quick_link(Route::NewApp, add("nav.apps")) }
+                    { quick_link(Route::NewApp, add("dashboard.add_app")) }
                     { quick_link(Route::AppStore, locale.t("nav.app_store").to_string()) }
                 }
                 { quick_link(Route::Settings, locale.t("nav.settings").to_string()) }
