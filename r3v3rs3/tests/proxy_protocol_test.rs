@@ -135,31 +135,40 @@ async fn http_port_filters_the_source_address_of_the_header() -> anyhow::Result<
         .build();
 
     with_server(config, |_| async move {
-        let addr = trusted_port.socket_addr();
-        wait_for_listener(addr).await?;
-
-        let denied = [v1_header(DENIED_SOURCE), REQUEST.to_vec()].concat();
-        assert_eq!(send(addr, &denied).await?, "HTTP/1.1 403 Forbidden");
-        let denied = [v2_header(DENIED_SOURCE), REQUEST.to_vec()].concat();
-        assert_eq!(send(addr, &denied).await?, "HTTP/1.1 403 Forbidden");
-
-        let allowed = [v1_header(ALLOWED_SOURCE), REQUEST.to_vec()].concat();
-        assert_eq!(send(addr, &allowed).await?, "HTTP/1.1 200 OK");
-        let allowed = [v2_header(ALLOWED_SOURCE), REQUEST.to_vec()].concat();
-        assert_eq!(send(addr, &allowed).await?, "HTTP/1.1 200 OK");
-
-        // A trusted peer must send the header.
-        assert!(send(addr, REQUEST).await.is_err());
-
-        // r3v3rs3 does not read a header from an untrusted peer.
-        let addr = untrusted_port.socket_addr();
-        wait_for_listener(addr).await?;
-        assert_eq!(send(addr, REQUEST).await?, "HTTP/1.1 200 OK");
-        Ok(())
+        check_trusted_port(trusted_port.socket_addr()).await?;
+        check_untrusted_port(untrusted_port.socket_addr()).await
     })
     .await?;
 
     mock.assert_async().await;
+    Ok(())
+}
+
+/// Checks that the trusted port filters the source address of a v1 and a v2 header and needs
+/// the header.
+async fn check_trusted_port(addr: SocketAddr) -> anyhow::Result<()> {
+    wait_for_listener(addr).await?;
+
+    let denied = [v1_header(DENIED_SOURCE), REQUEST.to_vec()].concat();
+    assert_eq!(send(addr, &denied).await?, "HTTP/1.1 403 Forbidden");
+    let denied = [v2_header(DENIED_SOURCE), REQUEST.to_vec()].concat();
+    assert_eq!(send(addr, &denied).await?, "HTTP/1.1 403 Forbidden");
+
+    let allowed = [v1_header(ALLOWED_SOURCE), REQUEST.to_vec()].concat();
+    assert_eq!(send(addr, &allowed).await?, "HTTP/1.1 200 OK");
+    let allowed = [v2_header(ALLOWED_SOURCE), REQUEST.to_vec()].concat();
+    assert_eq!(send(addr, &allowed).await?, "HTTP/1.1 200 OK");
+
+    // A trusted peer must send the header.
+    assert!(send(addr, REQUEST).await.is_err());
+    Ok(())
+}
+
+/// Checks that a port does not read a header from an untrusted peer.
+async fn check_untrusted_port(addr: SocketAddr) -> anyhow::Result<()> {
+    // r3v3rs3 does not read a header from an untrusted peer.
+    wait_for_listener(addr).await?;
+    assert_eq!(send(addr, REQUEST).await?, "HTTP/1.1 200 OK");
     Ok(())
 }
 
@@ -202,30 +211,40 @@ async fn tcp_port_passes_the_payload_after_the_header() -> anyhow::Result<()> {
         .build();
 
     with_server(config, |_| async move {
-        let addr = proxy_port.socket_addr();
-        wait_for_listener(addr).await?;
-
-        // A trusted peer that sends nothing does not delay other connections.
-        let mut idle = TcpStream::connect(addr).await?;
-
-        for header in [v1_header(ALLOWED_SOURCE), v2_header(ALLOWED_SOURCE)] {
-            let mut stream = TcpStream::connect(addr).await?;
-            stream
-                .write_all(&[header, b"hello".to_vec()].concat())
-                .await?;
-            let mut echoed = [0; 5];
-            tokio::time::timeout(Duration::from_millis(900), stream.read_exact(&mut echoed))
-                .await??;
-            assert_eq!(&echoed, b"hello");
-        }
-
-        // The idle connection closes when the header timeout expires.
-        let mut buf = [0; 1];
-        let read = tokio::time::timeout(Duration::from_secs(3), idle.read(&mut buf)).await?;
-        assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
-        Ok(())
+        check_payload_after_header(proxy_port.socket_addr()).await
     })
     .await
+}
+
+/// Sends the header and `hello` on a new connection and checks the echo within 900 ms.
+async fn echo_after_header(addr: SocketAddr, header: Vec<u8>) -> anyhow::Result<()> {
+    let mut stream = TcpStream::connect(addr).await?;
+    stream
+        .write_all(&[header, b"hello".to_vec()].concat())
+        .await?;
+    let mut echoed = [0; 5];
+    tokio::time::timeout(Duration::from_millis(900), stream.read_exact(&mut echoed)).await??;
+    assert_eq!(&echoed, b"hello");
+    Ok(())
+}
+
+/// Checks that the payload after a v1 or v2 header reaches the upstream while an idle peer
+/// waits, and that the idle connection closes at the header timeout.
+async fn check_payload_after_header(addr: SocketAddr) -> anyhow::Result<()> {
+    wait_for_listener(addr).await?;
+
+    // A trusted peer that sends nothing does not delay other connections.
+    let mut idle = TcpStream::connect(addr).await?;
+
+    for header in [v1_header(ALLOWED_SOURCE), v2_header(ALLOWED_SOURCE)] {
+        echo_after_header(addr, header).await?;
+    }
+
+    // The idle connection closes when the header timeout expires.
+    let mut buf = [0; 1];
+    let read = tokio::time::timeout(Duration::from_secs(3), idle.read(&mut buf)).await?;
+    assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
+    Ok(())
 }
 
 /// Starts a TCP server that sends the bytes of each connection, up to `hello`, to the channel.
@@ -295,50 +314,68 @@ async fn tcp_proxy_sends_the_header_to_the_upstream() -> anyhow::Result<()> {
         .build();
 
     with_server(config, |_| async move {
-        // A port without PROXY protocol sends the peer address of the client.
-        let addr = v1_port.socket_addr();
-        wait_for_listener(addr).await?;
-        let mut stream = TcpStream::connect(addr).await?;
-        let client = stream.local_addr()?;
-        stream.write_all(b"hello").await?;
-        let bytes = tokio::time::timeout(Duration::from_secs(5), received.recv())
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("the upstream received no connection"))?;
-        let expected = format!(
-            "PROXY TCP4 {} {} {} {}\r\nhello",
-            client.ip(),
-            addr.ip(),
-            client.port(),
-            addr.port()
-        );
-        assert_eq!(String::from_utf8_lossy(&bytes), expected);
-
-        // A port that receives a header sends its source address.
-        let addr = v2_port.socket_addr();
-        wait_for_listener(addr).await?;
-        let mut stream = TcpStream::connect(addr).await?;
-        stream
-            .write_all(&[v1_header(DENIED_SOURCE), b"hello".to_vec()].concat())
-            .await?;
-        let bytes = tokio::time::timeout(Duration::from_secs(5), received.recv())
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("the upstream received no connection"))?;
-        let header = v2::Header::try_from(bytes.as_slice())?;
-        let v2::Addresses::IPv4(addresses) = header.addresses else {
-            anyhow::bail!("unexpected addresses: {:?}", header.addresses);
-        };
-        assert_eq!(
-            SocketAddr::from((addresses.source_address, addresses.source_port)),
-            DENIED_SOURCE.parse::<SocketAddr>()?
-        );
-        assert_eq!(
-            SocketAddr::from((addresses.destination_address, addresses.destination_port)),
-            addr
-        );
-        assert!(bytes.ends_with(b"hello"));
-        Ok(())
+        check_v1_peer_address(v1_port.socket_addr(), &mut received).await?;
+        check_v2_source_address(v2_port.socket_addr(), &mut received).await
     })
     .await
+}
+
+/// Waits up to five seconds for the bytes of the next connection of the recording upstream.
+async fn recv_upstream(received: &mut mpsc::Receiver<Vec<u8>>) -> anyhow::Result<Vec<u8>> {
+    tokio::time::timeout(Duration::from_secs(5), received.recv())
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("the upstream received no connection"))
+}
+
+/// Checks that a port without PROXY protocol sends a v1 header with the peer address of the
+/// client.
+async fn check_v1_peer_address(
+    addr: SocketAddr,
+    received: &mut mpsc::Receiver<Vec<u8>>,
+) -> anyhow::Result<()> {
+    // A port without PROXY protocol sends the peer address of the client.
+    wait_for_listener(addr).await?;
+    let mut stream = TcpStream::connect(addr).await?;
+    let client = stream.local_addr()?;
+    stream.write_all(b"hello").await?;
+    let bytes = recv_upstream(received).await?;
+    let expected = format!(
+        "PROXY TCP4 {} {} {} {}\r\nhello",
+        client.ip(),
+        addr.ip(),
+        client.port(),
+        addr.port()
+    );
+    assert_eq!(String::from_utf8_lossy(&bytes), expected);
+    Ok(())
+}
+
+/// Checks that a port that receives a header sends a v2 header with its source address.
+async fn check_v2_source_address(
+    addr: SocketAddr,
+    received: &mut mpsc::Receiver<Vec<u8>>,
+) -> anyhow::Result<()> {
+    // A port that receives a header sends its source address.
+    wait_for_listener(addr).await?;
+    let mut stream = TcpStream::connect(addr).await?;
+    stream
+        .write_all(&[v1_header(DENIED_SOURCE), b"hello".to_vec()].concat())
+        .await?;
+    let bytes = recv_upstream(received).await?;
+    let header = v2::Header::try_from(bytes.as_slice())?;
+    let v2::Addresses::IPv4(addresses) = header.addresses else {
+        anyhow::bail!("unexpected addresses: {:?}", header.addresses);
+    };
+    assert_eq!(
+        SocketAddr::from((addresses.source_address, addresses.source_port)),
+        DENIED_SOURCE.parse::<SocketAddr>()?
+    );
+    assert_eq!(
+        SocketAddr::from((addresses.destination_address, addresses.destination_port)),
+        addr
+    );
+    assert!(bytes.ends_with(b"hello"));
+    Ok(())
 }
 
 fn tls_connector(root: &Cert) -> anyhow::Result<TlsConnector> {
@@ -367,27 +404,7 @@ async fn https_port_reads_the_header_before_the_tls_handshake() -> anyhow::Resul
 
     let root = Arc::new(Cert::new_ca()?);
     let cert = Arc::new(Cert::new_self_signed(&["localhost".parse()?], &root)?);
-    let mut entry = with_proxy_protocol(
-        port_entry("test", proxy_port.multiaddr_https()),
-        receive(&["127.0.0.0/8", "::1/128"]),
-    );
-    entry.port.opts.tls_termination = Some(TlsTermination {
-        server_names: vec!["localhost".into()],
-        ..Default::default()
-    });
-    let config = TestStorage::builder()
-        .ports(vec![entry])
-        .proxies(vec![http_proxy_entry(
-            "proxy",
-            "test",
-            filtered_proxy(&upstream),
-        )])
-        .certs(
-            [(root.id, root.clone()), (cert.id, cert.clone())]
-                .into_iter()
-                .collect(),
-        )
-        .build();
+    let config = https_storage(&proxy_port, &upstream, &root, &cert);
     let connector = tls_connector(&root)?;
 
     with_server(config, |_| async move {
@@ -397,11 +414,7 @@ async fn https_port_reads_the_header_before_the_tls_handshake() -> anyhow::Resul
             (ALLOWED_SOURCE, "HTTP/1.1 200 OK"),
             (DENIED_SOURCE, "HTTP/1.1 403 Forbidden"),
         ] {
-            let mut stream = TcpStream::connect(addr).await?;
-            stream.write_all(&v1_header(source)).await?;
-            let name = ServerName::try_from("localhost")?;
-            let mut tls = connector.connect(name, stream).await?;
-            assert_eq!(status_line(&mut tls, REQUEST).await?, expected);
+            assert_eq!(tls_status(addr, &connector, source).await?, expected);
         }
         Ok(())
     })
@@ -409,4 +422,49 @@ async fn https_port_reads_the_header_before_the_tls_handshake() -> anyhow::Resul
 
     mock.assert_async().await;
     Ok(())
+}
+
+/// Builds the storage with an HTTPS port that reads the PROXY protocol header and a filtered
+/// proxy behind it.
+fn https_storage(
+    proxy_port: &common::TestPort,
+    upstream: &str,
+    root: &Arc<Cert>,
+    cert: &Arc<Cert>,
+) -> TestStorage {
+    let mut entry = with_proxy_protocol(
+        port_entry("test", proxy_port.multiaddr_https()),
+        receive(&["127.0.0.0/8", "::1/128"]),
+    );
+    entry.port.opts.tls_termination = Some(TlsTermination {
+        server_names: vec!["localhost".into()],
+        ..Default::default()
+    });
+    TestStorage::builder()
+        .ports(vec![entry])
+        .proxies(vec![http_proxy_entry(
+            "proxy",
+            "test",
+            filtered_proxy(upstream),
+        )])
+        .certs(
+            [(root.id, root.clone()), (cert.id, cert.clone())]
+                .into_iter()
+                .collect(),
+        )
+        .build()
+}
+
+/// Sends a v1 header with the source address, then a request over TLS, and returns the status
+/// line of the response.
+async fn tls_status(
+    addr: SocketAddr,
+    connector: &TlsConnector,
+    source: &str,
+) -> anyhow::Result<String> {
+    let mut stream = TcpStream::connect(addr).await?;
+    stream.write_all(&v1_header(source)).await?;
+    let name = ServerName::try_from("localhost")?;
+    let mut tls = connector.connect(name, stream).await?;
+    status_line(&mut tls, REQUEST).await
 }
