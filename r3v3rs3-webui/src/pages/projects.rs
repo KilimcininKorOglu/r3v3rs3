@@ -2,7 +2,7 @@
 
 use super::accounts::{INPUT_CLASS, LABEL_CLASS};
 use super::resource_page::{FormCard, add_button, delete_on_click, form_modal};
-use super::settings::{fetch_json, send_json};
+use super::settings::{fetch_json, post_json, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -464,36 +464,26 @@ fn run_environment_sync(
 ) {
     spawn_local(async move {
         let url = format!("{API_ENDPOINT}{PATH}/{project_id}/environments/sync");
-        let Ok(req_builder) = Request::post(&url).json(&req) else {
-            return;
-        };
-        let resp = match req_builder.send().await {
-            Ok(r) => r,
-            Err(err) => {
-                dialog::message(locale, &err.to_string(), dialog::Icon::Error).await;
-                return;
-            }
-        };
-        if !resp.ok() {
-            let msg = crate::pages::settings::error_message(locale, resp).await;
-            dialog::message(locale, &msg, dialog::Icon::Error).await;
-            return;
-        }
-        if let Ok(report) = resp.json::<EnvironmentSyncReport>().await {
-            let msg = locale.tf(
-                "projects.sync_success",
-                &[("count", &report.synced_count.to_string())],
-            );
-            fetch_environment_diff(
-                locale,
-                modal.clone(),
-                project_id,
-                req.source_env_id,
-                req.target_env_id,
-            );
-            update_modal(&modal, move |st| st.sync_status_msg = Some(msg));
-            reload.set(*reload + 1);
-        }
+        let report =
+            match post_json::<EnvironmentSyncReport>(locale, Request::post(&url), &req).await {
+                Ok(report) => report,
+                Err(message) => {
+                    return dialog::message(locale, &message, dialog::Icon::Error).await;
+                }
+            };
+        let msg = locale.tf(
+            "projects.sync_success",
+            &[("count", &report.synced_count.to_string())],
+        );
+        fetch_environment_diff(
+            locale,
+            modal.clone(),
+            project_id,
+            req.source_env_id,
+            req.target_env_id,
+        );
+        update_modal(&modal, move |st| st.sync_status_msg = Some(msg));
+        reload.set(*reload + 1);
     });
 }
 
