@@ -1,0 +1,100 @@
+name: Warm release caches
+
+# A tag run may restore only the caches of its own tag and of the default branch, so every
+# release found no cache of the previous release and compiled all dependencies again. This
+# workflow builds the WebUI and the server binaries on main with the setup of the webui and
+# binary jobs in release.yml and saves the caches under the same keys, so the next tag run
+# restores them.
+#
+# The cache key hashes the rustc version, every CARGO* environment variable and the
+# dependencies of Cargo.toml and Cargo.lock (not the package versions). Keep the env block,
+# the toolchain setup and the cache inputs equal to the webui and binary jobs of
+# release.yml, or the release no longer finds these caches.
+
+on:
+  schedule:
+    # Daily. A run that finds an exact cache only restores it, which keeps the entry from
+    # GitHub's 7-day eviction without building.
+    - cron: "23 2 * * *"
+  push:
+    branches: [main]
+    # A dependency or toolchain change gives a new key; warm it before the next release.
+    paths:
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/release-cache.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cache
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  webui:
+    name: Warm WebUI cache
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: rustup toolchain install
+      - name: Cache
+        id: cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: r3v3rs3-webui
+          shared-key: wasm-webui
+      - name: Install cargo-binstall
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
+      - name: Install trunk
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: cargo binstall trunk@0.21.14 --force -y
+      - name: Build webui
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: cd r3v3rs3-webui && trunk build --cargo-profile web-release --release
+
+  warm:
+    name: Warm release cache (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-gnu
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install
+          rustup target add "${{ matrix.target }}"
+      - name: Cache
+        id: cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: release-${{ matrix.target }}-2.17
+      - name: Install cargo-binstall
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
+      - name: Install zig and cargo-zigbuild
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          python3 -m pip install ziglang==0.17.0
+          cargo binstall cargo-zigbuild@0.23.4 --force -y
+      - name: Build the server and the command line client for glibc 2.17
+        # The cache keeps only the dependencies, so the empty dist directory of the
+        # repository is enough here; the release embeds the real WebUI.
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: cargo zigbuild --release --locked -p r3v3rs3 -p r3v3rs3-cli --target ${{ matrix.target }}.2.17
