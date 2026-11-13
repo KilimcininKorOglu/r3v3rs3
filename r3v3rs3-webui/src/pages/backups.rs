@@ -673,10 +673,7 @@ fn render_backup_row(
             let path = format!("{API_ENDPOINT}/databases/{id}/backups/{backup_id}/test");
             let reload = reload.clone();
             spawn_local(async move {
-                let Ok(req) = Request::post(&path).build() else {
-                    return;
-                };
-                match send_request(locale, req).await {
+                match post_empty(locale, &path).await {
                     Ok(_) => {
                         dialog::message(locale, locale.t("backups.tested"), Icon::Success).await;
                         reload.emit(());
