@@ -139,84 +139,117 @@ async fn test_generate_app_env_secrets_endpoint() -> anyhow::Result<()> {
         let client = Client::new();
         let cookie = admin_session_cookie(addr).await?;
 
-        // 1. Create an app
-        let app_req = serde_json::json!({
-            "name": "test-app",
-            "target": "local",
-            "spec": {
-                "port": 8080,
-                "source": {
-                    "type": "image",
-                    "image": "nginx:alpine"
-                }
-            }
-        });
-
-        let res = client
-            .post(format!("http://{addr}/api/apps"))
-            .header(COOKIE, &cookie)
-            .json(&app_req)
-            .send()
-            .await?;
-        assert_eq!(res.status(), StatusCode::OK);
-        let app: AppEntry = res.json().await?;
-
-        // 2. Set initial env with an empty secret variable
-        let initial_env = vec![
-            EnvEntry {
-                key: "DATABASE_PASSWORD".parse()?,
-                value: Some("".into()),
-                secret: true,
-            },
-            EnvEntry {
-                key: "NORMAL_VAR".parse()?,
-                value: Some("hello".into()),
-                secret: false,
-            },
-        ];
-
-        let res = client
-            .put(format!("http://{addr}/api/apps/{}/env", app.id))
-            .header(COOKIE, &cookie)
-            .json(&initial_env)
-            .send()
-            .await?;
-        assert_eq!(res.status(), StatusCode::OK);
-
-        // 3. Call generate secrets with save: true
-        let gen_req = GenerateAppEnvSecretsRequest {
-            save: true,
-            overwrite: false,
-        };
-
-        let res = client
-            .post(format!("http://{addr}/api/apps/{}/env/generate", app.id))
-            .header(COOKIE, &cookie)
-            .json(&gen_req)
-            .send()
-            .await?;
-        assert_eq!(res.status(), StatusCode::OK);
-        let gen_res: ResolveEnvTemplateResponse = res.json().await?;
-
-        assert_eq!(gen_res.generated_count, 1);
-        assert_eq!(gen_res.generated_keys, vec!["DATABASE_PASSWORD"]);
-
-        // 4. Verify stored env has the secret masked but stored
-        let res = client
-            .get(format!("http://{addr}/api/apps/{}/env", app.id))
-            .header(COOKIE, &cookie)
-            .send()
-            .await?;
-        assert_eq!(res.status(), StatusCode::OK);
-        let envs: Vec<EnvEntry> = res.json().await?;
-        let db_pass = envs
-            .iter()
-            .find(|e| e.key.as_str() == "DATABASE_PASSWORD")
-            .unwrap();
-        assert!(db_pass.secret);
-        assert!(db_pass.value.is_none()); // Masked in GET /env
-
-        Ok(())
+        let app = create_app(&client, addr, &cookie).await?;
+        set_initial_env(&client, addr, &cookie, &app).await?;
+        check_generated_secret(&client, addr, &cookie, &app).await?;
+        check_stored_env(&client, addr, &cookie, &app).await
     })
     .await
+}
+
+/// Creates an image app and returns it.
+async fn create_app(client: &Client, addr: SocketAddr, cookie: &str) -> anyhow::Result<AppEntry> {
+    // 1. Create an app
+    let app_req = serde_json::json!({
+        "name": "test-app",
+        "target": "local",
+        "spec": {
+            "port": 8080,
+            "source": {
+                "type": "image",
+                "image": "nginx:alpine"
+            }
+        }
+    });
+
+    let res = client
+        .post(format!("http://{addr}/api/apps"))
+        .header(COOKIE, cookie)
+        .json(&app_req)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    Ok(res.json().await?)
+}
+
+/// Sets the env of the app to an empty secret variable and a plain variable.
+async fn set_initial_env(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    app: &AppEntry,
+) -> anyhow::Result<()> {
+    // 2. Set initial env with an empty secret variable
+    let initial_env = vec![
+        EnvEntry {
+            key: "DATABASE_PASSWORD".parse()?,
+            value: Some("".into()),
+            secret: true,
+        },
+        EnvEntry {
+            key: "NORMAL_VAR".parse()?,
+            value: Some("hello".into()),
+            secret: false,
+        },
+    ];
+
+    let res = client
+        .put(format!("http://{addr}/api/apps/{}/env", app.id))
+        .header(COOKIE, cookie)
+        .json(&initial_env)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    Ok(())
+}
+
+/// Checks that the generator fills only the empty secret variable and saves it.
+async fn check_generated_secret(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    app: &AppEntry,
+) -> anyhow::Result<()> {
+    // 3. Call generate secrets with save: true
+    let gen_req = GenerateAppEnvSecretsRequest {
+        save: true,
+        overwrite: false,
+    };
+
+    let res = client
+        .post(format!("http://{addr}/api/apps/{}/env/generate", app.id))
+        .header(COOKIE, cookie)
+        .json(&gen_req)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    let gen_res: ResolveEnvTemplateResponse = res.json().await?;
+
+    assert_eq!(gen_res.generated_count, 1);
+    assert_eq!(gen_res.generated_keys, vec!["DATABASE_PASSWORD"]);
+    Ok(())
+}
+
+/// Checks that the stored env keeps the generated secret but masks its value.
+async fn check_stored_env(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    app: &AppEntry,
+) -> anyhow::Result<()> {
+    // 4. Verify stored env has the secret masked but stored
+    let res = client
+        .get(format!("http://{addr}/api/apps/{}/env", app.id))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    let envs: Vec<EnvEntry> = res.json().await?;
+    let db_pass = envs
+        .iter()
+        .find(|e| e.key.as_str() == "DATABASE_PASSWORD")
+        .unwrap();
+    assert!(db_pass.secret);
+    assert!(db_pass.value.is_none()); // Masked in GET /env
+    Ok(())
 }
