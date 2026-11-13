@@ -354,17 +354,9 @@ async fn reset_port(locale: Locale, id: ShortId) -> Result<(), String> {
 }
 
 async fn toggle_port(locale: Locale, id: ShortId) -> Result<(), String> {
-    let mut entry: PortEntry = Request::get(&format!("{API_ENDPOINT}/ports/{id}"))
-        .send()
-        .await
-        .map_err(|err| err.to_string())?
-        .json()
-        .await
-        .map_err(|err| err.to_string())?;
+    let path = format!("{API_ENDPOINT}/ports/{id}");
+    let mut entry: PortEntry =
+        crate::pages::settings::fetch_json(locale, Request::get(&path)).await?;
     entry.port.active = !entry.port.active;
-    let req = Request::put(&format!("{API_ENDPOINT}/ports/{id}"))
-        .json(&entry)
-        .map_err(|err| err.to_string())?;
-    crate::pages::settings::send_request(locale, req).await?;
-    Ok(())
+    crate::pages::settings::send_json(locale, Request::put(&path), &entry).await
 }
