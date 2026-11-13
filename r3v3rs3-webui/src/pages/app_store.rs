@@ -243,34 +243,34 @@ fn store_card(locale: Locale, app: &StoreApp) -> Html {
     let logo = app.logo.clone();
 
     html! {
-        <div class="flex flex-col rounded bg-neutral-800 shadow p-4 gap-2 border border-neutral-700/50 hover:border-neutral-600 transition-colors">
+        <div class="flex flex-col rounded-lg bg-white dark:bg-neutral-800 shadow-sm p-4 gap-2 border border-neutral-300 dark:border-neutral-700 hover:border-neutral-400 dark:hover:border-neutral-600 transition-colors">
             if let Some(src) = screenshot {
-                <div class="overflow-hidden rounded bg-neutral-900 border border-neutral-700/40 mb-1 h-36 flex items-center justify-center">
+                <div class="overflow-hidden rounded bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700/40 mb-1 h-36 flex items-center justify-center">
                     <img src={src} alt={app.name.clone()} class="w-full h-full object-cover object-top hover:scale-105 transition-transform duration-200" loading="lazy" />
                 </div>
             }
             <div class="flex items-start justify-between gap-2">
                 <div class="flex items-center gap-2 flex-wrap">
                     if let Some(logo_url) = logo {
-                        <img src={logo_url} alt="" class="w-6 h-6 rounded object-contain p-0.5 bg-neutral-900 border border-neutral-700/60 shrink-0" loading="lazy" />
+                        <img src={logo_url} alt="" class="w-6 h-6 rounded object-contain p-0.5 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700/60 shrink-0" loading="lazy" />
                     }
-                    <h2 class="font-semibold text-neutral-100">{app.name.clone()}</h2>
+                    <h2 class="font-semibold text-neutral-900 dark:text-neutral-100">{app.name.clone()}</h2>
                     if let Some(cat) = category {
-                        <span class="text-xs px-2 py-0.5 rounded-full bg-neutral-700 text-neutral-300 font-medium">
+                        <span class="text-xs px-2 py-0.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-medium">
                             {cat}
                         </span>
                     }
                 </div>
                 if let Some(url) = website {
-                    <a href={url} target="_blank" rel="noopener noreferrer" class="text-sm text-neutral-400 hover:text-neutral-200 shrink-0">
+                    <a href={url} target="_blank" rel="noopener noreferrer" class="text-sm text-primary-600 dark:text-primary-400 hover:underline shrink-0">
                         {locale.t("apps.store_website")}
                     </a>
                 }
             </div>
-            <p class="text-sm text-neutral-300 grow line-clamp-3">{app.description_in(tr)}</p>
+            <p class="text-sm text-neutral-600 dark:text-neutral-300 grow line-clamp-3">{app.description_in(tr)}</p>
             <p class="text-xs text-neutral-500 font-mono truncate">{app.image.clone()}</p>
             <div class="pt-2">
-                <Link<Route> to={route} classes="inline-block px-3 py-1.5 rounded bg-neutral-100 text-neutral-900 font-medium hover:bg-white text-sm">
+                <Link<Route> to={route} classes={crate::components::button::button_class(crate::components::button::ButtonKind::Primary, crate::components::button::ButtonSize::Sm)}>
                     {locale.t("apps.store_install")}
                 </Link<Route>>
             </div>
