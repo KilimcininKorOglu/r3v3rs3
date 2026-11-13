@@ -1585,18 +1585,18 @@ fn configuration_backup_tab(props: &SubTabProps) -> Html {
             is_exporting.set(true);
             let is_exporting = is_exporting.clone();
             spawn_local(async move {
-                let req = Request::get(&format!("{API_ENDPOINT}/config/backup"));
-                if let Ok(built) = req.build()
-                    && let Ok(response) = send_request(locale, built).await
-                    && let Ok(text) = response.text().await
-                {
-                    let now = js_sys::Date::now() as u64 / 1000;
-                    crate::pages::app_log::download_text_file(
-                        &format!("r3v3rs3-config-backup-{now}.json"),
-                        &text,
-                    );
-                }
+                let exported = export_config(locale).await;
                 is_exporting.set(false);
+                match exported {
+                    Ok(text) => {
+                        let now = js_sys::Date::now() as u64 / 1000;
+                        crate::pages::app_log::download_text_file(
+                            &format!("r3v3rs3-config-backup-{now}.json"),
+                            &text,
+                        );
+                    }
+                    Err(err) => dialog::message(locale, &err, Icon::Error).await,
+                }
             });
         })
     };
@@ -1654,6 +1654,19 @@ fn configuration_backup_tab(props: &SubTabProps) -> Html {
             </div>
         </div>
     }
+}
+
+/// Reads the configuration backup. The error is the message of the failure in the selected
+/// language.
+async fn export_config(locale: Locale) -> Result<String, String> {
+    let request = Request::get(&format!("{API_ENDPOINT}/config/backup"))
+        .build()
+        .map_err(|err| format_network_error(locale, &err))?;
+    send_request(locale, request)
+        .await?
+        .text()
+        .await
+        .map_err(|_| locale.t("common.response_parse_failed").to_string())
 }
 
 async fn handle_config_restore_payload(locale: Locale, text: &str) {
