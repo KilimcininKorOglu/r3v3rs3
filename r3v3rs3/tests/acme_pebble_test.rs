@@ -203,6 +203,9 @@ fn pebble_host_ip() -> anyhow::Result<String> {
 #[tokio::test]
 #[ignore = "needs the Pebble containers, run it with make test-acme-pebble"]
 async fn tls_alpn_01_issues_a_certificate_without_a_port() -> anyhow::Result<()> {
+    // The test calls pebble-challtestsrv before the server starts, and the server installs the
+    // crypto provider that reqwest needs, so the test installs it first.
+    let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider().install_default();
     let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     wait_for_listener("127.0.0.1:8470".parse()?).await?;
     let addresses = vec![pebble_host_ip()?];
