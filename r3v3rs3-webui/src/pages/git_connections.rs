@@ -6,8 +6,9 @@ use super::Route;
 use super::accounts::{HINT_CLASS, INPUT_CLASS, LABEL_CLASS};
 use super::github_app;
 use super::resource_page::{
-    FormCard, Notice, delete_on_click, form_card, load, notice_view, reload_callback, save_result,
-    set_on_click, submit_callback, text_input,
+    FormCard, FormState, Notice, add_button, close_callback, delete_on_click, failed_view,
+    form_modal, load, open_on_click, reload_callback, save_result, saved_view, submit_callback,
+    text_input, then_close, use_form_modal,
 };
 use super::settings::{failure_box, send_json, success_box};
 use super::targets::copy_box;
@@ -200,7 +201,7 @@ pub fn git_connections() -> Html {
     let (session, _) = use_store::<SessionStore>();
     let location = use_location();
     let connections = use_state(Option::<Vec<GitConnectionEntry>>::default);
-    let form = use_state(Form::default);
+    let (form, open) = use_form_modal::<Form>();
     let notice = use_state(Option::<Notice<()>>::default);
     // The callback of the provider returns here with the result in the query.
     let query = location.as_ref().map_or("", |l| l.query_str());
@@ -231,14 +232,32 @@ pub fn git_connections() -> Html {
         return html! { <Redirect<Route> to={Route::Home} /> };
     }
     let admin = session.is_admin();
-    let rows = connection_rows(locale, admin, &form, &connections);
+    let rows = connection_rows(locale, admin, (&form, &open), &connections);
     html! {
         <>
             { callback_view(locale, &callback) }
             { installation_view(locale, &installation) }
+            { saved_view(&notice, |()| html! { <p>{locale.t("git_connections.saved")}</p> }) }
             { list_card(locale, connections.is_some(), "git_connections.empty", &COLUMNS, &rows) }
             if admin {
-                { form_view(locale, &form, &notice, &connections) }
+                { add_section(locale, (&form, &open), &notice, &connections) }
+            }
+        </>
+    }
+}
+
+/// The add button and the modal of the form.
+fn add_section(
+    locale: Locale,
+    (form, open): FormState<Form>,
+    notice: &UseStateHandle<Option<Notice<()>>>,
+    connections: &Connections,
+) -> Html {
+    html! {
+        <>
+            { add_button(locale, open_on_click(form, open, Form::default())) }
+            if **open {
+                { form_view(locale, (form, open), notice, connections) }
             }
         </>
     }
@@ -312,7 +331,7 @@ fn callback_view(locale: Locale, result: &Option<(bool, String)>) -> Html {
 fn connection_rows(
     locale: Locale,
     admin: bool,
-    form: &UseStateHandle<Form>,
+    form: FormState<Form>,
     connections: &Connections,
 ) -> Vec<Row> {
     connections
@@ -327,7 +346,7 @@ fn connection_row(
     locale: Locale,
     entry: &GitConnectionEntry,
     admin: bool,
-    form: &UseStateHandle<Form>,
+    form: FormState<Form>,
     connections: &Connections,
 ) -> Row {
     let (status, color) = connection_status(entry.status);
@@ -378,7 +397,7 @@ pub(super) fn provider_name(provider: GitProvider) -> &'static str {
 fn admin_actions(
     locale: Locale,
     entry: &GitConnectionEntry,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     connections: &Connections,
 ) -> Html {
     let label = match (entry.provider, entry.status) {
@@ -402,7 +421,7 @@ fn admin_actions(
             <ActionIconButton
                 variant={ActionVariant::Edit}
                 title={locale.t("common.edit").to_string()}
-                onclick={set_on_click(form, Form::edit(entry))}
+                onclick={open_on_click(form, open, Form::edit(entry))}
             />
             <ActionIconButton
                 variant={ActionVariant::Delete}
@@ -456,7 +475,7 @@ async fn authorize(locale: Locale, id: ShortId) -> Result<(), String> {
 
 fn form_view(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     notice: &UseStateHandle<Option<Notice<()>>>,
     connections: &Connections,
 ) -> Html {
@@ -468,16 +487,10 @@ fn form_view(
     let touched = form.editing.is_some() || !form.name.is_empty();
     let card = FormCard {
         title,
-        notice: notice_view(
-            notice,
-            |()| html! { <p>{locale.t("git_connections.saved")}</p> },
-        ),
+        notice: failed_view(notice),
         fields: fields_view(locale, form),
         error: parsed.as_ref().err().filter(|_| touched).cloned(),
-        cancel: form
-            .editing
-            .is_some()
-            .then(|| set_on_click(form, Form::default())),
+        cancel: None,
         save_label: if form.provider == GitProvider::Github && form.editing.is_none() {
             "git_connections.create_github_app"
         } else {
@@ -485,7 +498,12 @@ fn form_view(
         },
         can_save: parsed.is_ok(),
     };
-    form_card(locale, card, submit(locale, form, notice, connections))
+    form_modal(
+        locale,
+        card,
+        submit(locale, (form, open), notice, connections),
+        close_callback(form, open),
+    )
 }
 
 fn fields_view(locale: Locale, form: &UseStateHandle<Form>) -> Html {
@@ -575,11 +593,12 @@ fn provider_select(locale: Locale, form: &UseStateHandle<Form>) -> Html {
 
 fn submit(
     locale: Locale,
-    form: &UseStateHandle<Form>,
+    (form, open): FormState<Form>,
     notice: &UseStateHandle<Option<Notice<()>>>,
     connections: &Connections,
 ) -> Callback<SubmitEvent> {
-    let done = save_result(form, notice, reload_callback(connections, PATH));
+    let saved = then_close(reload_callback(connections, PATH), open);
+    let done = save_result(form, notice, saved);
     let form = form.clone();
     submit_callback(
         move || form.parse(locale, &callback_url()).ok(),
