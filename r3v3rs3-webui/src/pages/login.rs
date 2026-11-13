@@ -339,25 +339,18 @@ fn js_error_message(err: wasm_bindgen::JsValue) -> String {
     "Passkey authentication failed".to_string()
 }
 
-async fn fetch_passkey_challenge() -> Result<r3v3rs3_api::auth::PasskeyChallenge, String> {
-    let response = Request::get(&format!("{API_ENDPOINT}/auth/passkey/challenge"))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !response.ok() {
-        return Err("failed to get passkey challenge".into());
-    }
-    response
-        .json::<r3v3rs3_api::auth::PasskeyChallenge>()
-        .await
-        .map_err(|e| e.to_string())
+async fn fetch_passkey_challenge(
+    locale: Locale,
+) -> Result<r3v3rs3_api::auth::PasskeyChallenge, String> {
+    let path = format!("{API_ENDPOINT}/auth/passkey/challenge");
+    crate::pages::settings::fetch_json(locale, Request::get(&path)).await
 }
 
 async fn passkey_login(
     locale: Locale,
     username: String,
 ) -> Result<ApiResult<LoginResponse>, String> {
-    let challenge = fetch_passkey_challenge().await?;
+    let challenge = fetch_passkey_challenge(locale).await?;
     #[cfg(target_arch = "wasm32")]
     let assertion = {
         let promise = get_passkey(&challenge.challenge, &challenge.rp_id);
