@@ -347,7 +347,7 @@ fn pitr_banner_view(
                 <span class="font-medium text-neutral-900 dark:text-neutral-200 mr-1">{locale.t("databases.pitr_window")}</span>
                 <span class="font-mono text-neutral-700 dark:text-neutral-300 text-sm">{window_text}</span>
                 <span class="text-xs text-neutral-500 dark:text-neutral-400">
-                    {format!("({} base,", pitr.base_backups_count)}
+                    {locale.tf("databases.pitr_base_backups", &[("count", &pitr.base_backups_count.to_string())])}
                 </span>
                 <button
                     type="button"
@@ -359,7 +359,7 @@ fn pitr_banner_view(
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                     </svg>
-                    <span>{format!("{} WAL)", pitr.wal_segments_count)}</span>
+                    <span>{format!("{} WAL", pitr.wal_segments_count)}</span>
                 </button>
             </div>
             <div class="flex flex-wrap items-center gap-2">
