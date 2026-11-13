@@ -349,17 +349,11 @@ async fn a_missing_image_fails_the_pull() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Redis stays up and carries a shell, so the exec session can run a command in it.
-#[tokio::test]
-#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
-async fn an_exec_session_runs_a_command() -> anyhow::Result<()> {
-    let runtime = runtime()?;
-    let names = Names::new()?;
-    let image: ImageRef = "redis:8-alpine".parse()?;
-    runtime.ensure_network(&names.network, &names.app).await?;
-    let spec = ContainerSpec {
+/// The spec of a Redis container on the network of the names, without a published port.
+fn redis_spec(names: &Names, image: ImageRef) -> ContainerSpec {
+    ContainerSpec {
         name: names.container.clone(),
-        image: image.clone(),
+        image,
         env: Vec::new(),
         labels: BTreeMap::from([(APP_LABEL.to_string(), names.app.to_string())]),
         network: Some(names.network.clone()),
@@ -377,10 +371,27 @@ async fn an_exec_session_runs_a_command() -> anyhow::Result<()> {
         log_max_size: None,
         log_max_file: None,
         command: None,
-    };
+    }
+}
+
+/// Creates the network, pulls Redis, and creates and starts the Redis container.
+async fn start_redis(runtime: &DockerRuntime, names: &Names) -> anyhow::Result<()> {
+    let image: ImageRef = "redis:8-alpine".parse()?;
+    runtime.ensure_network(&names.network, &names.app).await?;
+    let spec = redis_spec(names, image.clone());
     runtime.pull_image(&image).await?;
     runtime.create_container(&spec).await?;
     runtime.start_container(&names.container).await?;
+    Ok(())
+}
+
+/// Redis stays up and carries a shell, so the exec session can run a command in it.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn an_exec_session_runs_a_command() -> anyhow::Result<()> {
+    let runtime = runtime()?;
+    let names = Names::new()?;
+    start_redis(&runtime, &names).await?;
 
     let result = exec_echo(&runtime, &names).await;
     let container = runtime.remove_container(&names.container).await;
@@ -395,67 +406,67 @@ async fn an_exec_session_runs_a_command() -> anyhow::Result<()> {
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn a_file_round_trips_through_the_archive() -> anyhow::Result<()> {
-    use r3v3rs3_api::platform::FileEntry;
     let runtime = runtime()?;
     let names = Names::new()?;
-    let image: ImageRef = "redis:8-alpine".parse()?;
-    runtime.ensure_network(&names.network, &names.app).await?;
-    let spec = ContainerSpec {
-        name: names.container.clone(),
-        image: image.clone(),
-        env: Vec::new(),
-        labels: BTreeMap::from([(APP_LABEL.to_string(), names.app.to_string())]),
-        network: Some(names.network.clone()),
-        volumes: Vec::new(),
-        restart: RestartPolicy::No,
-        limits: ResourceLimits {
-            memory_bytes: Some(64 << 20),
-            nano_cpus: Some(500_000_000),
-            memory_swap_bytes: None,
-            pids_limit: None,
-        },
-        publish: None,
-        host_port: None,
-        extra_hosts: Vec::new(),
-        log_max_size: None,
-        log_max_file: None,
-        command: None,
-    };
-    runtime.pull_image(&image).await?;
-    runtime.create_container(&spec).await?;
-    runtime.start_container(&names.container).await?;
+    start_redis(&runtime, &names).await?;
 
-    let path = "/data/r3v3rs3-test.txt";
-    let content = b"r3v3rs3 files ok".to_vec();
-    let result = async {
-        runtime
-            .upload_file(&names.container, path, content.clone())
-            .await?;
-        let entries = runtime.list_dir(&names.container, "/data").await?;
-        let found = entries
-            .iter()
-            .find(|FileEntry { name, .. }| name == "r3v3rs3-test.txt")
-            .context("the uploaded file is not listed")?;
-        ensure_eq!(found.dir, false);
-        ensure_eq!(found.size, content.len() as u64);
-        let downloaded = runtime.download_file(&names.container, path).await?;
-        ensure_eq!(downloaded, content);
-        runtime.remove_path(&names.container, path).await?;
-        let entries = runtime.list_dir(&names.container, "/data").await?;
-        ensure!(
-            entries
-                .iter()
-                .all(|FileEntry { name, .. }| name != "r3v3rs3-test.txt"),
-            "the removed file is still listed"
-        );
-        anyhow::Ok(())
-    }
-    .await;
+    let result = file_round_trip(&runtime, &names).await;
     let container = runtime.remove_container(&names.container).await;
     let network = runtime.remove_network(&names.network).await;
     result?;
     container?;
     network?;
+    Ok(())
+}
+
+/// The path of the file that the archive test writes into the Redis container.
+const ROUND_TRIP_PATH: &str = "/data/r3v3rs3-test.txt";
+
+/// Uploads a file, checks that it is listed with its size, downloads it, removes it and checks
+/// that it is no longer listed.
+async fn file_round_trip(runtime: &DockerRuntime, names: &Names) -> anyhow::Result<()> {
+    let content = b"r3v3rs3 files ok".to_vec();
+    upload_and_list(runtime, names, &content).await?;
+    let downloaded = runtime
+        .download_file(&names.container, ROUND_TRIP_PATH)
+        .await?;
+    ensure_eq!(downloaded, content);
+    remove_and_list(runtime, names).await
+}
+
+/// Uploads the file and checks that the directory lists it as a file of its size.
+async fn upload_and_list(
+    runtime: &DockerRuntime,
+    names: &Names,
+    content: &[u8],
+) -> anyhow::Result<()> {
+    use r3v3rs3_api::platform::FileEntry;
+    runtime
+        .upload_file(&names.container, ROUND_TRIP_PATH, content.to_vec())
+        .await?;
+    let entries = runtime.list_dir(&names.container, "/data").await?;
+    let found = entries
+        .iter()
+        .find(|FileEntry { name, .. }| name == "r3v3rs3-test.txt")
+        .context("the uploaded file is not listed")?;
+    ensure_eq!(found.dir, false);
+    ensure_eq!(found.size, content.len() as u64);
+    Ok(())
+}
+
+/// Removes the file and checks that the directory no longer lists it.
+async fn remove_and_list(runtime: &DockerRuntime, names: &Names) -> anyhow::Result<()> {
+    use r3v3rs3_api::platform::FileEntry;
+    runtime
+        .remove_path(&names.container, ROUND_TRIP_PATH)
+        .await?;
+    let entries = runtime.list_dir(&names.container, "/data").await?;
+    ensure!(
+        entries
+            .iter()
+            .all(|FileEntry { name, .. }| name != "r3v3rs3-test.txt"),
+        "the removed file is still listed"
+    );
     Ok(())
 }
 
@@ -495,6 +506,47 @@ fn window_contains(data: &[u8], needle: &[u8]) -> bool {
     data.windows(needle.len()).any(|window| window == needle)
 }
 
+/// Starts the container with the fixed host port and checks that port 80 is published on it.
+async fn publish_fixed_port(
+    runtime: &DockerRuntime,
+    names: &Names,
+    host_port: u16,
+) -> anyhow::Result<()> {
+    let image: ImageRef = IMAGE.parse()?;
+    runtime.pull_image(&image).await?;
+    runtime.ensure_network(&names.network, &names.app).await?;
+    let mut one = spec(names, image.clone())?;
+    one.host_port = Some(host_port);
+    runtime.create_container(&one).await?;
+    runtime.start_container(&names.container).await?;
+    wait_for_published_port(runtime, names, host_port).await
+}
+
+/// Waits up to 30 seconds until the container publishes port 80, and checks the host port.
+async fn wait_for_published_port(
+    runtime: &DockerRuntime,
+    names: &Names,
+    host_port: u16,
+) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let info = runtime
+            .inspect_container(&names.container)
+            .await?
+            .context("created container")?;
+        if let Some(published) = info.published.get(&80) {
+            ensure_eq!(*published, host_port);
+            break;
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the container published no port in time"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    Ok(())
+}
+
 /// A fixed host port publishes the container on the same port of `127.0.0.1` on every run.
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
@@ -504,33 +556,7 @@ async fn a_fixed_host_port_publishes_the_same_port() -> anyhow::Result<()> {
     let runtime = runtime()?;
     let names = Names::new()?;
     let host_port = TcpListener::bind(("127.0.0.1", 0))?.local_addr()?.port();
-    let result = async {
-        let image: ImageRef = IMAGE.parse()?;
-        runtime.pull_image(&image).await?;
-        runtime.ensure_network(&names.network, &names.app).await?;
-        let mut one = spec(&names, image.clone())?;
-        one.host_port = Some(host_port);
-        runtime.create_container(&one).await?;
-        runtime.start_container(&names.container).await?;
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-        loop {
-            let info = runtime
-                .inspect_container(&names.container)
-                .await?
-                .context("created container")?;
-            if let Some(published) = info.published.get(&80) {
-                ensure_eq!(*published, host_port);
-                break;
-            }
-            ensure!(
-                tokio::time::Instant::now() < deadline,
-                "the container published no port in time"
-            );
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-        Ok(())
-    }
-    .await;
+    let result = publish_fixed_port(&runtime, &names, host_port).await;
     let container = runtime.remove_container(&names.container).await;
     let network = runtime.remove_network(&names.network).await;
     result?;
