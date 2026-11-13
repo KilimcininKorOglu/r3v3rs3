@@ -1,6 +1,6 @@
 //! The parts of the pages that list resources and add or change one with a form.
 
-use super::settings::{failure_box, fetch_json, send_request, success_box};
+use super::settings::{failure_box, fetch_json, format_network_error, send_request, success_box};
 use crate::API_ENDPOINT;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::button::{Button, ButtonKind};
@@ -289,7 +289,7 @@ pub fn delete_on_click(
 async fn delete(locale: Locale, path: &str) -> Result<(), String> {
     let request = Request::delete(&format!("{API_ENDPOINT}{path}"))
         .build()
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| format_network_error(locale, &err))?;
     send_request(locale, request).await.map(|_| ())
 }
 
