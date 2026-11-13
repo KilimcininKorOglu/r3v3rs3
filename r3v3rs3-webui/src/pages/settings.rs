@@ -1442,10 +1442,13 @@ fn cdn_status_card() -> Html {
     let is_loading = use_state(|| false);
 
     let status_cloned = status.clone();
+    let load_notice = notice.clone();
     use_effect_with((), move |_| {
         wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(value) = get_cdn_status().await {
-                status_cloned.set(Some(value));
+            let path = format!("{API_ENDPOINT}/cdn");
+            match fetch_json(locale, Request::get(&path)).await {
+                Ok(value) => status_cloned.set(Some(value)),
+                Err(message) => load_notice.set(Some(Notice::Failed(message))),
             }
         });
     });
@@ -1519,14 +1522,6 @@ fn cdn_status_view(locale: Locale, status: &CdnStatus) -> Html {
             }).collect::<Html>() }
         </>
     }
-}
-
-async fn get_cdn_status() -> Result<CdnStatus, gloo_net::Error> {
-    Request::get(&format!("{API_ENDPOINT}/cdn"))
-        .send()
-        .await?
-        .json()
-        .await
 }
 
 fn security_hub_redirect(locale: Locale) -> Html {
