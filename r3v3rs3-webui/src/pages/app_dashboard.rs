@@ -316,9 +316,9 @@ fn restart_click_callback(p: &DashboardParams) -> Callback<MouseEvent> {
         let (failure, reload) = (failure.clone(), reload.clone());
         dialog::confirm_then(locale, question, async move {
             let path = format!("{API_ENDPOINT}/apps/{id}/restart");
-            match Request::post(&path).send().await {
-                Ok(_) => failure.set(None),
-                Err(err) => failure.set(Some(err.to_string())),
+            match super::settings::post_empty(locale, &path).await {
+                Ok(()) => failure.set(None),
+                Err(err) => failure.set(Some(err)),
             }
             reload.set(*reload + 1);
         });
