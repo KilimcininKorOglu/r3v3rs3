@@ -1,5 +1,6 @@
 //! Interactive SVG architecture visualizer and service dependency graph for Docker Compose.
 
+use crate::components::button::{Button, ButtonKind, ButtonSize};
 use r3v3rs3_api::container::ContainerHealth;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::platform::{
@@ -59,7 +60,7 @@ pub fn compose_topology_graph(props: &ComposeTopologyGraphProps) -> Html {
             { render_summary_bar(locale, &topology.summary) }
             { render_controls(locale, &filter, &zoom_level, topology.nodes.len()) }
 
-            <div class="relative bg-neutral-900 border border-neutral-700/80 rounded-xl overflow-hidden shadow-inner flex flex-col">
+            <div class="relative bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700/80 rounded-xl overflow-hidden shadow-inner flex flex-col">
                 { render_svg_canvas(
                     locale,
                     &filtered_nodes,
@@ -77,32 +78,27 @@ pub fn compose_topology_graph(props: &ComposeTopologyGraphProps) -> Html {
     }
 }
 
+/// One count of the summary bar. `label_class` colors the label, `extra` sizes the tile.
+fn summary_tile(label: &str, count: usize, label_class: &'static str, extra: &'static str) -> Html {
+    html! {
+        <div class={classes!("bg-white", "dark:bg-neutral-800/80", "border", "border-neutral-300", "dark:border-neutral-700/60", "rounded-lg", "p-3", "text-center", extra)}>
+            <div class={classes!("text-xs", "font-medium", label_class)}>{label.to_string()}</div>
+            <div class="text-lg font-bold text-neutral-900 dark:text-neutral-100 mt-0.5">{count}</div>
+        </div>
+    }
+}
+
 fn render_summary_bar(
     locale: Locale,
     summary: &r3v3rs3_api::platform::ComposeTopologySummary,
 ) -> Html {
     html! {
         <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            <div class="bg-neutral-800/80 border border-neutral-700/60 rounded-lg p-3 text-center">
-                <div class="text-xs font-medium text-neutral-400">{locale.t("compose.summary_services")}</div>
-                <div class="text-lg font-bold text-neutral-100 mt-0.5">{summary.services_count}</div>
-            </div>
-            <div class="bg-neutral-800/80 border border-neutral-700/60 rounded-lg p-3 text-center">
-                <div class="text-xs font-medium text-emerald-400">{locale.t("compose.summary_running")}</div>
-                <div class="text-lg font-bold text-emerald-300 mt-0.5">{summary.running_services}</div>
-            </div>
-            <div class="bg-neutral-800/80 border border-neutral-700/60 rounded-lg p-3 text-center">
-                <div class="text-xs font-medium text-teal-400">{locale.t("compose.summary_healthy")}</div>
-                <div class="text-lg font-bold text-teal-300 mt-0.5">{summary.healthy_services}</div>
-            </div>
-            <div class="bg-neutral-800/80 border border-neutral-700/60 rounded-lg p-3 text-center">
-                <div class="text-xs font-medium text-cyan-400">{locale.t("compose.summary_networks")}</div>
-                <div class="text-lg font-bold text-cyan-300 mt-0.5">{summary.networks_count}</div>
-            </div>
-            <div class="bg-neutral-800/80 border border-neutral-700/60 rounded-lg p-3 text-center col-span-2 sm:col-span-1">
-                <div class="text-xs font-medium text-purple-400">{locale.t("compose.summary_volumes")}</div>
-                <div class="text-lg font-bold text-purple-300 mt-0.5">{summary.volumes_count}</div>
-            </div>
+            { summary_tile(locale.t("compose.summary_services"), summary.services_count, "text-neutral-600 dark:text-neutral-400", "") }
+            { summary_tile(locale.t("compose.summary_running"), summary.running_services, "text-emerald-700 dark:text-emerald-400", "") }
+            { summary_tile(locale.t("compose.summary_healthy"), summary.healthy_services, "text-teal-700 dark:text-teal-400", "") }
+            { summary_tile(locale.t("compose.summary_networks"), summary.networks_count, "text-cyan-700 dark:text-cyan-400", "") }
+            { summary_tile(locale.t("compose.summary_volumes"), summary.volumes_count, "text-purple-700 dark:text-purple-400", "col-span-2 sm:col-span-1") }
         </div>
     }
 }
@@ -133,7 +129,7 @@ fn render_controls(
     };
 
     html! {
-        <div class="flex flex-wrap items-center justify-between gap-3 bg-neutral-800/50 p-2.5 rounded-lg border border-neutral-700/50">
+        <div class="flex flex-wrap items-center justify-between gap-3 bg-neutral-100 dark:bg-neutral-800/50 p-2.5 rounded-lg border border-neutral-300 dark:border-neutral-700/50">
             <div class="flex items-center gap-1.5">
                 <button
                     type="button"
@@ -166,33 +162,16 @@ fn render_controls(
             </div>
 
             <div class="flex items-center gap-2">
-                <span class="text-xs text-neutral-400 font-mono">{format!("{:.0}%", current_zoom * 100.0)}</span>
-                <div class="inline-flex rounded-md shadow-sm border border-neutral-700 overflow-hidden">
-                    <button
-                        type="button"
-                        onclick={zoom_out}
-                        title={locale.t("compose.zoom_out")}
-                        class="px-2.5 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 text-neutral-200"
-                    >
-                        {"-"}
-                    </button>
-                    <button
-                        type="button"
-                        onclick={zoom_reset}
-                        title={locale.t("compose.zoom_reset")}
-                        class="px-2.5 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border-x border-neutral-700"
-                    >
-                        {"100%"}
-                    </button>
-                    <button
-                        type="button"
-                        onclick={zoom_in}
-                        title={locale.t("compose.zoom_in")}
-                        class="px-2.5 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 text-neutral-200"
-                    >
-                        {"+"}
-                    </button>
-                </div>
+                <span class="text-xs text-neutral-500 dark:text-neutral-400 font-mono">{format!("{:.0}%", current_zoom * 100.0)}</span>
+                <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={zoom_out} title={locale.t("compose.zoom_out")}>
+                    {"-"}
+                </Button>
+                <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={zoom_reset} title={locale.t("compose.zoom_reset")}>
+                    {"100%"}
+                </Button>
+                <Button kind={ButtonKind::Secondary} size={ButtonSize::Sm} onclick={zoom_in} title={locale.t("compose.zoom_in")}>
+                    {"+"}
+                </Button>
             </div>
         </div>
     }
@@ -200,9 +179,9 @@ fn render_controls(
 
 fn filter_button_class(active: bool) -> &'static str {
     if active {
-        "px-2.5 py-1 text-xs font-semibold rounded-md bg-blue-600 text-white shadow-sm"
+        "px-2.5 py-1 text-xs font-semibold rounded-md bg-primary-600 text-white shadow-sm"
     } else {
-        "px-2.5 py-1 text-xs font-medium rounded-md text-neutral-300 hover:bg-neutral-700/60"
+        "px-2.5 py-1 text-xs font-medium rounded-md text-neutral-600 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-700/60"
     }
 }
 
@@ -417,7 +396,7 @@ fn render_edge(edge: &ComposeEdge, positions: &HashMap<String, NodePosition>) ->
                     font-size="9"
                     font-family="monospace"
                     text-anchor="middle"
-                    class="font-medium bg-neutral-900 px-1"
+                    class="font-medium"
                 >
                     {lbl}
                 </text>
@@ -460,10 +439,9 @@ fn render_node_element(
                 height={pos.height.to_string()}
                 rx="8"
                 ry="8"
-                fill="#171717"
                 stroke={if is_selected { "#3b82f6" } else { border_color }}
                 stroke-width={if is_selected { "2.5" } else { "1.2" }}
-                class="shadow-lg transition-all"
+                class="fill-white dark:fill-neutral-900 shadow-lg transition-all"
             />
 
             // Status light dot / halo
@@ -473,10 +451,9 @@ fn render_node_element(
             <text
                 x="28"
                 y="24"
-                fill="#f5f5f5"
                 font-size="12"
                 font-weight="600"
-                class="truncate"
+                class="truncate fill-neutral-900 dark:fill-neutral-100"
             >
                 {truncate_string(&node.name, 18)}
             </text>
@@ -485,9 +462,9 @@ fn render_node_element(
             <text
                 x="14"
                 y="46"
-                fill="#a3a3a3"
                 font-size="10"
                 font-family="monospace"
+                class="fill-neutral-500 dark:fill-neutral-400"
             >
                 {node_subtitle(node)}
             </text>
@@ -557,15 +534,15 @@ fn render_node_bottom_badges(
     html! {
         <g transform="translate(14, 62)">
             if let Some(badge) = badge_text {
-                <rect x="0" y="0" width="70" height="15" rx="3" fill="#262626" />
-                <text x="35" y="11" fill="#e5e5e5" font-size="8.5" font-weight="600" text-anchor="middle">
+                <rect x="0" y="0" width="70" height="15" rx="3" class="fill-neutral-200 dark:fill-neutral-800" />
+                <text x="35" y="11" font-size="8.5" font-weight="600" text-anchor="middle" class="fill-neutral-800 dark:fill-neutral-200">
                     {badge}
                 </text>
             }
             if let Some(svc) = &node.service {
                 if let Some(port) = svc.ports.first() {
-                    <rect x="76" y="0" width="60" height="15" rx="3" fill="#1e293b" />
-                    <text x="106" y="11" fill="#38bdf8" font-size="8.5" font-family="monospace" text-anchor="middle">
+                    <rect x="76" y="0" width="60" height="15" rx="3" class="fill-sky-100 dark:fill-slate-800" />
+                    <text x="106" y="11" font-size="8.5" font-family="monospace" text-anchor="middle" class="fill-sky-700 dark:fill-sky-400">
                         {truncate_string(port, 9)}
                     </text>
                 }
@@ -589,18 +566,19 @@ fn render_inspector_flyout(
     let downstream_deps: Vec<&ComposeEdge> = edges.iter().filter(|e| e.target == node.id).collect();
 
     html! {
-        <div class="absolute bottom-3 right-3 w-80 bg-neutral-900/95 backdrop-blur-md border border-neutral-700 rounded-xl p-4 shadow-2xl text-xs text-neutral-200 z-20 flex flex-col gap-2.5 max-h-[460px] overflow-y-auto">
-            <div class="flex items-center justify-between border-b border-neutral-800 pb-2">
+        <div class="absolute bottom-3 right-3 w-80 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border border-neutral-300 dark:border-neutral-700 rounded-xl p-4 shadow-2xl text-xs text-neutral-800 dark:text-neutral-200 z-20 flex flex-col gap-2.5 max-h-[460px] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-2">
                 <div class="flex items-center gap-2">
-                    <span class="font-bold text-neutral-100 text-sm">{&node.name}</span>
-                    <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-neutral-800 text-neutral-300">
+                    <span class="font-bold text-neutral-900 dark:text-neutral-100 text-sm">{&node.name}</span>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
                         {node_kind_label(locale, node.kind)}
                     </span>
                 </div>
                 <button
                     type="button"
                     onclick={close}
-                    class="text-neutral-400 hover:text-neutral-100 text-base font-bold px-1"
+                    aria-label={locale.t("common.close")}
+                    class="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100 text-base font-bold px-1"
                 >
                     {"×"}
                 </button>
@@ -628,19 +606,19 @@ fn render_service_inspector_details(
     html! {
         <div class="flex flex-col gap-1 text-[11px]">
             if let Some(img) = &svc.image {
-                <div><span class="text-neutral-400">{locale.t("compose.inspect_image")}{": "}</span><span class="font-mono text-neutral-200">{img}</span></div>
+                <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("compose.inspect_image")}{": "}</span><span class="font-mono text-neutral-800 dark:text-neutral-200">{img}</span></div>
             }
             if !svc.ports.is_empty() {
-                <div><span class="text-neutral-400">{locale.t("compose.inspect_ports")}{": "}</span><span class="font-mono text-cyan-400">{svc.ports.join(", ")}</span></div>
+                <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("compose.inspect_ports")}{": "}</span><span class="font-mono text-cyan-700 dark:text-cyan-400">{svc.ports.join(", ")}</span></div>
             }
             if let Some(st) = &svc.state {
-                <div><span class="text-neutral-400">{locale.t("apps.service_state")}{": "}</span><span class="font-semibold text-emerald-400">{st}</span></div>
+                <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("apps.service_state")}{": "}</span><span class="font-semibold text-emerald-700 dark:text-emerald-400">{st}</span></div>
             }
             if let Some(h) = svc.health {
-                <div><span class="text-neutral-400">{locale.t("apps.service_health")}{": "}</span><span class="font-semibold text-teal-400">{format!("{h:?}")}</span></div>
+                <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("apps.service_health")}{": "}</span><span class="font-semibold text-teal-700 dark:text-teal-400">{format!("{h:?}")}</span></div>
             }
             if svc.env_count > 0 {
-                <div><span class="text-neutral-400">{locale.t("compose.inspect_env_count")}{": "}</span><span>{svc.env_count}</span></div>
+                <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("compose.inspect_env_count")}{": "}</span><span>{svc.env_count}</span></div>
             }
         </div>
     }
@@ -653,10 +631,10 @@ fn render_volume_inspector_details(
     html! {
         <div class="flex flex-col gap-1 text-[11px]">
             if let Some(src) = &vol.source {
-                <div><span class="text-neutral-400">{locale.t("compose.inspect_source")}{": "}</span><span class="font-mono">{src}</span></div>
+                <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("compose.inspect_source")}{": "}</span><span class="font-mono">{src}</span></div>
             }
             if let Some(drv) = &vol.driver {
-                <div><span class="text-neutral-400">{locale.t("compose.inspect_driver")}{": "}</span><span>{drv}</span></div>
+                <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("compose.inspect_driver")}{": "}</span><span>{drv}</span></div>
             }
         </div>
     }
@@ -669,7 +647,7 @@ fn render_network_inspector_details(
     html! {
         <div class="flex flex-col gap-1 text-[11px]">
             if let Some(drv) = &net.driver {
-                <div><span class="text-neutral-400">{locale.t("compose.inspect_driver")}{": "}</span><span>{drv}</span></div>
+                <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("compose.inspect_driver")}{": "}</span><span>{drv}</span></div>
             }
         </div>
     }
@@ -681,15 +659,15 @@ fn render_dependency_lists(
     downstream: &[&ComposeEdge],
 ) -> Html {
     html! {
-        <div class="flex flex-col gap-2 pt-1 border-t border-neutral-800 text-[11px]">
+        <div class="flex flex-col gap-2 pt-1 border-t border-neutral-200 dark:border-neutral-800 text-[11px]">
             if !upstream.is_empty() {
                 <div>
-                    <span class="font-medium text-neutral-400 block mb-1">{locale.t("compose.inspect_dependencies")}{":"}</span>
+                    <span class="font-medium text-neutral-500 dark:text-neutral-400 block mb-1">{locale.t("compose.inspect_dependencies")}{":"}</span>
                     <div class="flex flex-wrap gap-1">
                         { for upstream.iter().map(|e| {
                             let target_name = e.target.split(':').nth(1).unwrap_or(&e.target);
                             html! {
-                                <span class="px-1.5 py-0.5 rounded bg-blue-950 border border-blue-800 text-blue-300 font-mono text-[10px]">
+                                <span class="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 font-mono text-[10px]">
                                     {target_name}
                                     if let Some(lbl) = &e.label { {format!(" ({lbl})")} }
                                 </span>
@@ -700,12 +678,12 @@ fn render_dependency_lists(
             }
             if !downstream.is_empty() {
                 <div>
-                    <span class="font-medium text-neutral-400 block mb-1">{locale.t("compose.inspect_connected_services")}{":"}</span>
+                    <span class="font-medium text-neutral-500 dark:text-neutral-400 block mb-1">{locale.t("compose.inspect_connected_services")}{":"}</span>
                     <div class="flex flex-wrap gap-1">
                         { for downstream.iter().map(|e| {
                             let src_name = e.source.split(':').nth(1).unwrap_or(&e.source);
                             html! {
-                                <span class="px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300 font-mono text-[10px]">
+                                <span class="px-1.5 py-0.5 rounded bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-mono text-[10px]">
                                     {src_name}
                                 </span>
                             }
