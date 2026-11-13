@@ -148,6 +148,12 @@ async fn a_credential_without_credentials_is_rejected() -> anyhow::Result<()> {
 #[tokio::test]
 async fn a_credential_of_an_acme_entry_is_not_deleted() -> anyhow::Result<()> {
     let storage = TestStorage::builder().build();
+    check_credential_in_use_is_kept(&storage).await?;
+    check_free_credential_is_deleted(storage).await
+}
+
+/// Checks that the delete of a credential that an ACME entry refers to fails as in use.
+async fn check_credential_in_use_is_kept(storage: &TestStorage) -> anyhow::Result<()> {
     let id: ShortId = "crd002".parse()?;
     storage
         .save_dns_credential(id, "in use", &provider("token"))
@@ -163,7 +169,12 @@ async fn a_credential_of_an_acme_entry_is_not_deleted() -> anyhow::Result<()> {
         deleted,
         Err(Error::DnsCredentialInUse { name }) if name == "in use"
     ));
+    Ok(())
+}
 
+/// Checks that a credential without a reference is deleted, and that a second delete does not
+/// find it.
+async fn check_free_credential_is_deleted(storage: TestStorage) -> anyhow::Result<()> {
     // After the ACME entry no longer holds the reference, the delete succeeds.
     let free: ShortId = "crd003".parse()?;
     storage
