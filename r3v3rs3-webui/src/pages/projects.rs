@@ -158,7 +158,7 @@ pub fn projects_page() -> Html {
     let list_cloned = list.clone();
     use_effect_with((signed_in, *reload), move |&(signed_in, _)| {
         if signed_in {
-            load_projects(list_cloned);
+            load_projects(locale, list_cloned);
         }
         || ()
     });
@@ -198,16 +198,13 @@ pub fn projects_page() -> Html {
     }
 }
 
-fn load_projects(list: ProjectsList) {
+fn load_projects(locale: Locale, list: ProjectsList) {
     spawn_local(async move {
         let url = format!("{API_ENDPOINT}{PATH}");
-        let Ok(response) = Request::get(&url).send().await else {
-            return;
-        };
-        let Ok(projects) = response.json::<Vec<ProjectSummary>>().await else {
-            return;
-        };
-        list.set(Some(projects));
+        match fetch_json::<Vec<ProjectSummary>>(locale, Request::get(&url)).await {
+            Ok(projects) => list.set(Some(projects)),
+            Err(message) => dialog::message(locale, &message, dialog::Icon::Error).await,
+        }
     });
 }
 
