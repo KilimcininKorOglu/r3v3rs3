@@ -7,12 +7,13 @@ use super::resource_page::{
     form_modal, load, open_on_click, reload_callback, row_actions, save_result, saved_view,
     submit_callback, text_input, then_close, use_form_modal,
 };
-use super::settings::send_json;
+use super::settings::{fetch_json, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::data_list::{Column, Row, list_card};
+use crate::dialog::{self, Icon};
 use crate::format::format_time;
 use crate::i18n::use_locale;
 use crate::store::SessionStore;
@@ -218,13 +219,13 @@ fn list_row(
                 e.prevent_default();
                 let (form, open) = (form.clone(), open.clone());
                 spawn_local(async move {
-                    if let Ok(res) = Request::get(&format!("{API_ENDPOINT}/env-groups/{id}"))
-                        .send()
-                        .await
-                        && let Ok(group) = res.json::<EnvGroup>().await
-                    {
-                        form.set(Form::edit(&group));
-                        open.set(true);
+                    let request = Request::get(&format!("{API_ENDPOINT}{PATH}/{id}"));
+                    match fetch_json::<EnvGroup>(locale, request).await {
+                        Ok(group) => {
+                            form.set(Form::edit(&group));
+                            open.set(true);
+                        }
+                        Err(message) => dialog::message(locale, &message, Icon::Error).await,
                     }
                 });
             });
