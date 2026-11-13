@@ -781,7 +781,10 @@ fn render_s3_row(
     can_edit: bool,
     reload: Callback<()>,
 ) -> Row {
-    let download_url = format!("{API_ENDPOINT}/databases/s3/download?key={}", snap.key);
+    let download_url = format!(
+        "{API_ENDPOINT}/databases/s3/download?key={}",
+        js_sys::encode_uri_component(&snap.key)
+    );
     let key = snap.key.clone();
     let restore_btn = can_edit.then(|| {
         let reload = reload.clone();
