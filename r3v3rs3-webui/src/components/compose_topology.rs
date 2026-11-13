@@ -466,7 +466,7 @@ fn render_node_element(
                 font-family="monospace"
                 class="fill-neutral-500 dark:fill-neutral-400"
             >
-                {node_subtitle(node)}
+                {node_subtitle(locale, node)}
             </text>
 
             // Bottom Badges Row
@@ -480,63 +480,64 @@ fn node_colors_and_badge(node: &ComposeNode) -> (&'static str, &'static str, Opt
         ComposeNodeKind::Service => {
             if let Some(svc) = &node.service {
                 if svc.is_entrypoint {
-                    return ("#2563eb", "#3b82f6", Some("ENTRYPOINT"));
+                    return ("#2563eb", "#3b82f6", Some("compose.badge_entrypoint"));
                 }
                 match svc.state.as_deref() {
                     Some("running") => {
                         if svc.health == Some(ContainerHealth::Healthy) {
-                            ("#10b981", "#10b981", Some("HEALTHY"))
+                            ("#10b981", "#10b981", Some("compose.badge_healthy"))
                         } else {
-                            ("#22c55e", "#22c55e", Some("RUNNING"))
+                            ("#22c55e", "#22c55e", Some("compose.badge_running"))
                         }
                     }
-                    Some("exited") => ("#ef4444", "#ef4444", Some("EXITED")),
-                    Some("restarting") => ("#f59e0b", "#f59e0b", Some("RESTART")),
+                    Some("exited") => ("#ef4444", "#ef4444", Some("compose.badge_exited")),
+                    Some("restarting") => ("#f59e0b", "#f59e0b", Some("compose.badge_restarting")),
                     _ => ("#525252", "#737373", None),
                 }
             } else {
                 ("#525252", "#737373", None)
             }
         }
-        ComposeNodeKind::Network => ("#0891b2", "#06b6d4", Some("NETWORK")),
-        ComposeNodeKind::Volume => ("#9333ea", "#a855f7", Some("VOLUME")),
+        ComposeNodeKind::Network => ("#0891b2", "#06b6d4", Some("compose.node_kind_network")),
+        ComposeNodeKind::Volume => ("#9333ea", "#a855f7", Some("compose.node_kind_volume")),
     }
 }
 
-fn node_subtitle(node: &ComposeNode) -> String {
+fn node_subtitle(locale: Locale, node: &ComposeNode) -> String {
     match node.kind {
         ComposeNodeKind::Service => node
             .service
             .as_ref()
             .and_then(|s| s.image.as_ref())
             .map(|i| truncate_string(i, 24))
-            .unwrap_or_else(|| "service".to_string()),
+            .unwrap_or_else(|| locale.t("compose.subtitle_service").to_string()),
         ComposeNodeKind::Network => node
             .network
             .as_ref()
             .and_then(|n| n.driver.as_ref())
-            .map(|d| format!("driver: {d}"))
-            .unwrap_or_else(|| "bridge network".to_string()),
+            .map(|d| locale.tf("compose.subtitle_driver", &[("driver", d)]))
+            .unwrap_or_else(|| locale.t("compose.subtitle_network").to_string()),
         ComposeNodeKind::Volume => node
             .volume
             .as_ref()
             .and_then(|v| v.source.as_ref())
             .map(|s| truncate_string(s, 24))
-            .unwrap_or_else(|| "named volume".to_string()),
+            .unwrap_or_else(|| locale.t("compose.subtitle_volume").to_string()),
     }
 }
 
+/// `badge_key` is the translation key of the state badge.
 fn render_node_bottom_badges(
-    _locale: Locale,
+    locale: Locale,
     node: &ComposeNode,
-    badge_text: Option<&'static str>,
+    badge_key: Option<&'static str>,
 ) -> Html {
     html! {
         <g transform="translate(14, 62)">
-            if let Some(badge) = badge_text {
+            if let Some(badge) = badge_key {
                 <rect x="0" y="0" width="70" height="15" rx="3" class="fill-neutral-200 dark:fill-neutral-800" />
                 <text x="35" y="11" font-size="8.5" font-weight="600" text-anchor="middle" class="fill-neutral-800 dark:fill-neutral-200">
-                    {badge}
+                    {locale.t(badge)}
                 </text>
             }
             if let Some(svc) = &node.service {
@@ -614,8 +615,8 @@ fn render_service_inspector_details(
             if let Some(st) = &svc.state {
                 <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("apps.service_state")}{": "}</span><span class="font-semibold text-emerald-700 dark:text-emerald-400">{st}</span></div>
             }
-            if let Some(h) = svc.health {
-                <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("apps.service_health")}{": "}</span><span class="font-semibold text-teal-700 dark:text-teal-400">{format!("{h:?}")}</span></div>
+            if svc.health.is_some() {
+                <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("apps.service_health")}{": "}</span>{crate::pages::app_services::health_badge(locale, svc.health)}</div>
             }
             if svc.env_count > 0 {
                 <div><span class="text-neutral-500 dark:text-neutral-400">{locale.t("compose.inspect_env_count")}{": "}</span><span>{svc.env_count}</span></div>
