@@ -1315,18 +1315,13 @@ async fn execute_dr_create(
     body: CreateDisasterRecoveryRequest,
     load_backups: Callback<()>,
 ) {
-    let req = Request::post(&format!("{API_ENDPOINT}/disaster-recovery/backups"))
-        .header("content-type", "application/json")
-        .json(&body);
-    match req {
-        Ok(built) => match send_request(locale, built).await {
-            Ok(_) => {
-                dialog::message(locale, locale.t("backups.taken"), Icon::Success).await;
-                load_backups.emit(());
-            }
-            Err(err) => dialog::message(locale, &err, Icon::Error).await,
-        },
-        Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
+    let builder = Request::post(&format!("{API_ENDPOINT}/disaster-recovery/backups"));
+    match send_json(locale, builder, &body).await {
+        Ok(()) => {
+            dialog::message(locale, locale.t("backups.taken"), Icon::Success).await;
+            load_backups.emit(());
+        }
+        Err(err) => dialog::message(locale, &err, Icon::Error).await,
     }
 }
 
@@ -1359,23 +1354,22 @@ async fn handle_dr_restore_upload(
     if !passphrase.is_empty() {
         builder = builder.header("x-passphrase", &passphrase);
     }
-    let req = builder.body(wasm_bindgen::JsValue::from(js_sys::Uint8Array::from(
-        bytes.as_slice(),
-    )));
-    match req {
-        Ok(built) => match send_request(locale, built).await {
-            Ok(_) => {
-                dialog::message(
-                    locale,
-                    locale.t("settings.dr_restore_success"),
-                    Icon::Success,
-                )
-                .await;
-                load_backups.emit(());
-            }
-            Err(err) => dialog::message(locale, &err, Icon::Error).await,
-        },
-        Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
+    let body = wasm_bindgen::JsValue::from(js_sys::Uint8Array::from(bytes.as_slice()));
+    let sent = match builder.body(body) {
+        Ok(request) => send_request(locale, request).await.map(|_| ()),
+        Err(err) => Err(format_network_error(locale, &err)),
+    };
+    match sent {
+        Ok(()) => {
+            dialog::message(
+                locale,
+                locale.t("settings.dr_restore_success"),
+                Icon::Success,
+            )
+            .await;
+            load_backups.emit(());
+        }
+        Err(err) => dialog::message(locale, &err, Icon::Error).await,
     }
 }
 
@@ -1687,17 +1681,12 @@ async fn handle_config_restore_payload(locale: Locale, text: &str) {
         .await;
         return;
     };
-    let req = Request::post(&format!("{API_ENDPOINT}/config/restore"))
-        .header("content-type", "application/json")
-        .json(&val);
-    match req {
-        Ok(built) => match send_request(locale, built).await {
-            Ok(_) => {
-                dialog::message(locale, locale.t("settings.restore_success"), Icon::Success).await
-            }
-            Err(err) => dialog::message(locale, &err, Icon::Error).await,
-        },
-        Err(err) => dialog::message(locale, &err.to_string(), Icon::Error).await,
+    let builder = Request::post(&format!("{API_ENDPOINT}/config/restore"));
+    match send_json(locale, builder, &val).await {
+        Ok(()) => {
+            dialog::message(locale, locale.t("settings.restore_success"), Icon::Success).await
+        }
+        Err(err) => dialog::message(locale, &err, Icon::Error).await,
     }
 }
 
