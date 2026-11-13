@@ -760,21 +760,12 @@ fn maintenance_onclick(
 }
 
 async fn toggle_maintenance(locale: Locale, id: ShortId, enabled: bool) -> Result<(), String> {
-    let mut entry: ProxyEntry = Request::get(&format!("{API_ENDPOINT}/proxies/{id}"))
-        .send()
-        .await
-        .map_err(|err| err.to_string())?
-        .json()
-        .await
-        .map_err(|err| err.to_string())?;
-    if let ProxyKind::Http(ref mut http) = entry.proxy.kind {
-        http.maintenance.enabled = enabled;
-    }
-    let req = Request::put(&format!("{API_ENDPOINT}/proxies/{id}"))
-        .json(&entry)
-        .map_err(|err| err.to_string())?;
-    crate::pages::settings::send_request(locale, req).await?;
-    Ok(())
+    change_proxy(locale, id, |entry| {
+        if let ProxyKind::Http(ref mut http) = entry.proxy.kind {
+            http.maintenance.enabled = enabled;
+        }
+    })
+    .await
 }
 
 #[cfg(test)]
