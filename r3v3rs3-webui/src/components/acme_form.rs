@@ -489,23 +489,22 @@ fn cname_preview_view(locale: Locale, fields: &UseReducerHandle<AcmeFields>) -> 
         return html! {};
     }
     html! {
-        <div class="mt-3 p-3 bg-slate-900/80 rounded-lg border border-cyan-500/30 text-xs">
-            <div class="font-medium text-cyan-400 mb-1 flex items-center gap-1.5">
-                <span>{"🔀"}</span>
-                <span>{locale.t("acme.cname_preview_title")}</span>
+        <div class="mt-3 p-3 bg-cyan-50 dark:bg-slate-900/80 rounded-lg border border-cyan-300 dark:border-cyan-500/30 text-xs">
+            <div class="font-medium text-cyan-700 dark:text-cyan-400 mb-1">
+                {locale.t("acme.cname_preview_title")}
             </div>
-            <p class="text-slate-400 mb-2">{locale.t("acme.cname_preview_desc")}</p>
-            <div class="space-y-1 font-mono text-slate-300">
+            <p class="text-neutral-600 dark:text-slate-400 mb-2">{locale.t("acme.cname_preview_desc")}</p>
+            <div class="space-y-1 font-mono text-neutral-700 dark:text-slate-300">
                 { domains.into_iter().map(|domain| {
                     let clean = domain.trim_start_matches("*.").trim_end_matches('.');
                     let source = format!("_acme-challenge.{clean}");
                     let target = Acme::compute_dns_alias_target(alias_pattern, clean);
                     html! {
-                        <div class="bg-black/40 px-2 py-1 rounded flex flex-col md:flex-row md:items-center justify-between gap-1">
+                        <div class="bg-white dark:bg-black/40 px-2 py-1 rounded flex flex-col md:flex-row md:items-center justify-between gap-1">
                             <div>
-                                <span class="text-amber-300 font-semibold">{source}</span>
-                                <span class="text-slate-500 mx-1.5">{"CNAME"}</span>
-                                <span class="text-emerald-400 font-semibold">{target}</span>
+                                <span class="text-amber-700 dark:text-amber-300 font-semibold">{source}</span>
+                                <span class="text-neutral-500 mx-1.5">{"CNAME"}</span>
+                                <span class="text-emerald-700 dark:text-emerald-400 font-semibold">{target}</span>
                             </div>
                         </div>
                     }
