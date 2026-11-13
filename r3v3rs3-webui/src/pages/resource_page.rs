@@ -295,6 +295,38 @@ pub(super) async fn delete(locale: Locale, path: &str) -> Result<(), String> {
     send_request(locale, request).await.map(|_| ())
 }
 
+/// A list of the admin API: `None` until it loads, then the entries or the error of the load.
+pub(super) type Loaded<T> = Option<Result<Vec<T>, String>>;
+
+/// Loads the list at `path` of the admin API, again each time `reload` changes.
+#[hook]
+pub(super) fn use_list<T: DeserializeOwned + 'static>(
+    locale: Locale,
+    path: &'static str,
+    reload: usize,
+) -> UseStateHandle<Loaded<T>> {
+    let list = use_state(|| None);
+    {
+        let list = list.clone();
+        use_effect_with(reload, move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                let url = format!("{API_ENDPOINT}{path}");
+                list.set(Some(fetch_json(locale, Request::get(&url)).await));
+            });
+        });
+    }
+    list
+}
+
+/// The entries of a list and whether it has loaded, or the error of its load.
+pub(super) fn loaded_entries<T>(list: &Loaded<T>) -> Result<(bool, &[T]), &str> {
+    match list {
+        Some(Ok(entries)) => Ok((true, entries)),
+        Some(Err(err)) => Err(err),
+        None => Ok((false, &[])),
+    }
+}
+
 /// Returns a callback that reads the value at `path` of the admin API into the state.
 pub fn reload_callback<T: DeserializeOwned + 'static>(
     locale: Locale,

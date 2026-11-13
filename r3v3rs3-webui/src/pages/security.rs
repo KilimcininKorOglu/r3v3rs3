@@ -1,8 +1,10 @@
 //! Security center consolidating Access Lists, Banned IPs, Quarantined IPs, and Anomaly Detection Rules.
 
 use super::access_lists::AccessLists;
-use super::resource_page::{FormCard, add_button, delete, form_modal};
-use super::settings::{Notice, failure_box, fetch_json, notice_view, send_json};
+use super::resource_page::{
+    FormCard, Loaded, add_button, delete, form_modal, loaded_entries, use_list,
+};
+use super::settings::{Notice, failure_box, notice_view, send_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
@@ -16,7 +18,6 @@ use gloo_net::http::Request;
 use r3v3rs3_api::auth::BannedIpEntry;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::quarantine::QuarantinedIpEntry;
-use serde::de::DeserializeOwned;
 use serde_json::json;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
@@ -167,38 +168,6 @@ fn banned_ips_card() -> Html {
                 { banned_table_view(locale, &list, unban) }
             </div>
         </div>
-    }
-}
-
-/// A list of the admin API: `None` until it loads, then the entries or the error of the load.
-type Loaded<T> = Option<Result<Vec<T>, String>>;
-
-/// Loads the list at `path` of the admin API, again each time `reload` changes.
-#[hook]
-fn use_list<T: DeserializeOwned + 'static>(
-    locale: Locale,
-    path: &'static str,
-    reload: usize,
-) -> UseStateHandle<Loaded<T>> {
-    let list = use_state(|| None);
-    {
-        let list = list.clone();
-        use_effect_with(reload, move |_| {
-            wasm_bindgen_futures::spawn_local(async move {
-                let url = format!("{API_ENDPOINT}{path}");
-                list.set(Some(fetch_json(locale, Request::get(&url)).await));
-            });
-        });
-    }
-    list
-}
-
-/// The entries of a list and whether it has loaded, or the error of its load.
-fn loaded_entries<T>(list: &Loaded<T>) -> Result<(bool, &[T]), &str> {
-    match list {
-        Some(Ok(entries)) => Ok((true, entries)),
-        Some(Err(err)) => Err(err),
-        None => Ok((false, &[])),
     }
 }
 
