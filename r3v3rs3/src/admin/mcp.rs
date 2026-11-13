@@ -495,6 +495,24 @@ pub struct CreateDatabaseParams {
     pub request: r3v3rs3_api::platform::DatabaseRequest,
 }
 
+/// The arguments of `reset_database_password`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ResetDatabasePasswordParams {
+    /// The id of the database.
+    pub id: String,
+    /// The tenant whose password changes. Omit it to change the root password.
+    pub tenant: Option<String>,
+}
+
+/// The arguments of `delete_database_tenant`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DeleteDatabaseTenantParams {
+    /// The id of the database.
+    pub id: String,
+    /// The name of the tenant, as `list_database_tenants` returns it.
+    pub tenant: String,
+}
+
 /// The arguments of `delete_database_backup`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DeleteBackupParams {
@@ -3195,6 +3213,97 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(created.0)
+    }
+
+    /// Read the passwords of the accounts of a database.
+    #[tool(
+        description = "Return the root account and every tenant of a managed database with their user, password, database and connection string. Needs the Admin permission and the edit scope; every call is audited."
+    )]
+    async fn get_database_credentials(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id = parse_id(&params.id)?;
+        let credentials = super::databases::credentials(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(credentials.0)
+    }
+
+    /// List the tenants of a shared database server.
+    #[tool(
+        description = "List the tenants of a shared (projectless) database server: one database and user per project environment, with the apps that connect as each of them. No passwords."
+    )]
+    async fn list_database_tenants(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id = parse_id(&params.id)?;
+        let tenants = super::databases::tenants(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(tenants.0)
+    }
+
+    /// Give the root account or a tenant of a database a new password.
+    #[tool(
+        description = "Give the root account (omit tenant) or a tenant of a managed database a new password, and redeploy the apps that connect with it. Returns the new password once. Needs the Admin permission and the edit scope."
+    )]
+    async fn reset_database_password(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<ResetDatabasePasswordParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id = parse_id(&params.id)?;
+        let request = r3v3rs3_api::platform::DatabasePasswordRequest {
+            tenant: params.tenant,
+        };
+        let reset = super::databases::reset_password(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(reset.0)
+    }
+
+    /// Remove a tenant of a shared database server with its data.
+    #[tool(
+        description = "Remove a tenant of a shared database server with its user, its database and its data. A tenant that an app connects as is refused. Needs the Admin permission and the edit scope."
+    )]
+    async fn delete_database_tenant(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<DeleteDatabaseTenantParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id = parse_id(&params.id)?;
+        let axum::Json(()) = super::databases::delete_tenant(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path((id, params.tenant.clone())),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(json!({ "deleted": params.tenant }))
     }
 
     /// List database backup snapshots.

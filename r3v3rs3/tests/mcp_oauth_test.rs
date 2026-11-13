@@ -899,6 +899,14 @@ async fn assert_mcp_tool_names(
     assert!(names.contains(&"restore_database_pitr"), "{names:?}");
     assert!(names.contains(&"archive_database_wal_segment"), "{names:?}");
     assert!(names.contains(&"list_database_wal_segments"), "{names:?}");
+    for name in [
+        "get_database_credentials",
+        "list_database_tenants",
+        "reset_database_password",
+        "delete_database_tenant",
+    ] {
+        assert!(names.contains(&name), "{names:?}");
+    }
     assert!(names.contains(&"generate_target_token"), "{names:?}");
     assert!(names.contains(&"upgrade_target"), "{names:?}");
     assert!(names.contains(&"upgrade_all_targets"), "{names:?}");
