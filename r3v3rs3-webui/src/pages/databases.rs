@@ -63,32 +63,17 @@ fn load_all(
         notice.clone(),
     );
     spawn_local(async move {
-        match fetch_json::<Vec<AppEntry>>(
-            locale,
-            Request::get(&format!("{API_ENDPOINT}/databases")),
-        )
-        .await
-        {
-            Ok(list) => databases.set(list),
-            Err(message) => notice.set(Some(Notice::Failed(message))),
-        }
-        if let Ok(list) = fetch_json::<Vec<EngineInfo>>(
-            locale,
-            Request::get(&format!("{API_ENDPOINT}/databases/engines")),
-        )
-        .await
-        {
-            engines.set(list);
-        }
-        if let Ok(list) =
-            fetch_json::<Vec<AppEntry>>(locale, Request::get(&format!("{API_ENDPOINT}/apps"))).await
-        {
-            apps.set(list);
-        }
+        let failures = [
+            fetch_into(locale, "/databases", &databases).await,
+            fetch_into(locale, "/databases/engines", &engines).await,
+            fetch_into(locale, "/apps", &apps).await,
+        ];
+        report_first(&notice, failures);
     });
 }
 
-/// Reads the databases and the apps again after a change.
+/// Reads the databases and the apps again after a change, and the first failure goes to the
+/// notice.
 fn reload_lists(
     locale: Locale,
     databases: &UseStateHandle<Vec<AppEntry>>,
@@ -97,21 +82,37 @@ fn reload_lists(
 ) {
     let (databases, apps, notice) = (databases.clone(), apps.clone(), notice.clone());
     spawn_local(async move {
-        match fetch_json::<Vec<AppEntry>>(
-            locale,
-            Request::get(&format!("{API_ENDPOINT}/databases")),
-        )
-        .await
-        {
-            Ok(list) => databases.set(list),
-            Err(message) => notice.set(Some(Notice::Failed(message))),
-        }
-        if let Ok(list) =
-            fetch_json::<Vec<AppEntry>>(locale, Request::get(&format!("{API_ENDPOINT}/apps"))).await
-        {
-            apps.set(list);
-        }
+        let failures = [
+            fetch_into(locale, "/databases", &databases).await,
+            fetch_into(locale, "/apps", &apps).await,
+        ];
+        report_first(&notice, failures);
     });
+}
+
+/// Reads the list at `path` of the admin API into the state, or returns the failure.
+async fn fetch_into<T: serde::de::DeserializeOwned>(
+    locale: Locale,
+    path: &str,
+    state: &UseStateHandle<T>,
+) -> Option<String> {
+    match fetch_json::<T>(locale, Request::get(&format!("{API_ENDPOINT}{path}"))).await {
+        Ok(value) => {
+            state.set(value);
+            None
+        }
+        Err(message) => Some(message),
+    }
+}
+
+/// Shows the first failure of a load in the notice.
+fn report_first<const N: usize>(
+    notice: &UseStateHandle<Option<Notice<()>>>,
+    failures: [Option<String>; N],
+) {
+    if let Some(message) = failures.into_iter().flatten().next() {
+        notice.set(Some(Notice::Failed(message)));
+    }
 }
 
 /// The engine info of a database app, from the catalog.
