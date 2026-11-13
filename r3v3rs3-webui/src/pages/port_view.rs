@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::components::button::{ButtonKind, ButtonSize, button_class};
-use crate::pages::settings::{failure_box, fetch_json};
+use crate::pages::settings::{failure_box, fetch_json, send_json};
 use crate::{
     API_ENDPOINT,
     auth::use_ensure_auth,
@@ -132,9 +132,10 @@ fn submit_callback(
 }
 
 async fn update_port(locale: Locale, id: ShortId, entry: &Port) -> Result<(), String> {
-    let req = Request::put(&format!("{API_ENDPOINT}/ports/{id}"))
-        .json(entry)
-        .map_err(|err| err.to_string())?;
-    crate::pages::settings::send_request(locale, req).await?;
-    Ok(())
+    send_json(
+        locale,
+        Request::put(&format!("{API_ENDPOINT}/ports/{id}")),
+        entry,
+    )
+    .await
 }
