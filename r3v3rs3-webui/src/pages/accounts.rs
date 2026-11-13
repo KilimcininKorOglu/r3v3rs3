@@ -831,44 +831,28 @@ async fn add_token_flow(locale: Locale, form: UseStateHandle<Form>, accounts: Ac
 
     let req = CreateApiTokenRequest { name, scope };
     let url = format!("{API_ENDPOINT}/auth/tokens");
-    let resp = match Request::post(&url).json(&req) {
-        Ok(r) => r.send().await,
-        Err(err) => {
-            crate::dialog::message(locale, &err.to_string(), crate::dialog::Icon::Error).await;
+    let created: ApiTokenCreated = match post_json(locale, Request::post(&url), &req).await {
+        Ok(created) => created,
+        Err(msg) => {
+            crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await;
             return;
         }
     };
-    match resp {
-        Ok(res) if res.ok() => {
-            if let Ok(created) = res.json::<ApiTokenCreated>().await {
-                let msg = format!(
-                    "{}\n\n{}",
-                    locale.t("accounts.token_created_warning"),
-                    created.token
-                );
-                crate::dialog::message(locale, &msg, crate::dialog::Icon::Success).await;
-                let mut updated = (*form).clone();
-                updated.tokens.push(ApiTokenInfo {
-                    id: created.id,
-                    name: created.name,
-                    scope: created.scope,
-                    created_at: created.created_at,
-                });
-                form.set(updated);
-                load(locale, accounts, PATH);
-            }
-        }
-        Ok(res) => {
-            let msg = res
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to create token".to_string());
-            crate::dialog::message(locale, &msg, crate::dialog::Icon::Error).await;
-        }
-        Err(err) => {
-            crate::dialog::message(locale, &err.to_string(), crate::dialog::Icon::Error).await;
-        }
-    }
+    let msg = format!(
+        "{}\n\n{}",
+        locale.t("accounts.token_created_warning"),
+        created.token
+    );
+    crate::dialog::message(locale, &msg, crate::dialog::Icon::Success).await;
+    let mut updated = (*form).clone();
+    updated.tokens.push(ApiTokenInfo {
+        id: created.id,
+        name: created.name,
+        scope: created.scope,
+        created_at: created.created_at,
+    });
+    form.set(updated);
+    load(locale, accounts, PATH);
 }
 
 async fn delete_token_action(
