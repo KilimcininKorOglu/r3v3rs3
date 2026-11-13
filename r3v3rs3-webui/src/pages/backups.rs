@@ -951,7 +951,7 @@ fn render_settings_modal(
                         show_settings.set(false);
                         reload.emit(());
                     }
-                    Err(err) => notice.set(Some(Notice::Failed(err.to_string()))),
+                    Err(err) => notice.set(Some(Notice::Failed(err))),
                 }
             });
         })
