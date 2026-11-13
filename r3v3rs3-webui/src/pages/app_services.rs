@@ -167,7 +167,7 @@ fn services_table(locale: Locale, app_id: ShortId, list: &[ComposeServiceStatus]
                         <th class="py-2 px-4 font-medium text-neutral-600 dark:text-neutral-300">{locale.t("apps.service_container")}</th>
                         <th class="py-2 px-4 font-medium text-neutral-600 dark:text-neutral-300">{locale.t("apps.service_state")}</th>
                         <th class="py-2 px-4 font-medium text-neutral-600 dark:text-neutral-300">{locale.t("apps.service_health")}</th>
-                        <th class="py-2 px-4 font-medium text-neutral-600 dark:text-neutral-300">{locale.t("apps.service_state")}</th>
+                        <th class="py-2 px-4 font-medium text-neutral-600 dark:text-neutral-300">{locale.t("apps.service_exit")}</th>
                         <th class="py-2 px-4 text-right font-medium text-neutral-600 dark:text-neutral-300"></th>
                     </tr>
                 </thead>

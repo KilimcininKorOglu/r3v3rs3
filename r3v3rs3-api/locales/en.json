@@ -1949,6 +1949,7 @@
   "apps.service_container": "Container",
   "apps.service_state": "State",
   "apps.service_health": "Health",
+  "apps.service_exit": "Exit Code",
   "apps.service_healthy": "Healthy",
   "apps.service_starting": "Starting",
   "apps.service_unhealthy": "Unhealthy",

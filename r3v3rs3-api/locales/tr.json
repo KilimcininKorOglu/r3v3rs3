@@ -1949,6 +1949,7 @@
   "apps.service_container": "Konteyner",
   "apps.service_state": "Durum",
   "apps.service_health": "Sağlık",
+  "apps.service_exit": "Çıkış Kodu",
   "apps.service_healthy": "Sağlıklı",
   "apps.service_starting": "Başlatılıyor",
   "apps.service_unhealthy": "Sağlıksız",
