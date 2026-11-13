@@ -320,6 +320,16 @@ The volume mounts the data directory of the image tag inside the container. The 
 
 The response shows the password and the connection string once, like a webhook secret. The panel lists every database with its engine, its port and its connection without the password. The database answers on `127.0.0.1` of the r3v3rs3 server, so only the apps of this server and the programs on the server itself reach it: a database gets no domain and no proxy, and **Delete** on its row removes the app while the volume with the data stays. Redis takes no password, so its port answers to every local client.
 
+### Shared Database Servers
+
+A database without a project is a shared server: an app of any project can use it. Each project environment that connects gets its own database and its own user on the server, so one project cannot read the data of another, and an app without a project gets a database and a user of its own. The names come from the ids, `p_<project>_<environment>` and `a_<app>`, so renaming a project keeps its data. A database of a project stays reserved for the apps of the same project environment, which connect with the root account as before.
+
+The first deployment of a connected app creates the user and the database and gives the app their connection (`DATABASE_URL`, `POSTGRES_USER` and the other variables of the engine). The password of the user is generated and sealed with the platform key; every later deployment reuses it. The commands run inside the database container with the root account: their passwords travel in a script file that is removed after the run and in the environment, never on a command line.
+
+On a shared Redis server each project environment gets an ACL user that reaches only the keys and channels under its prefix, and no command of the server administration. The app receives the prefix as `REDIS_PREFIX` (for example `p_abc_def:`) and must start every key with it. The default user of Redis stays without a password, so a program on the server itself still reaches every key. Redis keeps its users in memory, so every deployment of a shared server sets the users of all its tenants again.
+
+When an app leaves a shared server, or its project is deleted, its database and user stay on the server with their data.
+
 A deployment of a database is not blue-green, because the fixed port frees only when the old container stops: r3v3rs3 stops the old container, starts the new one and waits for its health check, so the database answers a few seconds later.
 
 ### Database Console Navigation & Backups Tab

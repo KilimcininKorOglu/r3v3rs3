@@ -43,6 +43,10 @@ pub struct FakeState {
     pub pruned: Vec<(String, bool)>,
     /// The spec of every created container.
     pub specs: Vec<ContainerSpec>,
+    /// The container, the command and the environment of every captured command.
+    pub execs: Vec<(String, Vec<String>, Vec<String>)>,
+    /// The files inside the containers, keyed by the container and the path.
+    pub files: BTreeMap<(String, String), Vec<u8>>,
 }
 
 /// One build of the fake runtime.
@@ -492,16 +496,39 @@ impl ContainerRuntime for FakeRuntime {
     async fn exec_capture(
         &self,
         name: &ContainerName,
-        _command: Vec<String>,
-        _env: Vec<String>,
+        command: Vec<String>,
+        env: Vec<String>,
     ) -> anyhow::Result<Vec<u8>> {
-        let state = self.check()?;
+        let mut state = self.check()?;
         if !state.containers.contains_key(name.as_str()) {
             bail!("no container is named {name}");
         }
         if state.hook_fail {
             bail!("post-deploy hook failed with non-zero exit code");
         }
+        state.execs.push((name.to_string(), command, env));
         Ok(b"hook output".to_vec())
+    }
+
+    async fn upload_file(
+        &self,
+        name: &ContainerName,
+        path: &str,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        let mut state = self.check()?;
+        if !state.containers.contains_key(name.as_str()) {
+            bail!("no container is named {name}");
+        }
+        state
+            .files
+            .insert((name.to_string(), path.to_string()), bytes);
+        Ok(())
+    }
+
+    async fn remove_path(&self, name: &ContainerName, path: &str) -> anyhow::Result<()> {
+        let mut state = self.check()?;
+        state.files.remove(&(name.to_string(), path.to_string()));
+        Ok(())
     }
 }

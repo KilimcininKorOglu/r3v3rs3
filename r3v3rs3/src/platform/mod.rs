@@ -32,6 +32,7 @@ pub mod rotate;
 mod s3;
 pub mod scheduler;
 pub mod store;
+pub mod tenant;
 pub mod terminal;
 pub mod volume_backup;
 pub mod webhook;
@@ -1389,6 +1390,11 @@ impl Platform {
         if db.spec.database.is_none() {
             return Err(anyhow!("the referenced app {db_id} is not a database"));
         }
+        // A database without a project is a shared server: every app may use it, and each
+        // project environment gets its own database and user on it.
+        if tenant::is_shared(&db) {
+            return Ok(());
+        }
         if db.spec.project_id != spec.project_id {
             return Err(anyhow!(
                 "referenced database belongs to a different project"
@@ -1536,7 +1542,12 @@ pub fn allocate_host_port() -> anyhow::Result<u16> {
 }
 
 pub(super) fn git_token_aad(app: ShortId) -> String {
-    format!("app/{app}/secret/{GIT_TOKEN}")
+    secret_aad(app, GIT_TOKEN)
+}
+
+/// The associated data of a sealed `app_secrets` row binds it to its app and its name.
+pub(super) fn secret_aad(app: ShortId, name: &str) -> String {
+    format!("app/{app}/secret/{name}")
 }
 
 /// A token is one word of printable ASCII, because git sends it in an HTTP header.

@@ -566,6 +566,9 @@ impl Platform {
             Err(err) => Err(err),
         };
         let Err(err) = result else {
+            if job.spec.database.is_some() && job.spec.project_id.is_none() {
+                self.restore_tenants(job.app).await;
+            }
             self.run_post_deploy_hook(job).await;
             info!(app = %job.app, deployment = %job.deployment, "deployment finished");
             self.notify_deployment(NotificationEvent::DeploymentRunning, job.notice(), None)
@@ -1078,8 +1081,7 @@ impl Platform {
             return Ok(Vec::new());
         };
         let db = self.app(db_id).await?;
-        Self::check_database_scope(&db, job)?;
-        let Some(engine) = db.spec.database else {
+        let Some(engine) = db.spec.database.clone() else {
             bail!("the app {} is not a database", db.name);
         };
         let info = r3v3rs3_api::platform::engine_info(&engine)
@@ -1088,16 +1090,34 @@ impl Platform {
             bail!("the database {} has no host port", db.name);
         };
         ensure_database_running(runtime, db_id, &db.name).await?;
-        let password = self.open_password(db_id, &info).await?;
+        let credentials = self.database_credentials(&db, job, &info).await?;
         let replicas = self.running_replica_ports(db_id, runtime).await;
         let mut env = Vec::new();
-        for (key, value) in connection_values(&info, host_port, password, &replicas) {
+        for (key, value) in connection_values(&info, host_port, &credentials, &replicas) {
             env.push(EnvVar {
                 key: key.parse()?,
                 value,
             });
         }
         Ok(env)
+    }
+
+    /// The account that the app connects with: its tenant on a shared server, or the root
+    /// account of a database of its own project environment.
+    async fn database_credentials(
+        &self,
+        db: &AppEntry,
+        job: &Job,
+        info: &r3v3rs3_api::platform::EngineInfo,
+    ) -> anyhow::Result<super::tenant::Credentials> {
+        if super::tenant::is_shared(db) {
+            let tenant =
+                super::tenant::tenant_name(job.app, job.spec.project_id, job.spec.environment_id);
+            return self.ensure_tenant(db.id, &tenant).await;
+        }
+        Self::check_database_scope(db, job)?;
+        let password = self.open_password(db.id, info).await?;
+        Ok(super::tenant::Credentials::root(info, password))
     }
 
     fn check_database_scope(db: &AppEntry, job: &Job) -> anyhow::Result<()> {
@@ -1492,27 +1512,36 @@ async fn ensure_database_running(
 fn connection_values(
     info: &r3v3rs3_api::platform::EngineInfo,
     host_port: u16,
-    password: String,
+    credentials: &super::tenant::Credentials,
     replicas: &[u16],
 ) -> Vec<(String, String)> {
     let host = "host.docker.internal";
     let mut values = vec![
         (format!("{}_HOST", info.env_prefix), host.to_string()),
         (format!("{}_PORT", info.env_prefix), host_port.to_string()),
-        (format!("{}_USER", info.env_prefix), info.user.clone()),
-        (format!("{}_PASSWORD", info.env_prefix), password.clone()),
+        (
+            format!("{}_USER", info.env_prefix),
+            credentials.user.clone(),
+        ),
+        (
+            format!("{}_PASSWORD", info.env_prefix),
+            credentials.password.clone(),
+        ),
     ];
-    if !info.default_db.is_empty() {
+    if !credentials.database.is_empty() {
         values.push((
             format!("{}_DATABASE", info.env_prefix),
-            info.default_db.clone(),
+            credentials.database.clone(),
         ));
     }
-    let url = format_url(info, host, host_port, &password);
+    if let Some(prefix) = &credentials.key_prefix {
+        values.push((format!("{}_PREFIX", info.env_prefix), prefix.clone()));
+    }
+    let url = format_url(info, host, host_port, credentials);
     values.push(("DATABASE_URL".to_string(), url));
     if !replicas.is_empty() {
         let read_port = replicas[0];
-        let read_url = format_url(info, host, read_port, &password);
+        let read_url = format_url(info, host, read_port, credentials);
         values.push(("DATABASE_READ_URL".to_string(), read_url.clone()));
         values.push(("DATABASE_REPLICA_URL".to_string(), read_url));
         values.push((format!("{}_READ_HOST", info.env_prefix), host.to_string()));
@@ -1522,7 +1551,7 @@ fn connection_values(
         ));
         let all_urls = replicas
             .iter()
-            .map(|&port| format_url(info, host, port, &password))
+            .map(|&port| format_url(info, host, port, credentials))
             .collect::<Vec<_>>()
             .join(",");
         values.push(("DATABASE_READ_URLS".to_string(), all_urls));
@@ -1530,22 +1559,26 @@ fn connection_values(
     values
 }
 
-fn format_url(
+pub(crate) fn format_url(
     info: &r3v3rs3_api::platform::EngineInfo,
     host: &str,
     port: u16,
-    password: &str,
+    credentials: &super::tenant::Credentials,
 ) -> String {
-    match (info.user.is_empty(), info.url_database) {
+    let super::tenant::Credentials {
+        user,
+        password,
+        database,
+        database_in_url,
+        ..
+    } = credentials;
+    match (user.is_empty(), *database_in_url) {
         (true, _) => format!("{}://{host}:{port}", info.url_scheme),
         (false, true) => format!(
-            "{}://{}:{password}@{host}:{port}/{}",
-            info.url_scheme, info.user, info.default_db
+            "{}://{user}:{password}@{host}:{port}/{database}",
+            info.url_scheme
         ),
-        (false, false) => format!(
-            "{}://{}:{password}@{host}:{port}",
-            info.url_scheme, info.user
-        ),
+        (false, false) => format!("{}://{user}:{password}@{host}:{port}", info.url_scheme),
     }
 }
 
@@ -2152,13 +2185,50 @@ mod tests {
     }
 
     /// A platform whose database app `main-db` runs with a secret password, and the app
-    /// `app-db` that uses it.
-    async fn setup_with_database()
-    -> anyhow::Result<(Arc<Platform>, Arc<FakeRuntime>, AppEntry, TempDir, u16)> {
+    /// `app-db` that uses it. With `in_project`, both belong to one project environment, so
+    /// the app connects as root; without it, `main-db` is a shared server and the app
+    /// connects as its tenant.
+    async fn setup_with_database(
+        in_project: bool,
+    ) -> anyhow::Result<(Arc<Platform>, Arc<FakeRuntime>, AppEntry, TempDir, u16)> {
         catalog();
         let (platform, runtime, dir) = setup_platform().await?;
+        let scope = if in_project {
+            test_project(&platform, "Shop").await?
+        } else {
+            (None, None)
+        };
+        let (db_app, host_port) = running_database(&platform, scope).await?;
+        let mut app = request("app-db");
+        (app.spec.project_id, app.spec.environment_id) = scope;
+        app.spec.uses_database = Some(db_app.id);
+        app.spec.health_check_path = Some("/healthz".into());
+        let linked = platform.add_app(app, 2).await?;
+        Ok((platform, runtime, linked, dir, host_port))
+    }
 
+    /// A project with one environment, as the project and the environment of an app.
+    async fn test_project(
+        platform: &Platform,
+        name: &str,
+    ) -> anyhow::Result<(Option<ShortId>, Option<ShortId>)> {
+        let spec = r3v3rs3_api::platform::ProjectSpec {
+            name: name.to_string(),
+            description: None,
+            default_environments: vec!["production".to_string()],
+        };
+        let project = platform.create_project(spec, 1).await?;
+        Ok((Some(project.id), Some(project.environments[0].id)))
+    }
+
+    /// Deploys the database app `main-db` with the root password `s3cret`, and returns it
+    /// with its host port.
+    async fn running_database(
+        platform: &Arc<Platform>,
+        scope: (Option<ShortId>, Option<ShortId>),
+    ) -> anyhow::Result<(AppEntry, u16)> {
         let mut db = request("main-db");
+        (db.spec.project_id, db.spec.environment_id) = scope;
         db.spec.port = 5432;
         db.spec.database = Some("postgres".to_string());
         let host_port = std::net::TcpListener::bind(("127.0.0.1", 0))?
@@ -2180,18 +2250,27 @@ mod tests {
         let db_entry = platform
             .deploy(db_app.id, "alice", DeploymentTrigger::Manual)
             .await?;
-        settled(&platform, &[db_app.id], db_entry.id).await?;
+        settled(platform, &[db_app.id], db_entry.id).await?;
+        Ok((db_app, host_port))
+    }
 
-        let mut app = request("app-db");
-        app.spec.uses_database = Some(db_app.id);
-        app.spec.health_check_path = Some("/healthz".into());
-        let linked = platform.add_app(app, 2).await?;
-        Ok((platform, runtime, linked, dir, host_port))
+    /// Deploys an app and fails unless the deployment runs.
+    async fn deploy_running(
+        platform: &Arc<Platform>,
+        app: ShortId,
+        db: ShortId,
+    ) -> anyhow::Result<()> {
+        let entry = platform
+            .deploy(app, "alice", DeploymentTrigger::Manual)
+            .await?;
+        let entry = settled(platform, &[db, app], entry.id).await?;
+        anyhow::ensure!(entry.status == DeploymentStatus::Running, "{entry:?}");
+        Ok(())
     }
 
     #[tokio::test]
     async fn a_deployment_injects_the_connection_of_its_database() -> anyhow::Result<()> {
-        let (platform, runtime, linked, _dir, host_port) = setup_with_database().await?;
+        let (platform, runtime, linked, _dir, host_port) = setup_with_database(true).await?;
         let db_id = linked.spec.uses_database.context("the database")?;
         let entry = platform
             .deploy(linked.id, "alice", DeploymentTrigger::Manual)
@@ -2244,6 +2323,86 @@ mod tests {
         Ok(())
     }
 
+    /// The last captured command ran the tenant script of PostgreSQL with the root password
+    /// in its environment, and the script with the passwords left the container again.
+    fn assert_tenant_script_ran(runtime: &FakeRuntime) -> anyhow::Result<()> {
+        let state = runtime.state();
+        let (_, command, env) = state.execs.last().context("the tenant script")?;
+        anyhow::ensure!(command.join(" ").contains("psql"), "{command:?}");
+        anyhow::ensure!(env == &["PGPASSWORD=s3cret".to_string()], "{env:?}");
+        anyhow::ensure!(state.files.is_empty(), "the script stayed in the container");
+        Ok(())
+    }
+
+    /// The DATABASE_URL of the newest container.
+    fn last_database_url(runtime: &FakeRuntime) -> anyhow::Result<String> {
+        let state = runtime.state();
+        let created = state.specs.last().context("the created container")?;
+        created
+            .env
+            .iter()
+            .find(|var| var.key.as_str() == "DATABASE_URL")
+            .map(|var| var.value.clone())
+            .context("DATABASE_URL")
+    }
+
+    #[tokio::test]
+    async fn an_app_on_a_shared_database_connects_as_its_own_tenant() -> anyhow::Result<()> {
+        let (platform, runtime, linked, _dir, host_port) = setup_with_database(false).await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        deploy_running(&platform, linked.id, db_id).await?;
+
+        let tenant = super::super::tenant::tenant_name(linked.id, None, None);
+        let password = platform
+            .tenant_password(db_id, &tenant)
+            .await?
+            .context("the stored tenant password")?;
+        // The app gets its own user and database, never the root account of the server.
+        assert_eq!(
+            last_database_url(&runtime)?,
+            format!("postgres://{tenant}:{password}@host.docker.internal:{host_port}/{tenant}")
+        );
+        assert_tenant_script_ran(&runtime)
+    }
+
+    #[tokio::test]
+    async fn a_second_deployment_keeps_the_password_of_the_tenant() -> anyhow::Result<()> {
+        let (platform, _runtime, linked, _dir, _host_port) = setup_with_database(false).await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        let tenant = super::super::tenant::tenant_name(linked.id, None, None);
+        deploy_running(&platform, linked.id, db_id).await?;
+        let first = platform.tenant_password(db_id, &tenant).await?;
+        // The running app keeps working while the next deployment starts.
+        deploy_running(&platform, linked.id, db_id).await?;
+        assert!(first.is_some());
+        assert_eq!(platform.tenant_password(db_id, &tenant).await?, first);
+        assert_eq!(platform.tenants(db_id).await?, vec![tenant]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn two_projects_on_one_shared_database_get_two_tenants() -> anyhow::Result<()> {
+        let (platform, _runtime, linked, _dir, _host_port) = setup_with_database(false).await?;
+        let db_id = linked.spec.uses_database.context("the database")?;
+        // An app of another project may use the shared server.
+        let scope = test_project(&platform, "Blog").await?;
+        let mut other = request("blog-web");
+        (other.spec.project_id, other.spec.environment_id) = scope;
+        other.spec.uses_database = Some(db_id);
+        other.spec.health_check_path = Some("/healthz".into());
+        let other = platform.add_app(other, 3).await?;
+
+        deploy_running(&platform, linked.id, db_id).await?;
+        deploy_running(&platform, other.id, db_id).await?;
+        let mut expected = vec![
+            super::super::tenant::tenant_name(linked.id, None, None),
+            super::super::tenant::tenant_name(other.id, scope.0, scope.1),
+        ];
+        expected.sort();
+        assert_eq!(platform.tenants(db_id).await?, expected);
+        Ok(())
+    }
+
     async fn add_and_deploy_replica(
         platform: &Arc<Platform>,
         db_id: ShortId,
@@ -2251,7 +2410,10 @@ mod tests {
         let replica_port = std::net::TcpListener::bind(("127.0.0.1", 0))?
             .local_addr()?
             .port();
+        let primary = platform.app(db_id).await?;
         let mut replica_req = request("db-replica");
+        replica_req.spec.project_id = primary.spec.project_id;
+        replica_req.spec.environment_id = primary.spec.environment_id;
         replica_req.spec.host_port = Some(replica_port);
         replica_req.spec.replica_of = Some(db_id);
         let replica = platform.add_app(replica_req, 3).await?;
@@ -2264,7 +2426,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_deployment_injects_read_replicas_connection_urls() -> anyhow::Result<()> {
-        let (platform, runtime, linked, _dir, host_port) = setup_with_database().await?;
+        let (platform, runtime, linked, _dir, host_port) = setup_with_database(true).await?;
         let db_id = linked.spec.uses_database.context("the database")?;
         let (rep_id, replica_port) = add_and_deploy_replica(&platform, db_id).await?;
 
@@ -2316,7 +2478,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_primary_database_with_replicas_cannot_be_deleted() -> anyhow::Result<()> {
-        let (platform, _runtime, linked, _dir, _host_port) = setup_with_database().await?;
+        let (platform, _runtime, linked, _dir, _host_port) = setup_with_database(true).await?;
         let db_id = linked.spec.uses_database.context("the database")?;
         let (rep_id, _replica_port) = add_and_deploy_replica(&platform, db_id).await?;
         platform.delete_app(linked.id).await?;
@@ -2333,7 +2495,7 @@ mod tests {
     #[tokio::test]
     async fn a_deployment_of_a_connected_app_fails_while_the_database_is_down() -> anyhow::Result<()>
     {
-        let (platform, runtime, linked, _dir, _host_port) = setup_with_database().await?;
+        let (platform, runtime, linked, _dir, _host_port) = setup_with_database(true).await?;
         let db_id = linked.spec.uses_database.context("the database")?;
         let db_entry = platform
             .store

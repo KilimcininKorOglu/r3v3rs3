@@ -651,6 +651,20 @@ impl PlatformStore {
         Ok(())
     }
 
+    /// The names of the secrets of an app that start with `prefix`, sorted.
+    pub async fn secret_names(&self, app: ShortId, prefix: &str) -> anyhow::Result<Vec<String>> {
+        let rows = sqlx::query(
+            "SELECT name FROM app_secrets WHERE app_id = ? AND substr(name, 1, length(?)) = ?
+            ORDER BY name",
+        )
+        .bind(app.to_string())
+        .bind(prefix)
+        .bind(prefix)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(|row| Ok(row.try_get("name")?)).collect()
+    }
+
     pub async fn delete_secret(&self, app: ShortId, name: &str) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM app_secrets WHERE app_id = ? AND name = ?")
             .bind(app.to_string())

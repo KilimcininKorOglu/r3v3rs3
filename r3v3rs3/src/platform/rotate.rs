@@ -5,8 +5,7 @@ use super::backup::{
     RSYNC_SECRET, RSYNC_SECRET_AAD, S3_SECRET, S3_SECRET_AAD, SFTP_SECRET, SFTP_SECRET_AAD,
 };
 use super::connections::connection_aad;
-use super::hooks::webhook_secret_aad;
-use super::{KEY_FILE, env_aad, git_token_aad};
+use super::{KEY_FILE, env_aad};
 use crate::keys::crypto::ClusterKeys;
 use crate::keys::key_file::{new_key_file, parse_key_file};
 use anyhow::Context;
@@ -157,11 +156,9 @@ async fn reseal_app_secrets(
         let app_id: ShortId = app_id_str.parse()?;
         let name: String = row.try_get("name")?;
         let value: Vec<u8> = row.try_get("value")?;
-        let aad = if name == "git_token" {
-            git_token_aad(app_id)
-        } else {
-            webhook_secret_aad(app_id)
-        };
+        // Every secret of an app (its Git token, its webhook secret, the passwords of the
+        // tenants of a shared database) binds the same way: its app and its name.
+        let aad = super::secret_aad(app_id, &name);
         let resealed = reseal_value(keys, &aad, &value)?;
         sqlx::query("UPDATE app_secrets SET value = ? WHERE app_id = ? AND name = ?")
             .bind(resealed)

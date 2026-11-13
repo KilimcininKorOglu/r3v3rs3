@@ -1693,7 +1693,7 @@ impl Platform {
     }
 
     /// The running container of a managed database on the local target.
-    async fn database_container(
+    pub(super) async fn database_container(
         &self,
         db_id: ShortId,
     ) -> anyhow::Result<(
@@ -1720,7 +1720,11 @@ impl Platform {
     }
 
     /// Opens the generated password of the database from its secret environment variable.
-    async fn database_password(&self, db_id: ShortId, info: &EngineInfo) -> anyhow::Result<String> {
+    pub(super) async fn database_password(
+        &self,
+        db_id: ShortId,
+        info: &EngineInfo,
+    ) -> anyhow::Result<String> {
         if info.password_env.is_empty() {
             return Ok(String::new());
         }

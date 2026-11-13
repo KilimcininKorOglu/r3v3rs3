@@ -320,6 +320,16 @@ Volume, container'ın içinde image tag'inin veri dizinine bağlanır. Katalog h
 
 Yanıt, parolayı ve bağlantı dizesini webhook secret gibi bir kez gösterir. Panel her veritabanını motoru, portu ve parolasız bağlantısıyla listeler. Veritabanı r3v3rs3 sunucusunun `127.0.0.1` adresini dinler; yalnız bu sunucudaki uygulamalar ve sunucunun kendi programları ulaşır: bir veritabanının alan adı ve proxy'si yoktur ve satırındaki **Sil** app'i kaldırırken verilerin olduğu volume kalır. Redis parola almaz, bu yüzden portu yerel her istemciye yanıt verir.
 
+### Ortak Veritabanı Sunucuları
+
+Projesi olmayan bir veritabanı ortak bir sunucudur: her projenin uygulaması onu kullanabilir. Bağlanan her proje ortamı sunucuda kendi veritabanını ve kendi kullanıcısını alır, böylece bir proje başka bir projenin verisini okuyamaz. Projesi olmayan bir uygulama kendine ait bir veritabanı ve kullanıcı alır. Adlar id'lerden türer, `p_<proje>_<ortam>` ve `a_<uygulama>`; bu yüzden bir projenin adını değiştirmek verisini taşımaz. Bir projeye ait veritabanı aynı proje ortamının uygulamalarına ayrılmış kalır ve onlar eskisi gibi root hesabıyla bağlanır.
+
+Bağlı bir uygulamanın ilk deployment'ı kullanıcıyı ve veritabanını oluşturur ve uygulamaya onların bağlantısını verir (`DATABASE_URL`, `POSTGRES_USER` ve motorun diğer değişkenleri). Kullanıcının parolası üretilir ve platform anahtarıyla mühürlenir; sonraki her deployment aynı parolayı kullanır. Komutlar veritabanı container'ının içinde root hesabıyla çalışır: parolaları, çalıştıktan sonra silinen bir script dosyasıyla ve ortam değişkeniyle taşınır, hiçbir zaman komut satırına yazılmaz.
+
+Ortak bir Redis sunucusunda her proje ortamı, yalnız kendi önekiyle başlayan anahtarlara ve kanallara erişen ve sunucu yönetim komutlarını çalıştıramayan bir ACL kullanıcısı alır. Uygulama öneki `REDIS_PREFIX` olarak alır (örneğin `p_abc_def:`) ve her anahtarın başına koymalıdır. Redis'in varsayılan kullanıcısı parolasız kalır, bu yüzden sunucunun kendi programları hâlâ her anahtara ulaşır. Redis kullanıcılarını bellekte tutar, bu yüzden ortak sunucunun her deployment'ı tüm kiracılarının kullanıcılarını yeniden kurar.
+
+Bir uygulama ortak sunucudan ayrıldığında veya projesi silindiğinde, veritabanı ve kullanıcısı verisiyle birlikte sunucuda kalır.
+
 Bir veritabanının deployment'ı blue-green değildir, çünkü sabit port eski container durmadan boşalmaz: r3v3rs3 eski container'ı durdurur, yenisini başlatır ve sağlık kontrolünü bekler; veritabanı birkaç saniye sonra yanıtlamaya devam eder.
 
 ### Veritabanı Konsolu Gezinimi ve Yedekler Sekmesi
