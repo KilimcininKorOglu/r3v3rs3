@@ -1979,6 +1979,7 @@
   "apps.command_run_success": "Command executed successfully.",
   "apps.command_run_failed": "Command failed: {error}",
   "apps.command_output": "Output",
+  "apps.command_no_output": "No output.",
   "apps.command_delete_confirm": "Delete scheduled command '{name}'?",
   "apps.command_status_success": "Success",
   "apps.command_status_failed": "Failed",

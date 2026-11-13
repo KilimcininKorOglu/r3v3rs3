@@ -1979,6 +1979,7 @@
   "apps.command_run_success": "Komut başarıyla çalıştırıldı.",
   "apps.command_run_failed": "Komut başarısız: {error}",
   "apps.command_output": "Çıktı",
+  "apps.command_no_output": "Çıktı yok.",
   "apps.command_delete_confirm": "'{name}' zamanlanmış komutu silinsin mi?",
   "apps.command_status_success": "Başarılı",
   "apps.command_status_failed": "Başarısız",

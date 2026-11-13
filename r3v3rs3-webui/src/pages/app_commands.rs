@@ -491,7 +491,7 @@ fn render_output_modal(
     html! {
         <Modal title={name.to_string()} {on_close} size={ModalSize::Lg} {footer}>
             <pre class="overflow-auto max-h-80 p-3 bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100 font-mono text-xs rounded break-words whitespace-pre-wrap">
-                {if output.is_empty() { "No output." } else { output }}
+                {if output.is_empty() { locale.t("apps.command_no_output") } else { output }}
             </pre>
         </Modal>
     }
