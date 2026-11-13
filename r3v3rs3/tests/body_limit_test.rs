@@ -5,7 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 mod common;
-use common::{TestStorage, serve_http_upstream};
+use common::{TestPort, TestStorage, serve_http_upstream};
 use common::{alloc_tcp_port, http_port_entry, http_proxy_entry, http_route, with_server};
 
 /// A proxy whose routes answer with the request body: `/` has the proxy limit of 16 bytes, `/small`
@@ -63,31 +63,50 @@ async fn request_bodies_are_limited() -> anyhow::Result<()> {
         let http1 = reqwest::Client::new();
         let http2 = reqwest::Client::builder().http2_prior_knowledge().build()?;
         for client in [&http1, &http2] {
-            let post = |path: &str, body: &'static str| {
-                let request = client.post(port.http_url(path)).body(body);
-                async move {
-                    let res = request.send().await?;
-                    anyhow::Ok((res.status().as_u16(), res.text().await?))
-                }
-            };
-            let sixteen = "0123456789abcdef";
-            assert_eq!(post("/", sixteen).await?, (200, sixteen.to_string()));
-            assert_eq!(post("/", "0123456789abcdefg").await?.0, 413);
-            assert_eq!(post("/small", "abcd").await?.0, 200);
-            assert_eq!(post("/small", "abcde").await?.0, 413);
-            let long = "0123456789abcdef0123456789abcdef";
-            assert_eq!(post("/free", long).await?, (200, long.to_string()));
+            check_route_limits(client, &port).await?;
         }
-
-        let addr = port.socket_addr();
-        let chunks = ["0123456789", "abcdef"];
-        assert_eq!(post_chunked(addr, "/", &chunks).await?, "HTTP/1.1 200 OK");
-        let chunks = ["0123456789", "abcdefg"];
-        assert_eq!(
-            post_chunked(addr, "/", &chunks).await?,
-            "HTTP/1.1 413 Payload Too Large"
-        );
-        Ok(())
+        check_chunked_limit(port.socket_addr()).await
     })
     .await
+}
+
+/// Posts the body to the path and returns the status and the response body.
+async fn post(
+    client: &reqwest::Client,
+    port: &TestPort,
+    path: &str,
+    body: &'static str,
+) -> anyhow::Result<(u16, String)> {
+    let res = client.post(port.http_url(path)).body(body).send().await?;
+    Ok((res.status().as_u16(), res.text().await?))
+}
+
+/// Checks the proxy limit, a smaller route limit and a route without a limit.
+async fn check_route_limits(client: &reqwest::Client, port: &TestPort) -> anyhow::Result<()> {
+    let sixteen = "0123456789abcdef";
+    assert_eq!(
+        post(client, port, "/", sixteen).await?,
+        (200, sixteen.to_string())
+    );
+    assert_eq!(post(client, port, "/", "0123456789abcdefg").await?.0, 413);
+    assert_eq!(post(client, port, "/small", "abcd").await?.0, 200);
+    assert_eq!(post(client, port, "/small", "abcde").await?.0, 413);
+    let long = "0123456789abcdef0123456789abcdef";
+    assert_eq!(
+        post(client, port, "/free", long).await?,
+        (200, long.to_string())
+    );
+    Ok(())
+}
+
+/// Checks that the limit also applies to a chunked body without `Content-Length`.
+async fn check_chunked_limit(addr: SocketAddr) -> anyhow::Result<()> {
+    let chunks = ["0123456789", "abcdef"];
+    assert_eq!(post_chunked(addr, "/", &chunks).await?, "HTTP/1.1 200 OK");
+    let chunks = ["0123456789", "abcdefg"];
+    assert_eq!(
+        post_chunked(addr, "/", &chunks).await?,
+        "HTTP/1.1 413 Payload Too Large"
+    );
+    Ok(())
 }
