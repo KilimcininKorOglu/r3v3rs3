@@ -463,19 +463,14 @@ async fn authorize(locale: Locale, id: ShortId) -> Result<(), String> {
             .parse()
             .map_err(|err| locale.error_message(&err))?,
     };
-    let request = Request::post(&format!("{API_ENDPOINT}{PATH}/{id}/authorize"))
-        .json(&body)
-        .map_err(|err| err.to_string())?;
-    let response: AuthorizeResponse = super::settings::send_request(locale, request)
-        .await?
-        .json()
-        .await
-        .map_err(|err| err.to_string())?;
-    let window = web_sys::window().ok_or("no window")?;
+    let request = Request::post(&format!("{API_ENDPOINT}{PATH}/{id}/authorize"));
+    let response: AuthorizeResponse = super::settings::post_json(locale, request, &body).await?;
+    let failed = || locale.t("git_connections.provider_page_failed").to_string();
+    let window = web_sys::window().ok_or_else(failed)?;
     window
         .location()
         .set_href(&response.url)
-        .map_err(|_| "the provider page did not open".to_string())
+        .map_err(|_| failed())
 }
 
 fn form_view(
