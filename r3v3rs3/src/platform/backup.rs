@@ -1857,12 +1857,15 @@ async fn capture_mysql_wal(
     Ok((filename, dump))
 }
 
-fn mongodb_uri(user: &str, password: &str) -> String {
-    let mut uri = url::Url::parse("mongodb://127.0.0.1:27017/?authSource=admin")
-        .expect("static url is valid");
-    let _ = uri.set_username(user);
-    let _ = uri.set_password(Some(password));
-    uri.to_string()
+/// The local connection string of a MongoDB container, with the user and the password
+/// percent-encoded into it.
+pub(super) fn mongodb_uri(user: &str, password: &str) -> anyhow::Result<String> {
+    let mut uri = url::Url::parse("mongodb://127.0.0.1:27017/?authSource=admin")?;
+    uri.set_username(user)
+        .map_err(|()| anyhow::anyhow!("the MongoDB user cannot go into a connection string"))?;
+    uri.set_password(Some(password))
+        .map_err(|()| anyhow::anyhow!("the MongoDB password cannot go into a connection string"))?;
+    Ok(uri.to_string())
 }
 
 async fn capture_mongodb_oplog(
@@ -1880,7 +1883,7 @@ async fn capture_mongodb_oplog(
                 "-c".into(),
                 "mongodump --uri=\"$MONGO_URI\" --archive --oplog".into(),
             ],
-            vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password))],
+            vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password)?)],
         )
         .await?;
     if dump.is_empty() {
@@ -2072,7 +2075,7 @@ fn dump_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Result<
                 "-c".into(),
                 "mongodump --uri=\"$MONGO_URI\" --archive".into(),
             ],
-            env: vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password))],
+            env: vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password)?)],
             file: None,
         },
         "redis" => DumpPlan {
@@ -2129,7 +2132,7 @@ fn restore_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Resu
                     "mongorestore --uri=\"$MONGO_URI\" --archive={RESTORE_DIR}/dump.archive --drop"
                 ),
             ],
-            env: vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password))],
+            env: vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password)?)],
         },
         // Redis takes no upload: the restore writes the dump into the data volume and
         // restarts the server, which loads it.
@@ -3008,7 +3011,10 @@ mod tests {
         assert!(!dump.command.iter().any(|arg| arg.contains(secret)));
         assert_eq!(
             dump.env,
-            [format!("MONGO_URI={}", mongodb_uri(&info.user, secret))]
+            [format!(
+                "MONGO_URI={}",
+                mongodb_uri(&info.user, secret).unwrap()
+            )]
         );
 
         let restore = restore_plan("mongodb", &info, secret).unwrap();
@@ -3023,7 +3029,10 @@ mod tests {
         assert!(!restore.command.iter().any(|arg| arg.contains(secret)));
         assert_eq!(
             restore.env,
-            [format!("MONGO_URI={}", mongodb_uri(&info.user, secret))]
+            [format!(
+                "MONGO_URI={}",
+                mongodb_uri(&info.user, secret).unwrap()
+            )]
         );
     }
 
