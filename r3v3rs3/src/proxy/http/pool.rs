@@ -10,7 +10,7 @@ use hyper::{
     Method, Request, Response, StatusCode, Uri,
     body::Body,
     header::{CONNECTION, CONTENT_LENGTH, HOST, HeaderValue, UPGRADE},
-    http::uri::Scheme,
+    http::uri::{Authority, Scheme},
 };
 use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
@@ -82,6 +82,13 @@ impl<B: Body> Body for ConnGuardedBody<B> {
 #[derive(Debug, Clone, Copy)]
 pub struct UpstreamH2c;
 
+/// Marks a request whose `Host` header is the host of the client (`preserve_host`).
+#[derive(Debug, Clone, Copy)]
+pub struct KeptHost;
+
+/// The clients that connect to one upstream server, keyed by the server and the h2c option.
+type PinnedClients = std::sync::Mutex<HashMap<(String, bool), ProxyClient>>;
+
 /// Upstream clients shared by the proxies of a port that use the same client certificate and
 /// connect timeout.
 pub struct ConnectionPool {
@@ -91,12 +98,45 @@ pub struct ConnectionPool {
     http1_client: ProxyClient,
     /// Uses HTTP/2 with prior knowledge.
     h2c_client: ProxyClient,
+    /// The TLS config with h2 and HTTP/1.1, the connect timeout and the resolver of the clients
+    /// in `pinned`.
+    negotiated: Arc<ClientConfig>,
+    connect_timeout: Duration,
+    resolver: DnsResolver,
+    /// The clients for the requests that keep the host of the client and may speak HTTP/2.
+    pinned: PinnedClients,
 }
 
 impl fmt::Debug for ConnectionPool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConnectionPool").finish_non_exhaustive()
     }
+}
+
+/// The upstream server, the host of the client and the h2c option of a request that keeps the
+/// host of the client and goes to a server that may speak HTTP/2.
+fn kept_host_target<B>(req: &Request<B>) -> Option<(Uri, Authority, bool)> {
+    req.extensions().get::<KeptHost>()?;
+    let h2c = req.extensions().get::<UpstreamH2c>().is_some();
+    let server = http2_capable_server(req.uri(), h2c)?;
+    let host = req.headers().get(HOST)?.to_str().ok()?.parse().ok()?;
+    Some((server, host, h2c))
+}
+
+/// The scheme and authority of `uri` when the server may speak HTTP/2: an HTTPS server, or a
+/// plain HTTP server with h2c.
+fn http2_capable_server(uri: &Uri, h2c: bool) -> Option<Uri> {
+    let scheme = uri.scheme()?;
+    let may_speak_h2 = *scheme == Scheme::HTTPS || (h2c && *scheme == Scheme::HTTP);
+    if !may_speak_h2 {
+        return None;
+    }
+    Uri::builder()
+        .scheme(scheme.clone())
+        .authority(uri.authority()?.clone())
+        .path_and_query("/")
+        .build()
+        .ok()
 }
 
 fn is_websocket_upgrade_request<B>(req: &Request<B>) -> bool {
@@ -124,8 +164,47 @@ impl ConnectionPool {
         Self {
             client: build_client(negotiated.clone(), false, connect_timeout, resolver.clone()),
             http1_client: build_client(http1, false, connect_timeout, resolver.clone()),
-            h2c_client: build_client(negotiated, true, connect_timeout, resolver),
+            h2c_client: build_client(negotiated.clone(), true, connect_timeout, resolver.clone()),
+            negotiated,
+            connect_timeout,
+            resolver,
+            pinned: PinnedClients::default(),
         }
+    }
+
+    /// Prepares a request that keeps the host of the client for an upstream server that may
+    /// speak HTTP/2 (HTTPS, or plain HTTP with h2c). HTTP/2 has no separate `Host` header: the
+    /// server reads the URI authority as `:authority`. The URI then names the host of the client,
+    /// and the returned client connects to the upstream server whatever the URI names. Returns
+    /// `None` for every other request, which keeps the URI of the server.
+    fn pin_kept_host<B>(&self, req: &mut Request<B>) -> Option<ProxyClient> {
+        let (server, host, h2c) = kept_host_target(req)?;
+        let mut parts = req.uri().clone().into_parts();
+        parts.authority = Some(host);
+        *req.uri_mut() = Uri::from_parts(parts).ok()?;
+        // HTTP/1.1 writes the `Host` header from the URI again.
+        req.headers_mut().remove(HOST);
+        Some(self.pinned_client(server, h2c))
+    }
+
+    fn pinned_client(&self, server: Uri, h2c: bool) -> ProxyClient {
+        let mut clients = self.pinned.lock().unwrap_or_else(PoisonError::into_inner);
+        clients
+            .entry((server.to_string(), h2c))
+            .or_insert_with(|| {
+                Client::builder(TokioExecutor::new())
+                    .http2_only(h2c)
+                    .http2_max_frame_size(Some(HTTP2_MAX_FRAME_SIZE as u32))
+                    .build(
+                        HttpsConnector::new_with_resolver(
+                            self.negotiated.clone(),
+                            self.resolver.clone(),
+                        )
+                        .with_connect_timeout(self.connect_timeout)
+                        .with_destination(server),
+                    )
+            })
+            .clone()
     }
 
     fn client_for<B>(&self, req: &Request<B>, upgrading: bool) -> &ProxyClient {
@@ -188,7 +267,14 @@ impl ConnectionPool {
         // version, and an HTTP/2 connection ignores the request version.
         *req.version_mut() = hyper::Version::HTTP_11;
 
-        let sending = self.client_for(&req, upgrading_req.is_some()).request(req);
+        let pinned = upgrading_req
+            .is_none()
+            .then(|| self.pin_kept_host(&mut req))
+            .flatten();
+        let sending = match &pinned {
+            Some(client) => client.request(req),
+            None => self.client_for(&req, upgrading_req.is_some()).request(req),
+        };
         let res = response_headers(sending, request_timeout)
             .await?
             .map(|body| BoxBody::new(body.map_err(Into::into)));
@@ -514,6 +600,9 @@ impl Upstream {
             target.query.as_deref(),
         )?;
         let client_host = self.preserve_host.then(|| client_host(req)).flatten();
+        if client_host.is_some() {
+            req.extensions_mut().insert(KeptHost);
+        }
         if let Some(host) = client_host.or_else(|| authority_header(&uri)) {
             req.headers_mut().insert(HOST, host);
         }

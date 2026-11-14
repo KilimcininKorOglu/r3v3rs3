@@ -27,6 +27,8 @@ pub struct HttpsConnector<T> {
     tls: TlsConnector,
     /// Time limit for the DNS lookup, the TCP connection and the TLS handshake.
     connect_timeout: Option<Duration>,
+    /// The server that every connection goes to, whatever the URI of the request names.
+    destination: Option<Uri>,
 }
 
 impl HttpsConnector<HttpConnector> {
@@ -67,6 +69,13 @@ impl<T> HttpsConnector<T> {
         self.connect_timeout = Some(timeout);
         self
     }
+
+    /// Connects every request to `destination`: the DNS lookup, the TCP connection and the TLS
+    /// server name use it, while the request URI may name another host.
+    pub fn with_destination(mut self, destination: Uri) -> Self {
+        self.destination = Some(destination);
+        self
+    }
 }
 
 impl<R> HttpsConnector<HttpConnector<R>> {
@@ -85,6 +94,7 @@ impl<T> From<(T, TlsConnector)> for HttpsConnector<T> {
             http: args.0,
             tls: args.1,
             connect_timeout: None,
+            destination: None,
         }
     }
 }
@@ -118,6 +128,7 @@ where
     }
 
     fn call(&mut self, dst: Uri) -> Self::Future {
+        let dst = self.destination.clone().unwrap_or(dst);
         let is_https = dst.scheme_str() == Some("https");
         // Early abort if HTTPS is forced but can't be used
         if !is_https && self.force_https {

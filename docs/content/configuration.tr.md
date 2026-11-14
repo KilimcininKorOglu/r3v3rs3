@@ -1082,7 +1082,7 @@ Kurallar `Connection`, `Content-Length`, `Host`, `Keep-Alive`, `Proxy-Connection
 
 ### Host header'ı
 
-r3v3rs3 varsayılan olarak `Host` header'ında upstream sunucunun adresini gönderir, örneğin `127.0.0.1:8080`. Bunun yerine istemcinin istediği host adını göndermek için "İstemcinin Host Header'ını Koru" (`preserve_host = true`) seçeneğini açın. `Origin` header'ını `Host` header'ı ile karşılaştıran bir uygulama bu ayara ihtiyaç duyar, örneğin bir CSRF kontrolünde. Deploy platformu uygulamalarının proxy'leri istemcinin host adını her zaman korur. Keşfedilen bir proxy bu ayarı `r3v3rs3.http.<name>.preserve_host=true` label'ı ile açar.
+r3v3rs3 varsayılan olarak `Host` header'ında upstream sunucunun adresini gönderir, örneğin `127.0.0.1:8080`. Bunun yerine istemcinin istediği host adını göndermek için "İstemcinin Host Header'ını Koru" (`preserve_host = true`) seçeneğini açın. `Origin` header'ını `Host` header'ı ile karşılaştıran bir uygulama bu ayara ihtiyaç duyar, örneğin bir CSRF kontrolünde. HTTP/2 kullanan bir upstream sunucu (h2 seçen bir HTTPS sunucusu veya h2c ile düz bir HTTP sunucusu) istemcinin host adını isteğin `:authority` değeri olarak alır, çünkü HTTP/2'de ayrı bir `Host` header'ı yoktur. Bağlantı ve TLS sertifika kontrolü yine upstream sunucunun adresini kullanır. Deploy platformu uygulamalarının proxy'leri istemcinin host adını her zaman korur. Keşfedilen bir proxy bu ayarı `r3v3rs3.http.<name>.preserve_host=true` label'ı ile açar.
 
 ```toml
 [my-app]

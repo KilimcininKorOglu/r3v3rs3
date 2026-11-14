@@ -1082,7 +1082,7 @@ Rules cannot change `Connection`, `Content-Length`, `Host`, `Keep-Alive`, `Proxy
 
 ### Host Header
 
-By default, r3v3rs3 sends the address of the upstream server as the `Host` header, for example `127.0.0.1:8080`. Turn on "Keep the Client Host Header" (`preserve_host = true`) to send the host name that the client asked for instead. An application that compares the `Origin` header with the `Host` header, for example in a CSRF check, needs this setting. The proxies of the deployment platform apps always keep the client host. A discovered proxy sets it with the `r3v3rs3.http.<name>.preserve_host=true` label.
+By default, r3v3rs3 sends the address of the upstream server as the `Host` header, for example `127.0.0.1:8080`. Turn on "Keep the Client Host Header" (`preserve_host = true`) to send the host name that the client asked for instead. An application that compares the `Origin` header with the `Host` header, for example in a CSRF check, needs this setting. An upstream server that speaks HTTP/2 (an HTTPS server that selects h2, or a plain HTTP server with h2c) receives the client host as the `:authority` of the request, because HTTP/2 has no separate `Host` header. The connection and the TLS certificate check still use the address of the upstream server. The proxies of the deployment platform apps always keep the client host. A discovered proxy sets it with the `r3v3rs3.http.<name>.preserve_host=true` label.
 
 ```toml
 [my-app]
