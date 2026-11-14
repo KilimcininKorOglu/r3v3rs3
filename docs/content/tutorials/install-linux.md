@@ -114,6 +114,24 @@ Open [http://localhost:46492/](http://localhost:46492/) and sign in with the acc
 
 `journalctl -u r3-server` shows the server log. `/etc/r3v3rs3/r3v3rs3.db` holds configuration and operational state, and `r3v3rs3.key` holds the master encryption key, so back up the whole directory and protect the backup.
 
+The running server also opens `/etc/r3v3rs3/control.sock` with the mode `0600`. Only root and the service user can connect to it.
+
+## Release a Blocked Address
+
+The auto-quarantine and the sign-in ban block a client address, and a blocked client cannot open the panel. Release the address on the server with root:
+
+```bash
+$ sudo r3-server unblock 203.0.113.9 --config-dir /etc/r3v3rs3
+203.0.113.9 released: quarantine=true login_ban=false
+```
+
+- The command talks to the running server over `control.sock`. It needs no panel session and no API token, because the file permissions decide who can use it.
+- The output shows which block held the address. `false` in both fields means that the address was not blocked.
+- The audit log records the release with the account name `local-control`.
+- Without `--config-dir`, the command reads `R3V3RS3_CONFIG_DIR` or the default directory of the current user, which is not `/etc/r3v3rs3`.
+- The admin API opens the socket, so a server that runs with `--no-webui` has no socket.
+- Add the address to the allowed addresses of the quarantine (see [Threat Detection & Auto-Quarantine](@/configuration.md#threat-detection-auto-quarantine)) so it is not blocked again.
+
 ## Upgrade
 
 Run the same command again:

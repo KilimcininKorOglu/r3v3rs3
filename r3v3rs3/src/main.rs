@@ -44,8 +44,17 @@ async fn main() -> anyhow::Result<()> {
         Command::Agent(args) => agent(args).await?,
         Command::Worker(args) => worker(args).await?,
         Command::DisasterRecovery(args) => disaster_recovery_cli(args).await?,
+        Command::Unblock(args) => unblock(args).await?,
     }
 
+    Ok(())
+}
+
+/// Asks the running server over its local control socket to release an address.
+async fn unblock(args: r3v3rs3::args::UnblockArgs) -> anyhow::Result<()> {
+    let config_dir = get_config_dir(args.config_dir)?;
+    let result = r3v3rs3::admin::control::request_unblock(&config_dir, args.ip).await?;
+    println!("{} released: {result}", args.ip);
     Ok(())
 }
 

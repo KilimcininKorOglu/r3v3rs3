@@ -114,6 +114,24 @@ $ ssh -L 46492:127.0.0.1:46492 kullanici@sunucunuz
 
 Sunucu log'unu `journalctl -u r3-server` gösterir. `/etc/r3v3rs3/r3v3rs3.db` tüm yapılandırma ve durum verilerini, `r3v3rs3.key` ise ana şifreleme anahtarını tutar; bu yüzden bütün dizini yedekleyin ve yedeği koruyun.
 
+Çalışan sunucu ayrıca `/etc/r3v3rs3/control.sock` dosyasını `0600` moduyla açar. Bu dosyaya yalnız root ve servis kullanıcısı bağlanabilir.
+
+## Engellenen bir adresi serbest bırakma
+
+Otomatik karantina ve giriş yasağı bir istemci adresini engeller. Engellenen istemci paneli açamaz. Adresi sunucuda root ile serbest bırakın:
+
+```bash
+$ sudo r3-server unblock 203.0.113.9 --config-dir /etc/r3v3rs3
+203.0.113.9 released: quarantine=true login_ban=false
+```
+
+- Komut çalışan sunucuyla `control.sock` üzerinden konuşur. Panel oturumu veya API token'ı gerekmez, çünkü komutu kimin kullanabileceğine dosya izinleri karar verir.
+- Çıktı, adresi hangi engelin tuttuğunu gösterir. İki alanda da `false` değeri adresin engelli olmadığı anlamına gelir.
+- Denetim kaydı serbest bırakmayı `local-control` hesap adıyla kaydeder.
+- `--config-dir` verilmezse komut `R3V3RS3_CONFIG_DIR` değişkenini veya mevcut kullanıcının varsayılan dizinini okur. Bu dizin `/etc/r3v3rs3` değildir.
+- Socket'i admin API açar. Bu yüzden `--no-webui` ile çalışan bir sunucunun socket'i yoktur.
+- Adresin tekrar engellenmemesi için onu karantinanın izinli adreslerine ekleyin (bkz. [Tehdit Algılama ve Otomatik Karantina](@/configuration.tr.md#tehdit-algilama-ve-otomatik-karantina)).
+
 ## Yükseltme
 
 Aynı komutu tekrar çalıştırın:

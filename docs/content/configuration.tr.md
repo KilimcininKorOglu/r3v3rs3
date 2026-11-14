@@ -1783,6 +1783,7 @@ r3v3rs3, gelen canlı HTTP ve TCP trafiğini izleyerek dış tehdit istihbaratı
 - **Yönetim ve WebUI Kontrolleri**:
   - Karantinadaki IP'leri, ihlal sayılarını ve kalan karantina sürelerini **Güvenlik > Karantinadaki IP'ler** sekmesinde görüntüleyin.
   - WebUI üzerinden tek tıkla herhangi bir IP adresini manuel karantinaya alın veya serbest bırakın.
+  - Sunucuda `sudo r3-server unblock <ip> --config-dir /etc/r3v3rs3` komutu, panel oturumu olmadan bir adresi karantinadan ve giriş yasağından çıkarır (bkz. [Engellenen bir adresi serbest bırakma](@/tutorials/install-linux.tr.md#engellenen-bir-adresi-serbest-birakma)).
   - Eşiği, pencereyi, süreyi, engellenen durum kodlarını, tarayıcı yollarını ve izinli adresleri aynı sekmedeki **Otomatik Karantina Ayarları** kartında değiştirin.
 
 ```toml

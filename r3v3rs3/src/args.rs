@@ -22,6 +22,18 @@ pub enum Command {
     Worker(WorkerArgs),
     /// Create or restore an encrypted disaster recovery bundle
     DisasterRecovery(DisasterRecoveryArgs),
+    /// Release an address from the auto-quarantine and the sign-in ban of the running server
+    Unblock(UnblockArgs),
+}
+
+#[derive(Args)]
+pub struct UnblockArgs {
+    /// The IP address to release.
+    pub ip: std::net::IpAddr,
+
+    /// The config directory of the running server, which holds its control.sock.
+    #[clap(long, short, value_name = "DIR", env = "R3V3RS3_CONFIG_DIR")]
+    pub config_dir: Option<PathBuf>,
 }
 
 #[derive(Args)]

@@ -1783,6 +1783,7 @@ r3v3rs3 monitors incoming live HTTP and TCP traffic to detect scanner probes, pa
 - **Management & WebUI Controls**:
   - View all quarantined IPs, violation counts, and remaining quarantine times in the **Security > Quarantined IPs** tab.
   - Manually quarantine or release any IP address with a single click.
+  - On the server, `sudo r3-server unblock <ip> --config-dir /etc/r3v3rs3` releases an address from the quarantine and the sign-in ban without a panel session (see [Release a Blocked Address](@/tutorials/install-linux.md#release-a-blocked-address)).
   - Change the threshold, the window, the duration, the blocked status codes, the scanner paths and the allowed addresses in the **Auto-Quarantine Settings** card of the same tab.
 
 ```toml
