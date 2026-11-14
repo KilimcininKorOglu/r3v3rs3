@@ -55,6 +55,11 @@ const RULES: &[Rule] = &[
         // The navigation is dark in both themes. Code blocks (<pre>) stay dark on purpose.
         allowed: &["components/navbar.rs", "components/sidebar.rs", "main.rs"],
     },
+    Rule {
+        name: "an own back button; use components::back_button::BackButton",
+        matches: |line| line.contains("arrow-back.svg"),
+        allowed: &["components/back_button.rs"],
+    },
 ];
 
 /// Whether the line sets a neutral 800 to 950 background outside a `dark:` variant. A code

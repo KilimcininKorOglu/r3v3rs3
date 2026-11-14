@@ -61,9 +61,6 @@ pub fn database_backups(props: &Props) -> Html {
     if session.info.is_none() {
         return html!();
     }
-    let Some(navigator) = use_navigator() else {
-        return html!();
-    };
     let reload = make_reload_cb(
         locale,
         backups.clone(),
@@ -115,7 +112,7 @@ pub fn database_backups(props: &Props) -> Html {
                     domains={a.spec.domains.clone()}
                 />
             } else {
-                { back_header(locale, &navigator, locale.t("backups.title").to_string()) }
+                { back_header(Route::Databases, locale.t("backups.title").to_string()) }
             }
             { notice_view(&notice, |key| html! { {locale.t(key)} }) }
             { pitr_banner_view(locale, id, (*pitr_range).as_ref(), can_edit, &notice, &reload, on_open_wal) }

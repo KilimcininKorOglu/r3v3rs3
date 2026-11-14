@@ -4,6 +4,7 @@ pub mod action_button;
 pub mod anomaly_rules;
 pub mod app_tabs;
 pub mod auth_config;
+pub mod back_button;
 pub mod backup_drill_modal;
 pub mod button;
 pub mod compose_editor;

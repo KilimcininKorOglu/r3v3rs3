@@ -19,7 +19,6 @@ use r3v3rs3_api::platform::{
 };
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
-use yew_router::prelude::*;
 use yewdux::prelude::*;
 
 /// The length of a commit hash in the list.
@@ -83,9 +82,6 @@ pub fn app_deployments(props: &Props) -> Html {
     use_ensure_auth();
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
-    let Some(navigator) = use_navigator() else {
-        return html!();
-    };
     let history = use_state(|| Loaded::None);
     let failure = use_state(|| Option::<String>::None);
     let reload = use_state(|| 0_u32);
@@ -113,7 +109,7 @@ pub fn app_deployments(props: &Props) -> Html {
                     domains={h.app.spec.domains.clone()}
                 />
             } else {
-                { back_header(locale, &navigator, title) }
+                { back_header(Route::Apps, title) }
             }
             if let Some(err) = error.as_ref().or(failure.as_ref()) {
                 { failure_box(err) }
@@ -209,16 +205,11 @@ fn page_parts(
     }
 }
 
-/// The back button to the app list and the title of the page.
-pub fn back_header(locale: Locale, navigator: &Navigator, title: String) -> Html {
-    let navigator = navigator.clone();
-    let onclick = Callback::from(move |_: MouseEvent| navigator.push(&Route::Apps));
+/// The back button to `to` and the title of the page, for a page that shows no app tabs.
+pub fn back_header(to: Route, title: String) -> Html {
     html! {
-        <div class="flex flex-wrap items-center gap-4 mb-4">
-            <crate::components::button::Button kind={crate::components::button::ButtonKind::Secondary} {onclick}>
-                <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 dark:invert" />
-                {locale.t("common.back")}
-            </crate::components::button::Button>
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+            <crate::components::back_button::BackButton {to} />
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{title}</h2>
         </div>
     }

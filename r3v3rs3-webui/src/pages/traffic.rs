@@ -1,5 +1,6 @@
 use super::app_log::download_text_file;
 use crate::components::action_button::{ActionIconButton, ActionVariant};
+use crate::components::back_button::BackButton;
 use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_card, list_view};
 use crate::components::tabs::{TabItem, Tabs};
@@ -20,7 +21,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
-use yew_router::prelude::use_navigator;
 
 const MAX_UI_ENTRIES: usize = 1000;
 
@@ -112,14 +112,6 @@ fn create_inspector_callbacks(
         })
     };
     (on_select, on_close)
-}
-
-fn create_back_callback(navigator: Option<yew_router::prelude::Navigator>) -> Callback<MouseEvent> {
-    Callback::from(move |_| {
-        if let Some(nav) = &navigator {
-            nav.back();
-        }
-    })
 }
 
 fn create_country_callback(
@@ -729,7 +721,6 @@ fn traffic_tab_content(
 
 struct LogsTabProps<'a> {
     locale: Locale,
-    on_back: Callback<MouseEvent>,
     controls: HeaderControls,
     stats: &'a TrafficStats,
     show_geo_map: bool,
@@ -751,7 +742,6 @@ struct LogsTabProps<'a> {
 fn logs_tab_view(props: LogsTabProps<'_>) -> Html {
     let LogsTabProps {
         locale,
-        on_back,
         controls,
         stats,
         show_geo_map,
@@ -772,7 +762,7 @@ fn logs_tab_view(props: LogsTabProps<'_>) -> Html {
 
     html! {
         <>
-            { header_view(locale, on_back, controls) }
+            { header_view(locale, controls) }
             { stats_cards_view(locale, stats) }
             if show_geo_map {
                 { geo_heatmap_view(locale, geo_dist, selected_country, on_select_country) }
@@ -796,7 +786,6 @@ fn default_traffic_tab() -> TrafficTab {
 pub fn traffic_view() -> Html {
     use_ensure_auth();
     let locale = use_locale();
-    let navigator = use_navigator();
     let active_tab = use_state(default_traffic_tab);
     let connections = use_state(Vec::<ActiveConnectionInfo>::new);
     let conns_trigger = use_state(u32::default);
@@ -833,7 +822,6 @@ pub fn traffic_view() -> Html {
         selected_country.as_deref(),
     );
 
-    let on_back = create_back_callback(navigator);
     let controls = create_header_controls(&live, &auto_scroll, &show_geo_map, &entries);
     let on_select_country = create_country_callback(&selected_country);
     let (on_select_entry, on_close_inspector) = create_inspector_callbacks(&selected_entry);
@@ -841,7 +829,6 @@ pub fn traffic_view() -> Html {
 
     let logs_view = logs_tab_view(LogsTabProps {
         locale,
-        on_back,
         controls,
         stats: &stats,
         show_geo_map: *show_geo_map,
@@ -877,7 +864,7 @@ fn toggle_kind(active: bool) -> ButtonKind {
     }
 }
 
-fn header_view(locale: Locale, on_back: Callback<MouseEvent>, controls: HeaderControls) -> Html {
+fn header_view(locale: Locale, controls: HeaderControls) -> Html {
     let HeaderControls {
         live,
         auto_scroll,
@@ -891,10 +878,7 @@ fn header_view(locale: Locale, on_back: Callback<MouseEvent>, controls: HeaderCo
     html! {
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b dark:border-neutral-700">
             <div class="flex items-center gap-3">
-                <Button kind={ButtonKind::Secondary} onclick={on_back}>
-                    <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 dark:invert" />
-                    {locale.t("common.back")}
-                </Button>
+                <BackButton />
                 <div>
                     <h1 class="text-xl font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
                         {locale.t("traffic.title")}

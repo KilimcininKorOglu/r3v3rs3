@@ -2,9 +2,11 @@
 //! session command history memory, and quick maintenance snippets.
 
 use super::Route;
+use super::app_deployments::back_header;
 use super::settings::fetch_json;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::app_tabs::{AppTab, AppTabs};
 use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::modal::Modal;
 use crate::i18n::use_locale;
@@ -19,7 +21,6 @@ use std::rc::Rc;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use yew::prelude::*;
-use yew_router::prelude::*;
 use yewdux::prelude::*;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -362,12 +363,17 @@ fn render_terminal_page(locale: Locale, app_id: ShortId, state: &TerminalState) 
 
     html! {
         <>
-            <div class="flex items-center justify-between mb-3">
-                <h1 class="text-xl font-semibold">{title}</h1>
-                <Link<Route> to={Route::AppDashboard { id: app_id }} classes="text-sm text-neutral-400 hover:text-neutral-200">
-                    {locale.t("common.back")}
-                </Link<Route>>
-            </div>
+            if let Some(app) = (*state.app).as_ref() {
+                <AppTabs
+                    id={app_id}
+                    name={app.name.to_string()}
+                    active={AppTab::Terminal}
+                    domains={app.spec.domains.clone()}
+                    is_database={app.spec.database.is_some()}
+                />
+            } else {
+                { back_header(Route::AppDashboard { id: app_id }, title) }
+            }
             { status_view(locale, &state.failed, &state.app) }
             { tab_bar_view(locale, &state.tabs, *state.active_tab_id, (*state.app).as_ref(), on_select_tab, on_close_tab, on_new_tab) }
             { toolbar_view(locale, state, &toolbar_actions) }

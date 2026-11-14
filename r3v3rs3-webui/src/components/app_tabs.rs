@@ -1,11 +1,10 @@
-use crate::components::button::{ButtonKind, ButtonSize, button_class};
+use crate::components::back_button::BackButton;
 use crate::components::tabs::{TabItem, Tabs};
 use crate::i18n::use_locale;
 use crate::pages::Route;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::subject_name::SubjectName;
 use yew::prelude::*;
-use yew_router::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AppTab {
@@ -97,13 +96,7 @@ pub fn app_tabs(props: &Props) -> Html {
         <div class="mb-6 space-y-4">
             <div class="flex flex-wrap items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
-                    <Link<Route>
-                        to={back_route}
-                        classes={button_class(ButtonKind::Secondary, ButtonSize::Sm)}
-                    >
-                        <img src="/assets/icons/arrow-back.svg" class="w-4 h-4" />
-                        {locale.t("common.back")}
-                    </Link<Route>>
+                    <BackButton to={back_route} />
                     <h1 class="text-xl font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
                         {&props.name}
                         if let Some(status) = &props.status {

@@ -68,10 +68,10 @@ fn use_dashboard_poll(
     });
 }
 
-fn render_loading_skeleton(locale: Locale, navigator: &Navigator) -> Html {
+fn render_loading_skeleton(locale: Locale) -> Html {
     html! {
         <div class="space-y-6 animate-pulse">
-            { back_header(locale, navigator, locale.t("apps.dashboard").to_string()) }
+            { back_header(Route::Apps, locale.t("apps.dashboard").to_string()) }
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div class="h-28 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-4"></div>
                 <div class="h-28 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-4"></div>
@@ -129,12 +129,12 @@ pub fn app_dashboard(props: &Props) -> Html {
     } else if let Some(err) = active_error {
         html! {
             <div class="space-y-6">
-                { back_header(locale, &navigator, locale.t("apps.dashboard").to_string()) }
+                { back_header(Route::Apps, locale.t("apps.dashboard").to_string()) }
                 { failure_box(&err) }
             </div>
         }
     } else {
-        render_loading_skeleton(locale, &navigator)
+        render_loading_skeleton(locale)
     }
 }
 

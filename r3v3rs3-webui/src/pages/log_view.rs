@@ -1,4 +1,5 @@
 use super::app_log::download_text_file;
+use crate::components::back_button::BackButton;
 use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::{API_ENDPOINT, auth::use_ensure_auth, format::format_instant, i18n::use_locale};
 use gloo_net::http::Request;
@@ -8,7 +9,6 @@ use r3v3rs3_api::log::{LogLevel, SystemLogRow};
 use time::OffsetDateTime;
 use web_sys::{Element, HtmlInputElement};
 use yew::prelude::*;
-use yew_router::prelude::use_navigator;
 
 #[derive(Properties, PartialEq)]
 pub struct Props {
@@ -35,13 +35,6 @@ pub fn log_view(props: &Props) -> Html {
         poll_log(poll, vec![], None);
     });
 
-    let Some(navigator) = use_navigator() else {
-        return html!();
-    };
-    let back_onclick = Callback::from(move |_| {
-        navigator.back();
-    });
-
     let (filtered_rows, matched, total) = filter_system_logs(&log, &search);
     let id_for_download = props.id.clone();
     let log_for_download = log.clone();
@@ -53,10 +46,9 @@ pub fn log_view(props: &Props) -> Html {
     html! {
         <>
             <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 mb-4">
-                <Button kind={ButtonKind::Secondary} class="self-start" onclick={back_onclick}>
-                    <img src="/assets/icons/arrow-back.svg" class="w-4 h-4 dark:invert" />
-                    {locale.t("common.back")}
-                </Button>
+                <div class="self-start">
+                    <BackButton />
+                </div>
                 { log_controls_view(locale, &search, on_download) }
             </div>
             if let Some(error) = &*error {

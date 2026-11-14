@@ -1,5 +1,6 @@
 //! The container log of the running deployment of an app.
 
+use super::Route;
 use super::app_deployments::back_header;
 use super::app_list::SLOW_REFRESH_MS;
 use super::settings::{failure_box, fetch_json};
@@ -20,7 +21,6 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
-use yew_router::prelude::*;
 use yewdux::prelude::*;
 
 /// The number of initial log lines that the page loads.
@@ -49,9 +49,6 @@ pub fn app_log_view(props: &Props) -> Html {
     use_ensure_auth();
     let locale = use_locale();
     let (session, _) = use_store::<SessionStore>();
-    let Some(navigator) = use_navigator() else {
-        return html!();
-    };
     let page = use_state(|| Loaded::None);
     let live = use_state(|| true);
     let auto_scroll = use_state(|| true);
@@ -103,7 +100,7 @@ pub fn app_log_view(props: &Props) -> Html {
                     active={crate::components::app_tabs::AppTab::Logs}
                 />
             } else {
-                { back_header(locale, &navigator, title) }
+                { back_header(Route::Apps, title) }
             }
             { content_view(content_props) }
         </>
