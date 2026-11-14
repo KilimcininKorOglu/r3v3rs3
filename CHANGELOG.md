@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.1] - 2026-11-15
+
+### Added
+- "Keep the Client Host Header" (`preserve_host`) sends the host name that the client asked for to the upstream servers instead of the server address. The proxies of the deployment platform apps always keep it, so an app that compares the `Origin` header with the `Host` header no longer rejects its forms with 403.
+- The auto-quarantine has a list of allowed addresses and networks that it never blocks. The WebUI, the MCP server and the CLI (`--allowed-ips`) manage the list, and a manual quarantine of an allowed address fails.
+- `r3-server unblock <ip>` releases a quarantined or sign-in banned address on the server through the local control socket `control.sock`, without a panel session or an API token.
+
+### Changed
+- Every page shows the same back button as the first item of its title row. The terminal page shows the app tabs, and the database backups page goes back to the database list.
+
+### Fixed
+- A Git app with BuildKit enabled fell back to the classic builder under the service user, because the docker CLI could not create its config directory. The build now gets a writable `DOCKER_CONFIG`, a BuildKit failure fails the deployment with its output, and an agent target builds on the agent host.
+- The build context dropped the Dockerfile when `.dockerignore` listed it, unlike the Docker CLI.
+- The auto-quarantine counted the 403 and 404 responses of the upstream apps, so a user who failed a login form a few times was blocked. It now counts only the responses of r3v3rs3 itself.
+- In workers mode, a quarantine change of the master did not reach the worker, and a ban of the worker did not show in the panel.
+- The descriptor handover of the workers mode could read bytes of the next IPC frame on macOS.
+- The CLI quarantine, prune and CT monitor setters sent default values when the current settings failed to load, and the quarantine command could not set the status codes and scanner patterns.
+- The app restart button showed "Restart Policy" because the locale files defined `apps.restart` twice.
+- The Deploy button of the app dashboard and the run button of the terminal history drew only a small part of the play icon.
+- An HTTP/2 upstream received the kept client host as a second `Host` header next to the server address in `:authority`. It now receives the client host as `:authority`.
+
 ## [3.3.0] - 2026-11-13
 
 ### Changed
