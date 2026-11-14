@@ -81,6 +81,20 @@ pub enum ServerCommand {
     },
     /// Master key was rotated, so cached encryption keys in storage must be invalidated.
     InvalidateStorageSecrets,
+    /// A supervisor gives the master the channel that carries quarantine changes to its worker.
+    SetWorkerLink {
+        sender: tokio::sync::mpsc::Sender<crate::server::ipc::QuarantineChange>,
+    },
+    /// Applies a quarantine change of another process of this server. `notify` sends the
+    /// webhook of a new quarantine, which only the master does.
+    ApplyQuarantine {
+        change: crate::server::ipc::QuarantineChange,
+        notify: bool,
+    },
+    /// Sets the channel that carries the quarantines of this worker to its master.
+    SetQuarantineNotifier {
+        sender: tokio::sync::mpsc::UnboundedSender<r3v3rs3_api::quarantine::QuarantinedIpEntry>,
+    },
 }
 
 impl std::fmt::Debug for ServerCommand {
@@ -152,6 +166,13 @@ impl std::fmt::Debug for ServerCommand {
                     &status.as_ref().map(|s| s.open_connections),
                 )
                 .finish(),
+            Self::SetWorkerLink { .. } => f.debug_struct("SetWorkerLink").finish(),
+            Self::ApplyQuarantine { change, notify } => f
+                .debug_struct("ApplyQuarantine")
+                .field("change", change)
+                .field("notify", notify)
+                .finish(),
+            Self::SetQuarantineNotifier { .. } => f.debug_struct("SetQuarantineNotifier").finish(),
         }
     }
 }

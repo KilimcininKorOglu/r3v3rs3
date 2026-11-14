@@ -6,7 +6,8 @@
 
 use super::fdmanifest::ListenerFd;
 use super::ipc::{
-    Handshake, PROTOCOL_VERSION, WorkerCommand, WorkerConfig, WorkerEvent, read_frame, write_frame,
+    Handshake, PROTOCOL_VERSION, QuarantineChange, WorkerCommand, WorkerConfig, WorkerEvent,
+    read_frame, write_frame,
 };
 use crate::command::ServerCommand;
 use crate::server::ServerEvent;
@@ -77,6 +78,10 @@ async fn supervise(
     let (events_tx, mut events_rx) = mpsc::channel::<WorkerEvent>(16);
     let (mut config_tx, mut config_rx) = mpsc::channel::<WorkerConfig>(1);
     let (mut ipc_tx, _ipc_rx) = mpsc::channel::<IpcMessage>(16);
+    let (link_tx, mut link_rx) = mpsc::channel::<QuarantineChange>(64);
+    command
+        .send(ServerCommand::SetWorkerLink { sender: link_tx })
+        .await?;
     let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -122,6 +127,9 @@ async fn supervise(
             config = config_rx.recv() => {
                 let Some(config) = config else { continue };
                 let _ = ipc_tx.send(IpcMessage::Config(Box::new(config))).await;
+            }
+            Some(change) = link_rx.recv() => {
+                let _ = ipc_tx.send(IpcMessage::Command(worker_command_of(change))).await;
             }
         }
     }
@@ -230,7 +238,25 @@ async fn handle_worker_event(
                 })
                 .await;
         }
+        // The master lists the quarantine of the worker and sends its webhook.
+        Some(WorkerEvent::Quarantined(entry)) => {
+            let change = QuarantineChange::Add(entry);
+            let _ = command
+                .send(ServerCommand::ApplyQuarantine {
+                    change,
+                    notify: true,
+                })
+                .await;
+        }
         Some(WorkerEvent::Pong) | None => {}
+    }
+}
+
+/// The command that carries a quarantine change of the master to the worker.
+fn worker_command_of(change: QuarantineChange) -> WorkerCommand {
+    match change {
+        QuarantineChange::Add(entry) => WorkerCommand::Quarantine(entry),
+        QuarantineChange::Remove(ip) => WorkerCommand::Unquarantine(ip),
     }
 }
 

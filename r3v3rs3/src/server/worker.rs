@@ -8,9 +8,10 @@
 use super::fdmanifest::ListenerFd;
 use super::fdpass::recv_fds;
 use super::ipc::{
-    Handshake, PROTOCOL_VERSION, WorkerCommand, WorkerConfig, WorkerEvent, WorkerStatus,
-    read_frame, write_frame,
+    Handshake, PROTOCOL_VERSION, QuarantineChange, WorkerCommand, WorkerConfig, WorkerEvent,
+    WorkerStatus, read_frame, write_frame,
 };
+use crate::command::ServerCommand;
 use crate::config::memory::MemoryStorage;
 use crate::server::Server;
 use anyhow::{Context, anyhow, bail};
@@ -78,16 +79,60 @@ pub async fn run(ipc_fd: i32, config_dir: &Path, log_dir: &Path) -> anyhow::Resu
         .send(crate::command::ServerCommand::SetBroadcastEvents { enabled: true })
         .await;
     let server_task = tokio::spawn(server.start());
+    let writer = Writer::new(&ipc)?;
+    report_quarantines(&channels, writer.clone()).await?;
 
-    let result = serve_master(&mut ipc, &storage, &channels, &config, started_at).await;
+    let result = serve_master(&ipc, &writer, &storage, &channels, &config, started_at).await;
     channels.shutdown();
     let _ = server_task.await;
     result
 }
 
+/// The writing half of the IPC socket. The command loop and the quarantine reports share it, so
+/// a lock keeps their frames whole.
+#[derive(Clone)]
+struct Writer(Arc<std::sync::Mutex<UnixStream>>);
+
+impl Writer {
+    fn new(ipc: &UnixStream) -> anyhow::Result<Self> {
+        let stream = ipc.try_clone().context("failed to clone the IPC socket")?;
+        Ok(Self(Arc::new(std::sync::Mutex::new(stream))))
+    }
+
+    fn send(&self, event: &WorkerEvent) -> std::io::Result<()> {
+        let mut stream = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        write_frame(&mut *stream, event)
+    }
+}
+
+/// Sends every quarantine of this worker to the master, which lists it and sends its webhook.
+async fn report_quarantines(
+    channels: &crate::server::ServerChannels,
+    writer: Writer,
+) -> anyhow::Result<()> {
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    channels
+        .command
+        .send(ServerCommand::SetQuarantineNotifier { sender })
+        .await
+        .context("the server of the worker is gone")?;
+    tokio::spawn(async move {
+        while let Some(entry) = receiver.recv().await {
+            if let Err(err) = writer.send(&WorkerEvent::Quarantined(Box::new(entry))) {
+                error!(%err, "failed to report a quarantine to the master");
+            }
+        }
+    });
+    Ok(())
+}
+
 /// Answers the commands of the master until it hangs up.
 async fn serve_master(
-    ipc: &mut UnixStream,
+    ipc: &UnixStream,
+    writer: &Writer,
     storage: &Arc<MemoryStorage>,
     channels: &crate::server::ServerChannels,
     config: &WorkerConfig,
@@ -98,48 +143,97 @@ async fn serve_master(
     let ready = WorkerEvent::Event(r3v3rs3_api::event::ServerEvent::AppConfigUpdated {
         config: Box::new(config.app.clone().masked()),
     });
-    write_frame(ipc, &ready).context("failed to announce the readiness of the worker")?;
+    writer
+        .send(&ready)
+        .context("failed to announce the readiness of the worker")?;
     loop {
         let command = tokio::time::timeout(HEARTBEAT_TIMEOUT, read_command(ipc)).await;
         let Ok(Some(command)) = command else {
             error!("the master stopped answering, the worker exits");
             return Ok(());
         };
-        match command {
-            WorkerCommand::Config(new_config) => {
-                storage
-                    .replace(
-                        new_config.ports.clone(),
-                        new_config.proxies.clone(),
-                        new_config.access_lists.clone(),
-                        certs_of(&new_config.certs)?,
-                    )
-                    .await;
-                channels
-                    .command
-                    .send(crate::command::ServerCommand::WorkerApply)
-                    .await
-                    .context("the server of the worker is gone")?;
-                info!("applied the new configuration of the master");
-            }
-            WorkerCommand::Drain | WorkerCommand::Shutdown => {
-                info!("the master ordered the worker down");
-                return Ok(());
-            }
-            WorkerCommand::Ping => {
-                write_frame(ipc, &WorkerEvent::Pong).context("failed to answer the heartbeat")?;
-            }
-            WorkerCommand::Status => {
-                let status = WorkerStatus {
-                    pid: std::process::id(),
-                    uptime_secs: started_at.elapsed().as_secs(),
-                    open_connections: crate::proxy::open_connections() as u64,
-                };
-                write_frame(ipc, &WorkerEvent::Status(Box::new(status)))
-                    .context("failed to answer the status request")?;
-            }
+        if !handle_command(command, writer, storage, channels, started_at).await? {
+            return Ok(());
         }
     }
+}
+
+/// Runs one command of the master. `false` ends the worker.
+async fn handle_command(
+    command: WorkerCommand,
+    writer: &Writer,
+    storage: &Arc<MemoryStorage>,
+    channels: &crate::server::ServerChannels,
+    started_at: std::time::Instant,
+) -> anyhow::Result<bool> {
+    match command {
+        WorkerCommand::Config(new_config) => apply_config(*new_config, storage, channels).await?,
+        WorkerCommand::Drain | WorkerCommand::Shutdown => {
+            info!("the master ordered the worker down");
+            return Ok(false);
+        }
+        WorkerCommand::Ping => writer
+            .send(&WorkerEvent::Pong)
+            .context("failed to answer the heartbeat")?,
+        WorkerCommand::Status => writer
+            .send(&WorkerEvent::Status(Box::new(status(started_at))))
+            .context("failed to answer the status request")?,
+        WorkerCommand::Quarantine(entry) => {
+            apply_quarantine(channels, QuarantineChange::Add(entry)).await?;
+        }
+        WorkerCommand::Unquarantine(ip) => {
+            apply_quarantine(channels, QuarantineChange::Remove(ip)).await?;
+        }
+    }
+    Ok(true)
+}
+
+fn status(started_at: std::time::Instant) -> WorkerStatus {
+    WorkerStatus {
+        pid: std::process::id(),
+        uptime_secs: started_at.elapsed().as_secs(),
+        open_connections: crate::proxy::open_connections() as u64,
+    }
+}
+
+/// Applies a quarantine change of the master without reporting it back.
+async fn apply_quarantine(
+    channels: &crate::server::ServerChannels,
+    change: QuarantineChange,
+) -> anyhow::Result<()> {
+    channels
+        .command
+        .send(ServerCommand::ApplyQuarantine {
+            change,
+            notify: false,
+        })
+        .await
+        .context("the server of the worker is gone")
+}
+
+/// Writes the configuration of the master into the storage and reloads the server from it.
+async fn apply_config(
+    new_config: WorkerConfig,
+    storage: &Arc<MemoryStorage>,
+    channels: &crate::server::ServerChannels,
+) -> anyhow::Result<()> {
+    let certs = certs_of(&new_config.certs)?;
+    storage
+        .replace(
+            new_config.app,
+            new_config.ports,
+            new_config.proxies,
+            new_config.access_lists,
+            certs,
+        )
+        .await;
+    channels
+        .command
+        .send(ServerCommand::WorkerApply)
+        .await
+        .context("the server of the worker is gone")?;
+    info!("applied the new configuration of the master");
+    Ok(())
 }
 
 /// Reads one command on a blocking thread, so the runtime stays free. `None` ends the channel.

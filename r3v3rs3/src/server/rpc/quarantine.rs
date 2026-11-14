@@ -1,6 +1,7 @@
 use super::RpcMethod;
 use crate::accounts::Permission;
 use crate::audit::AuditRecord;
+use crate::server::ipc::QuarantineChange;
 use crate::server::state::ServerState;
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
@@ -39,7 +40,9 @@ impl RpcMethod for QuarantineIp {
                 ip: self.ip.to_string(),
             });
         }
-        Ok(quarantine.quarantine(self.ip, self.reason, self.duration_seconds))
+        let entry = quarantine.quarantine(self.ip, self.reason, self.duration_seconds);
+        state.forward_to_worker(QuarantineChange::Add(Box::new(entry.clone())));
+        Ok(entry)
     }
 
     fn audit(&self) -> Option<AuditRecord> {
@@ -61,6 +64,7 @@ impl RpcMethod for UnquarantineIp {
     const PERMISSION: Permission = Permission::Edit;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
+        state.forward_to_worker(QuarantineChange::Remove(self.ip));
         Ok(state.registries.quarantine.unban(&self.ip))
     }
 

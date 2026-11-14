@@ -187,7 +187,39 @@ impl AutoQuarantineTracker {
         self.quarantine_internal(ip, reason, duration_seconds, 1, now)
     }
 
+    /// Applies a quarantine that another process of this server decided, without a notification,
+    /// so the change does not travel back to that process.
+    pub fn restore(&self, entry: &QuarantinedIpEntry) {
+        self.insert_ban(
+            entry.ip,
+            entry.reason.clone(),
+            entry.remaining_seconds,
+            entry.violations,
+            Instant::now(),
+        );
+    }
+
+    /// Applies a quarantine of another process of this server and notifies about it, for the
+    /// webhook of the master.
+    pub fn record(&self, entry: &QuarantinedIpEntry) {
+        self.restore(entry);
+        self.notify_quarantine(entry);
+    }
+
     fn quarantine_internal(
+        &self,
+        ip: IpAddr,
+        reason: String,
+        duration_seconds: u64,
+        violations: u32,
+        now: Instant,
+    ) -> QuarantinedIpEntry {
+        let result = self.insert_ban(ip, reason, duration_seconds, violations, now);
+        self.notify_quarantine(&result);
+        result
+    }
+
+    fn insert_ban(
         &self,
         ip: IpAddr,
         reason: String,
@@ -214,17 +246,14 @@ impl AutoQuarantineTracker {
         };
         bans.insert(ip, entry);
 
-        let result = QuarantinedIpEntry {
+        QuarantinedIpEntry {
             ip,
             reason,
             violations,
             banned_at,
             banned_until: banned_until_ms,
             remaining_seconds: duration_seconds.max(1),
-        };
-
-        self.notify_quarantine(&result);
-        result
+        }
     }
 
     fn notify_quarantine(&self, entry: &QuarantinedIpEntry) {
@@ -345,6 +374,26 @@ mod tests {
         let quarantined = tracker.record_violation(ip, "Scanner /.env".to_string(), 1);
         assert!(quarantined.is_some());
         assert!(tracker.is_quarantined(&ip));
+    }
+
+    #[test]
+    fn a_restored_quarantine_blocks_without_a_notification() {
+        let tracker = AutoQuarantineTracker::default();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        tracker.set_notifier(tx);
+        let entry = QuarantinedIpEntry {
+            ip: "203.0.113.70".parse().unwrap(),
+            reason: "Worker".to_string(),
+            violations: 5,
+            banned_at: 0,
+            banned_until: 0,
+            remaining_seconds: 600,
+        };
+        tracker.restore(&entry);
+        assert!(tracker.is_quarantined(&entry.ip));
+        assert!(rx.try_recv().is_err());
+        tracker.record(&entry);
+        assert_eq!(rx.try_recv().unwrap().ip, entry.ip);
     }
 
     #[test]

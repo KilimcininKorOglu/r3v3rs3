@@ -3,6 +3,7 @@ use super::acme_schedule::AcmeSchedule;
 use super::cert_list::CertList;
 use super::connection::{self, HttpChallenges};
 use super::discovery::{self, DiscoveryRegistry, DiscoveryTasks};
+use super::ipc::QuarantineChange;
 use super::proxy_list::ProxyList;
 use super::quic::QuicListenerPool;
 use super::rpc::proxies::validate_proxy;
@@ -105,6 +106,8 @@ pub struct ServerState {
     config_dir: PathBuf,
     /// What the supervised worker serves, as its supervisor reports it.
     worker_status: Option<WorkerEntry>,
+    /// Carries the quarantine changes of the master to its worker in the workers mode.
+    worker_link: Option<mpsc::Sender<QuarantineChange>>,
     /// The tag of the newest release, when it is newer than this build.
     update_available: Option<String>,
     /// The check interval that the update check task reads again on every round.
@@ -368,6 +371,7 @@ impl ServerState {
             platform,
             config_dir: config_dir.to_path_buf(),
             worker_status: None,
+            worker_link: None,
             update_available: None,
             update_interval: watch::Sender::new(check_interval),
         };
@@ -550,8 +554,45 @@ impl ServerState {
             ServerCommand::CertificateNotificationDelivered { key } => {
                 self.record_certificate_notification_sent(key).await;
             }
+            other => self.handle_quarantine_command(other),
+        }
+    }
+
+    /// Handles the commands that keep the quarantine of the master and its worker equal.
+    fn handle_quarantine_command(&mut self, cmd: ServerCommand) {
+        match cmd {
+            ServerCommand::SetWorkerLink { sender } => self.worker_link = Some(sender),
+            ServerCommand::ApplyQuarantine { change, notify } => {
+                self.apply_quarantine_change(change, notify);
+            }
+            ServerCommand::SetQuarantineNotifier { sender } => {
+                self.registries.quarantine.set_notifier(sender);
+            }
             // `handle_command` handles the other commands before it calls this method.
             _ => {}
+        }
+    }
+
+    fn apply_quarantine_change(&self, change: QuarantineChange, notify: bool) {
+        let quarantine = &self.registries.quarantine;
+        match change {
+            QuarantineChange::Add(entry) if notify => quarantine.record(&entry),
+            QuarantineChange::Add(entry) => quarantine.restore(&entry),
+            QuarantineChange::Remove(ip) => {
+                quarantine.unban(&ip);
+            }
+        }
+    }
+
+    /// Passes a quarantine change of the master to its worker. The worker serves the ports in
+    /// the workers mode, so a ban or a release that stays in the master changes nothing.
+    pub fn forward_to_worker(&self, change: QuarantineChange) {
+        let Some(link) = &self.worker_link else {
+            return;
+        };
+        // The server loop must not wait, so a full channel drops the change and logs it.
+        if let Err(err) = link.try_send(change) {
+            error!(%err, "failed to pass a quarantine change to the worker");
         }
     }
 
@@ -708,6 +749,16 @@ impl ServerState {
     /// Reloads the parts of the state that the configuration of the master replaces. Only the
     /// worker process receives this command, because only its storage is a memory storage.
     async fn apply_worker_state(&mut self) {
+        let app = self.storage.load_app_config().await;
+        let geoip_changed = self.config.geoip != app.geoip;
+        let themes_changed = self.config.error_page_themes != app.error_page_themes;
+        self.registries
+            .quarantine
+            .update_config(app.auto_quarantine.clone());
+        self.apply_config_registries(&app, geoip_changed, themes_changed)
+            .await;
+        // The ports read their limits from the settings, so they reload after them.
+        self.config = app;
         self.reload_ports().await;
         self.reload_manual_proxies().await;
         self.reload_access_lists().await;

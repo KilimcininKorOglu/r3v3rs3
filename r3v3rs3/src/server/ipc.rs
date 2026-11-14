@@ -9,13 +9,14 @@ use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::event::ServerEvent;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::proxy::ProxyEntry;
+use r3v3rs3_api::quarantine::QuarantinedIpEntry;
 use serde_derive::{Deserialize, Serialize};
 use std::io::{Read, Result, Write};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 /// The version of the frame layout and of the messages. A peer that reads another version
 /// refuses the channel, so an old master and a new worker never mix their state.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 const MAX_FRAME_SIZE: u32 = 64 * 1024 * 1024;
 
@@ -47,6 +48,10 @@ pub enum WorkerCommand {
     Ping,
     /// The worker answers with [`WorkerEvent::Status`].
     Status,
+    /// Blocks an address that the master quarantined.
+    Quarantine(Box<QuarantinedIpEntry>),
+    /// Releases an address that the master released.
+    Unquarantine(IpAddr),
 }
 
 /// The configuration that a worker needs. It reads nothing from the storage.
@@ -85,6 +90,15 @@ pub enum WorkerEvent {
     Status(Box<WorkerStatus>),
     /// A server event of the worker, for example a status update.
     Event(ServerEvent),
+    /// The worker quarantined an address, so the master lists it and sends the webhook.
+    Quarantined(Box<QuarantinedIpEntry>),
+}
+
+/// A quarantine change that one process of this server passes to another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuarantineChange {
+    Add(Box<QuarantinedIpEntry>),
+    Remove(IpAddr),
 }
 
 /// The live state of a worker process.
@@ -144,6 +158,27 @@ mod tests {
         let received: WorkerCommand = read_frame(&mut receiver).unwrap();
         writer.join().unwrap();
         assert_eq!(received, expected);
+    }
+
+    #[test]
+    fn the_quarantine_commands_round_trip() {
+        let entry = QuarantinedIpEntry {
+            ip: "203.0.113.83".parse().unwrap(),
+            reason: "manual".into(),
+            violations: 1,
+            banned_at: 0,
+            banned_until: 0,
+            remaining_seconds: 60,
+        };
+        for command in [
+            WorkerCommand::Quarantine(Box::new(entry.clone())),
+            WorkerCommand::Unquarantine(entry.ip),
+        ] {
+            let mut bytes = Vec::new();
+            write_frame(&mut bytes, &command).unwrap();
+            let read: WorkerCommand = read_frame(&mut bytes.as_slice()).unwrap();
+            assert_eq!(read, command);
+        }
     }
 
     #[test]

@@ -146,18 +146,22 @@ fn send_handshake(
     Ok(())
 }
 
-/// Checks that the heartbeat and the status request of the master get their answers.
-fn check_ping_and_status(master: &mut std::os::unix::net::UnixStream) -> anyhow::Result<()> {
-    // The heartbeat of the master gets an answer.
+/// Checks that the heartbeat of the master gets its answer.
+fn expect_pong(master: &mut std::os::unix::net::UnixStream) -> anyhow::Result<()> {
     write_frame(master, &WorkerCommand::Ping)?;
     // The worker announces its configuration over the same channel, so the events
     // that arrive before the answer do not block it.
     loop {
         let frame: WorkerEvent = read_frame(master)?;
         if matches!(frame, WorkerEvent::Pong) {
-            break;
+            return Ok(());
         }
     }
+}
+
+/// Checks that the heartbeat and the status request of the master get their answers.
+fn check_ping_and_status(master: &mut std::os::unix::net::UnixStream) -> anyhow::Result<()> {
+    expect_pong(master)?;
 
     // The status request reports the live state of the worker process.
     write_frame(master, &WorkerCommand::Status)?;
@@ -212,6 +216,9 @@ fn start_worker(
     let child = spawn_worker(&worker_end, log_dir)?;
 
     send_handshake(&mut master, proxy_addr, config, child_fd)?;
+    // The worker holds its own copy now. Without this close a worker that exits leaves the
+    // channel open, and the test waits for an answer forever instead of failing.
+    unsafe { libc::close(child_fd) };
 
     // The kernel keeps the listener alive through the descriptor of the worker only, so every
     // connection reaches the worker.
@@ -361,6 +368,112 @@ async fn the_supervisor_serves_the_ports_through_a_worker() -> anyhow::Result<()
         panic!("the supervisor task failed: {err}");
     }
     server_task.await??;
+    std::fs::remove_dir_all(&log_dir).ok();
+    Ok(())
+}
+
+/// A one minute quarantine of the address.
+fn quarantine_entry(ip: std::net::IpAddr) -> r3v3rs3_api::quarantine::QuarantinedIpEntry {
+    r3v3rs3_api::quarantine::QuarantinedIpEntry {
+        ip,
+        reason: "manual".into(),
+        violations: 1,
+        banned_at: 0,
+        banned_until: 0,
+        remaining_seconds: 60,
+    }
+}
+
+/// A master server without ports whose quarantine changes go to the returned channel, as they
+/// go to its worker in the workers mode.
+async fn master_with_link() -> anyhow::Result<(
+    r3v3rs3::server::ServerChannels,
+    tokio::sync::mpsc::Receiver<r3v3rs3::server::ipc::QuarantineChange>,
+    tokio::task::JoinHandle<anyhow::Result<()>>,
+)> {
+    let storage = common::TestStorage::builder().build();
+    let log_dir = std::env::temp_dir().join(format!("r3v3rs3-wquarantine-{}", std::process::id()));
+    std::fs::create_dir_all(&log_dir)?;
+    let app_info = r3v3rs3::config::new_appinfo(&log_dir, &log_dir);
+    let (server, channels) =
+        r3v3rs3::server::Server::new_shared(app_info, std::sync::Arc::new(storage)).await;
+    let server_task = tokio::spawn(server.start());
+    let (sender, link) = tokio::sync::mpsc::channel(4);
+    channels
+        .command
+        .send(r3v3rs3::command::ServerCommand::SetWorkerLink { sender })
+        .await?;
+    Ok((channels, link, server_task))
+}
+
+/// In the workers mode the worker serves the ports, so a quarantine change of the master goes
+/// to the worker.
+#[tokio::test]
+async fn the_quarantine_changes_of_the_master_go_to_the_worker() -> anyhow::Result<()> {
+    use r3v3rs3::server::ipc::QuarantineChange;
+    use r3v3rs3::server::rpc::quarantine::{QuarantineIp, UnquarantineIp};
+
+    let (mut channels, mut link, server_task) = master_with_link().await?;
+    let ip: std::net::IpAddr = "203.0.113.80".parse()?;
+    let quarantine = QuarantineIp {
+        ip,
+        reason: "manual".into(),
+        duration_seconds: 60,
+    };
+    common::call(&mut channels, quarantine).await??;
+    assert!(matches!(link.recv().await, Some(QuarantineChange::Add(entry)) if entry.ip == ip));
+    common::call(&mut channels, UnquarantineIp { ip }).await??;
+    assert_eq!(link.recv().await, Some(QuarantineChange::Remove(ip)));
+    channels.shutdown();
+    server_task.await?
+}
+
+/// A quarantine of the worker shows in the list of the master.
+#[tokio::test]
+async fn a_quarantine_of_the_worker_shows_in_the_master() -> anyhow::Result<()> {
+    use r3v3rs3::command::ServerCommand;
+    use r3v3rs3::server::ipc::QuarantineChange;
+    use r3v3rs3::server::rpc::quarantine::GetQuarantinedList;
+
+    let (mut channels, _link, server_task) = master_with_link().await?;
+    let worker_ban = quarantine_entry("203.0.113.81".parse()?);
+    let change = QuarantineChange::Add(Box::new(worker_ban.clone()));
+    channels
+        .command
+        .send(ServerCommand::ApplyQuarantine {
+            change,
+            notify: true,
+        })
+        .await?;
+    let list = common::call(&mut channels, GetQuarantinedList).await??;
+    let ips = list.iter().map(|entry| entry.ip).collect::<Vec<_>>();
+    assert_eq!(ips, [worker_ban.ip]);
+    channels.shutdown();
+    server_task.await?
+}
+
+/// Starts a worker with a TCP proxy and no client, and returns the master end of its channel.
+async fn start_plain_worker(
+    log_dir: &std::path::Path,
+) -> anyhow::Result<(std::os::unix::net::UnixStream, std::process::Child)> {
+    let (upstream_port, proxy_port) = (alloc_tcp_port().await?, alloc_tcp_port().await?);
+    let (listener, proxy_addr) = bind_proxy_listener(&proxy_port)?;
+    std::fs::create_dir_all(log_dir)?;
+    let config = worker_config(&proxy_port, &upstream_port.socket_addr());
+    start_worker(listener, proxy_addr, &config, log_dir)
+}
+
+/// The worker applies the quarantine commands of the master and keeps answering.
+#[tokio::test]
+async fn a_worker_takes_the_quarantine_commands_of_the_master() -> anyhow::Result<()> {
+    let log_dir = std::env::temp_dir().join(format!("r3v3rs3-wqcmd-{}", std::process::id()));
+    let (mut master, child) = start_plain_worker(&log_dir).await?;
+    let entry = quarantine_entry("203.0.113.82".parse()?);
+    let ip = entry.ip;
+    write_frame(&mut master, &WorkerCommand::Quarantine(Box::new(entry)))?;
+    write_frame(&mut master, &WorkerCommand::Unquarantine(ip))?;
+    expect_pong(&mut master)?;
+    stop_worker(master, child).await?;
     std::fs::remove_dir_all(&log_dir).ok();
     Ok(())
 }

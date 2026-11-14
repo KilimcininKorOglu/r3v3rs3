@@ -53,15 +53,17 @@ impl MemoryStorage {
         }
     }
 
-    /// Replaces the ports, the proxies and the access lists of a new configuration.
+    /// Replaces the settings, the ports, the proxies and the access lists of a new configuration.
     pub async fn replace(
         &self,
+        app: AppConfig,
         ports: Vec<PortEntry>,
         proxies: Vec<ProxyEntry>,
         access_lists: Vec<AccessListEntry>,
         certs: Vec<Arc<Cert>>,
     ) {
         let mut data = self.data.lock().await;
+        data.app = app;
         data.ports = ports;
         data.proxies = proxies;
         data.access_lists = access_lists;
@@ -252,9 +254,19 @@ mod tests {
         assert_eq!(storage.load_ports().await.len(), 1);
 
         storage
-            .replace(Vec::new(), Vec::new(), Vec::new(), Vec::new())
+            .replace(
+                AppConfig {
+                    public_url: Some("https://panel.example.com".parse().unwrap()),
+                    ..Default::default()
+                },
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            )
             .await;
         assert!(storage.load_ports().await.is_empty());
+        assert!(storage.load_app_config().await.public_url.is_some());
         assert!(storage.load_accounts().await.unwrap().is_empty());
     }
 }
