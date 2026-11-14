@@ -174,6 +174,8 @@ A private repository needs a [Git provider](#git-providers) connection or an acc
 
 The server that runs r3v3rs3 needs the `git` binary. r3v3rs3 runs `git` without the configuration of the host, without hooks and only over HTTPS. The build context holds no `.git` directory, and a symbolic link in it stays a link, so a build does not read a file from outside the repository. The context can hold up to 512 MiB.
 
+The build context leaves out the files that `.dockerignore` names. Like the Docker CLI, r3v3rs3 always keeps the Dockerfile and `.dockerignore` in the context, also when `.dockerignore` names them.
+
 Docker builds the image with its builder. Two builds run at the same time, and every other build waits. The builder keeps the stages of a multi-stage Dockerfile as its build cache, so the next build of the same app is faster. `docker image prune` removes that cache.
 
 #### BuildKit and Cache Mounts

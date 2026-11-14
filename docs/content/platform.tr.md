@@ -174,6 +174,8 @@ Private bir repo, bir [Git sağlayıcı](#git-saglayicilari) bağlantısı veya 
 
 r3v3rs3'ü çalıştıran sunucuda `git` binary'si bulunmalıdır. r3v3rs3, `git`'i host'un yapılandırması ve hook'lar olmadan, yalnız HTTPS üzerinden çalıştırır. Build context'inde `.git` dizini yer almaz. Context'teki bir sembolik link link olarak kalır. Bu yüzden bir build, repo dışındaki bir dosyayı okuyamaz. Context en fazla 512 MiB olabilir.
 
+Build context'i `.dockerignore` dosyasının adını verdiği dosyaları almaz. r3v3rs3, Docker CLI gibi, `.dockerignore` adlarını verse bile Dockerfile'ı ve `.dockerignore` dosyasını context'te her zaman tutar.
+
 Docker image'ı builder ile build eder. Aynı anda iki build çalışır, diğerleri sırada bekler. Builder, çok aşamalı bir Dockerfile'ın aşamalarını build cache'i olarak saklar. Bu yüzden aynı uygulamanın sonraki build'i daha hızlı biter. `docker image prune` bu cache'i siler.
 
 #### BuildKit ve Derleme Önbellekleri

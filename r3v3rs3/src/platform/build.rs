@@ -84,9 +84,10 @@ impl Platform {
         if let Some(img_id) = try_buildkit(source, &checkout, &tag).await {
             return Ok(img_id);
         }
-        let context = source.context.clone();
+        let (context, dockerfile) = (source.context.clone(), source.dockerfile.clone());
         let archive =
-            tokio::task::spawn_blocking(move || context_archive(&checkout, &context)).await??;
+            tokio::task::spawn_blocking(move || context_archive(&checkout, &context, &dockerfile))
+                .await??;
         runtime.build_image(archive, &source.dockerfile, &tag).await
     }
 
