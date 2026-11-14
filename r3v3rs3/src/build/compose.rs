@@ -84,6 +84,7 @@ pub trait ComposeRunner: Send + Sync {
 /// The runner that calls the `docker` binary with the Compose plugin.
 pub struct DockerCompose {
     docker_host: String,
+    docker_config: Option<std::path::PathBuf>,
 }
 
 impl DockerCompose {
@@ -91,7 +92,15 @@ impl DockerCompose {
     pub fn new(docker_host: impl Into<String>) -> Self {
         Self {
             docker_host: docker_host.into(),
+            docker_config: None,
         }
+    }
+
+    /// The writable config directory of the `docker` CLI. A Compose build runs through buildx,
+    /// which writes its state there, and the service user of the server has no home directory.
+    pub fn with_docker_config(mut self, dir: Option<std::path::PathBuf>) -> Self {
+        self.docker_config = dir;
+        self
     }
 
     fn command(&self, name: &ProjectName, dir: &Path) -> Command {
@@ -105,6 +114,9 @@ impl DockerCompose {
             if let Some(value) = std::env::var_os(key) {
                 command.env(key, value);
             }
+        }
+        if let Some(config) = &self.docker_config {
+            command.env("DOCKER_CONFIG", config);
         }
         command
             .args([

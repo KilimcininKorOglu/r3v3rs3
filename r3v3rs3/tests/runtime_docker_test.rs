@@ -8,12 +8,13 @@ use anyhow::{Context as _, ensure};
 use r3v3rs3::build::compose::{ComposeProject, ComposeRunner, DockerCompose};
 use r3v3rs3::kv::http::ApiClient;
 use r3v3rs3::runtime::ContainerRuntime;
-use r3v3rs3::runtime::docker::DockerRuntime;
+use r3v3rs3::runtime::docker::{DockerCli, DockerRuntime};
 use r3v3rs3_api::container::{
     APP_LABEL, AppName, ContainerName, ContainerSpec, EnvVar, ImageRef, NetworkName, ProjectName,
     ResourceLimits, RestartPolicy,
 };
 use r3v3rs3_api::discovery::Endpoint;
+use r3v3rs3_api::platform::BuildKitConfig;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -270,7 +271,7 @@ async fn build(runtime: &DockerRuntime, tag: &ImageRef) -> anyhow::Result<()> {
     let dockerfile = format!("FROM {IMAGE}\nLABEL r3v3rs3.test=build\n");
     let archive = context("docker/Dockerfile", &dockerfile)?;
     let id = runtime
-        .build_image(archive, &"docker/Dockerfile".parse()?, tag)
+        .build_image(archive, &"docker/Dockerfile".parse()?, tag, None)
         .await?;
     let info = runtime.inspect_image(tag).await?.context("built image")?;
     ensure_eq!(info.id, id);
@@ -278,11 +279,63 @@ async fn build(runtime: &DockerRuntime, tag: &ImageRef) -> anyhow::Result<()> {
     // The image has no shell, so the RUN step fails.
     let failing = context("Dockerfile", &format!("FROM {IMAGE}\nRUN false\n"))?;
     let error = runtime
-        .build_image(failing, &"Dockerfile".parse()?, tag)
+        .build_image(failing, &"Dockerfile".parse()?, tag, None)
         .await
         .unwrap_err();
     let message = format!("{error:#}");
     ensure!(message.contains("RUN false"), "{message}");
+    Ok(())
+}
+
+/// A here-document runs only with BuildKit, so the classic builder refuses the Dockerfile and a
+/// BuildKit build through the `docker` binary builds it.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn an_image_builds_with_buildkit_through_the_docker_binary() -> anyhow::Result<()> {
+    let work = std::env::temp_dir().join(format!("r3v3rs3-buildkit-{:08x}", rand::random::<u32>()));
+    let docker_config = r3v3rs3::build::buildkit::docker_config_dir(&work).await?;
+    let runtime = runtime()?.with_cli(DockerCli {
+        docker_host: docker_host(),
+        work_dir: work.join("builds"),
+        docker_config,
+    });
+    let tag: ImageRef = format!("r3v3rs3/rt-buildkit:{:08x}", rand::random::<u32>()).parse()?;
+    let result = buildkit_build(&runtime, &tag).await;
+    let removed = runtime.remove_image(&tag).await;
+    std::fs::remove_dir_all(&work)?;
+    result?;
+    removed
+}
+
+async fn buildkit_build(runtime: &DockerRuntime, tag: &ImageRef) -> anyhow::Result<()> {
+    let dockerfile = format!("FROM {IMAGE}\nCOPY <<EOF /r3v3rs3-test\nbuilt\nEOF\n");
+    let dockerfile_path: r3v3rs3_api::git::RelPath = "Dockerfile".parse()?;
+    let classic = runtime
+        .build_image(
+            context("Dockerfile", &dockerfile)?,
+            &dockerfile_path,
+            tag,
+            None,
+        )
+        .await;
+    ensure!(
+        classic.is_err(),
+        "the classic builder built a here-document"
+    );
+    let config = BuildKitConfig {
+        enabled: true,
+        ..Default::default()
+    };
+    let id = runtime
+        .build_image(
+            context("Dockerfile", &dockerfile)?,
+            &dockerfile_path,
+            tag,
+            Some(&config),
+        )
+        .await?;
+    let info = runtime.inspect_image(tag).await?.context("built image")?;
+    ensure_eq!(info.id, id);
     Ok(())
 }
 

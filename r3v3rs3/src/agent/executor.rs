@@ -63,7 +63,16 @@ impl Executor {
             }
             AgentRequest::BuildImage { dockerfile, tag } => {
                 let context = read_payload(&mut stream, MAX_PAYLOAD).await?;
-                self.build_image(context, &dockerfile, &tag).await
+                self.build_image(context, &dockerfile, &tag, None).await
+            }
+            AgentRequest::BuildImageWithBuildKit {
+                dockerfile,
+                tag,
+                buildkit,
+            } => {
+                let context = read_payload(&mut stream, MAX_PAYLOAD).await?;
+                self.build_image(context, &dockerfile, &tag, Some(&buildkit))
+                    .await
             }
             AgentRequest::ComposeConfig(request) => {
                 let checkout = read_payload(&mut stream, MAX_PAYLOAD).await?;
@@ -169,9 +178,13 @@ impl Executor {
         context: Vec<u8>,
         dockerfile: &RelPath,
         tag: &ImageRef,
+        buildkit: Option<&r3v3rs3_api::platform::BuildKitConfig>,
     ) -> anyhow::Result<AgentOutput> {
         check_prefix(tag.repository(), BUILD_REPOSITORY_PREFIX)?;
-        let id = self.runtime.build_image(context, dockerfile, tag).await?;
+        let id = self
+            .runtime
+            .build_image(context, dockerfile, tag, buildkit)
+            .await?;
         Ok(AgentOutput::Id { id })
     }
 

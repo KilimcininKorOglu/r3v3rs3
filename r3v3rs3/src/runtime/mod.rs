@@ -9,6 +9,7 @@ use r3v3rs3_api::container::{
     ImageInfo, ImageRef, NetworkName, ProjectName, ResourceLimits,
 };
 use r3v3rs3_api::git::RelPath;
+use r3v3rs3_api::platform::BuildKitConfig;
 use std::time::Duration;
 
 #[async_trait::async_trait]
@@ -33,12 +34,15 @@ pub trait ContainerRuntime: Send + Sync {
     async fn inspect_image(&self, image: &ImageRef) -> anyhow::Result<Option<ImageInfo>>;
 
     /// Builds an image from a tar archive of the build context and tags it with `tag`.
-    /// `dockerfile` is relative to the root of the context. Returns the image id.
+    /// `dockerfile` is relative to the root of the context. An enabled `buildkit` builds with
+    /// BuildKit on the host of the runtime, and its failure is the failure of the build.
+    /// Returns the image id.
     async fn build_image(
         &self,
         context: Vec<u8>,
         dockerfile: &RelPath,
         tag: &ImageRef,
+        buildkit: Option<&BuildKitConfig>,
     ) -> anyhow::Result<String>;
 
     /// Removes an image reference. A missing image, and an image that a container still uses,

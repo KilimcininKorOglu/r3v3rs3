@@ -14,6 +14,7 @@ use r3v3rs3::config::new_appinfo;
 use r3v3rs3::config::sqlite::SqliteStorage;
 use r3v3rs3::config::storage::Storage;
 use r3v3rs3::log::DatabaseLayer;
+use r3v3rs3::runtime::docker::DockerCli;
 use r3v3rs3::server::{Server, ServerChannels};
 use r3v3rs3_api::app::{AppConfig, AppInfo};
 use r3v3rs3_api::auth::MIN_PASSWORD_LENGTH;
@@ -69,9 +70,16 @@ async fn agent(args: AgentArgs) -> anyhow::Result<()> {
         .as_deref()
         .map(str::parse::<EnrollmentToken>)
         .transpose()?;
-    let runtime = Arc::new(r3v3rs3::platform::docker_runtime(&args.docker)?);
+    let docker_config = r3v3rs3::build::buildkit::docker_config_dir(&data_dir).await?;
+    let runtime = Arc::new(
+        r3v3rs3::platform::docker_runtime(&args.docker)?.with_cli(DockerCli {
+            docker_host: args.docker.clone(),
+            work_dir: data_dir.join("builds"),
+            docker_config: docker_config.clone(),
+        }),
+    );
     let compose = AgentCompose::new(
-        Arc::new(DockerCompose::new(args.docker)),
+        Arc::new(DockerCompose::new(args.docker).with_docker_config(docker_config)),
         data_dir.join("compose"),
     );
     let executor = Executor::new(runtime, compose);

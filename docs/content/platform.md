@@ -193,6 +193,12 @@ When building images for Git applications, r3v3rs3 supports Docker Buildx / Buil
 - **Custom Cache Mounts**: Add custom target paths inside the build container.
 - **External Cache Backends**: Configure `cache_from` and `cache_to` (e.g. `type=registry,ref=myregistry/app:cache,mode=max` or `type=local,src=...`) to reuse build layers across multiple worker nodes or CI runs.
 
+A BuildKit build runs on the host of the target of the app: on the server for the local target, and on the agent host for an agent target. An agent target needs r3v3rs3 3.3.1 or newer on the agent, and an older agent fails the deployment with a message to upgrade it. The host needs the `docker` binary with the buildx plugin.
+
+When the BuildKit build fails, the deployment fails with the end of the buildx output. r3v3rs3 does not fall back to the classic builder, because the classic builder rejects the BuildKit instructions of the Dockerfile.
+
+buildx keeps its state in the config directory of the `docker` CLI, `~/.docker` by default. The r3-server service of `install.sh` runs as the `r3v3rs3` user without a writable home directory. When `~/.docker` cannot be created and DOCKER_CONFIG is not set, r3v3rs3 gives the CLI the `docker` directory in the config directory (the `docker` directory in the data directory on an agent) with mode `0700`. Compose apps use the same directory.
+
 ### Compose Source
 
 An app with a `compose` source starts the Docker Compose file of a branch of a repository:

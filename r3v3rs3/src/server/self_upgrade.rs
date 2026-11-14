@@ -111,7 +111,7 @@ fn parse_release_for(json: &str, current: &str, target: &str) -> anyhow::Result<
 }
 
 /// Compares the numeric parts of two versions and ignores a leading `v` and any suffix.
-fn version_of(version: &str) -> Vec<u64> {
+pub(crate) fn version_of(version: &str) -> Vec<u64> {
     version
         .trim_start_matches('v')
         .split(|c: char| !c.is_ascii_digit())

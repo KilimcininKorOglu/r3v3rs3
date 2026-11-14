@@ -53,7 +53,7 @@ use crate::keys::crypto::ClusterKeys;
 use crate::keys::key_file::{load_keys, write_new_key_file};
 use crate::kv::http::ApiClient;
 use crate::runtime::ContainerRuntime;
-use crate::runtime::docker::{DockerRuntime, ExecHandle};
+use crate::runtime::docker::{DockerCli, DockerRuntime, ExecHandle};
 use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::container::{
@@ -320,7 +320,6 @@ impl Platform {
         audit: Option<Arc<AuditLog>>,
         pool: Option<sqlx::SqlitePool>,
     ) -> anyhow::Result<Self> {
-        let local = docker_runtime(&config.platform.docker)?;
         let keys = open_keys(config_dir).await?;
         let store = open_platform_store(config_dir, pool).await?;
         let now = crate::clock::unix_ms();
@@ -329,6 +328,12 @@ impl Platform {
         // A stopped server can leave the checkouts of its unfinished builds.
         let build_dir = config_dir.join(build::BUILD_DIR);
         build::remove_dir(&build_dir).await?;
+        let docker_config = crate::build::buildkit::docker_config_dir(config_dir).await?;
+        let local = docker_runtime(&config.platform.docker)?.with_cli(DockerCli {
+            docker_host: config.platform.docker.clone(),
+            work_dir: build_dir.clone(),
+            docker_config: docker_config.clone(),
+        });
         let pki = agent_pki(&config.platform, config_dir).await?;
         let agents = Arc::new(AgentRegistry::default());
         let public_url = resolve_public_url(config, &store).await?;
@@ -354,7 +359,10 @@ impl Platform {
             fetcher: Arc::new(GitFetcher),
             builds: Semaphore::new(build::MAX_BUILDS),
             build_dir,
-            compose: Arc::new(DockerCompose::new(config.platform.docker.clone())),
+            compose: Arc::new(
+                DockerCompose::new(config.platform.docker.clone())
+                    .with_docker_config(docker_config),
+            ),
             compose_dir: config_dir.join(compose::COMPOSE_DIR),
             backup_dir: config_dir.join(backup::BACKUP_DIR),
             http: tokio::sync::OnceCell::new(),

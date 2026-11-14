@@ -274,6 +274,7 @@ pub enum AgentRequest {
     PullImage { image: ImageRef },
     InspectImage { image: ImageRef },
     BuildImage { dockerfile: RelPath, tag: ImageRef },          // payload: the build context
+    BuildImageWithBuildKit { dockerfile: RelPath, tag: ImageRef, buildkit: BuildKitConfig }, // since 3.3.1
     RemoveImage { image: ImageRef },
     PruneProjectImages { project: ProjectName, all: bool },
     EnsureNetwork { network: NetworkName, app: AppName },

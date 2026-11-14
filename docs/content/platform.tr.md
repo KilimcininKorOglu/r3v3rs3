@@ -193,6 +193,12 @@ Git tabanlı uygulamalar derlenirken r3v3rs3, otomatik önbellek bağlama (cache
 - **Özel Önbellek Bağlamaları**: Konteyner içinde satır başına özel hedef dizin yolları belirleyebilirsiniz.
 - **Dış Önbellek Desteği**: Katmanların birden çok sunucu veya CI çalıştırmasında yeniden kullanılabilmesi için `cache_from` ve `cache_to` parametrelerini (ör. `type=registry,ref=myregistry/app:cache,mode=max` veya `type=local,src=...`) yapılandırabilirsiniz.
 
+BuildKit build'i uygulamanın target'ının host'unda çalışır: yerel target için sunucuda, agent target'ı için agent host'unda. Agent target'ı agent'ta r3v3rs3 3.3.1 veya daha yeni bir sürüm ister. Daha eski bir agent deployment'ı, agent'ı yükseltmeyi söyleyen bir mesajla başarısız yapar. Host'ta buildx plugin'i olan `docker` binary'si bulunmalıdır.
+
+BuildKit build'i başarısız olursa deployment, buildx çıktısının sonuyla başarısız olur. r3v3rs3 klasik builder'a geri dönmez, çünkü klasik builder Dockerfile'ın BuildKit yönergelerini reddeder.
+
+buildx durumunu `docker` CLI'nın config dizininde tutar, varsayılan olarak `~/.docker`. `install.sh` ile kurulan r3-server servisi yazılabilir bir home dizini olmayan `r3v3rs3` kullanıcısıyla çalışır. `~/.docker` oluşturulamıyorsa ve DOCKER_CONFIG tanımlı değilse r3v3rs3, CLI'ya config dizinindeki `docker` dizinini (agent'ta data dizinindeki `docker` dizinini) `0700` moduyla verir. Compose uygulamaları da aynı dizini kullanır.
+
 ### Compose kaynağı
 
 `compose` kaynağı olan bir uygulama, bir reponun bir branch'indeki Docker Compose dosyasını başlatır:

@@ -26,6 +26,11 @@ pub struct TestAgent {
 impl TestAgent {
     /// Connects a new agent to `target` in `registry`.
     pub fn connect(registry: &AgentRegistry, target: ShortId) -> Self {
+        Self::connect_with_version(registry, target, VERSION)
+    }
+
+    /// Connects a new agent that reports `version` to `target` in `registry`.
+    pub fn connect_with_version(registry: &AgentRegistry, target: ShortId, version: &str) -> Self {
         let runtime = Arc::new(FakeRuntime::default());
         let compose = Arc::new(FakeCompose::new(runtime.clone()));
         let dir = std::env::temp_dir().join(format!(
@@ -50,7 +55,7 @@ impl TestAgent {
         registry.insert(
             target,
             link.clone(),
-            VERSION.to_string(),
+            version.to_string(),
             link_task.abort_handle(),
             1,
         );

@@ -17,6 +17,7 @@ use r3v3rs3_api::container::{
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::git::RelPath;
 use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::platform::BuildKitConfig;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -33,6 +34,23 @@ impl RemoteRuntime {
             agents,
             forwarders,
         }
+    }
+
+    /// Fails unless the connected agent runs `minimum` or a newer release.
+    fn require_version(&self, minimum: &str) -> anyhow::Result<()> {
+        let status = self
+            .agents
+            .status(self.target)
+            .ok_or(Error::AgentOffline { id: self.target })?;
+        let version_of = crate::server::self_upgrade::version_of;
+        if version_of(&status.version) < version_of(minimum) {
+            return Err(anyhow!(
+                "the agent of the target {} runs r3v3rs3 {}; upgrade it to {minimum} or newer to build with BuildKit",
+                self.target,
+                status.version
+            ));
+        }
+        Ok(())
     }
 
     fn link(&self) -> Result<Link, Error> {
@@ -83,6 +101,9 @@ impl RemoteRuntime {
     }
 }
 
+/// The first agent release that answers [`AgentRequest::BuildImageWithBuildKit`].
+pub const BUILDKIT_AGENT_VERSION: &str = "3.3.1";
+
 fn unexpected(output: &AgentOutput) -> anyhow::Error {
     anyhow!("the agent gave an unexpected answer: {output:?}")
 }
@@ -124,10 +145,19 @@ impl ContainerRuntime for RemoteRuntime {
         context: Vec<u8>,
         dockerfile: &RelPath,
         tag: &ImageRef,
+        buildkit: Option<&BuildKitConfig>,
     ) -> anyhow::Result<String> {
-        let request = AgentRequest::BuildImage {
-            dockerfile: dockerfile.clone(),
-            tag: tag.clone(),
+        let (dockerfile, tag) = (dockerfile.clone(), tag.clone());
+        let request = match buildkit.filter(|config| config.enabled) {
+            Some(config) => {
+                self.require_version(BUILDKIT_AGENT_VERSION)?;
+                AgentRequest::BuildImageWithBuildKit {
+                    dockerfile,
+                    tag,
+                    buildkit: config.clone(),
+                }
+            }
+            None => AgentRequest::BuildImage { dockerfile, tag },
         };
         self.call_id(request, Some(&context)).await
     }
@@ -332,16 +362,68 @@ mod tests {
         assert!(remote.remove_image(&nginx).await.is_err());
         let context = b"context".to_vec();
         let dockerfile: RelPath = "Dockerfile".parse()?;
-        let refused = remote.build_image(context.clone(), &dockerfile, &nginx);
+        let refused = remote.build_image(context.clone(), &dockerfile, &nginx, None);
         assert!(refused.await.is_err());
         let tag: ImageRef = "r3v3rs3/fzn-txd:bcd-fgh".parse()?;
         let id = remote
-            .build_image(context.clone(), &dockerfile, &tag)
+            .build_image(context.clone(), &dockerfile, &tag, None)
             .await?;
         assert!(id.starts_with("sha256:"));
         assert_eq!(setup.agent.runtime.state().builds[0].context, context);
         remote.remove_image(&tag).await?;
         assert_eq!(remote.version().await?, "fake");
+        Ok(())
+    }
+
+    fn buildkit() -> BuildKitConfig {
+        BuildKitConfig {
+            enabled: true,
+            cache_mounts: vec![r3v3rs3_api::platform::CacheMountPreset::Cargo],
+            ..Default::default()
+        }
+    }
+
+    /// A BuildKit build travels to the agent with its settings, so it runs on the agent host.
+    #[tokio::test]
+    async fn a_buildkit_build_runs_on_the_agent() -> anyhow::Result<()> {
+        let target: ShortId = "fzn-txd".parse()?;
+        let agents = Arc::new(AgentRegistry::default());
+        let agent = TestAgent::connect_with_version(&agents, target, BUILDKIT_AGENT_VERSION);
+        let remote = RemoteRuntime::new(target, agents.clone(), Arc::new(Forwarders::new(agents)));
+        let tag: ImageRef = "r3v3rs3/fzn-txd:bcd-fgh".parse()?;
+        let config = buildkit();
+        remote
+            .build_image(
+                b"context".to_vec(),
+                &"Dockerfile".parse()?,
+                &tag,
+                Some(&config),
+            )
+            .await?;
+        assert_eq!(agent.runtime.state().builds[0].buildkit, Some(config));
+        Ok(())
+    }
+
+    /// An agent older than [`BUILDKIT_AGENT_VERSION`] would build without BuildKit, so the
+    /// build fails before it reaches the agent.
+    #[tokio::test]
+    async fn an_old_agent_refuses_a_buildkit_build() -> anyhow::Result<()> {
+        let target: ShortId = "fzn-txd".parse()?;
+        let agents = Arc::new(AgentRegistry::default());
+        let agent = TestAgent::connect_with_version(&agents, target, "3.3.0");
+        let remote = RemoteRuntime::new(target, agents.clone(), Arc::new(Forwarders::new(agents)));
+        let tag: ImageRef = "r3v3rs3/fzn-txd:bcd-fgh".parse()?;
+        let err = remote
+            .build_image(
+                b"context".to_vec(),
+                &"Dockerfile".parse()?,
+                &tag,
+                Some(&buildkit()),
+            )
+            .await
+            .expect_err("an old agent must refuse a BuildKit build");
+        assert!(err.to_string().contains(BUILDKIT_AGENT_VERSION), "{err}");
+        assert!(agent.runtime.state().builds.is_empty());
         Ok(())
     }
 

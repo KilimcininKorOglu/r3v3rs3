@@ -10,6 +10,7 @@ use r3v3rs3_api::container::{
     ContainerSummary, ImageInfo, ImageRef, NetworkName, ProjectName,
 };
 use r3v3rs3_api::git::{RelPath, RepoUrl};
+use r3v3rs3_api::platform::BuildKitConfig;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -54,6 +55,8 @@ pub struct Build {
     pub tag: String,
     pub dockerfile: String,
     pub context: Vec<u8>,
+    /// The BuildKit settings that the build received.
+    pub buildkit: Option<BuildKitConfig>,
 }
 
 #[derive(Default)]
@@ -346,6 +349,7 @@ impl ContainerRuntime for FakeRuntime {
         context: Vec<u8>,
         dockerfile: &RelPath,
         tag: &ImageRef,
+        buildkit: Option<&BuildKitConfig>,
     ) -> anyhow::Result<String> {
         let mut state = self.check()?;
         if let Some(error) = &state.build_error {
@@ -355,6 +359,7 @@ impl ContainerRuntime for FakeRuntime {
             tag: tag.to_string(),
             dockerfile: dockerfile.to_string(),
             context,
+            buildkit: buildkit.cloned(),
         });
         let id = format!("sha256:{:064x}", state.builds.len());
         let info = ImageInfo {

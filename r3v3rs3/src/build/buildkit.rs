@@ -5,21 +5,66 @@ use super::process::run;
 use anyhow::Context as _;
 use r3v3rs3_api::container::ImageRef;
 use r3v3rs3_api::platform::BuildKitConfig;
-use std::path::Path;
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::process::Command;
 
 /// The default timeout for BuildKit builds (30 minutes).
 pub const BUILDKIT_TIMEOUT: Duration = Duration::from_secs(1800);
 
+/// The directory of the docker CLI configuration under a work directory.
+const DOCKER_CONFIG_DIR: &str = "docker";
+
+/// The config directory that the `docker` CLI must receive, or `None` when its default works.
+///
+/// buildx writes its state into the config directory, `$HOME/.docker` by default. The service
+/// user of the server has no writable home directory (`ProtectHome=true`), so buildx fails there.
+/// The default stays when `DOCKER_CONFIG` is set or `$HOME/.docker/buildx` can be created,
+/// because it holds the CLI plugins and the registry logins of the user. Otherwise the CLI gets
+/// `docker` under `base`, created with mode 0700; the system plugin directories still apply.
+pub async fn docker_config_dir(base: &Path) -> anyhow::Result<Option<PathBuf>> {
+    if std::env::var_os("DOCKER_CONFIG").is_some() {
+        return Ok(None);
+    }
+    let Some(home) = std::env::var_os("HOME") else {
+        return private_dir(base.join(DOCKER_CONFIG_DIR)).await.map(Some);
+    };
+    let default = Path::new(&home).join(".docker/buildx");
+    match tokio::fs::create_dir_all(&default).await {
+        Ok(()) => Ok(None),
+        Err(err) => {
+            let dir = private_dir(base.join(DOCKER_CONFIG_DIR)).await?;
+            tracing::info!(
+                default = %default.display(),
+                dir = %dir.display(),
+                "the docker CLI uses its own config directory: {err}"
+            );
+            Ok(Some(dir))
+        }
+    }
+}
+
+async fn private_dir(dir: PathBuf) -> anyhow::Result<PathBuf> {
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .with_context(|| format!("failed to create {}", dir.display()))?;
+    tokio::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+        .await
+        .with_context(|| format!("failed to restrict {}", dir.display()))?;
+    Ok(dir)
+}
+
 pub struct BuildKitRunner {
     pub docker_host: Option<String>,
+    pub docker_config: Option<PathBuf>,
 }
 
 impl BuildKitRunner {
-    pub fn new(docker_host: Option<impl Into<String>>) -> Self {
+    pub fn new(docker_host: Option<String>, docker_config: Option<PathBuf>) -> Self {
         Self {
-            docker_host: docker_host.map(Into::into),
+            docker_host,
+            docker_config,
         }
     }
 
@@ -31,17 +76,20 @@ impl BuildKitRunner {
         config: &BuildKitConfig,
     ) -> Command {
         let mut cmd = Command::new("docker");
-        cmd.env("DOCKER_BUILDKIT", "1");
+        cmd.env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("DOCKER_BUILDKIT", "1");
+        if let Some(home) = std::env::var_os("HOME") {
+            cmd.env("HOME", home);
+        }
         if let Some(host) = &self.docker_host {
             cmd.env("DOCKER_HOST", host);
         }
+        if let Some(dir) = &self.docker_config {
+            cmd.env("DOCKER_CONFIG", dir);
+        }
         if let Some(remote) = &config.remote_addr {
             cmd.env("BUILDKIT_HOST", remote);
-        }
-        for key in ["PATH", "HOME", "DOCKER_CONFIG"] {
-            if let Ok(val) = std::env::var(key) {
-                cmd.env(key, val);
-            }
         }
 
         cmd.args(["buildx", "build"]);
@@ -61,19 +109,34 @@ impl BuildKitRunner {
         cmd
     }
 
+    /// Builds the image and tags it with `tag`. The error carries the end of the buildx output.
     pub async fn build(
         &self,
         context_dir: &Path,
         dockerfile_path: &Path,
         tag: &ImageRef,
         config: &BuildKitConfig,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<()> {
         let cmd = self.build_command(context_dir, dockerfile_path, tag, config);
         run(cmd, BUILDKIT_TIMEOUT)
             .await
             .context("BuildKit build failed")?;
-        Ok(tag.to_string())
+        Ok(())
     }
+}
+
+/// Writes the cache mounts of `config` into the `RUN` instructions of the Dockerfile.
+pub async fn prepare_dockerfile(dockerfile: &Path, config: &BuildKitConfig) -> anyhow::Result<()> {
+    if config.cache_mounts.is_empty() && config.custom_cache_paths.is_empty() {
+        return Ok(());
+    }
+    let content = tokio::fs::read_to_string(dockerfile)
+        .await
+        .with_context(|| format!("failed to read {}", dockerfile.display()))?;
+    let optimized = inject_cache_mounts(&content, config);
+    tokio::fs::write(dockerfile, optimized)
+        .await
+        .with_context(|| format!("failed to write {}", dockerfile.display()))
 }
 
 /// Injects BuildKit cache mount syntax into `RUN` instructions of a Dockerfile.
@@ -196,5 +259,55 @@ mod tests {
         assert!(!injected.contains("host_root"));
         assert!(!injected.contains("id"));
         assert_eq!(injected, "RUN build\n");
+    }
+
+    fn env_of(cmd: &Command, key: &str) -> Option<String> {
+        cmd.as_std()
+            .get_envs()
+            .find(|(name, _)| *name == key)
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn the_build_command_carries_the_docker_config_and_host() -> anyhow::Result<()> {
+        let runner = BuildKitRunner::new(
+            Some("unix:///var/run/docker.sock".into()),
+            Some(PathBuf::from("/etc/r3v3rs3/docker")),
+        );
+        let tag: ImageRef = "r3v3rs3/abc-def:ghi-jkl".parse()?;
+        let cmd = runner.build_command(
+            Path::new("/tmp/ctx"),
+            Path::new("/tmp/ctx/Dockerfile"),
+            &tag,
+            &BuildKitConfig {
+                enabled: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            env_of(&cmd, "DOCKER_CONFIG").as_deref(),
+            Some("/etc/r3v3rs3/docker")
+        );
+        assert_eq!(
+            env_of(&cmd, "DOCKER_HOST").as_deref(),
+            Some("unix:///var/run/docker.sock")
+        );
+        assert_eq!(env_of(&cmd, "BUILDKIT_HOST"), None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_own_config_directory_is_private() -> anyhow::Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "r3v3rs3-docker-config-{}",
+            hex::encode(rand::random::<[u8; 8]>())
+        ));
+        let dir = private_dir(base.join(DOCKER_CONFIG_DIR)).await?;
+        let mode = std::fs::metadata(&dir)?.permissions().mode() & 0o777;
+        std::fs::remove_dir_all(&base)?;
+        assert_eq!(dir, base.join("docker"));
+        assert_eq!(mode, 0o700);
+        Ok(())
     }
 }

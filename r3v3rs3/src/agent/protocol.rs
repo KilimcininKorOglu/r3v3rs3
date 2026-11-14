@@ -70,6 +70,14 @@ pub enum AgentRequest {
         dockerfile: RelPath,
         tag: ImageRef,
     },
+    /// A BuildKit build on the agent host; the build context follows as a payload. It is a
+    /// variant of its own, because an older agent must refuse it rather than build without
+    /// BuildKit.
+    BuildImageWithBuildKit {
+        dockerfile: RelPath,
+        tag: ImageRef,
+        buildkit: r3v3rs3_api::platform::BuildKitConfig,
+    },
     RemoveImage {
         image: ImageRef,
     },

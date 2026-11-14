@@ -1984,6 +1984,37 @@ mod tests {
         Ok(names)
     }
 
+    /// The BuildKit settings of the app reach the runtime, and a failed BuildKit build fails the
+    /// deployment instead of a silent build without BuildKit.
+    #[tokio::test]
+    async fn a_buildkit_app_builds_with_its_settings_and_fails_visibly() -> anyhow::Result<()> {
+        let mut request = git_request()?;
+        let buildkit = r3v3rs3_api::platform::BuildKitConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        request.spec.buildkit = Some(buildkit.clone());
+        let setup = setup_with(request).await?;
+        let deployment = deploy(&setup).await?;
+        assert_eq!(deployment.status, DeploymentStatus::Running);
+        assert_eq!(
+            setup.runtime.state().builds[0].buildkit.as_ref(),
+            Some(&buildkit)
+        );
+        setup.runtime.state().build_error = Some("BuildKit build failed".into());
+        let failed = deploy(&setup).await?;
+        assert_eq!(failed.status, DeploymentStatus::Failed);
+        assert!(
+            failed
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("BuildKit build failed")),
+            "{failed:?}"
+        );
+        assert_eq!(setup.runtime.state().builds.len(), 1);
+        Ok(())
+    }
+
     #[tokio::test]
     async fn a_git_deployment_builds_its_image_from_the_checkout() -> anyhow::Result<()> {
         let setup = setup_with(git_request()?).await?;

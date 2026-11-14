@@ -21,7 +21,7 @@ use r3v3rs3_api::container::{
     ResourceLimits,
 };
 use r3v3rs3_api::git::RelPath;
-use r3v3rs3_api::platform::FileEntry;
+use r3v3rs3_api::platform::{BuildKitConfig, FileEntry};
 use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use serde_json::{Value, json};
@@ -83,11 +83,122 @@ fn split_parent(path: &str) -> anyhow::Result<(String, String)> {
 #[derive(Clone)]
 pub struct DockerRuntime {
     client: ApiClient,
+    cli: Option<DockerCli>,
+}
+
+/// What a BuildKit build needs besides the Engine API: the `docker` binary reaches the same
+/// engine, unpacks the context into `work_dir` and keeps its state in `docker_config`.
+#[derive(Clone, Debug)]
+pub struct DockerCli {
+    /// The engine in the format of `DOCKER_HOST`.
+    pub docker_host: String,
+    /// A writable directory for the unpacked build contexts.
+    pub work_dir: std::path::PathBuf,
+    /// The config directory of the `docker` CLI, when its default is not writable.
+    pub docker_config: Option<std::path::PathBuf>,
 }
 
 impl DockerRuntime {
     pub fn new(client: ApiClient) -> Self {
-        Self { client }
+        Self { client, cli: None }
+    }
+
+    /// Lets the runtime build with BuildKit through the `docker` binary.
+    pub fn with_cli(mut self, cli: DockerCli) -> Self {
+        self.cli = Some(cli);
+        self
+    }
+
+    /// Builds with the classic builder of the Engine API.
+    async fn classic_build(
+        &self,
+        context: Vec<u8>,
+        dockerfile: &RelPath,
+        tag: &ImageRef,
+    ) -> anyhow::Result<String> {
+        // Version 1 is the classic builder. BuildKit needs a gRPC session besides this request.
+        let path = format!(
+            "/build?t={}&dockerfile={}&rm=1&forcerm=1&version=1",
+            encode(tag.as_str()),
+            encode(dockerfile.as_str())
+        );
+        let request = self
+            .client
+            .builder(Method::POST, &path)
+            .header(CONTENT_TYPE, "application/x-tar")
+            .body(Full::new(Bytes::from(context)))?;
+        let response = self
+            .client
+            .send_with(request, BUILD_START_TIMEOUT, &[])
+            .await?;
+        let mut lines = Lines::new(response);
+        let mut output = BuildOutput::default();
+        loop {
+            let line = tokio::time::timeout(BUILD_IDLE_TIMEOUT, lines.next())
+                .await
+                .map_err(|_| anyhow!("the build of {tag} stopped sending output"))??;
+            let Some(line) = line else {
+                break;
+            };
+            output
+                .read(&line)
+                .map_err(|err| anyhow!("failed to build {tag}: {err:#}"))?;
+        }
+        output
+            .id
+            .ok_or_else(|| anyhow!("the build of {tag} returned no image id"))
+    }
+
+    /// Builds with BuildKit: unpacks the context into its own directory, adds the cache mounts
+    /// and runs `docker buildx build`. The directory is removed afterwards.
+    async fn buildkit_build(
+        &self,
+        context: Vec<u8>,
+        dockerfile: &RelPath,
+        tag: &ImageRef,
+        config: &BuildKitConfig,
+    ) -> anyhow::Result<String> {
+        let cli = self.cli.as_ref().ok_or_else(|| {
+            anyhow!("this runtime cannot build with BuildKit, because it has no docker binary")
+        })?;
+        let dir = cli.work_dir.join(format!(
+            "buildkit-{}",
+            hex::encode(rand::random::<[u8; 8]>())
+        ));
+        let result = self
+            .buildkit_build_in(cli, &dir, context, dockerfile, tag, config)
+            .await;
+        if let Err(err) = crate::build::remove_dir(&dir).await {
+            tracing::error!(dir = %dir.display(), "failed to remove a build context: {err}");
+        }
+        result
+    }
+
+    async fn buildkit_build_in(
+        &self,
+        cli: &DockerCli,
+        dir: &std::path::Path,
+        context: Vec<u8>,
+        dockerfile: &RelPath,
+        tag: &ImageRef,
+        config: &BuildKitConfig,
+    ) -> anyhow::Result<String> {
+        tokio::fs::create_dir_all(dir).await?;
+        let target = dir.to_path_buf();
+        tokio::task::spawn_blocking(move || tar::Archive::new(&context[..]).unpack(&target))
+            .await??;
+        let dockerfile_path = dir.join(dockerfile.as_str());
+        crate::build::buildkit::prepare_dockerfile(&dockerfile_path, config).await?;
+        let runner = crate::build::buildkit::BuildKitRunner::new(
+            Some(cli.docker_host.clone()),
+            cli.docker_config.clone(),
+        );
+        runner.build(dir, &dockerfile_path, tag, config).await?;
+        let image = self
+            .inspect_image(tag)
+            .await?
+            .ok_or_else(|| anyhow!("BuildKit built {tag}, but the engine does not have it"))?;
+        Ok(image.id)
     }
 
     async fn send(
@@ -703,38 +814,12 @@ impl ContainerRuntime for DockerRuntime {
         context: Vec<u8>,
         dockerfile: &RelPath,
         tag: &ImageRef,
+        buildkit: Option<&BuildKitConfig>,
     ) -> anyhow::Result<String> {
-        // Version 1 is the classic builder. BuildKit needs a gRPC session besides this request.
-        let path = format!(
-            "/build?t={}&dockerfile={}&rm=1&forcerm=1&version=1",
-            encode(tag.as_str()),
-            encode(dockerfile.as_str())
-        );
-        let request = self
-            .client
-            .builder(Method::POST, &path)
-            .header(CONTENT_TYPE, "application/x-tar")
-            .body(Full::new(Bytes::from(context)))?;
-        let response = self
-            .client
-            .send_with(request, BUILD_START_TIMEOUT, &[])
-            .await?;
-        let mut lines = Lines::new(response);
-        let mut output = BuildOutput::default();
-        loop {
-            let line = tokio::time::timeout(BUILD_IDLE_TIMEOUT, lines.next())
-                .await
-                .map_err(|_| anyhow!("the build of {tag} stopped sending output"))??;
-            let Some(line) = line else {
-                break;
-            };
-            output
-                .read(&line)
-                .map_err(|err| anyhow!("failed to build {tag}: {err:#}"))?;
+        match buildkit.filter(|config| config.enabled) {
+            Some(config) => self.buildkit_build(context, dockerfile, tag, config).await,
+            None => self.classic_build(context, dockerfile, tag).await,
         }
-        output
-            .id
-            .ok_or_else(|| anyhow!("the build of {tag} returned no image id"))
     }
 
     async fn remove_image(&self, image: &ImageRef) -> anyhow::Result<()> {
