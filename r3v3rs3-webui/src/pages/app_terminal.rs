@@ -6,6 +6,7 @@ use super::app_deployments::back_header;
 use super::settings::fetch_json;
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::action_button::play_icon;
 use crate::components::app_tabs::{AppTab, AppTabs};
 use crate::components::button::{Button, ButtonKind, ButtonSize};
 use crate::components::modal::Modal;
@@ -1148,10 +1149,9 @@ fn render_history_row(
                     class="p-1 rounded text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition cursor-pointer"
                     onclick={on_run_click}
                     title={locale.t("apps.terminal_history_run")}
+                    aria-label={locale.t("apps.terminal_history_run")}
                 >
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    </svg>
+                    { play_icon() }
                 </button>
                 <button
                     type="button"

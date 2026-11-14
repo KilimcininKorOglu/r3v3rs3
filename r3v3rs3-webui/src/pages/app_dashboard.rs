@@ -8,6 +8,7 @@ use super::app_services::AppServices;
 use super::settings::{failure_box, fetch_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
+use crate::components::action_button::play_icon;
 use crate::components::app_tabs::{AppTab, AppTabs};
 use crate::components::button::{Button, ButtonKind};
 use crate::dialog;
@@ -222,9 +223,7 @@ fn render_quick_actions(p: &DashboardParams) -> Html {
             <div class="flex flex-wrap items-center gap-2">
                 if p.can_edit && !p.busy {
                     <Button kind={ButtonKind::Success} onclick={on_deploy}>
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                        </svg>
+                        { play_icon() }
                         {p.locale.t("apps.deploy")}
                     </Button>
                     <Button kind={ButtonKind::Secondary} onclick={on_restart}>

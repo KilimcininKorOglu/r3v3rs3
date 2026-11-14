@@ -99,6 +99,15 @@ fn render_icon_svg(variant: ActionVariant) -> Html {
     }
 }
 
+/// The filled play triangle of every deploy and run button.
+pub fn play_icon() -> Html {
+    html! {
+        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" />
+        </svg>
+    }
+}
+
 fn render_secondary_icon_svg(variant: ActionVariant) -> Html {
     match variant {
         ActionVariant::Logs => html! {
@@ -106,11 +115,7 @@ fn render_secondary_icon_svg(variant: ActionVariant) -> Html {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
         },
-        ActionVariant::Play => html! {
-            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" />
-            </svg>
-        },
+        ActionVariant::Play => play_icon(),
         ActionVariant::Pause => html! {
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />

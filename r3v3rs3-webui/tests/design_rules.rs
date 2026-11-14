@@ -60,6 +60,11 @@ const RULES: &[Rule] = &[
         matches: |line| line.contains("arrow-back.svg"),
         allowed: &["components/back_button.rs"],
     },
+    Rule {
+        name: "the inner triangle of a play circle, too small alone; use action_button::play_icon",
+        matches: |line| line.contains("M14.752 11.168"),
+        allowed: &[],
+    },
 ];
 
 /// Whether the line sets a neutral 800 to 950 background outside a `dark:` variant. A code
