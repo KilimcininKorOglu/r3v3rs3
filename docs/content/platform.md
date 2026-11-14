@@ -892,7 +892,7 @@ Clicking an application in the list opens its dedicated dashboard console at `/a
 - **Active Deployment Card**: Current commit hash, branch name, commit message, author, deployment duration, and target node.
 - **Quick Actions Toolbar**: One-click **Deploy**, **Restart** container, **Rollback** to previous deployment, **Terminal**, and **Logs**.
 - **Compose Topology & Container Management**: Interactive visual architecture topology graph and service container inspection table for multi-service Compose applications.
-- **Recent Logs Tail**: Direct terminal preview of the latest 15 container log lines.
+- **Recent Logs Tail**: Direct terminal preview of the latest 15 container log lines. The dashboard waits at most 5 seconds for the log. When the container runtime does not answer in time, the preview shows the reason (`logs_error` in the API response) and the rest of the dashboard loads without it.
 - **API, MCP & CLI Management**: Complete parity via `GET /api/apps/{id}/dashboard`, MCP tool `get_app_dashboard`, and CLI command `r3 app dashboard <APP_ID>`.
 
 ### App Store

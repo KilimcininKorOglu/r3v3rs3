@@ -892,7 +892,7 @@ Uygulama listesinden bir uygulamaya tıklandığında `/apps/{id}` adresindeki �
 - **Aktif Dağıtım Kartı**: Çalışan commit hash'i, branch adı, commit mesajı, yazar, dağıtım süresi ve hedef node bilgisi.
 - **Hızlı Aksiyonlar Barı**: Tek tıkla **Deploy**, **Yeniden Başlat** (Restart), önceki sürüme **Geri Al** (Rollback), **Terminal** ve **Loglar** butonları.
 - **Compose Mimarisi ve Topoloji**: Compose çok servisli uygulamalar için görsel mimari bağlantı şeması ve konteyner yönetim tablosu.
-- **Son Loglar Önizlemesi**: En son 15 log satırını gösteren terminal önizleme kutusu.
+- **Son Loglar Önizlemesi**: En son 15 log satırını gösteren terminal önizleme kutusu. Pano log için en fazla 5 saniye bekler. Container runtime zamanında yanıt vermezse önizleme nedeni gösterir (API yanıtında `logs_error`) ve panonun geri kalanı log olmadan yüklenir.
 - **API, MCP ve CLI Eşitliği**: `GET /api/apps/{id}/dashboard`, MCP aracı `get_app_dashboard` ve CLI komutu `r3 app dashboard <APP_ID>` ile tam yönetim eşitliği.
 
 ### App Store

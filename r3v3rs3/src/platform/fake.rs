@@ -48,6 +48,8 @@ pub struct FakeState {
     pub execs: Vec<(String, Vec<String>, Vec<String>)>,
     /// The files inside the containers, keyed by the container and the path.
     pub files: BTreeMap<(String, String), Vec<u8>>,
+    /// A log read waits this long before it answers.
+    pub log_delay: Option<std::time::Duration>,
 }
 
 /// One build of the fake runtime.
@@ -494,7 +496,10 @@ impl ContainerRuntime for FakeRuntime {
     }
 
     async fn logs(&self, name: &ContainerName, _: u32) -> anyhow::Result<String> {
-        let _state = self.check()?;
+        let delay = self.check()?.log_delay;
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
         Ok(format!("the log of {name}\n"))
     }
 

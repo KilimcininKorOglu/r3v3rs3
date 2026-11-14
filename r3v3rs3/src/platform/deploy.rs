@@ -2796,6 +2796,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_log_that_does_not_answer_leaves_the_dashboard_preview_empty() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let deployment = deploy(&setup).await?;
+        let summary = setup.platform.app_dashboard(setup.app.id).await?;
+        assert_eq!(
+            summary.logs_preview,
+            format!("the log of {}\n", container_of(&setup, &deployment))
+        );
+        assert_eq!(summary.logs_error, None);
+
+        setup.runtime.state().log_delay = Some(Duration::from_secs(3600));
+        let started = std::time::Instant::now();
+        let summary = setup.platform.app_dashboard(setup.app.id).await?;
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the dashboard waited for the log"
+        );
+        assert_eq!(summary.logs_preview, "");
+        let error = summary.logs_error.unwrap_or_default();
+        assert!(error.contains("did not answer"), "{error}");
+        assert!(summary.running_deployment.is_some(), "the other parts load");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn a_failed_deployment_keeps_the_old_container() -> anyhow::Result<()> {
         let setup = setup().await?;
         let first = deploy(&setup).await?;

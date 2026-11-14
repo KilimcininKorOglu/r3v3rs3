@@ -1567,6 +1567,8 @@
   "apps.rolled_back": "Rollback started.",
   "apps.services_count": "Services ({count})",
   "apps.recent_logs": "Recent Logs",
+  "apps.logs_preview_empty": "No logs available yet.",
+  "apps.logs_preview_failed": "The log could not be read: {error}",
   "deployments.status_queued": "Queued",
   "deployments.status_pending_approval": "Pending Approval",
   "deployments.status_building": "Building",

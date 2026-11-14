@@ -2627,6 +2627,9 @@ pub struct AppDashboardSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub metrics: Vec<AppMetricsPoint>,
     pub logs_preview: String,
+    /// Why `logs_preview` is empty when the container log could not be read in time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logs_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_size_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3346,6 +3349,7 @@ EMPTY_VAL=
             diagnostics: None,
             metrics: Vec::new(),
             logs_preview: "ready to serve\n".to_string(),
+            logs_error: None,
             log_size_bytes: Some(1024),
             uptime_seconds: Some(3600),
         };

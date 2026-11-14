@@ -1567,6 +1567,8 @@
   "apps.rolled_back": "Geri alma başlatıldı.",
   "apps.services_count": "Servisler ({count})",
   "apps.recent_logs": "Son Loglar",
+  "apps.logs_preview_empty": "Henüz log yok.",
+  "apps.logs_preview_failed": "Log okunamadı: {error}",
   "deployments.status_queued": "Sırada",
   "deployments.status_pending_approval": "Onay Bekliyor",
   "deployments.status_building": "Build ediliyor",

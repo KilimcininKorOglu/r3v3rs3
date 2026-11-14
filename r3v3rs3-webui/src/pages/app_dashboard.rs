@@ -203,7 +203,7 @@ fn render_dashboard_content(p: DashboardParams) -> Html {
                 <AppServices id={p.id} locale={p.locale} />
             }
 
-            { render_logs_preview(p.locale, p.id, &p.summary.logs_preview, p.summary.log_size_bytes, &p.navigator) }
+            { render_logs_preview(p.locale, p.id, &p.summary, &p.navigator) }
         </>
     }
 }
@@ -551,16 +551,28 @@ fn render_database_card(locale: Locale, summary: &AppDashboardSummary) -> Html {
     }
 }
 
+/// The text of the log preview: the reason of a failed read, or a note for an empty log.
+fn preview_note(locale: Locale, summary: &AppDashboardSummary) -> Option<String> {
+    if let Some(error) = &summary.logs_error {
+        return Some(locale.tf("apps.logs_preview_failed", &[("error", error)]));
+    }
+    summary
+        .logs_preview
+        .trim()
+        .is_empty()
+        .then(|| locale.t("apps.logs_preview_empty").to_string())
+}
+
 fn render_logs_preview(
     locale: Locale,
     id: ShortId,
-    preview: &str,
-    log_size_bytes: Option<u64>,
+    summary: &AppDashboardSummary,
     navigator: &Navigator,
 ) -> Html {
     let nav = navigator.clone();
     let on_full_logs = Callback::from(move |_: MouseEvent| nav.push(&Route::AppLog { id }));
-    let size_str = log_size_bytes.map(format_bytes).unwrap_or_default();
+    let size_str = summary.log_size_bytes.map(format_bytes).unwrap_or_default();
+    let preview = summary.logs_preview.as_str();
 
     html! {
         <div class="p-5 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 shadow-sm space-y-3">
@@ -583,8 +595,8 @@ fn render_logs_preview(
             </div>
 
             <pre class="p-3 bg-neutral-950 text-neutral-200 font-mono text-xs rounded-md overflow-x-auto max-h-48 leading-relaxed whitespace-pre-wrap select-all">
-                if preview.trim().is_empty() {
-                    <span class="text-neutral-500 italic">{"No logs available yet."}</span>
+                if let Some(note) = preview_note(locale, summary) {
+                    <span class="text-neutral-400 italic">{note}</span>
                 } else {
                     {preview}
                 }

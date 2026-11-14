@@ -83,6 +83,13 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+/// The longest wait for the log preview of the app dashboard.
+const DASHBOARD_LOG_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_millis(200)
+} else {
+    Duration::from_secs(5)
+};
+
 /// The database of the platform in the config directory.
 pub const DATABASE_FILE: &str = "r3v3rs3.db";
 
@@ -1153,7 +1160,8 @@ impl Platform {
         Ok(services)
     }
 
-    /// Returns the aggregated dashboard summary of an app.
+    /// Returns the aggregated dashboard summary of an app. The parts load at the same time, so a
+    /// slow part does not add its time to the others.
     pub async fn app_dashboard(&self, id: ShortId) -> anyhow::Result<AppDashboardSummary> {
         let app = self.app(id).await?;
         let deployments = self.deployments(id).await.unwrap_or_default();
@@ -1161,14 +1169,17 @@ impl Platform {
         let running_id = self.store.running_deployment(id).await.ok().flatten();
         let running_deployment =
             running_id.and_then(|rid| deployments.iter().find(|d| d.id == rid).cloned());
-        let services = self.app_services(id).await.unwrap_or_default();
-        let diagnostics = self.app_resource_diagnostics(id).await.ok();
-        let metrics = self.app_metrics(id, 1).await.unwrap_or_default();
-        let log_res = self.app_log(id, 15, None).await.unwrap_or(AppLog {
-            log: String::new(),
-            running: false,
-        });
-        let log_size_bytes = self.app_log_size(id).await.ok().map(|o| o.total_size_bytes);
+        let (services, diagnostics, metrics, (logs_preview, logs_error), log_size) = tokio::join!(
+            self.app_services(id),
+            self.app_resource_diagnostics(id),
+            self.app_metrics(id, 1),
+            self.dashboard_log(id),
+            self.app_log_size(id),
+        );
+        let services = services.unwrap_or_default();
+        let diagnostics = diagnostics.ok();
+        let metrics = metrics.unwrap_or_default();
+        let log_size_bytes = log_size.ok().map(|o| o.total_size_bytes);
         let uptime_seconds = running_deployment.as_ref().map(|d| {
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1184,10 +1195,28 @@ impl Platform {
             services,
             diagnostics,
             metrics,
-            logs_preview: log_res.log,
+            logs_preview,
+            logs_error,
             log_size_bytes,
             uptime_seconds,
         })
+    }
+
+    /// The last log lines of the dashboard, with the reason when they could not be read. The
+    /// read waits at most `DASHBOARD_LOG_TIMEOUT`, because a Docker Engine can hold a log request
+    /// open without an answer.
+    async fn dashboard_log(&self, id: ShortId) -> (String, Option<String>) {
+        match tokio::time::timeout(DASHBOARD_LOG_TIMEOUT, self.app_log(id, 15, None)).await {
+            Ok(Ok(log)) => (log.log, None),
+            Ok(Err(err)) => (String::new(), Some(format!("{err:#}"))),
+            Err(_) => (
+                String::new(),
+                Some(format!(
+                    "the container log did not answer within {} ms",
+                    DASHBOARD_LOG_TIMEOUT.as_millis()
+                )),
+            ),
+        }
     }
 
     /// Returns the architecture dependency graph and topology of a Compose app.
