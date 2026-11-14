@@ -51,7 +51,9 @@ pub fn send_fds(stream: &UnixStream, fds: &[RawFd]) -> Result<()> {
 /// returns however many arrived. The read must start at the beginning of one message, because
 /// a read that starts inside an earlier message drops its ancillary data.
 pub fn recv_fds(stream: &UnixStream, max_fds: usize) -> Result<Vec<OwnedFd>> {
-    let mut data = [0u8; 16];
+    // The message carries one marker byte. A larger buffer reads into the frame that follows on
+    // a system that joins stream messages, such as macOS, and that frame loses its first bytes.
+    let mut data = [0u8; 1];
     let mut io = iovec {
         iov_base: data.as_mut_ptr() as *mut libc::c_void,
         iov_len: data.len(),
@@ -131,6 +133,18 @@ mod tests {
         let (sender, receiver) = UnixStream::pair().unwrap();
         send_fds(&sender, &[listener.as_raw_fd()]).unwrap();
         assert_eq!(recv_fds(&receiver, 16).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_bytes_after_the_descriptors_stay_in_the_stream() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let (mut sender, mut receiver) = UnixStream::pair().unwrap();
+        send_fds(&sender, &[listener.as_raw_fd()]).unwrap();
+        sender.write_all(b"the next frame").unwrap();
+        assert_eq!(recv_fds(&receiver, 1).unwrap().len(), 1);
+        let mut rest = [0u8; 14];
+        receiver.read_exact(&mut rest).unwrap();
+        assert_eq!(&rest, b"the next frame");
     }
 
     #[test]
