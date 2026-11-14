@@ -67,7 +67,8 @@ pub fn action_variant_classes(variant: ActionVariant) -> &'static str {
     }
 }
 
-fn render_icon_svg(variant: ActionVariant) -> Html {
+/// The icon of `variant`, drawn in the text color of its button.
+pub fn render_icon_svg(variant: ActionVariant) -> Html {
     match variant {
         ActionVariant::Edit => html! {
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

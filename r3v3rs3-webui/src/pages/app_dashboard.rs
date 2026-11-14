@@ -8,7 +8,7 @@ use super::app_services::AppServices;
 use super::settings::{failure_box, fetch_json};
 use crate::API_ENDPOINT;
 use crate::auth::use_ensure_auth;
-use crate::components::action_button::play_icon;
+use crate::components::action_button::{ActionVariant, play_icon, render_icon_svg};
 use crate::components::app_tabs::{AppTab, AppTabs};
 use crate::components::button::{Button, ButtonKind};
 use crate::dialog;
@@ -247,11 +247,11 @@ fn render_quick_actions(p: &DashboardParams) -> Html {
             </div>
             <div class="flex items-center gap-2">
                 <Button kind={ButtonKind::Secondary} onclick={on_terminal}>
-                    <img src="/assets/icons/terminal.svg" class="w-4 h-4 dark:invert" />
+                    { render_icon_svg(ActionVariant::Terminal) }
                     {p.locale.t("apps.tabs_terminal")}
                 </Button>
                 <Button kind={ButtonKind::Secondary} onclick={on_logs}>
-                    <img src="/assets/icons/description.svg" class="w-4 h-4 dark:invert" />
+                    { render_icon_svg(ActionVariant::Logs) }
                     {p.locale.t("apps.tabs_logs")}
                 </Button>
             </div>
