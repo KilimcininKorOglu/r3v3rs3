@@ -42,6 +42,39 @@ pub struct SetPrunePolicyArgs {
     pub dangling_layers_only: Option<bool>,
 }
 
+/// The non-empty, trimmed items of a comma-separated list.
+fn comma_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn apply_ct_args(cur: &mut r3v3rs3_api::ct::CtMonitorConfig, args: SetCtConfigArgs<'_>) {
+    if let Some(en) = args.enable {
+        cur.enabled = en;
+    }
+    if let Some(doms) = args.domains {
+        cur.monitored_domains = comma_list(doms);
+    }
+    if let Some(auto) = args.auto_discover {
+        cur.auto_discover_domains = auto;
+    }
+    if let Some(issuers) = args.allowed_issuers {
+        cur.allowed_issuers = comma_list(issuers);
+    }
+    if let Some(alert) = args.alert_unknown {
+        cur.alert_on_unknown_issuer = alert;
+    }
+    if let Some(int) = args.interval {
+        cur.check_interval_secs = int;
+    }
+    if let Some(url) = args.api_url {
+        cur.ct_api_url = Some(url.to_string());
+    }
+}
+
 fn apply_prune_args(cur: &mut r3v3rs3_api::platform::PrunePolicy, args: &SetPrunePolicyArgs) {
     if let Some(en) = args.enabled {
         cur.enabled = en;
@@ -2259,10 +2292,8 @@ impl ApiClient {
         window_seconds: Option<u64>,
         ban_duration_seconds: Option<u64>,
     ) -> anyhow::Result<()> {
-        let mut config: r3v3rs3_api::quarantine::AutoQuarantineConfig = self
-            .get_json("/api/security/quarantine/config")
-            .await
-            .unwrap_or_default();
+        let mut config: r3v3rs3_api::quarantine::AutoQuarantineConfig =
+            self.get_json("/api/security/quarantine/config").await?;
         if let Some(en) = enabled {
             config.enabled = en;
         }
@@ -2922,10 +2953,8 @@ impl ApiClient {
     }
 
     pub async fn set_prune_policy(&self, args: &SetPrunePolicyArgs) -> anyhow::Result<()> {
-        let mut cur: r3v3rs3_api::platform::PrunePolicy = self
-            .get_json("/api/platform/prune")
-            .await
-            .unwrap_or_default();
+        let mut cur: r3v3rs3_api::platform::PrunePolicy =
+            self.get_json("/api/platform/prune").await?;
         apply_prune_args(&mut cur, args);
         let res = self
             .request(
@@ -3359,41 +3388,9 @@ impl ApiClient {
     }
 
     pub async fn set_ct_config(&self, args: SetCtConfigArgs<'_>) -> anyhow::Result<()> {
-        let mut cur: r3v3rs3_api::ct::CtMonitorConfig = self
-            .get_json("/api/certs/ct/config")
-            .await
-            .unwrap_or_default();
-
-        if let Some(en) = args.enable {
-            cur.enabled = en;
-        }
-        if let Some(doms) = args.domains {
-            cur.monitored_domains = doms
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        if let Some(auto) = args.auto_discover {
-            cur.auto_discover_domains = auto;
-        }
-        if let Some(issuers) = args.allowed_issuers {
-            cur.allowed_issuers = issuers
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        if let Some(alert) = args.alert_unknown {
-            cur.alert_on_unknown_issuer = alert;
-        }
-        if let Some(int) = args.interval {
-            cur.check_interval_secs = int;
-        }
-        if let Some(url) = args.api_url {
-            cur.ct_api_url = Some(url.to_string());
-        }
-
+        let mut cur: r3v3rs3_api::ct::CtMonitorConfig =
+            self.get_json("/api/certs/ct/config").await?;
+        apply_ct_args(&mut cur, args);
         let body = r3v3rs3_api::ct::UpdateCtConfigRequest { config: cur };
         let res: r3v3rs3_api::ct::CtMonitorConfig =
             self.put_json("/api/certs/ct/config", &body).await?;
