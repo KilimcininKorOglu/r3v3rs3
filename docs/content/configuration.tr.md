@@ -1080,6 +1080,18 @@ Değerlerde şu değişkenleri kullanabilirsiniz. Süslü parantez yazmak için 
 
 Kurallar `Connection`, `Content-Length`, `Host`, `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding` ve `Upgrade` header'larını değiştiremez, çünkü bu header'lar bağlantıyı ve mesajın çerçeve yapısını kontrol eder.
 
+### Host header'ı
+
+r3v3rs3 varsayılan olarak `Host` header'ında upstream sunucunun adresini gönderir, örneğin `127.0.0.1:8080`. Bunun yerine istemcinin istediği host adını göndermek için "İstemcinin Host Header'ını Koru" (`preserve_host = true`) seçeneğini açın. `Origin` header'ını `Host` header'ı ile karşılaştıran bir uygulama bu ayara ihtiyaç duyar, örneğin bir CSRF kontrolünde. Deploy platformu uygulamalarının proxy'leri istemcinin host adını her zaman korur. Keşfedilen bir proxy bu ayarı `r3v3rs3.http.<name>.preserve_host=true` label'ı ile açar.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+preserve_host = true
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
+```
+
 ```toml
 [my-app]
 protocol = "http"

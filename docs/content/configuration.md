@@ -1080,6 +1080,18 @@ A client can send a header with the same name itself. Use `set`, not `append`, f
 
 Rules cannot change `Connection`, `Content-Length`, `Host`, `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding` and `Upgrade`, because these headers control the connection and the message framing.
 
+### Host Header
+
+By default, r3v3rs3 sends the address of the upstream server as the `Host` header, for example `127.0.0.1:8080`. Turn on "Keep the Client Host Header" (`preserve_host = true`) to send the host name that the client asked for instead. An application that compares the `Origin` header with the `Host` header, for example in a CSRF check, needs this setting. The proxies of the deployment platform apps always keep the client host. A discovered proxy sets it with the `r3v3rs3.http.<name>.preserve_host=true` label.
+
+```toml
+[my-app]
+protocol = "http"
+vhosts = ["app.example.com"]
+preserve_host = true
+routes = [{ path = "/", servers = [{ url = "http://127.0.0.1:9000/" }] }]
+```
+
 ```toml
 [my-app]
 protocol = "http"

@@ -723,6 +723,7 @@ Platform, en az bir alan adı olan her çalışan uygulama için bir proxy ekler
 - uygulamanın **Portlar** alanlarında seçtiği portlarda dinler; seçim yoksa `proxy_ports` portlarını, o ayar da boşsa tüm HTTP ve HTTPS portlarını kullanır,
 - uygulamanın alan adlarına yanıt verir,
 - istekleri container'ın `127.0.0.1` üzerindeki dışarı açılmış portuna gönderir,
+- istemcinin `Host` header'ını korur, böylece uygulama loopback adresini değil kendi alan adını görür ([Host header'ı](@/configuration.tr.md#host-header-i)),
 - sertifikasını `acme` ACME kaydından, kaydın hesabı, challenge'ı ve DNS sağlayıcısı ile alır. [ACME sertifikaları](@/discovery.tr.md#acme-sertifikalari) kuralları geçerlidir.
 
 Alan adı olmayan bir uygulama proxy almaz. Container'ı olmayan veya durmuş olan çalışan bir deployment, sağlayıcı durumunda bir sorun olarak görünür. r3v3rs3 container'ları 15 saniyede bir okur. Bu yüzden Docker'ın yeni bir portta yeniden başlattığı container yönlendirmesini geri alır.

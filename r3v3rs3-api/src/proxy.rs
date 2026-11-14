@@ -364,6 +364,10 @@ pub struct HttpProxy {
     /// When true, translates gRPC-Web browser client requests and trailers for upstream gRPC servers.
     #[serde(default, skip_serializing_if = "is_false")]
     pub grpc_web: bool,
+    /// When true, sends the `Host` that the client asked for to the upstream servers instead of
+    /// the address of the server. Applications that compare `Origin` with `Host` need it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub preserve_host: bool,
     /// HTTP/2 and HTTP/3 adaptive stream prioritization and RFC 9218 priority header handling.
     #[serde(
         default,

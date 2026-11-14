@@ -723,6 +723,7 @@ The platform adds one proxy for each running app that has at least one domain. T
 - listens on the ports that the app selects in its **Ports** fields, or the ports of `proxy_ports` when it selects none, or every HTTP and HTTPS port when that setting is also empty,
 - answers the domains of the app,
 - sends the requests to the published port of the container on `127.0.0.1`,
+- keeps the `Host` header of the client, so the app sees its own domain and not the loopback address ([Host Header](@/configuration.md#host-header)),
 - gets its certificate from the ACME entry of `acme`, with the account, the challenge and the DNS provider of the entry. The rules of [ACME Certificates](@/discovery.md#acme-certificates) apply.
 
 An app without a domain gets no proxy. A running deployment whose container is missing or stopped appears as an issue in the provider status. r3v3rs3 reads the containers every 15 seconds, so a container that Docker restarts on a new port gets its route back.

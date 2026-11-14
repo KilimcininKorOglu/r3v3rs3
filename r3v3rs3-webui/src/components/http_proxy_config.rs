@@ -60,6 +60,7 @@ pub struct ProxyForm {
     pub hide_branding: bool,
     pub bot_blocker: bool,
     pub grpc_web: bool,
+    pub preserve_host: bool,
     pub stream_priority: r3v3rs3_api::priority::StreamPriorityConfig,
 }
 
@@ -112,6 +113,7 @@ impl ProxyForm {
             hide_branding: proxy.hide_branding,
             bot_blocker: proxy.bot_blocker,
             grpc_web: proxy.grpc_web,
+            preserve_host: proxy.preserve_host,
             stream_priority: proxy.stream_priority.clone(),
         }
     }
@@ -183,6 +185,9 @@ pub fn http_proxy_config(props: &Props) -> Html {
 
             { toggle(state_input(&form, checked, |form, value| form.grpc_web = value), form.grpc_web, locale.t("http_form.grpc_web"), "my-6") }
             <p class={HINT_CLASS}>{locale.t("http_form.grpc_web_hint")}</p>
+
+            { toggle(state_input(&form, checked, |form, value| form.preserve_host = value), form.preserve_host, locale.t("http_form.preserve_host"), "my-6") }
+            <p class={HINT_CLASS}>{locale.t("http_form.preserve_host_hint")}</p>
 
             { toggle(state_input(&form, checked, |form, value| form.stream_priority.enabled = value), form.stream_priority.enabled, locale.t("proxies.stream_priority"), "my-6") }
             <p class={HINT_CLASS}>{locale.t("proxies.stream_priority_hint")}</p>
@@ -473,6 +478,7 @@ pub fn get_proxy(
         hide_branding: form.hide_branding,
         bot_blocker: form.bot_blocker,
         grpc_web: form.grpc_web,
+        preserve_host: form.preserve_host,
         stream_priority: form.stream_priority.clone(),
     })
 }

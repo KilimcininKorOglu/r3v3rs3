@@ -229,11 +229,13 @@ struct ProxyUpstream {
     sticky: StickyCookie,
     max_body_size: u64,
     geoip: Arc<crate::proxy::geoip::GeoIpResolver>,
+    preserve_host: bool,
 }
 
 impl ProxyUpstream {
     fn new(http: &HttpProxy, geoip: Arc<crate::proxy::geoip::GeoIpResolver>) -> Self {
         Self {
+            preserve_host: http.preserve_host,
             client_cert: http.client_cert,
             timeouts: http.timeouts,
             load_balancing: http.load_balancing,
@@ -315,6 +317,7 @@ impl ProxyUpstream {
             max_body_size: route.max_body_size.unwrap_or(self.max_body_size),
             rewrite: Arc::new(Rewrite::new(&route.rewrite, base_path)),
             mirror,
+            preserve_host: self.preserve_host,
         })
     }
 }

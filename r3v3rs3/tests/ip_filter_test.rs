@@ -51,6 +51,7 @@ fn proxy(routes: Vec<Route>, ip_filter: IpFilter, client_ip: ClientIpConfig) -> 
         error_pages: Vec::new(),
         bot_blocker: false,
         grpc_web: false,
+        preserve_host: false,
         stream_priority: Default::default(),
         hide_branding: false,
     }

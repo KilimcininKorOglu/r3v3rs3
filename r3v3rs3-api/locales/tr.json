@@ -720,6 +720,8 @@
   "http_form.bot_blocker_hint": "Otomatik yapay zeka tarayıcılarını, kazıyıcıları ve agresif botları (GPTBot, ClaudeBot, Bytespider, CCBot, PerplexityBot vb.) 403 Forbidden ile engeller.",
   "http_form.grpc_web": "gRPC-Web Proxy Dönüştürme",
   "http_form.grpc_web_hint": "Tarayıcı gRPC-Web isteklerini upstream gRPC servislerine dönüştürür, HTTP trailer'larını yanıt akışında çerçeveler ve CORS ön kontrollerini yönetir.",
+  "http_form.preserve_host": "İstemcinin Host Header'ını Koru",
+  "http_form.preserve_host_hint": "Upstream sunuculara sunucu adresi yerine istemcinin istediği host adını gönderir. Origin header'ını Host header'ı ile karşılaştıran uygulamalarda açın.",
   "http_form.burst": "Burst",
   "http_form.cache": "Cache",
   "http_form.cache_hint": "GET yanıtlarını bellekte saklar ve upstream sunucuya gitmeden istemciye gönderir. Cache-Control, Expires, Vary, ETag ve Last-Modified header'larına uyar. Private yanıtları ve Set-Cookie içeren yanıtları saklamaz. Varsayılan TTL, geçerlilik süresi belirtilmemiş yanıtlara uygulanır; değer 0 ise böyle bir yanıt yalnız validator'ı varsa saklanır. Saklanan yanıtları silmek için proxy listesindeki Temizle linkini kullanın.",

@@ -380,6 +380,26 @@ pub struct Upstream {
     pub rewrite: Arc<Rewrite>,
     /// `None` when the route has no mirror.
     pub mirror: Option<Arc<Mirror>>,
+    /// Sends the `Host` of the client instead of the authority of the server.
+    pub preserve_host: bool,
+}
+
+/// The `Host` that the client sent; an HTTP/2 or HTTP/3 client sends it as the URI authority.
+/// A retry finds the header that the first attempt set.
+fn client_host<B>(req: &Request<B>) -> Option<HeaderValue> {
+    req.headers()
+        .get(HOST)
+        .cloned()
+        .or_else(|| req.uri().authority().and_then(authority_value))
+}
+
+/// The `Host` header that names the server of `uri`.
+fn authority_header(uri: &Uri) -> Option<HeaderValue> {
+    uri.authority().and_then(authority_value)
+}
+
+fn authority_value(authority: &hyper::http::uri::Authority) -> Option<HeaderValue> {
+    HeaderValue::from_str(authority.as_str()).ok()
 }
 
 /// The servers to try for a request in order, and the part of the client URI that follows the
@@ -476,7 +496,8 @@ impl Upstream {
     }
 
     /// Points the request at the server. The request must not be sent when this fails, because
-    /// it still carries the URI of the client.
+    /// it still carries the URI of the client. The `Host` header names the server, or with
+    /// `preserve_host` the host that the client asked for.
     fn apply<B>(
         &self,
         req: &mut Request<B>,
@@ -492,10 +513,8 @@ impl Upstream {
             &target.path_segments,
             target.query.as_deref(),
         )?;
-        if let Some(host) = uri
-            .authority()
-            .and_then(|host| HeaderValue::from_str(host.as_str()).ok())
-        {
+        let client_host = self.preserve_host.then(|| client_host(req)).flatten();
+        if let Some(host) = client_host.or_else(|| authority_header(&uri)) {
             req.headers_mut().insert(HOST, host);
         }
         *req.uri_mut() = uri;

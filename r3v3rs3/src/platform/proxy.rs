@@ -104,6 +104,8 @@ pub fn app_proxy(
         sticky: app.spec.sticky.clone().unwrap_or_default(),
         bot_blocker: app.spec.bot_blocker,
         grpc_web: app.spec.grpc_web,
+        // An app sees the domain that the browser opened, not the loopback port of its container.
+        preserve_host: true,
         headers: if app.spec.frame_protection {
             HeaderRules::default_frame_protection()
         } else {
@@ -269,6 +271,7 @@ mod tests {
             .map(ToString::to_string)
             .collect::<Vec<_>>();
         assert_eq!(vhosts, ["shop.example.com", "www.shop.example.com"]);
+        assert!(http.preserve_host, "the app sees the domain of the browser");
         assert_eq!(
             crate::discovery::first_route_servers(&proxy),
             ["http://127.0.0.1:49153/"]
