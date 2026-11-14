@@ -934,14 +934,14 @@ fn header_view(locale: Locale, controls: HeaderControls) -> Html {
 fn live_badge(locale: Locale, live: bool) -> Html {
     if live {
         html! {
-            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+            <span class="inline-flex shrink-0 whitespace-nowrap items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 {locale.t("traffic.live")}
             </span>
         }
     } else {
         html! {
-            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">
+            <span class="inline-flex shrink-0 whitespace-nowrap items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">
                 <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
                 {locale.t("traffic.paused")}
             </span>
