@@ -689,6 +689,9 @@ pub struct UpdateQuarantineConfigParams {
     pub block_status_codes: Option<Vec<u16>>,
     /// Scanner URI path substrings (e.g. ["/.env", "/.git"]).
     pub scanner_patterns: Option<Vec<String>>,
+    /// Addresses or CIDR networks that are never quarantined (e.g. ["198.51.100.0/24"]).
+    /// Replaces the whole list; an empty list removes every entry.
+    pub allowed_ips: Option<Vec<String>>,
 }
 
 /// The arguments of `update_geoip_config`.
@@ -1320,7 +1323,8 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         let mut config = *current.0;
-        apply_quarantine_overrides(&mut config, params);
+        apply_quarantine_overrides(&mut config, params)
+            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
         let _ = super::quarantine::update_config(
             axum::extract::State(self.state.clone()),
             axum::Extension(caller),
@@ -5132,6 +5136,17 @@ fn parse_webhook_events(
 impl rmcp::ServerHandler for McpServer {}
 
 fn apply_quarantine_overrides(
+    config: &mut r3v3rs3_api::quarantine::AutoQuarantineConfig,
+    params: UpdateQuarantineConfigParams,
+) -> Result<(), r3v3rs3_api::error::Error> {
+    if let Some(allowed_ips) = &params.allowed_ips {
+        config.allowed_ips = r3v3rs3_api::cidr::parse_cidr_list(&allowed_ips.join(","))?;
+    }
+    apply_quarantine_limits(config, params);
+    Ok(())
+}
+
+fn apply_quarantine_limits(
     config: &mut r3v3rs3_api::quarantine::AutoQuarantineConfig,
     params: UpdateQuarantineConfigParams,
 ) {

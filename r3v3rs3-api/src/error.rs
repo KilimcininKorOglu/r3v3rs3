@@ -528,6 +528,9 @@ pub enum Error {
     #[error("invalid auto-quarantine configuration: {reason}")]
     InvalidAutoQuarantineConfig { reason: String },
 
+    #[error("{ip} is on the allowed list of the quarantine")]
+    QuarantineAllowedIp { ip: String },
+
     #[error("invalid GeoIP configuration: {reason}")]
     InvalidGeoIpConfig { reason: String },
 
@@ -614,7 +617,8 @@ impl Error {
             | Self::AppTargetFixed { .. }
             | Self::HostPortUnavailable { .. }
             | Self::DatabaseInUse { .. }
-            | Self::ErrorPageThemeInUse { .. } => 409,
+            | Self::ErrorPageThemeInUse { .. }
+            | Self::QuarantineAllowedIp { .. } => 409,
             Self::AgentOffline { .. } | Self::PlatformDisabled | Self::PlatformFailed => 503,
             Self::NotificationFailed { .. }
             | Self::GitProviderFailed { .. }

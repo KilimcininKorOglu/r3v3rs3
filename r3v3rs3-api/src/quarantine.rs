@@ -1,6 +1,7 @@
 //! Models and validation for automatic threat detection and IP quarantine.
 
 use crate::error::Error;
+use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use utoipa::ToSchema;
@@ -26,6 +27,11 @@ pub struct AutoQuarantineConfig {
     /// URI substrings triggering an immediate scan violation (e.g. "/.env", "/.git").
     #[serde(default = "default_scanner_patterns")]
     pub scanner_patterns: Vec<String>,
+    /// Client addresses and networks that are never quarantined, for example the network of
+    /// the administrators.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = [String], example = json!(["198.51.100.0/24"]))]
+    pub allowed_ips: Vec<IpNet>,
 }
 
 fn default_true() -> bool {
@@ -70,11 +76,17 @@ impl Default for AutoQuarantineConfig {
             ban_duration_seconds: default_ban_duration_seconds(),
             block_status_codes: default_block_status_codes(),
             scanner_patterns: default_scanner_patterns(),
+            allowed_ips: Vec::new(),
         }
     }
 }
 
 impl AutoQuarantineConfig {
+    /// Whether the address is in `allowed_ips`, so it is never quarantined.
+    pub fn allows(&self, ip: &IpAddr) -> bool {
+        self.allowed_ips.iter().any(|net| net.contains(ip))
+    }
+
     pub fn validate(&self) -> Result<(), Error> {
         if self.max_violations == 0 {
             return Err(Error::InvalidAutoQuarantineConfig {
@@ -157,6 +169,17 @@ mod tests {
             ..Default::default()
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn an_allowed_network_covers_its_addresses_only() {
+        let config: AutoQuarantineConfig =
+            serde_json::from_str(r#"{"allowed_ips": ["198.51.100.0/24", "2001:db8::1/128"]}"#)
+                .unwrap();
+        assert!(config.allows(&"198.51.100.7".parse().unwrap()));
+        assert!(config.allows(&"2001:db8::1".parse().unwrap()));
+        assert!(!config.allows(&"198.51.101.7".parse().unwrap()));
+        assert!(!AutoQuarantineConfig::default().allows(&"198.51.100.7".parse().unwrap()));
     }
 
     #[test]

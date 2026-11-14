@@ -1774,6 +1774,8 @@ r3v3rs3, gelen canlı HTTP ve TCP trafiğini izleyerek dış tehdit istihbaratı
   - `/.env`, `/.git`, `/.aws`, `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/phpmyadmin` ve `/config.json` gibi tarayıcı ve sonda kalıplarını otomatik olarak yakalar.
   - Kayan bir zaman penceresinde (varsayılan: 60 saniye) peş peşe alınan HTTP durum ihlallerini (`404`, `403`) biriktirir. Yalnız r3v3rs3'ün kendi oluşturduğu yanıtlar sayılır: bilinmeyen bir host, IP filtresinin reddettiği bir istek, başarısız bir giriş veya başka bir route politikası. Upstream uygulamanın döndürdüğü `403` veya `404` hiçbir zaman sayılmaz. Böylece bir uygulamanın giriş sayfası kullanıcılarını karantinaya almaz.
   - İhlaller belirlenen eşiğe ulaştığında (varsayılan: 5 ihlal) ilgili client IP adresini anında karantinaya alır.
+- **İzinli Adresler**:
+  - `allowed_ips` listesindeki adresler ve CIDR ağları hiçbir zaman karantinaya alınmaz, örneğin yöneticilerin ağı. Karantinadaki bir adresi listeye eklemek karantinasını hemen kaldırır. İzinli bir adresi elle karantinaya alma isteği `quarantine_allowed_ip` hatasıyla reddedilir.
 - **TCP Drop Yaptırımı**:
   - Karantinaya alınan IP'lerden gelen bağlantılar, HTTP istek çözümlemesi veya TLS handshake yapılmadan TCP dinleyici seviyesinde anında kapatılır (TCP Drop / Reset). Sunucu CPU ve bellek tüketimi sıfıra indirilir.
 - **Webhook Bildirimi**:
@@ -1781,6 +1783,17 @@ r3v3rs3, gelen canlı HTTP ve TCP trafiğini izleyerek dış tehdit istihbaratı
 - **Yönetim ve WebUI Kontrolleri**:
   - Karantinadaki IP'leri, ihlal sayılarını ve kalan karantina sürelerini **Güvenlik > Karantinadaki IP'ler** sekmesinde görüntüleyin.
   - WebUI üzerinden tek tıkla herhangi bir IP adresini manuel karantinaya alın veya serbest bırakın.
+  - Eşiği, pencereyi, süreyi, engellenen durum kodlarını, tarayıcı yollarını ve izinli adresleri aynı sekmedeki **Otomatik Karantina Ayarları** kartında değiştirin.
+
+```toml
+[auto_quarantine]
+enabled = true
+max_violations = 5
+window_seconds = 60
+ban_duration_seconds = 3600
+block_status_codes = [404, 403]
+allowed_ips = ["198.51.100.0/24"]
+```
 
 #### Admin API
 
@@ -1981,7 +1994,7 @@ r3 <server> security quarantined-ips
 r3 <server> security quarantine <ip> [--reason "Tarayıcı sondası"] [--duration-seconds 3600]
 r3 <server> security unquarantine <ip>
 r3 <server> security quarantine-config
-r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600] [--block-status-codes 404,403] [--scanner-patterns "/.env,/.git"]
+r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600] [--block-status-codes 404,403] [--scanner-patterns "/.env,/.git"] [--allowed-ips "198.51.100.0/24"]
 
 # Webhook'lar ve Zamanlanmış Görevler (Cron)
 r3 <server> webhook list

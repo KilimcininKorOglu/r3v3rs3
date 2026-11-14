@@ -772,6 +772,9 @@ pub enum SecurityCommand {
         /// Comma-separated URI substrings that quarantine at once (e.g. "/.env,/.git").
         #[arg(long)]
         scanner_patterns: Option<String>,
+        /// Comma-separated addresses or CIDR networks that are never quarantined; "" clears it.
+        #[arg(long)]
+        allowed_ips: Option<String>,
     },
     /// Manage GeoIP MMDB database, MaxMind licensing, and automated updates.
     #[command(subcommand)]
@@ -1714,6 +1717,7 @@ async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyh
             ban_duration_seconds,
             block_status_codes,
             scanner_patterns,
+            allowed_ips,
         } => {
             api.set_quarantine_config(api_client::SetQuarantineConfigArgs {
                 enabled,
@@ -1722,6 +1726,7 @@ async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyh
                 ban_duration_seconds,
                 block_status_codes,
                 scanner_patterns,
+                allowed_ips,
             })
             .await
         }

@@ -33,12 +33,13 @@ impl RpcMethod for QuarantineIp {
     const PERMISSION: Permission = Permission::Edit;
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
-        let entry =
-            state
-                .registries
-                .quarantine
-                .quarantine(self.ip, self.reason, self.duration_seconds);
-        Ok(entry)
+        let quarantine = &state.registries.quarantine;
+        if quarantine.is_exempt(&self.ip) {
+            return Err(Error::QuarantineAllowedIp {
+                ip: self.ip.to_string(),
+            });
+        }
+        Ok(quarantine.quarantine(self.ip, self.reason, self.duration_seconds))
     }
 
     fn audit(&self) -> Option<AuditRecord> {

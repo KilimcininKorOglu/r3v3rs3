@@ -57,9 +57,15 @@ impl AutoQuarantineTracker {
         }
     }
 
-    /// Checks whether an IP address is currently quarantined.
+    /// Whether the address is never quarantined: loopback, or an entry of `allowed_ips`.
+    pub fn is_exempt(&self, ip: &IpAddr) -> bool {
+        ip.is_loopback() || self.config.load().allows(ip)
+    }
+
+    /// Checks whether an IP address is currently quarantined. An address that the allowed list
+    /// gained after its ban is not quarantined.
     pub fn is_quarantined(&self, ip: &IpAddr) -> bool {
-        if ip.is_loopback() {
+        if self.is_exempt(ip) {
             return false;
         }
         let bans = match self.active_bans.read() {
@@ -131,7 +137,7 @@ impl AutoQuarantineTracker {
         weight: u32,
     ) -> Option<QuarantinedIpEntry> {
         let config = self.config.load();
-        if !config.enabled || ip.is_loopback() || self.is_quarantined(&ip) {
+        if !config.enabled || self.is_exempt(&ip) || self.is_quarantined(&ip) {
             return None;
         }
 
@@ -317,6 +323,7 @@ mod tests {
             max_violations: 3,
             window_seconds: 60,
             ban_duration_seconds: 120,
+            allowed_ips: Vec::new(),
             block_status_codes: vec![404],
             scanner_patterns: vec!["/.env".to_string()],
         };
@@ -371,12 +378,40 @@ mod tests {
     }
 
     #[test]
+    fn an_allowed_address_is_never_quarantined() {
+        let tracker = AutoQuarantineTracker::new(AutoQuarantineConfig {
+            allowed_ips: vec!["198.51.100.0/24".parse().unwrap()],
+            ..Default::default()
+        });
+        let allowed: IpAddr = "198.51.100.9".parse().unwrap();
+        assert_eq!(
+            tracker.record_violation(allowed, "Probe".to_string(), 100),
+            None
+        );
+        assert!(!tracker.is_quarantined(&allowed));
+    }
+
+    #[test]
+    fn allowing_a_banned_address_lifts_its_ban() {
+        let tracker = AutoQuarantineTracker::default();
+        let ip: IpAddr = "198.51.100.10".parse().unwrap();
+        tracker.quarantine(ip, "Manual".to_string(), 3600);
+        assert!(tracker.is_quarantined(&ip));
+        tracker.update_config(AutoQuarantineConfig {
+            allowed_ips: vec!["198.51.100.10/32".parse().unwrap()],
+            ..Default::default()
+        });
+        assert!(!tracker.is_quarantined(&ip));
+    }
+
+    #[test]
     fn violations_retention_pruning_and_bounded_capacity() {
         let config = AutoQuarantineConfig {
             enabled: true,
             max_violations: 10,
             window_seconds: 60,
             ban_duration_seconds: 120,
+            allowed_ips: Vec::new(),
             block_status_codes: vec![404],
             scanner_patterns: vec![],
         };

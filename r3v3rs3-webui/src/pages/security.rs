@@ -11,6 +11,7 @@ use crate::components::action_button::{ActionIconButton, ActionVariant};
 use crate::components::anomaly_rules::AnomalyRulesCard;
 use crate::components::data_list::{Column, ListContent, ListOptions, Row, list_view};
 use crate::components::geoip_card::GeoIpCard;
+use crate::components::quarantine_config::QuarantineConfigCard;
 use crate::components::tabs::{TabItem, Tabs};
 use crate::dialog;
 use crate::i18n::use_locale;
@@ -89,7 +90,10 @@ pub fn security() -> Html {
                     <BannedIpsCard />
                 },
                 SecurityTab::QuarantinedIps => html! {
-                    <QuarantinedIpsCard />
+                    <>
+                        <QuarantinedIpsCard />
+                        <QuarantineConfigCard />
+                    </>
                 },
                 SecurityTab::AnomalyRules => html! {
                     <AnomalyRulesCard />
@@ -315,14 +319,9 @@ fn quarantined_ips_card() -> Html {
     html! {
         <div class="bg-white dark:bg-neutral-800 shadow-sm p-5 border border-neutral-300 dark:border-neutral-700 rounded-md">
             { notice_view(&notice) }
-            <div class="flex items-center justify-between mb-2">
-                <div>
-                    <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.quarantined_ips")}</h2>
-                    <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.quarantined_ips_hint")}</p>
-                </div>
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300">
-                    {locale.t("settings.auto_quarantine_active")}
-                </span>
+            <div class="mb-2">
+                <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-200">{locale.t("settings.quarantined_ips")}</h2>
+                <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{locale.t("settings.quarantined_ips_hint")}</p>
             </div>
 
             { quarantined_table_view(locale, &list, unquarantine) }

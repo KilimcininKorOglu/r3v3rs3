@@ -28,6 +28,7 @@ pub mod port_config;
 pub mod proxy_config;
 pub mod proxy_dry_run;
 pub mod proxy_subcomponents;
+pub mod quarantine_config;
 pub mod sidebar;
 pub mod tabs;
 pub mod tcp_proxy_config;

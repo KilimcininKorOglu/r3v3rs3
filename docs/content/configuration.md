@@ -1774,6 +1774,8 @@ r3v3rs3 monitors incoming live HTTP and TCP traffic to detect scanner probes, pa
   - Automatically identifies probe patterns such as `/.env`, `/.git`, `/.aws`, `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/phpmyadmin`, and `/config.json`.
   - Accumulates repeated client status violations (`404`, `403`) across a sliding time window (default: 60 seconds). Only the responses that r3v3rs3 creates itself count: an unknown host, a refused IP filter, a failed sign-in or another route policy. A `403` or `404` from an upstream application never counts, so the login page of an app does not quarantine its users.
   - Instantly quarantines offending client IPs when violations reach the threshold (default: 5 violations).
+- **Allowed Addresses**:
+  - The addresses and CIDR networks in `allowed_ips` are never quarantined, for example the network of the administrators. Adding an address that is in quarantine lifts its quarantine at once, and a manual quarantine of an allowed address fails with `quarantine_allowed_ip`.
 - **TCP Drop Enforcement**:
   - Quarantined IP connections are immediately dropped at the TCP listener level before HTTP request parsing or TLS handshakes, consuming near-zero server CPU and memory.
 - **Webhook Alerting**:
@@ -1781,6 +1783,17 @@ r3v3rs3 monitors incoming live HTTP and TCP traffic to detect scanner probes, pa
 - **Management & WebUI Controls**:
   - View all quarantined IPs, violation counts, and remaining quarantine times in the **Security > Quarantined IPs** tab.
   - Manually quarantine or release any IP address with a single click.
+  - Change the threshold, the window, the duration, the blocked status codes, the scanner paths and the allowed addresses in the **Auto-Quarantine Settings** card of the same tab.
+
+```toml
+[auto_quarantine]
+enabled = true
+max_violations = 5
+window_seconds = 60
+ban_duration_seconds = 3600
+block_status_codes = [404, 403]
+allowed_ips = ["198.51.100.0/24"]
+```
 
 #### Admin API
 
@@ -1981,7 +1994,7 @@ r3 <server> security quarantined-ips
 r3 <server> security quarantine <ip> [--reason "Scanner probe"] [--duration-seconds 3600]
 r3 <server> security unquarantine <ip>
 r3 <server> security quarantine-config
-r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600] [--block-status-codes 404,403] [--scanner-patterns "/.env,/.git"]
+r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600] [--block-status-codes 404,403] [--scanner-patterns "/.env,/.git"] [--allowed-ips "198.51.100.0/24"]
 
 # Webhooks & Scheduled Cron Jobs
 r3 <server> webhook list

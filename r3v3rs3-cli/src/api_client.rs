@@ -51,6 +51,7 @@ pub struct SetQuarantineConfigArgs {
     pub ban_duration_seconds: Option<u64>,
     pub block_status_codes: Option<String>,
     pub scanner_patterns: Option<String>,
+    pub allowed_ips: Option<String>,
 }
 
 fn apply_quarantine_args(
@@ -85,6 +86,9 @@ fn apply_quarantine_lists(
     }
     if let Some(patterns) = args.scanner_patterns {
         config.scanner_patterns = comma_list(&patterns);
+    }
+    if let Some(allowed) = args.allowed_ips {
+        config.allowed_ips = r3v3rs3_api::cidr::parse_cidr_list(&allowed)?;
     }
     Ok(())
 }
@@ -3655,6 +3659,19 @@ mod tests {
         };
         assert!(apply_quarantine_args(&mut config, args).is_err());
         assert_eq!(config.block_status_codes, [404, 403]);
+    }
+
+    #[test]
+    fn the_allowed_ips_flag_takes_addresses_and_networks() {
+        let mut config = r3v3rs3_api::quarantine::AutoQuarantineConfig::default();
+        let args = SetQuarantineConfigArgs {
+            allowed_ips: Some("198.51.100.0/24, 203.0.113.9".into()),
+            ..Default::default()
+        };
+        apply_quarantine_args(&mut config, args).unwrap();
+        assert!(config.allows(&"198.51.100.20".parse().unwrap()));
+        assert!(config.allows(&"203.0.113.9".parse().unwrap()));
+        assert!(!config.allows(&"203.0.113.10".parse().unwrap()));
     }
 
     #[test]
