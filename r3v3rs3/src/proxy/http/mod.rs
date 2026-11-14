@@ -669,6 +669,7 @@ async fn proxied_response(
     if shared.quarantine.is_quarantined(&client_ip) {
         return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
     }
+    let own_response = answered_by_r3v3rs3(&req);
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
     let duration = start.elapsed();
@@ -679,7 +680,7 @@ async fn proxied_response(
     );
 
     let country = shared.geoip.lookup_country(client_ip);
-    check_and_record_quarantine(&shared.quarantine, client_ip, &uri, &mapped);
+    check_and_record_quarantine(&shared.quarantine, client_ip, &uri, own_response, &mapped);
     record_access_log(
         AccessLogMeta {
             resource_id,
@@ -926,10 +927,20 @@ fn record_access_log<B>(
     });
 }
 
+/// Whether r3v3rs3 answers the request itself, without an upstream server: no route, a refused
+/// request or a response of a route policy.
+fn answered_by_r3v3rs3<R>(req: &ProxiedRequest<R>) -> bool {
+    !matches!(req, ProxiedRequest::Ok(_))
+}
+
+/// Records a quarantine violation for a scanner path, or for a blocked status code of a response
+/// that r3v3rs3 created itself. The status of an upstream response never counts, because a 403
+/// or 404 of the application is no sign of a hostile client.
 fn check_and_record_quarantine<B>(
     quarantine: &crate::security::AutoQuarantineTracker,
     client_ip: std::net::IpAddr,
     uri: &str,
+    own_response: bool,
     mapped: &Result<Response<B>, anyhow::Error>,
 ) {
     if client_ip.is_loopback() {
@@ -946,7 +957,7 @@ fn check_and_record_quarantine<B>(
         return;
     }
 
-    if uri.contains("/api/") {
+    if !own_response {
         return;
     }
 
@@ -1939,6 +1950,7 @@ where
         return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
     }
 
+    let own_response = answered_by_r3v3rs3(&req);
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
     let mapped = mapped.map(|res| res.map(|b| BoxBody::new(ByteCountBody::tx(b))));
@@ -1949,7 +1961,7 @@ where
         route_path.as_deref(),
     );
     let country = shared.geoip.lookup_country(client_ip);
-    check_and_record_quarantine(&shared.quarantine, client_ip, &uri, &mapped);
+    check_and_record_quarantine(&shared.quarantine, client_ip, &uri, own_response, &mapped);
     record_access_log(
         AccessLogMeta {
             resource_id,
