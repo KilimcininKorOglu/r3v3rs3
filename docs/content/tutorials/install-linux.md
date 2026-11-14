@@ -121,9 +121,11 @@ The running server also opens `/etc/r3v3rs3/control.sock` with the mode `0600`. 
 The auto-quarantine and the sign-in ban block a client address, and a blocked client cannot open the panel. Release the address on the server with root:
 
 ```bash
-$ sudo r3-server unblock 203.0.113.9 --config-dir /etc/r3v3rs3
+$ sudo /usr/local/bin/r3-server unblock 203.0.113.9 --config-dir /etc/r3v3rs3
 203.0.113.9 released: quarantine=true login_ban=false
 ```
+
+- Write the full path: the `secure_path` of sudo on RHEL, Rocky and AlmaLinux does not contain `/usr/local/bin`.
 
 - The command talks to the running server over `control.sock`. It needs no panel session and no API token, because the file permissions decide who can use it.
 - The output shows which block held the address. `false` in both fields means that the address was not blocked.

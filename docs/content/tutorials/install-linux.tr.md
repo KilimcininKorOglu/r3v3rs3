@@ -121,9 +121,11 @@ Sunucu log'unu `journalctl -u r3-server` gösterir. `/etc/r3v3rs3/r3v3rs3.db` t�
 Otomatik karantina ve giriş yasağı bir istemci adresini engeller. Engellenen istemci paneli açamaz. Adresi sunucuda root ile serbest bırakın:
 
 ```bash
-$ sudo r3-server unblock 203.0.113.9 --config-dir /etc/r3v3rs3
+$ sudo /usr/local/bin/r3-server unblock 203.0.113.9 --config-dir /etc/r3v3rs3
 203.0.113.9 released: quarantine=true login_ban=false
 ```
+
+- Tam yolu yazın: RHEL, Rocky ve AlmaLinux'ta sudo'nun `secure_path` değeri `/usr/local/bin` dizinini içermez.
 
 - Komut çalışan sunucuyla `control.sock` üzerinden konuşur. Panel oturumu veya API token'ı gerekmez, çünkü komutu kimin kullanabileceğine dosya izinleri karar verir.
 - Çıktı, adresi hangi engelin tuttuğunu gösterir. İki alanda da `false` değeri adresin engelli olmadığı anlamına gelir.
