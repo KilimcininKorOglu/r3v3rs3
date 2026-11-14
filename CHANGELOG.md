@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.3] - 2026-11-15
+
+### Fixed
+- The app dashboard waited 30 seconds and showed only its skeleton when the Docker Engine held the log request open, which Docker 29.9 did on the test host. The dashboard now loads its parts at the same time, waits at most 5 seconds for the log preview, and shows the reason in the preview (`logs_error` in the API response) instead of an empty box.
+- The "No logs available yet." text of the dashboard log preview was not translated.
+- The live badge of the traffic page broke into two lines next to the description.
+
 ## [3.3.2] - 2026-11-15
 
 ### Fixed
