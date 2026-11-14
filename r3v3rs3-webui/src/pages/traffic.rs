@@ -849,6 +849,12 @@ pub fn traffic_view() -> Html {
 
     html! {
         <div class="space-y-4">
+            <div class="flex items-center gap-3">
+                <BackButton />
+                <h1 class="text-xl font-bold text-neutral-900 dark:text-neutral-100">
+                    {locale.t("traffic.title")}
+                </h1>
+            </div>
             { tab_bar_view(locale, &active_tab, connections.len()) }
             { traffic_tab_content(locale, *active_tab, logs_view, &connections, &conns_trigger, &priority_stats, &priority_trigger) }
         </div>
@@ -877,17 +883,11 @@ fn header_view(locale: Locale, controls: HeaderControls) -> Html {
     } = controls;
     html! {
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b dark:border-neutral-700">
-            <div class="flex items-center gap-3">
-                <BackButton />
-                <div>
-                    <h1 class="text-xl font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-                        {locale.t("traffic.title")}
-                        { live_badge(locale, live) }
-                    </h1>
-                    <p class="text-xs text-neutral-500 dark:text-neutral-400">
-                        {locale.t("traffic.subtitle")}
-                    </p>
-                </div>
+            <div class="flex items-center gap-2">
+                { live_badge(locale, live) }
+                <p class="text-xs text-neutral-500 dark:text-neutral-400">
+                    {locale.t("traffic.subtitle")}
+                </p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
                 <Button kind={toggle_kind(show_geo_map)} size={ButtonSize::Sm} onclick={on_toggle_map}>
