@@ -42,6 +42,53 @@ pub struct SetPrunePolicyArgs {
     pub dangling_layers_only: Option<bool>,
 }
 
+/// The flags of `security set-quarantine-config`. A list flag holds comma-separated items.
+#[derive(Default)]
+pub struct SetQuarantineConfigArgs {
+    pub enabled: Option<bool>,
+    pub max_violations: Option<u32>,
+    pub window_seconds: Option<u64>,
+    pub ban_duration_seconds: Option<u64>,
+    pub block_status_codes: Option<String>,
+    pub scanner_patterns: Option<String>,
+}
+
+fn apply_quarantine_args(
+    config: &mut r3v3rs3_api::quarantine::AutoQuarantineConfig,
+    args: SetQuarantineConfigArgs,
+) -> anyhow::Result<()> {
+    if let Some(en) = args.enabled {
+        config.enabled = en;
+    }
+    if let Some(mv) = args.max_violations {
+        config.max_violations = mv;
+    }
+    if let Some(ws) = args.window_seconds {
+        config.window_seconds = ws;
+    }
+    if let Some(bd) = args.ban_duration_seconds {
+        config.ban_duration_seconds = bd;
+    }
+    apply_quarantine_lists(config, args)
+}
+
+fn apply_quarantine_lists(
+    config: &mut r3v3rs3_api::quarantine::AutoQuarantineConfig,
+    args: SetQuarantineConfigArgs,
+) -> anyhow::Result<()> {
+    if let Some(codes) = args.block_status_codes {
+        config.block_status_codes = comma_list(&codes)
+            .iter()
+            .map(|code| code.parse::<u16>())
+            .collect::<Result<_, _>>()
+            .context("block-status-codes takes numbers such as 404,403")?;
+    }
+    if let Some(patterns) = args.scanner_patterns {
+        config.scanner_patterns = comma_list(&patterns);
+    }
+    Ok(())
+}
+
 /// The non-empty, trimmed items of a comma-separated list.
 fn comma_list(value: &str) -> Vec<String> {
     value
@@ -2285,27 +2332,10 @@ impl ApiClient {
         Ok(())
     }
 
-    pub async fn set_quarantine_config(
-        &self,
-        enabled: Option<bool>,
-        max_violations: Option<u32>,
-        window_seconds: Option<u64>,
-        ban_duration_seconds: Option<u64>,
-    ) -> anyhow::Result<()> {
+    pub async fn set_quarantine_config(&self, args: SetQuarantineConfigArgs) -> anyhow::Result<()> {
         let mut config: r3v3rs3_api::quarantine::AutoQuarantineConfig =
             self.get_json("/api/security/quarantine/config").await?;
-        if let Some(en) = enabled {
-            config.enabled = en;
-        }
-        if let Some(mv) = max_violations {
-            config.max_violations = mv;
-        }
-        if let Some(ws) = window_seconds {
-            config.window_seconds = ws;
-        }
-        if let Some(bd) = ban_duration_seconds {
-            config.ban_duration_seconds = bd;
-        }
+        apply_quarantine_args(&mut config, args)?;
         self.request(
             Method::PUT,
             "/api/security/quarantine/config",
@@ -3602,6 +3632,30 @@ pub fn build_pitr_restore_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_quarantine_flags_replace_only_the_given_lists() {
+        let mut config = r3v3rs3_api::quarantine::AutoQuarantineConfig::default();
+        let patterns = config.scanner_patterns.clone();
+        let args = SetQuarantineConfigArgs {
+            block_status_codes: Some("404, 401".into()),
+            ..Default::default()
+        };
+        apply_quarantine_args(&mut config, args).unwrap();
+        assert_eq!(config.block_status_codes, [404, 401]);
+        assert_eq!(config.scanner_patterns, patterns);
+    }
+
+    #[test]
+    fn a_status_code_that_is_not_a_number_is_refused() {
+        let mut config = r3v3rs3_api::quarantine::AutoQuarantineConfig::default();
+        let args = SetQuarantineConfigArgs {
+            block_status_codes: Some("404,abc".into()),
+            ..Default::default()
+        };
+        assert!(apply_quarantine_args(&mut config, args).is_err());
+        assert_eq!(config.block_status_codes, [404, 403]);
+    }
 
     #[test]
     fn a_long_engine_name_maps_to_its_catalog_key() {

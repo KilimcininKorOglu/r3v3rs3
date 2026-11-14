@@ -1981,7 +1981,7 @@ r3 <server> security quarantined-ips
 r3 <server> security quarantine <ip> [--reason "Tarayıcı sondası"] [--duration-seconds 3600]
 r3 <server> security unquarantine <ip>
 r3 <server> security quarantine-config
-r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600]
+r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600] [--block-status-codes 404,403] [--scanner-patterns "/.env,/.git"]
 
 # Webhook'lar ve Zamanlanmış Görevler (Cron)
 r3 <server> webhook list

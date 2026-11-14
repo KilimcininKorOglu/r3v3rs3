@@ -766,6 +766,12 @@ pub enum SecurityCommand {
         /// Ban duration in seconds.
         #[arg(long)]
         ban_duration_seconds: Option<u64>,
+        /// Comma-separated status codes of r3v3rs3 responses that count as violations.
+        #[arg(long)]
+        block_status_codes: Option<String>,
+        /// Comma-separated URI substrings that quarantine at once (e.g. "/.env,/.git").
+        #[arg(long)]
+        scanner_patterns: Option<String>,
     },
     /// Manage GeoIP MMDB database, MaxMind licensing, and automated updates.
     #[command(subcommand)]
@@ -1706,13 +1712,17 @@ async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyh
             max_violations,
             window_seconds,
             ban_duration_seconds,
+            block_status_codes,
+            scanner_patterns,
         } => {
-            api.set_quarantine_config(
+            api.set_quarantine_config(api_client::SetQuarantineConfigArgs {
                 enabled,
                 max_violations,
                 window_seconds,
                 ban_duration_seconds,
-            )
+                block_status_codes,
+                scanner_patterns,
+            })
             .await
         }
         SecurityCommand::Geoip(cmd) => run_geoip(api, cmd).await,
