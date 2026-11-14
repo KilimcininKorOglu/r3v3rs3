@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.2] - 2026-11-15
+
+### Fixed
+- The Back button of the traffic page sat below the tab bar. It is now the first item of the page, like on every other page.
+- The Logs and Terminal buttons of the app dashboard used gray image icons, and the Logs icon was hard to see in both themes. They now draw their icons in the text color of the button.
+- The install guide called `sudo r3-server unblock`, which fails on RHEL, Rocky and AlmaLinux because the `secure_path` of sudo has no `/usr/local/bin`. It now uses the full path.
+
 ## [3.3.1] - 2026-11-15
 
 ### Added
