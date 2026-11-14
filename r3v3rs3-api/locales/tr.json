@@ -1895,7 +1895,7 @@
   "apps.volumes": "Volume'lar",
   "apps.volumes_hint": "Her satıra bir mount yazın: volume:/yol, salt okunur mount için volume:/yol:ro.",
   "apps.invalid_volume": "Geçersiz volume: {volume}",
-  "apps.restart": "Yeniden başlatma politikası",
+  "apps.restart_policy": "Yeniden Başlatma Politikası",
   "apps.restart_unless_stopped": "Durdurulmadıkça",
   "apps.restart_always": "Her zaman",
   "apps.restart_on_failure": "Hata olursa",

@@ -425,6 +425,25 @@ mod tests {
         }
     }
 
+    /// A JSON object keeps only the last of two equal keys, so a second definition silently
+    /// replaces the text of the first one. The locale files hold one key on each line.
+    #[test]
+    fn locale_files_define_each_key_once() {
+        for locale in Locale::ALL {
+            let mut seen = BTreeSet::new();
+            for line in source(locale).lines() {
+                let Some((key, _)) = line
+                    .trim()
+                    .strip_prefix('"')
+                    .and_then(|l| l.split_once("\":"))
+                else {
+                    continue;
+                };
+                assert!(seen.insert(key), "{key} twice in {}", locale.code());
+            }
+        }
+    }
+
     #[test]
     fn locales_define_the_same_keys_and_placeholders() {
         let english = table(Locale::En);

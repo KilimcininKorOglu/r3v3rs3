@@ -1552,7 +1552,7 @@ fn restart_select(locale: Locale, form: &UseStateHandle<AppForm>) -> Html {
         .collect::<Html>();
     html! {
         <>
-            <label class={LABEL_CLASS}>{locale.t("apps.restart")}</label>
+            <label class={LABEL_CLASS}>{locale.t("apps.restart_policy")}</label>
             { select_view(form, options, |f, value| f.restart = parse_restart(value)) }
         </>
     }

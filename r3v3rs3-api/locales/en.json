@@ -1895,7 +1895,7 @@
   "apps.volumes": "Volumes",
   "apps.volumes_hint": "One mount on each line: volume:/path, or volume:/path:ro for a read-only mount.",
   "apps.invalid_volume": "Invalid volume: {volume}",
-  "apps.restart": "Restart Policy",
+  "apps.restart_policy": "Restart Policy",
   "apps.restart_unless_stopped": "Unless stopped",
   "apps.restart_always": "Always",
   "apps.restart_on_failure": "On failure",
