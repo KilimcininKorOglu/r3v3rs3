@@ -201,7 +201,12 @@ async fn a_deleted_app_leaves_nothing_on_the_agent() -> anyhow::Result<()> {
 
     setup.platform.delete_app(setup.app.id).await?;
     assert!(setup.agent.runtime.names().is_empty());
-    assert!(setup.agent.runtime.state().networks.is_empty());
+    // Only the shared network of the target stays.
+    let networks = setup.agent.runtime.state().networks.clone();
+    assert_eq!(
+        networks.into_iter().collect::<Vec<_>>(),
+        [crate::platform::deploy::SHARED_NETWORK.to_string()]
+    );
     assert_eq!(setup.platform.forwarders.existing(&key), None);
     Ok(())
 }

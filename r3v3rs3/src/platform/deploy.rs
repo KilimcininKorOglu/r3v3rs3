@@ -884,8 +884,7 @@ impl Platform {
     ) -> anyhow::Result<()> {
         let runtime = &*backend.runtime;
         let app_label = app_label(job.app)?;
-        let network = app_network(job.app)?;
-        runtime.ensure_network(&network, &app_label).await?;
+        let network = ensure_shared_network(runtime).await?;
         let spec = self
             .build_container_spec(job, name, digest, runtime, &app_label, &network)
             .await?;
@@ -908,8 +907,7 @@ impl Platform {
         network: &NetworkName,
     ) -> anyhow::Result<ContainerSpec> {
         let mut env = self.effective_env(job).await?;
-        let (database_env, extra_networks) = self.database_env(job, runtime).await?;
-        env.extend(database_env);
+        env.extend(self.database_env(job, runtime).await?);
         Ok(ContainerSpec {
             name: name.clone(),
             image: digest.parse()?,
@@ -925,7 +923,7 @@ impl Platform {
             publish: Some(job.spec.port),
             host_port: job.spec.host_port,
             aliases: vec![app_host(job.app)],
-            extra_networks,
+            extra_networks: Vec::new(),
             log_max_size: None,
             log_max_file: None,
             command: database_command(job.spec.database.as_deref()),
@@ -1064,17 +1062,16 @@ fn merge_env_vars(target: &mut Vec<EnvVar>, new_vars: Vec<EnvVar>) {
 }
 
 impl Platform {
-    /// The connection of the database that the app uses, as the environment of the container,
-    /// and the networks of the database and its running replicas. The container joins those
-    /// networks and reaches each database by its host name and container port, because a
-    /// database publishes its port only on `127.0.0.1` of the host.
+    /// The connection of the database that the app uses, as the environment of the container.
+    /// The app and the database are on the shared network, so the app reaches the database and
+    /// its replicas by their host names and container ports.
     async fn database_env(
         &self,
         job: &Job,
         runtime: &dyn ContainerRuntime,
-    ) -> anyhow::Result<(Vec<EnvVar>, Vec<NetworkName>)> {
+    ) -> anyhow::Result<Vec<EnvVar>> {
         let Some(db_id) = job.spec.uses_database else {
-            return Ok((Vec::new(), Vec::new()));
+            return Ok(Vec::new());
         };
         let db = self.app(db_id).await?;
         let Some(engine) = db.spec.database.clone() else {
@@ -1092,8 +1089,7 @@ impl Platform {
         let credentials = self.database_credentials(&db, job, &info).await?;
         let replicas = self.running_replicas(db_id, runtime).await;
         let primary = (app_host(db_id), db.spec.port);
-        let env = connection_env(connection_values(&info, &primary, &credentials, &replicas))?;
-        Ok((env, database_networks(db_id, &replicas)?))
+        connection_env(connection_values(&info, &primary, &credentials, &replicas))
     }
 
     /// The account that the app connects with: its tenant on a shared server, or the root
@@ -1177,8 +1173,7 @@ impl Platform {
         let hook_name: ContainerName =
             format!("r3v3rs3-hook-{}-{}", job.app, job.deployment).parse()?;
         let app_label = app_label(job.app)?;
-        let network = app_network(job.app)?;
-        runtime.ensure_network(&network, &app_label).await?;
+        let network = ensure_shared_network(runtime).await?;
         let mut spec = self
             .build_container_spec(job, &hook_name, digest, runtime, &app_label, &network)
             .await?;
@@ -1430,27 +1425,28 @@ fn app_label(app: ShortId) -> anyhow::Result<AppName> {
     Ok(app.to_string().parse()?)
 }
 
-/// The network of an app, so that the containers of different apps do not reach each other.
+/// The network of every app and database container of the platform, like the shared network
+/// of other deployment platforms. Each container answers on it to its host name, so an app
+/// reaches a database, and an administration app such as phpMyAdmin reaches a server, by name.
+pub(crate) const SHARED_NETWORK: &str = "r3v3rs3-shared";
+
+/// Creates the shared network on the target when it is missing.
+async fn ensure_shared_network(runtime: &dyn ContainerRuntime) -> anyhow::Result<NetworkName> {
+    let network: NetworkName = SHARED_NETWORK.parse()?;
+    runtime
+        .ensure_network(&network, &SHARED_NETWORK.parse()?)
+        .await?;
+    Ok(network)
+}
+
+/// The network of an app before the shared network. A removed app still removes it.
 fn app_network(app: ShortId) -> anyhow::Result<NetworkName> {
     Ok(app_host(app).parse()?)
 }
 
-/// The host name of the containers of an app on the network of the app. An app that uses a
-/// database joins the network of the database and connects to this name.
-fn app_host(app: ShortId) -> String {
+/// The host name of the containers of an app on the shared network.
+pub(crate) fn app_host(app: ShortId) -> String {
     format!("{RESOURCE_PREFIX}{app}")
-}
-
-/// The networks of a database and of its replicas, which a connected app joins.
-fn database_networks(
-    db_id: ShortId,
-    replicas: &[(ShortId, u16)],
-) -> anyhow::Result<Vec<NetworkName>> {
-    let mut networks = vec![app_network(db_id)?];
-    for (replica, _) in replicas {
-        networks.push(app_network(*replica)?);
-    }
-    Ok(networks)
 }
 
 /// The connection values as container environment variables.
@@ -2358,6 +2354,116 @@ mod tests {
         Ok(())
     }
 
+    /// A platform on the Docker Engine of `DOCKER_HOST`, as the real Docker tests use it.
+    async fn docker_platform() -> anyhow::Result<(Arc<Platform>, TempDir)> {
+        let (command, _) = mpsc::channel(1);
+        let (mut platform, _fake, dir) = platform_with(&PlatformConfig::default(), command).await?;
+        let host = std::env::var("DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());
+        platform.local = Arc::new(super::super::docker_runtime(&host)?);
+        platform.timing.health_timeout = Duration::from_secs(60);
+        Ok((Arc::new(platform), dir))
+    }
+
+    /// Adds an image app of the Redis image and deploys it until it runs.
+    async fn running_redis(
+        platform: &Arc<Platform>,
+        name: &str,
+        configure: impl FnOnce(&mut AppRequest),
+    ) -> anyhow::Result<(AppEntry, DeploymentEntry)> {
+        let mut request = request(name);
+        request.spec.source = AppSource::Image {
+            image: "mirror.gcr.io/library/redis:8-alpine".parse()?,
+        };
+        request.spec.port = 6379;
+        configure(&mut request);
+        let app = platform.add_app(request, 1).await?;
+        if app.spec.database.is_some() {
+            let password = EnvEntry {
+                key: "REDIS_PASSWORD".parse()?,
+                value: Some("s3cret0123".into()),
+                secret: true,
+            };
+            platform.set_env(app.id, vec![password]).await?;
+        }
+        let entry = platform
+            .deploy(app.id, "alice", DeploymentTrigger::Manual)
+            .await?;
+        let entry = settled(platform, &[app.id], entry.id).await?;
+        anyhow::ensure!(entry.status == DeploymentStatus::Running, "{entry:?}");
+        Ok((app, entry))
+    }
+
+    /// Runs a Redis ping in the container of the deployment and checks the answer.
+    async fn ping_from(
+        platform: &Arc<Platform>,
+        app: &AppEntry,
+        deployment: &DeploymentEntry,
+        ping: String,
+    ) -> anyhow::Result<()> {
+        let command = vec!["sh".to_string(), "-c".to_string(), ping];
+        let name = proxy::container_name(app.id, deployment.id)?;
+        let output = platform
+            .local
+            .exec_capture(&name, command, Vec::new())
+            .await?;
+        let output = String::from_utf8_lossy(&output);
+        anyhow::ensure!(output.trim() == "PONG", "{output}");
+        Ok(())
+    }
+
+    /// An app that uses the database and an app that uses none both reach the server.
+    async fn check_shared_network(platform: &Arc<Platform>, db: ShortId) -> anyhow::Result<()> {
+        let (app, deployment) = running_redis(platform, "cache-client", |request| {
+            request.spec.uses_database = Some(db);
+        })
+        .await?;
+        // The injected host is the name of the database on the shared network, and the tenant
+        // account of the app signs in over it.
+        let ping = "redis-cli -h \"$REDIS_HOST\" -p \"$REDIS_PORT\" --user \"$REDIS_USER\" \
+                    --pass \"$REDIS_PASSWORD\" --no-auth-warning ping";
+        ping_from(platform, &app, &deployment, ping.to_string()).await?;
+
+        // An administration app such as phpMyAdmin uses no database, yet it reaches the server
+        // by its host name with the root account, as on other platforms.
+        let (admin, deployment) = running_redis(platform, "cache-admin", |_| {}).await?;
+        let ping = format!(
+            "redis-cli -h {} -p 6379 --pass s3cret0123 --no-auth-warning ping",
+            app_host(db)
+        );
+        ping_from(platform, &admin, &deployment, ping).await
+    }
+
+    /// Deletes the apps before the databases that they use, then the shared network.
+    async fn remove_test_apps(platform: &Arc<Platform>) -> anyhow::Result<()> {
+        let mut apps = platform.store.apps().await?;
+        apps.sort_by_key(|app| app.spec.database.is_some());
+        for app in apps {
+            platform.delete_app(app.id).await?;
+        }
+        platform
+            .local
+            .remove_network(&SHARED_NETWORK.parse()?)
+            .await
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+    async fn apps_share_a_network_on_the_docker_engine() -> anyhow::Result<()> {
+        catalog();
+        let (platform, _dir) = docker_platform().await?;
+        let checks = match running_redis(&platform, "cache-db", |request| {
+            request.spec.database = Some("redis".into());
+        })
+        .await
+        {
+            Ok((db, _)) => check_shared_network(&platform, db.id).await,
+            Err(err) => Err(err),
+        };
+        // A failed check reports its own error; the cleanup still runs.
+        let cleanup = remove_test_apps(&platform).await;
+        checks.and(cleanup)
+    }
+
     #[tokio::test]
     async fn a_deployment_injects_the_connection_of_its_database() -> anyhow::Result<()> {
         let (platform, runtime, linked, _dir, _host_port) = setup_with_database(true).await?;
@@ -2374,10 +2480,11 @@ mod tests {
             .last()
             .cloned()
             .context("the created container")?;
-        // The app joins the network of the database, and the database answers to its host
-        // name on its own network: the published port of the host is not reachable from a
-        // container.
-        assert_eq!(created.extra_networks, vec![app_network(db_id)?]);
+        // The app and the database are on the shared network, and the database answers to its
+        // host name there: the published port of the host is not reachable from a container.
+        let shared: NetworkName = SHARED_NETWORK.parse()?;
+        assert_eq!(created.network.as_ref(), Some(&shared));
+        assert!(created.extra_networks.is_empty());
         assert_eq!(created.aliases, vec![app_host(linked.id)]);
         let db_spec = runtime
             .state()
@@ -2387,6 +2494,7 @@ mod tests {
             .cloned()
             .context("the database container")?;
         assert_eq!(db_spec.aliases, vec![app_host(db_id)]);
+        assert_eq!(db_spec.network.as_ref(), Some(&shared));
         let db_host = app_host(db_id);
         let env = |key: &str| {
             created
@@ -2739,11 +2847,8 @@ mod tests {
             env("POSTGRES_READ_PORT").as_deref(),
             Some(&*replica_port.to_string())
         );
-        // The app joins the network of the replica too.
-        assert_eq!(
-            created.extra_networks,
-            vec![app_network(db_id)?, app_network(rep_id)?]
-        );
+        // The replica is on the shared network too, so the app needs no other network.
+        assert!(created.extra_networks.is_empty());
         Ok(())
     }
 
@@ -2816,11 +2921,7 @@ mod tests {
         let info = &state.containers[&container_of(&setup, &second)];
         assert_eq!(info.labels[APP_LABEL], setup.app.id.to_string());
         assert_eq!(info.labels[DEPLOYMENT_LABEL], second.id.to_string());
-        assert!(
-            state
-                .networks
-                .contains(&format!("r3v3rs3-{}", setup.app.id))
-        );
+        assert!(state.networks.contains(SHARED_NETWORK));
         Ok(())
     }
 
@@ -2993,7 +3094,12 @@ mod tests {
         deploy(&setup).await?;
         setup.platform.delete_app(setup.app.id).await?;
         assert!(setup.runtime.names().is_empty());
-        assert!(setup.runtime.state().networks.is_empty());
+        // The shared network stays for the other apps; the app had no network of its own.
+        let networks = setup.runtime.state().networks.clone();
+        assert_eq!(
+            networks.into_iter().collect::<Vec<_>>(),
+            [SHARED_NETWORK.to_string()]
+        );
         Ok(())
     }
 
