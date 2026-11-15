@@ -2,7 +2,7 @@
 
 use super::{CdnRanges, set_last_errors, table};
 use crate::clock::unix_ms;
-use crate::{command::ServerCommand, proxy::http::hyper_tls::client::HttpsConnector};
+use crate::{command::ServerCommand, hyper_tls::client::HttpsConnector};
 use anyhow::{anyhow, bail};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};

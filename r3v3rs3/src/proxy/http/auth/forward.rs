@@ -1,5 +1,6 @@
 use super::{AuthContext, AuthRejection};
-use crate::proxy::http::{error::ProxyError, hyper_tls::client::HttpsConnector};
+use crate::hyper_tls::client::HttpsConnector;
+use crate::proxy::http::error::ProxyError;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty, Full, Limited};
 use hyper::{

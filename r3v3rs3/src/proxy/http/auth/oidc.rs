@@ -2,7 +2,7 @@ use super::super::cookie::{cookie_values, remove_cookie};
 use super::session::{ENDPOINT_PREFIX, safe_redirect};
 use super::{AuthContext, AuthRejection};
 use crate::cdn::fetch::HttpClient;
-use crate::proxy::http::hyper_tls::client::HttpsConnector;
+use crate::hyper_tls::client::HttpsConnector;
 use aws_lc_rs::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
 use base64::Engine;
 use bytes::Bytes;

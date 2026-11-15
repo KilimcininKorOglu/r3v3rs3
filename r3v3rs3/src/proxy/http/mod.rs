@@ -78,7 +78,6 @@ pub(crate) mod filter;
 mod fixed;
 pub(crate) mod grpc_web;
 pub(crate) mod header_rules;
-pub(crate) mod hyper_tls;
 mod mirror;
 pub(crate) mod page;
 pub(crate) mod pool;
