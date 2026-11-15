@@ -4773,16 +4773,11 @@ impl McpServer {
             Some(ref id) => Some(parse_id(id)?),
             None => None,
         };
-        let event = match params.event {
-            Some(ref e) => Some(
-                e.trim()
-                    .replace('_', ".")
-                    .parse::<r3v3rs3_api::webhook::WebhookEvent>()
-                    .or_else(|_| e.trim().parse::<r3v3rs3_api::webhook::WebhookEvent>())
-                    .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?,
-            ),
-            None => None,
-        };
+        let event = params
+            .event
+            .as_deref()
+            .map(parse_webhook_event)
+            .transpose()?;
         let request = r3v3rs3_api::webhook::TestWebhookRequest {
             webhook_id,
             url: params.url,
@@ -5286,16 +5281,23 @@ impl McpServer {
 fn parse_webhook_events(
     events: &[String],
 ) -> Result<Vec<r3v3rs3_api::webhook::WebhookEvent>, ErrorData> {
-    events
-        .iter()
-        .map(|e| {
-            e.trim()
-                .replace('_', ".")
-                .parse::<r3v3rs3_api::webhook::WebhookEvent>()
-                .or_else(|_| e.trim().parse::<r3v3rs3_api::webhook::WebhookEvent>())
-                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))
+    events.iter().map(|e| parse_webhook_event(e)).collect()
+}
+
+/// Parses an event name such as `deploy.pending_approval`. The group may also be joined with `_`
+/// (`deploy_pending_approval`): only the first `_` stands for the dot, because the names after
+/// the group contain `_` themselves.
+fn parse_webhook_event(name: &str) -> Result<r3v3rs3_api::webhook::WebhookEvent, ErrorData> {
+    let name = name.trim();
+    name.parse()
+        .or_else(|err| {
+            if name.contains('.') {
+                Err(err)
+            } else {
+                name.replacen('_', ".", 1).parse()
+            }
         })
-        .collect()
+        .map_err(|err: Error| ErrorData::invalid_params(err.to_string(), None))
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -5390,4 +5392,37 @@ fn parse_project_env_params(
     };
     spec.validate().map_err(any_error)?;
     Ok((env_id, spec))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use r3v3rs3_api::webhook::WebhookEvent;
+
+    #[test]
+    fn webhook_events_accept_the_underscore_form_of_the_group() {
+        let cases = [
+            (
+                "deploy.pending_approval",
+                WebhookEvent::DeployPendingApproval,
+            ),
+            (
+                "deploy_pending_approval",
+                WebhookEvent::DeployPendingApproval,
+            ),
+            ("system_disk_pressure", WebhookEvent::SystemDiskPressure),
+            ("app_crashed", WebhookEvent::AppCrashed),
+            (" test.ping ", WebhookEvent::TestPing),
+        ];
+        for (name, event) in cases {
+            assert_eq!(parse_webhook_event(name).ok(), Some(event), "{name}");
+        }
+    }
+
+    #[test]
+    fn unknown_webhook_events_are_refused() {
+        for name in ["deploy.pending.approval", "deploy_unknown", "", "deploy"] {
+            assert!(parse_webhook_event(name).is_err(), "{name}");
+        }
+    }
 }
