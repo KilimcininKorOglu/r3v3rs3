@@ -3,9 +3,10 @@
 use r3v3rs3::admin::start_admin;
 use r3v3rs3::config::new_appinfo;
 use r3v3rs3::log::DatabaseLayer;
-use r3v3rs3::proxy::access_log::{self, record};
+use r3v3rs3::proxy::access_log::record;
 use r3v3rs3::server::Server;
 use r3v3rs3_api::auth::Role;
+use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::traffic::AccessLogEntry;
 use reqwest::header::COOKIE;
 use reqwest::{Client, StatusCode};
@@ -63,11 +64,20 @@ where
     result
 }
 
-fn sample_log(status: u16, uri: &str, method: &str, country: Option<&str>) -> AccessLogEntry {
+/// The access log is one store for the whole process, and the proxy tests of the other files
+/// write into it while this test runs. Every entry of this test carries its own resource id,
+/// and every query filters on it.
+fn sample_log(
+    resource: ShortId,
+    status: u16,
+    uri: &str,
+    method: &str,
+    country: Option<&str>,
+) -> AccessLogEntry {
     AccessLogEntry {
         id: 0,
         timestamp: OffsetDateTime::now_utc(),
-        resource_id: Some("proxy-1".parse().unwrap()),
+        resource_id: Some(resource),
         client_ip: "10.0.0.42".to_string(),
         method: method.to_string(),
         host: "app.example.com".to_string(),
@@ -89,7 +99,12 @@ fn sample_log(status: u16, uri: &str, method: &str, country: Option<&str>) -> Ac
     }
 }
 
-async fn verify_list(client: &Client, addr: SocketAddr, cookie: &str) -> anyhow::Result<()> {
+async fn verify_list(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    resource: ShortId,
+) -> anyhow::Result<()> {
     let unauth = client
         .get(format!("http://{addr}/api/traffic"))
         .send()
@@ -97,7 +112,7 @@ async fn verify_list(client: &Client, addr: SocketAddr, cookie: &str) -> anyhow:
     assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
 
     let resp = client
-        .get(format!("http://{addr}/api/traffic"))
+        .get(format!("http://{addr}/api/traffic?resource_id={resource}"))
         .header(COOKIE, cookie)
         .send()
         .await?;
@@ -112,9 +127,12 @@ async fn verify_filters_and_sse(
     client: &Client,
     addr: SocketAddr,
     cookie: &str,
+    resource: ShortId,
 ) -> anyhow::Result<()> {
     let filtered_status: Vec<AccessLogEntry> = client
-        .get(format!("http://{addr}/api/traffic?status=404"))
+        .get(format!(
+            "http://{addr}/api/traffic?resource_id={resource}&status=404"
+        ))
         .header(COOKIE, cookie)
         .send()
         .await?
@@ -124,7 +142,9 @@ async fn verify_filters_and_sse(
     assert_eq!(filtered_status[0].uri, "/unknown/endpoint");
 
     let filtered_search: Vec<AccessLogEntry> = client
-        .get(format!("http://{addr}/api/traffic?search=health"))
+        .get(format!(
+            "http://{addr}/api/traffic?resource_id={resource}&search=health"
+        ))
         .header(COOKIE, cookie)
         .send()
         .await?
@@ -141,7 +161,12 @@ async fn verify_filters_and_sse(
     Ok(())
 }
 
-async fn verify_geo(client: &Client, addr: SocketAddr, cookie: &str) -> anyhow::Result<()> {
+async fn verify_geo(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    resource: ShortId,
+) -> anyhow::Result<()> {
     let unauth = client
         .get(format!("http://{addr}/api/traffic/geo"))
         .send()
@@ -149,7 +174,9 @@ async fn verify_geo(client: &Client, addr: SocketAddr, cookie: &str) -> anyhow::
     assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
 
     let geo: r3v3rs3_api::traffic::TrafficGeoDistribution = client
-        .get(format!("http://{addr}/api/traffic/geo"))
+        .get(format!(
+            "http://{addr}/api/traffic/geo?resource_id={resource}"
+        ))
         .header(COOKIE, cookie)
         .send()
         .await?
@@ -166,9 +193,10 @@ async fn verify_get_entry_and_replay(
     client: &Client,
     addr: SocketAddr,
     cookie: &str,
+    resource: ShortId,
 ) -> anyhow::Result<()> {
     let items: Vec<AccessLogEntry> = client
-        .get(format!("http://{addr}/api/traffic"))
+        .get(format!("http://{addr}/api/traffic?resource_id={resource}"))
         .header(COOKIE, cookie)
         .send()
         .await?
@@ -195,7 +223,7 @@ async fn verify_get_entry_and_replay(
 
     let replay_req = r3v3rs3_api::traffic::RequestReplayRequest {
         method: "GET".to_string(),
-        url: format!("http://{addr}/api/traffic"),
+        url: format!("http://{addr}/api/traffic?resource_id={resource}"),
         headers: vec![r3v3rs3_api::traffic::HeaderEntry::new("Cookie", cookie)],
         body: None,
         timeout_ms: Some(5000),
@@ -220,17 +248,29 @@ async fn verify_get_entry_and_replay(
 async fn traffic_api_lists_and_filters_logs() -> anyhow::Result<()> {
     let dir = TempDir::new("traffic-test")?;
     with_admin(&dir.0, |addr| async move {
-        access_log::clear();
-        record(sample_log(200, "/api/v1/health", "GET", Some("TR")));
-        record(sample_log(404, "/unknown/endpoint", "GET", Some("TR")));
-        record(sample_log(500, "/api/v1/crash", "POST", None));
+        let resource = ShortId::new();
+        record(sample_log(
+            resource,
+            200,
+            "/api/v1/health",
+            "GET",
+            Some("TR"),
+        ));
+        record(sample_log(
+            resource,
+            404,
+            "/unknown/endpoint",
+            "GET",
+            Some("TR"),
+        ));
+        record(sample_log(resource, 500, "/api/v1/crash", "POST", None));
 
         let client = Client::new();
         let cookie = login_when_allowed(addr, "admin", "password").await?;
-        verify_list(&client, addr, &cookie).await?;
-        verify_filters_and_sse(&client, addr, &cookie).await?;
-        verify_geo(&client, addr, &cookie).await?;
-        verify_get_entry_and_replay(&client, addr, &cookie).await?;
+        verify_list(&client, addr, &cookie, resource).await?;
+        verify_filters_and_sse(&client, addr, &cookie, resource).await?;
+        verify_geo(&client, addr, &cookie, resource).await?;
+        verify_get_entry_and_replay(&client, addr, &cookie, resource).await?;
         verify_active_connections(&client, addr, &cookie).await
     })
     .await
@@ -242,7 +282,6 @@ async fn verify_active_connections(
     cookie: &str,
 ) -> anyhow::Result<()> {
     use r3v3rs3::proxy::connection_tracker;
-    use r3v3rs3_api::id::ShortId;
     use r3v3rs3_api::traffic::{ActiveConnectionInfo, ConnectionProtocol};
 
     let unauth = client
@@ -251,8 +290,13 @@ async fn verify_active_connections(
         .await?;
     assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
 
+    // The connection tracker is also one store for the whole process, so the checks filter
+    // on the proxy id of this test.
+    let proxy_id = ShortId::new();
     let resp = client
-        .get(format!("http://{addr}/api/traffic/connections"))
+        .get(format!(
+            "http://{addr}/api/traffic/connections?proxy_id={proxy_id}"
+        ))
         .header(COOKIE, cookie)
         .send()
         .await?;
@@ -260,7 +304,6 @@ async fn verify_active_connections(
     let items: Vec<ActiveConnectionInfo> = resp.json().await?;
     assert!(items.is_empty());
 
-    let proxy_id = ShortId::new();
     let (conn_id, guard, cancel_rx, sent, recv) = connection_tracker::register(
         Some(proxy_id),
         "test-ws",
