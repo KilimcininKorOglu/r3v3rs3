@@ -1,7 +1,7 @@
-use super::cache_share::{CacheShare, SharedCacheStore, SharedResponse};
 use super::compression::{header_items, header_number};
 use super::pool::Upstream;
 use crate::clock::unix_ms;
+use crate::config::cache_share::{CacheShare, SharedCacheStore, SharedResponse};
 use crate::proxy::registry::WeakRegistry;
 use bytes::{Bytes, BytesMut};
 use http_body_util::{BodyExt, Full, combinators::BoxBody};

@@ -1,4 +1,4 @@
-use super::rate_share::{self, RateCountExchange, RateShare, SharedWindow};
+use crate::config::rate_share::{self, RateCountExchange, RateShare, SharedWindow};
 use crate::proxy::registry::WeakRegistry;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter, clock::Clock};
 use r3v3rs3_api::{client_ip::canonical_client_ip, id::ShortId, policy::RateLimit};
