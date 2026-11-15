@@ -953,7 +953,7 @@ fn check_and_record_quarantine<B>(
 
     if let Some(pattern) = quarantine.check_scanner_uri(uri) {
         let reason = format!("Scanner pattern probe: {pattern}");
-        let _ = quarantine.record_violation(client_ip, reason, config.max_violations);
+        let _ = quarantine.record_violation(client_ip, reason, 1);
         return;
     }
 
@@ -2302,6 +2302,20 @@ mod tests {
     use super::*;
     use hyper::HeaderMap;
     use hyper::header::{AUTHORIZATION, COOKIE, HeaderValue, SET_COOKIE, USER_AGENT};
+
+    #[test]
+    fn one_scanner_probe_counts_as_one_violation() {
+        let quarantine = crate::security::AutoQuarantineTracker::default();
+        let ip: std::net::IpAddr = "203.0.113.9".parse().unwrap();
+        let ok: Result<Response<()>, anyhow::Error> = Ok(Response::new(()));
+        let max = quarantine.get_config().max_violations;
+        for _ in 1..max {
+            check_and_record_quarantine(&quarantine, ip, "/.env", false, &ok);
+            assert!(!quarantine.is_quarantined(&ip));
+        }
+        check_and_record_quarantine(&quarantine, ip, "/.env", false, &ok);
+        assert!(quarantine.is_quarantined(&ip));
+    }
 
     #[test]
     fn test_extract_headers_redaction() {
