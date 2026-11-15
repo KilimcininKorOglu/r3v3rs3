@@ -1766,6 +1766,34 @@ async fn needed_arguments_are_required_in_the_schema() -> anyhow::Result<()> {
     .await
 }
 
+/// A prune policy with a threshold of 0 or an unreadable interval is refused and not stored: a
+/// threshold of 0 ran an emergency prune every 15 minutes.
+#[tokio::test]
+async fn an_invalid_prune_policy_is_refused() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-prune-policy")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let client = mcp_client(addr, &access_token(&addr).await?).await?;
+        for args in [
+            json!({ "disk_pressure_threshold": 0 }),
+            json!({ "interval": "0h" }),
+            json!({ "interval": "weekly" }),
+        ] {
+            mcp_call(&client, "update_prune_policy", args.clone())
+                .await
+                .expect_err(&format!("an invalid prune policy was stored: {args}"));
+        }
+        let policy: Value =
+            serde_json::from_str(&mcp_call(&client, "get_prune_policy", json!({})).await?)?;
+        assert_eq!(policy["interval"], json!("24h"), "{policy}");
+        assert_eq!(policy["disk_pressure_threshold"], json!(85), "{policy}");
+        client.cancel().await?;
+        Ok(())
+    })
+    .await
+}
+
 /// The app store refresh changes the catalog of every account, so a viewer with a token of the
 /// edit scope must not run it, the same as through the HTTP API.
 #[tokio::test]

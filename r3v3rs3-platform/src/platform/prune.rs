@@ -90,7 +90,7 @@ async fn check_periodic_prune(
     policy: &PrunePolicy,
     now: u64,
 ) -> anyhow::Result<()> {
-    let interval_secs = parse_interval_secs(&policy.interval);
+    let interval_secs = policy.interval_secs()?;
     let should_run = match policy.last_pruned_at {
         Some(last) => now >= last.saturating_add(interval_secs),
         None => true,
@@ -108,23 +108,6 @@ async fn check_periodic_prune(
         );
     }
     Ok(())
-}
-
-fn parse_interval_secs(interval: &str) -> u64 {
-    let s = interval.trim().to_ascii_lowercase();
-    if s.ends_with('h') {
-        s.trim_end_matches('h').parse::<u64>().unwrap_or(24) * 3600
-    } else if s.ends_with('d') || s.ends_with("days") || s.ends_with("day") {
-        let num = s
-            .trim_end_matches("days")
-            .trim_end_matches("day")
-            .trim_end_matches('d')
-            .parse::<u64>()
-            .unwrap_or(1);
-        num * 86400
-    } else {
-        s.parse::<u64>().unwrap_or(86400)
-    }
 }
 
 /// Reads the disk space metrics for the given filesystem path.
@@ -172,8 +155,9 @@ impl Platform {
         self.store.get_prune_policy().await
     }
 
-    /// Saves the disk hygiene prune policy.
+    /// Saves the disk hygiene prune policy after it checks the interval and the threshold.
     pub async fn update_prune_policy(&self, policy: PrunePolicy) -> anyhow::Result<()> {
+        policy.validate()?;
         self.store.save_prune_policy(&policy).await
     }
 
@@ -242,15 +226,6 @@ impl Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_interval_understands_hours_and_days() {
-        assert_eq!(parse_interval_secs("12h"), 12 * 3600);
-        assert_eq!(parse_interval_secs("24h"), 24 * 3600);
-        assert_eq!(parse_interval_secs("7days"), 7 * 86400);
-        assert_eq!(parse_interval_secs("3d"), 3 * 86400);
-        assert_eq!(parse_interval_secs("invalid"), 86400);
-    }
 
     #[test]
     fn default_prune_policy_has_pressure_threshold() {

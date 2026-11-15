@@ -406,6 +406,7 @@ mod tests {
             Error::InvalidCompressionDictionary { reason: text() },
             Error::InvalidScheduledCommand { reason: text() },
             Error::InvalidCtConfig { reason: text() },
+            Error::InvalidPrunePolicy { reason: text() },
             Error::CompressionDictionaryNotFound {
                 id: "dict".parse().unwrap(),
             },

@@ -715,6 +715,57 @@ impl Default for PrunePolicy {
     }
 }
 
+/// The disk usage percentages that a disk pressure threshold accepts.
+pub const PRUNE_PRESSURE_RANGE: std::ops::RangeInclusive<u8> = 10..=99;
+
+impl PrunePolicy {
+    /// The seconds between automatic prune runs.
+    pub fn interval_secs(&self) -> Result<u64, Error> {
+        prune_interval_secs(&self.interval).ok_or_else(|| Error::InvalidPrunePolicy {
+            reason: format!(
+                "the interval `{}` is not a positive number of hours or days, such as 24h or 7d",
+                self.interval
+            ),
+        })
+    }
+
+    /// Checks the interval and the disk pressure threshold. A threshold of 0 ran an emergency
+    /// prune every 15 minutes, and an unreadable interval ran a daily prune without notice.
+    pub fn validate(&self) -> Result<(), Error> {
+        self.interval_secs()?;
+        match self.disk_pressure_threshold {
+            Some(threshold) if !PRUNE_PRESSURE_RANGE.contains(&threshold) => {
+                Err(Error::InvalidPrunePolicy {
+                    reason: format!(
+                        "the disk pressure threshold {threshold} is outside {}-{}",
+                        PRUNE_PRESSURE_RANGE.start(),
+                        PRUNE_PRESSURE_RANGE.end()
+                    ),
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Reads an interval such as `24h`, `7d`, `7day` or `7days`; a bare number counts seconds, as
+/// earlier releases stored it. Zero and unreadable values give `None`.
+pub fn prune_interval_secs(interval: &str) -> Option<u64> {
+    let text = interval.trim().to_ascii_lowercase();
+    let (number, unit) = if let Some(n) = text.strip_suffix('h') {
+        (n, 3600)
+    } else if let Some(n) = ["days", "day", "d"]
+        .iter()
+        .find_map(|s| text.strip_suffix(s))
+    {
+        (n, 86_400)
+    } else {
+        (text.as_str(), 1)
+    };
+    let secs = number.trim().parse::<u64>().ok()?.checked_mul(unit)?;
+    (secs > 0).then_some(secs)
+}
+
 /// The result of executing a disk hygiene prune.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PruneResult {
@@ -2651,6 +2702,43 @@ pub struct AppDashboardSummary {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn prune_intervals_read_hours_days_and_legacy_seconds() {
+        let cases = [
+            ("12h", 12 * 3600),
+            ("24H", 24 * 3600),
+            ("7days", 7 * 86_400),
+            ("1day", 86_400),
+            ("3d", 3 * 86_400),
+            ("86400", 86_400),
+        ];
+        for (text, secs) in cases {
+            assert_eq!(prune_interval_secs(text), Some(secs), "{text}");
+        }
+    }
+
+    #[test]
+    fn unreadable_or_zero_prune_intervals_are_refused() {
+        for text in ["invalid", "", "0h", "0", "-1d", "h", "1w"] {
+            assert_eq!(prune_interval_secs(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_prune_policy_needs_a_threshold_inside_its_range() {
+        let with = |threshold, interval: &str| PrunePolicy {
+            disk_pressure_threshold: threshold,
+            interval: interval.to_string(),
+            ..PrunePolicy::default()
+        };
+        assert!(with(Some(10), "24h").validate().is_ok());
+        assert!(with(Some(99), "7d").validate().is_ok());
+        assert!(with(None, "24h").validate().is_ok());
+        assert!(with(Some(0), "24h").validate().is_err());
+        assert!(with(Some(100), "24h").validate().is_err());
+        assert!(with(Some(85), "0h").validate().is_err());
+    }
 
     fn spec(value: serde_json::Value) -> Result<AppSpec, String> {
         let spec: AppSpec = serde_json::from_value(value).map_err(|err| err.to_string())?;

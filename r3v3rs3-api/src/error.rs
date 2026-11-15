@@ -567,6 +567,9 @@ pub enum Error {
     #[error("invalid certificate transparency configuration: {reason}")]
     InvalidCtConfig { reason: String },
 
+    #[error("invalid prune policy: {reason}")]
+    InvalidPrunePolicy { reason: String },
+
     #[error("compression dictionary not found: {id}")]
     CompressionDictionaryNotFound {
         #[schema(value_type = String)]
