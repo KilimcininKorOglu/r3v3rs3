@@ -30,6 +30,7 @@ on:
       - r3v3rs3-webui/**
       - r3v3rs3-api/**
       - .github/scripts/webui-cache-key.sh
+      - .github/workflows/release.yml
       - .github/workflows/release-cache.yml
   workflow_dispatch:
 
