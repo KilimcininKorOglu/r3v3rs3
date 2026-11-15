@@ -70,7 +70,7 @@ jobs:
         with:
           tool: nextest
       - name: Run the Docker runtime tests
-        run: cargo nextest run --all-features --locked --no-fail-fast --run-ignored only -E 'binary(runtime_docker_test) | binary(platform_deploy_test) | test(on_the_docker_engine)'
+        run: cargo nextest run --all-features --locked --no-fail-fast --run-ignored only -E '(binary(it) & (test(/^runtime_docker_test::/) | test(/^platform_deploy_test::/))) | test(on_the_docker_engine)'
 
   lint:
     runs-on: ubuntu-24.04

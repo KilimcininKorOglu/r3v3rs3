@@ -41,20 +41,20 @@ test-acme-pebble:
 	mkdir -p $(dir $(PEBBLE_CA))
 	docker compose -f $(PEBBLE_COMPOSE) cp pebble:/test/certs/pebble.minica.pem $(PEBBLE_CA)
 	PEBBLE_HOST_IP=$$(docker run --rm --add-host=host.docker.internal:host-gateway busybox:latest awk '/host.docker.internal/{print $$1}' /etc/hosts) \
-		SSL_CERT_FILE=$(CURDIR)/$(PEBBLE_CA) CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test acme_pebble_test -- --ignored; \
+		SSL_CERT_FILE=$(CURDIR)/$(PEBBLE_CA) CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test it -- --ignored acme_pebble_test::; \
 		status=$$?; docker compose -f $(PEBBLE_COMPOSE) down; exit $$status
 
 # Runs the service discovery end-to-end tests against Consul and etcd in Docker and against
 # the local Docker engine, then removes the containers.
 test-discovery-e2e:
 	$(DISCOVERY_COMPOSE) up -d --wait && \
-		CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test discovery_e2e_test -- --ignored; \
+		CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test it -- --ignored discovery_e2e_test::; \
 		status=$$?; $(DISCOVERY_COMPOSE) down -v; exit $$status
 
 # Runs the Docker runtime and the deployment platform against the local Docker Engine. The tests
 # remove their containers, networks and images.
 test-runtime-docker:
-	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test runtime_docker_test --test platform_deploy_test -- --ignored
+	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test it -- --ignored runtime_docker_test:: platform_deploy_test::
 	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --lib on_the_docker_engine -- --ignored
 
 lint:

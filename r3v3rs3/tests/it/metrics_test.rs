@@ -1,0 +1,218 @@
+//! The Prometheus metrics endpoint: its authorization and its exported counters.
+
+use r3v3rs3::server::Server;
+use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
+use r3v3rs3_api::auth::Role;
+use reqwest::{Client, StatusCode};
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use tracing_subscriber::filter::LevelFilter;
+
+use crate::common;
+use common::{TestStorage, alloc_tcp_port, login_when_allowed, session_cookie, wait_for_listener};
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> anyhow::Result<Self> {
+        let unique = hex::encode(rand::random::<[u8; 8]>());
+        let path = std::env::temp_dir().join(format!("r3v3rs3-{name}-{unique}"));
+        std::fs::create_dir_all(&path)?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Runs a server and its admin API.
+async fn with_admin<F, O>(dir: &Path, func: F) -> anyhow::Result<()>
+where
+    F: FnOnce(SocketAddr) -> O,
+    O: Future<Output = anyhow::Result<()>>,
+{
+    let storage = TestStorage::builder()
+        .account("admin", "password", Role::Admin, None)
+        .build();
+    DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
+    let addr = alloc_tcp_port().await?.socket_addr();
+    let (server, channels) = Server::new(new_appinfo(dir, dir), storage).await;
+    let event = channels.event.clone();
+    let task = tokio::spawn(server.start());
+    tokio::spawn(start_admin(
+        new_appinfo(dir, dir),
+        addr,
+        channels.command,
+        channels.callback,
+        channels.event.clone(),
+        channels.accounts.clone(),
+    ));
+    wait_for_listener(addr).await?;
+    let result = func(addr).await;
+    event.send(r3v3rs3_api::event::ServerEvent::Shutdown)?;
+    task.await??;
+    result
+}
+
+/// Signs in as `admin` and returns the session cookie, waiting out a login rate limit.
+async fn sign_in(addr: &SocketAddr) -> anyhow::Result<String> {
+    match session_cookie(*addr, "admin", "password").await {
+        Ok(cookie) => Ok(cookie),
+        Err(err) if err.to_string().contains("429") => {
+            login_when_allowed(*addr, "admin", "password").await
+        }
+        Err(err) => Err(err),
+    }
+}
+
+#[tokio::test]
+async fn the_metrics_need_a_session_or_a_bearer_token() -> anyhow::Result<()> {
+    let dir = TempDir::new("metrics-auth")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let url = format!("http://{addr}/api/metrics");
+
+        check_unauthorized(&client, &url).await?;
+
+        // The admin session reads the metrics.
+        let cookie = sign_in(&addr).await?;
+        check_prometheus_text(&client, &url, &cookie).await?;
+        check_metrics_json(&client, &url, &cookie).await?;
+        check_grafana_dashboard(&client, &addr, &cookie).await
+    })
+    .await
+}
+
+/// Checks that a request without credentials and a request with an unknown Bearer token are
+/// unauthorized.
+async fn check_unauthorized(client: &Client, url: &str) -> anyhow::Result<()> {
+    // A request without credentials is unauthorized.
+    let res = client.get(url).send().await?;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // A Bearer token that no grant issued is unauthorized too.
+    let res = client
+        .get(url)
+        .header("authorization", "Bearer not-a-token")
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+/// Checks that the Prometheus text output holds every metric family and its labels.
+async fn check_prometheus_text(client: &Client, url: &str, cookie: &str) -> anyhow::Result<()> {
+    let res = client.get(url).header("cookie", cookie).send().await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    let content_type = res
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap()
+        .to_string();
+    assert!(content_type.starts_with("text/plain"));
+    let body = res.text().await?;
+    for name in [
+        "r3v3rs3_http_requests_total",
+        "r3v3rs3_h3_requests_total",
+        "r3v3rs3_rx_bytes_total",
+        "r3v3rs3_tx_bytes_total",
+        "r3v3rs3_upstream_errors_total",
+        "r3v3rs3_cache_hits_total",
+        "r3v3rs3_cache_misses_total",
+        "r3v3rs3_cache_bypasses_total",
+        "r3v3rs3_open_connections",
+        "r3v3rs3_tls_handshakes_total",
+        "r3v3rs3_tls_handshake_errors_total",
+        "r3v3rs3_http_responses_by_status_total",
+        "r3v3rs3_upstream_errors_by_kind_total",
+        "r3v3rs3_http_request_duration_seconds",
+        "r3v3rs3_http_request_duration_quantiles_seconds",
+        "r3v3rs3_tls_handshake_duration_seconds",
+        "r3v3rs3_tls_handshake_duration_quantiles_seconds",
+    ] {
+        assert!(
+            body.contains(&format!("# TYPE {name} ")),
+            "the metrics miss {name}"
+        );
+    }
+    assert!(body.contains("r3v3rs3_http_requests_total{proxy=\"\",route=\"\"}"));
+    assert!(body.contains("r3v3rs3_upstream_errors_total{proxy=\"\",route=\"\"}"));
+    assert!(
+        body.contains("r3v3rs3_http_request_duration_seconds_bucket{proxy=\"\",route=\"\",le=\"")
+    );
+    assert!(body.contains("status=\"2xx\""));
+    assert!(body.contains("quantile=\"0.5\""));
+    assert!(body.contains("quantile=\"0.95\""));
+    assert!(body.contains("quantile=\"0.99\""));
+    assert!(body.contains("kind=\"timeout\""));
+    assert!(body.contains("r3v3rs3_event_loop_lag_seconds"));
+    Ok(())
+}
+
+/// Checks that the `Accept: application/json` header returns the metrics as JSON.
+async fn check_metrics_json(client: &Client, url: &str, cookie: &str) -> anyhow::Result<()> {
+    // JSON format via Accept header
+    let res_json = client
+        .get(url)
+        .header("cookie", cookie)
+        .header("accept", "application/json")
+        .send()
+        .await?;
+    assert_eq!(res_json.status(), StatusCode::OK);
+    assert!(
+        res_json
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .starts_with("application/json")
+    );
+    let val: serde_json::Value = res_json.json().await?;
+    assert!(val.get("event_loop_lag_seconds").is_some());
+    Ok(())
+}
+
+/// Checks that the Grafana dashboard needs a session and holds the title and at least ten
+/// panels.
+async fn check_grafana_dashboard(
+    client: &Client,
+    addr: &SocketAddr,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    // Grafana dashboard endpoint
+    let grafana_url = format!("http://{addr}/api/metrics/grafana");
+    let res_grafana_anon = client.get(&grafana_url).send().await?;
+    assert_eq!(res_grafana_anon.status(), StatusCode::UNAUTHORIZED);
+
+    let res_grafana = client
+        .get(&grafana_url)
+        .header("cookie", cookie)
+        .send()
+        .await?;
+    assert_eq!(res_grafana.status(), StatusCode::OK);
+    assert!(
+        res_grafana
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .starts_with("application/json")
+    );
+    let dash: serde_json::Value = res_grafana.json().await?;
+    assert_eq!(
+        dash.get("title").and_then(|v| v.as_str()),
+        Some("r3v3rs3 Reverse Proxy Overview")
+    );
+    assert!(
+        dash.get("panels")
+            .and_then(|v| v.as_array())
+            .map(|p| p.len())
+            .unwrap_or(0)
+            >= 10
+    );
+    Ok(())
+}

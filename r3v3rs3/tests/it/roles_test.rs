@@ -1,0 +1,803 @@
+use r3v3rs3::{
+    accounts::Caller,
+    admin::start_admin,
+    command::ServerCommand,
+    config::{new_appinfo, storage::Storage},
+    log::DatabaseLayer,
+    server::rpc::{
+        ErasedRpcMethod, RpcMethod, RpcWrapper,
+        config::GetConfig,
+        ports::AddPort,
+        proxies::{AddProxy, DeleteProxy, GetProxy, GetProxyList, UpdateProxy},
+    },
+};
+use r3v3rs3_api::{
+    auth::Role,
+    error::Error,
+    id::ShortId,
+    policy::{AuthPolicy, ForwardAuth},
+    proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind},
+};
+use reqwest::{Client, Method, Response, StatusCode, header::COOKIE};
+use std::{collections::BTreeSet, net::SocketAddr, time::Duration};
+use tokio::sync::mpsc;
+use tracing_subscriber::filter::LevelFilter;
+
+use crate::common;
+use common::{
+    TestStorage, alloc_tcp_port, call, call_as, http_route, port_entry, session_cookie,
+    wait_for_listener, with_server,
+};
+use r3v3rs3::server::ServerChannels;
+
+fn caller(role: Role, proxies: Option<BTreeSet<ShortId>>) -> Caller {
+    Caller {
+        username: "editor".to_string(),
+        role,
+        proxies,
+        client: None,
+    }
+}
+
+fn web_only() -> Option<BTreeSet<ShortId>> {
+    Some(BTreeSet::from(["web".parse().unwrap()]))
+}
+
+fn http_proxy(upstream: &str) -> Proxy {
+    Proxy {
+        kind: ProxyKind::Http(Box::new(HttpProxy {
+            routes: vec![http_route("/", upstream, None)],
+            ..Default::default()
+        })),
+        ..Default::default()
+    }
+}
+
+fn proxy_entry(id: &str, upstream: &str) -> ProxyEntry {
+    ProxyEntry {
+        id: id.parse().unwrap(),
+        proxy: http_proxy(upstream),
+        source: None,
+        status: None,
+    }
+}
+
+/// Storage with the proxies `web` and `other`, an admin, and an editor that sees only `web`.
+fn restricted_storage() -> TestStorage {
+    TestStorage::builder()
+        .proxies(vec![
+            proxy_entry("web", "http://127.0.0.1:1/"),
+            proxy_entry("other", "http://127.0.0.1:1/"),
+        ])
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build()
+}
+
+/// A directory with a log database for the admin API.
+async fn log_dir(name: &str) -> anyhow::Result<std::path::PathBuf> {
+    let dir = std::env::temp_dir().join(format!("r3v3rs3-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
+    Ok(dir)
+}
+
+#[tokio::test]
+async fn the_server_runs_only_the_methods_that_the_role_allows() -> anyhow::Result<()> {
+    let storage = TestStorage::builder().build();
+    with_server(storage, |mut channels| async move {
+        let port = || port_entry("unused", "/ip4/127.0.0.1/tcp/0".parse().unwrap()).port;
+
+        let viewer = caller(Role::Viewer, None);
+        let add = AddProxy {
+            entry: Proxy::default(),
+            owner: None,
+        };
+        let result = call_as(&mut channels, viewer, add).await?;
+        assert!(matches!(result, Err(Error::Forbidden)), "{result:?}");
+
+        let restricted = caller(Role::Editor, web_only());
+        let result = call_as(&mut channels, restricted, AddPort { entry: port() }).await?;
+        assert!(matches!(result, Err(Error::Forbidden)), "{result:?}");
+
+        let editor = caller(Role::Editor, None);
+        let result = call_as(&mut channels, editor.clone(), GetConfig).await?;
+        assert!(matches!(result, Err(Error::Forbidden)));
+        let result = call_as(&mut channels, editor, AddPort { entry: port() }).await?;
+        assert!(result.is_ok(), "{result:?}");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn an_editor_with_a_proxy_list_sees_and_changes_only_its_proxies() -> anyhow::Result<()> {
+    let storage = restricted_storage();
+    with_server(storage.clone(), |mut channels| async move {
+        let editor = caller(Role::Editor, web_only());
+        let web: ShortId = "web".parse()?;
+        let other: ShortId = "other".parse()?;
+
+        check_other_proxy_hidden(&mut channels, &editor, web, other).await?;
+        let created = check_new_proxy_granted(&mut channels, &storage, editor, web).await?;
+
+        call(&mut channels, DeleteProxy { id: created }).await??;
+        assert_eq!(storage.load_accounts().await?["editor"].proxies, web_only());
+        Ok(())
+    })
+    .await
+}
+
+/// Checks that the editor lists only `web` and gets `id_not_found` for every method on `other`.
+async fn check_other_proxy_hidden(
+    channels: &mut ServerChannels,
+    editor: &Caller,
+    web: ShortId,
+    other: ShortId,
+) -> anyhow::Result<()> {
+    let proxies = call_as(channels, editor.clone(), GetProxyList).await??;
+    let ids = proxies.iter().map(|entry| entry.id).collect::<Vec<_>>();
+    assert_eq!(ids, vec![web]);
+
+    let result = call_as(channels, editor.clone(), GetProxy { id: other }).await?;
+    assert!(matches!(result, Err(Error::IdNotFound { .. })));
+    let entry = proxy_entry("other", "http://127.0.0.1:2/");
+    let result = call_as(channels, editor.clone(), UpdateProxy { entry }).await?;
+    assert!(matches!(result, Err(Error::IdNotFound { .. })));
+    let result = call_as(channels, editor.clone(), DeleteProxy { id: other }).await?;
+    assert!(matches!(result, Err(Error::IdNotFound { .. })));
+    Ok(())
+}
+
+/// Checks that a proxy the editor adds goes into its proxy list, in the storage and in the
+/// account directory, and returns the id of the new proxy.
+async fn check_new_proxy_granted(
+    channels: &mut ServerChannels,
+    storage: &TestStorage,
+    editor: Caller,
+    web: ShortId,
+) -> anyhow::Result<ShortId> {
+    let add = AddProxy {
+        entry: http_proxy("http://127.0.0.1:3/"),
+        owner: Some("editor".to_string()),
+    };
+    call_as(channels, editor, add).await??;
+    let granted = storage.load_accounts().await?["editor"].proxies.clone();
+    let created = granted
+        .iter()
+        .flatten()
+        .copied()
+        .find(|id| *id != web)
+        .ok_or_else(|| anyhow::anyhow!("the new proxy is not in the account list"))?;
+    let directory = channels.accounts.borrow().clone();
+    assert_eq!(directory.get("editor").map(|a| &a.proxies), Some(&granted));
+
+    // The admin API builds the caller from the directory for each request.
+    let editor = caller(Role::Editor, granted.clone());
+    let proxies = call_as(channels, editor, GetProxyList).await??;
+    let mut ids = proxies.iter().map(|entry| entry.id).collect::<Vec<_>>();
+    ids.sort();
+    let mut expected = vec![web, created];
+    expected.sort();
+    assert_eq!(ids, expected);
+    Ok(created)
+}
+
+fn port_vhost_proxy(port: ShortId, vhost: &str, upstream: &str) -> Proxy {
+    let mut proxy = http_proxy(upstream);
+    proxy.ports = vec![port];
+    if let ProxyKind::Http(http) = &mut proxy.kind {
+        http.vhosts = vec![vhost.parse().expect("valid vhost")];
+    }
+    proxy
+}
+
+async fn assert_update_rejected(
+    channels: &mut ServerChannels,
+    caller: Caller,
+    proxy_id: ShortId,
+    conflicting: Proxy,
+) {
+    let update = UpdateProxy {
+        entry: (proxy_id, conflicting).into(),
+    };
+    let res = call_as(channels, caller, update).await.expect("rpc call");
+    assert!(matches!(res, Err(Error::Forbidden)));
+}
+
+async fn assert_add_rejected(channels: &mut ServerChannels, caller: Caller, conflicting: Proxy) {
+    let add = AddProxy {
+        entry: conflicting,
+        owner: Some("editor".into()),
+    };
+    let res = call_as(channels, caller, add).await.expect("rpc call");
+    assert!(matches!(res, Err(Error::Forbidden)));
+}
+
+#[tokio::test]
+async fn a_restricted_editor_cannot_overlap_hosts_of_an_unseen_proxy() -> anyhow::Result<()> {
+    let port_id: ShortId = "p1".parse().unwrap();
+    let web_id: ShortId = "web".parse().unwrap();
+    let other_id: ShortId = "other".parse().unwrap();
+
+    let other_proxy = port_vhost_proxy(port_id, "app.example.com", "http://127.0.0.1:1/");
+    let web_proxy = port_vhost_proxy(port_id, "web.example.com", "http://127.0.0.1:2/");
+
+    let storage = TestStorage::builder()
+        .proxies(vec![
+            ProxyEntry {
+                id: web_id,
+                proxy: web_proxy,
+                source: None,
+                status: None,
+            },
+            ProxyEntry {
+                id: other_id,
+                proxy: other_proxy,
+                source: None,
+                status: None,
+            },
+        ])
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    with_server(storage, |mut channels| async move {
+        let editor = caller(Role::Editor, web_only());
+
+        // 1. Updating 'web' with 'app.example.com' (host of unseen proxy 'other') is rejected
+        let conflicting = port_vhost_proxy(port_id, "app.example.com", "http://127.0.0.1:3/");
+        assert_update_rejected(&mut channels, editor.clone(), web_id, conflicting).await;
+
+        // 2. Adding a new proxy on port_id with 'app.example.com' is rejected
+        let new_conflicting = port_vhost_proxy(port_id, "app.example.com", "http://127.0.0.1:4/");
+        assert_add_rejected(&mut channels, editor.clone(), new_conflicting).await;
+
+        // 3. Adding a new proxy with wildcard '*.example.com' that overlaps 'app.example.com' is rejected
+        let wildcard = port_vhost_proxy(port_id, "*.example.com", "http://127.0.0.1:5/");
+        assert_add_rejected(&mut channels, editor.clone(), wildcard).await;
+
+        // 4. An admin can add with the same host
+        let admin = caller(Role::Admin, None);
+        let admin_proxy = port_vhost_proxy(port_id, "app.example.com", "http://127.0.0.1:6/");
+        let add_admin = AddProxy {
+            entry: admin_proxy,
+            owner: None,
+        };
+        let res = call_as(&mut channels, admin, add_admin)
+            .await
+            .expect("rpc call");
+        assert!(res.is_ok(), "{res:?}");
+
+        Ok(())
+    })
+    .await
+}
+
+fn tcp_proxy_with_port(port: ShortId) -> Proxy {
+    Proxy {
+        kind: ProxyKind::Tcp(r3v3rs3_api::proxy::TcpProxy::default()),
+        ports: vec![port],
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn a_restricted_editor_cannot_take_tcp_port_of_an_unseen_proxy() -> anyhow::Result<()> {
+    let p1: ShortId = "p1".parse().unwrap();
+    let p2: ShortId = "p2".parse().unwrap();
+    let web_id: ShortId = "web".parse().unwrap();
+    let other_id: ShortId = "other".parse().unwrap();
+
+    let storage = TestStorage::builder()
+        .proxies(vec![
+            ProxyEntry {
+                id: web_id,
+                proxy: tcp_proxy_with_port(p1),
+                source: None,
+                status: None,
+            },
+            ProxyEntry {
+                id: other_id,
+                proxy: tcp_proxy_with_port(p2),
+                source: None,
+                status: None,
+            },
+        ])
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    with_server(storage, |mut channels| async move {
+        let editor = caller(Role::Editor, web_only());
+
+        // 1. Updating 'web' with port p2 (held by unseen proxy 'other') is rejected
+        assert_update_rejected(
+            &mut channels,
+            editor.clone(),
+            web_id,
+            tcp_proxy_with_port(p2),
+        )
+        .await;
+
+        // 2. Adding a new proxy with port p2 is rejected
+        assert_add_rejected(&mut channels, editor.clone(), tcp_proxy_with_port(p2)).await;
+
+        // 3. An admin can add a proxy on p2
+        let admin = caller(Role::Admin, None);
+        let add_admin = AddProxy {
+            entry: tcp_proxy_with_port(p2),
+            owner: None,
+        };
+        let res = call_as(&mut channels, admin, add_admin)
+            .await
+            .expect("rpc call");
+        assert!(res.is_ok(), "{res:?}");
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_restricted_editor_cannot_use_stored_client_certificates() -> anyhow::Result<()> {
+    let pki = common::pki::Pki::new();
+    let cert_id = pki.client.id;
+    let web_id: ShortId = "web".parse().unwrap();
+
+    let storage = TestStorage::builder()
+        .certs(pki.certs())
+        .proxies(vec![proxy_entry("web", "http://127.0.0.1:1/")])
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    with_server(storage, |mut channels| async move {
+        let editor = caller(Role::Editor, web_only());
+
+        let mut with_cert = http_proxy("http://127.0.0.1:2/");
+        if let ProxyKind::Http(http) = &mut with_cert.kind {
+            http.client_cert = Some(cert_id);
+        }
+
+        // 1. Updating 'web' with client_cert is rejected with Forbidden
+        assert_update_rejected(&mut channels, editor.clone(), web_id, with_cert.clone()).await;
+
+        // 2. Adding a new proxy with client_cert is rejected with Forbidden
+        assert_add_rejected(&mut channels, editor.clone(), with_cert.clone()).await;
+
+        // 3. Admin can add a proxy with client_cert
+        let admin = caller(Role::Admin, None);
+        let add_admin = AddProxy {
+            entry: with_cert,
+            owner: None,
+        };
+        let res = call_as(&mut channels, admin, add_admin)
+            .await
+            .expect("rpc call");
+        assert!(res.is_ok(), "{res:?}");
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn forward_auth_ssrf_destinations_are_restricted() -> anyhow::Result<()> {
+    let web_id: ShortId = "web".parse().unwrap();
+    let storage = TestStorage::builder()
+        .proxies(vec![proxy_entry("web", "http://127.0.0.1:1/")])
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    with_server(storage, |mut channels| async move {
+        let editor = caller(Role::Editor, web_only());
+        let admin = caller(Role::Admin, None);
+
+        let make_forward = |url: &str| {
+            let mut p = http_proxy("http://127.0.0.1:2/");
+            if let ProxyKind::Http(http) = &mut p.kind {
+                http.auth = AuthPolicy::Forward(Box::new(ForwardAuth {
+                    url: url.parse().unwrap(),
+                    response_headers: vec!["X-Auth-User".into()],
+                    timeout: std::time::Duration::from_secs(5),
+                }));
+            }
+            p
+        };
+
+        // 1. Cloud metadata is rejected for both editor and admin
+        let meta_proxy = make_forward("http://169.254.169.254/latest/meta-data");
+        assert_add_rejected(&mut channels, editor.clone(), meta_proxy.clone()).await;
+        assert_add_rejected(&mut channels, admin.clone(), meta_proxy).await;
+
+        // 2. Loopback destination is rejected for restricted editor
+        let loopback_proxy = make_forward("http://127.0.0.1:4180/auth");
+        assert_add_rejected(&mut channels, editor.clone(), loopback_proxy.clone()).await;
+        assert_update_rejected(
+            &mut channels,
+            editor.clone(),
+            web_id,
+            loopback_proxy.clone(),
+        )
+        .await;
+
+        // 3. Admin can configure forward auth on loopback
+        let add_admin = AddProxy {
+            entry: loopback_proxy,
+            owner: None,
+        };
+        let res = call_as(&mut channels, admin, add_admin)
+            .await
+            .expect("rpc call");
+        assert!(res.is_ok(), "{res:?}");
+
+        Ok(())
+    })
+    .await
+}
+
+async fn status(
+    client: &Client,
+    addr: SocketAddr,
+    method: Method,
+    path: &str,
+    cookie: &str,
+) -> anyhow::Result<u16> {
+    let port = port_entry("unused", "/ip4/127.0.0.1/tcp/0".parse()?).port;
+    let res = client
+        .request(method, format!("http://{addr}{path}"))
+        .header(COOKIE, cookie)
+        .json(&port)
+        .send()
+        .await?;
+    Ok(res.status().as_u16())
+}
+
+#[tokio::test]
+async fn the_admin_api_answers_403_to_an_action_that_the_role_does_not_allow() -> anyhow::Result<()>
+{
+    let dir = log_dir("roles").await?;
+    let addr = alloc_tcp_port().await?.socket_addr();
+    let storage = TestStorage::builder()
+        .account("viewer", "viewer-secret", Role::Viewer, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    let app_info = new_appinfo(&dir, &dir);
+    with_server(storage, |channels| async move {
+        tokio::spawn(start_admin(
+            app_info,
+            addr,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+            channels.accounts.clone(),
+        ));
+        wait_for_listener(addr).await?;
+        check_role_statuses(addr).await
+    })
+    .await?;
+
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// Checks the status of each request for the account, in order.
+async fn check_statuses(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    account: &str,
+    checks: &[(Method, &str, u16)],
+) -> anyhow::Result<()> {
+    for (method, path, expected) in checks {
+        let actual = status(client, addr, method.clone(), path, cookie).await?;
+        assert_eq!(actual, *expected, "{account} {method} {path}");
+    }
+    Ok(())
+}
+
+/// Checks that the viewer and the restricted editor get 403 for the actions of their role.
+async fn check_role_statuses(addr: SocketAddr) -> anyhow::Result<()> {
+    let client = Client::new();
+
+    let viewer = session_cookie(addr, "viewer", "viewer-secret").await?;
+    let checks = [
+        (Method::GET, "/api/ports", 200),
+        (Method::POST, "/api/ports", 403),
+        (Method::GET, "/api/config", 403),
+        (Method::POST, "/api/cdn/refresh", 403),
+        (Method::GET, "/api/certs/abc/download", 403),
+        (Method::POST, "/api/grpc/reflect", 403),
+        (Method::POST, "/api/grpc/health", 403),
+        (Method::GET, "/api/databases/abc/backups/b1/download", 403),
+        (
+            Method::GET,
+            "/api/databases/s3/download?key=test.dump.gz",
+            403,
+        ),
+    ];
+    check_statuses(&client, addr, &viewer, "viewer", &checks).await?;
+
+    let editor = session_cookie(addr, "editor", "editor-secret").await?;
+    let checks = [
+        (Method::GET, "/api/certs", 200),
+        (Method::POST, "/api/ports", 403),
+        (Method::GET, "/api/config", 403),
+        (Method::POST, "/api/grpc/reflect", 403),
+        (Method::POST, "/api/grpc/health", 403),
+        (Method::GET, "/api/databases/abc/backups/b1/download", 403),
+        (
+            Method::GET,
+            "/api/databases/s3/download?key=test.dump.gz",
+            403,
+        ),
+        // The passwords of a database belong to the administrators only.
+        (Method::GET, "/api/databases/abc/credentials", 403),
+        (Method::POST, "/api/databases/abc/password", 403),
+        (Method::DELETE, "/api/databases/abc/tenants/p_one", 403),
+    ];
+    check_statuses(&client, addr, &editor, "editor", &checks).await
+}
+
+/// Sends a method as the admin API itself. Nothing waits for the result.
+async fn send_system<M: RpcMethod + 'static>(
+    command: &mpsc::Sender<ServerCommand>,
+    method: M,
+) -> anyhow::Result<()> {
+    let arg = Box::new(RpcWrapper::new(method)) as Box<dyn ErasedRpcMethod>;
+    let caller = Caller::system();
+    command
+        .send(ServerCommand::CallMethod {
+            id: usize::MAX,
+            arg,
+            caller,
+        })
+        .await?;
+    Ok(())
+}
+
+/// Reads the body until the duration passes or the body ends.
+async fn read_for(response: &mut Response, duration: Duration) -> anyhow::Result<String> {
+    let mut text = String::new();
+    let deadline = tokio::time::Instant::now() + duration;
+    while let Ok(chunk) = tokio::time::timeout_at(deadline, response.chunk()).await {
+        let Some(bytes) = chunk? else {
+            break;
+        };
+        text.push_str(&String::from_utf8_lossy(&bytes));
+    }
+    Ok(text)
+}
+
+#[tokio::test]
+async fn the_event_stream_holds_only_the_proxies_of_the_account_and_ends_when_the_account_changes()
+-> anyhow::Result<()> {
+    let dir = log_dir("roles-events").await?;
+    let addr = alloc_tcp_port().await?.socket_addr();
+    let storage = restricted_storage();
+
+    let app_info = new_appinfo(&dir, &dir);
+    with_server(storage.clone(), |channels| async move {
+        let command = channels.command.clone();
+        tokio::spawn(start_admin(
+            app_info,
+            addr,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+            channels.accounts.clone(),
+        ));
+        wait_for_listener(addr).await?;
+        let client = Client::new();
+        let mut events = check_editor_event_stream(&client, addr, &command).await?;
+        check_event_stream_ends(&client, addr, &mut events).await
+    })
+    .await?;
+
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// Opens the event stream of the editor and checks that a proxy update shows only `web`.
+/// Returns the open event stream.
+async fn check_editor_event_stream(
+    client: &Client,
+    addr: SocketAddr,
+    command: &mpsc::Sender<ServerCommand>,
+) -> anyhow::Result<Response> {
+    let cookie = session_cookie(addr, "editor", "editor-secret").await?;
+
+    let logs = status(client, addr, Method::GET, "/api/logs/other", &cookie).await?;
+    assert_eq!(logs, 404);
+
+    let mut events = client
+        .get(format!("http://{addr}/api/events"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await?
+        .error_for_status()?;
+    let entry = proxy_entry("other", "http://127.0.0.1:2/");
+    send_system(command, UpdateProxy { entry }).await?;
+    let text = read_for(&mut events, Duration::from_secs(1)).await?;
+    assert!(text.contains("proxies_updated"), "{text}");
+    assert!(text.contains("\"web\""), "{text}");
+    assert!(!text.contains("\"other\""), "{text}");
+    Ok(events)
+}
+
+/// Checks that the event stream of the editor ends when an admin removes its proxy list.
+async fn check_event_stream_ends(
+    client: &Client,
+    addr: SocketAddr,
+    events: &mut Response,
+) -> anyhow::Result<()> {
+    // The session of the editor ends when an admin removes its proxy list.
+    let admin_cookie = session_cookie(addr, "admin", "admin-secret").await?;
+    let resp = client
+        .put(format!("http://{addr}/api/accounts/editor"))
+        .header(COOKIE, &admin_cookie)
+        .json(&serde_json::json!({"role": "editor", "proxies": null}))
+        .send()
+        .await?
+        .error_for_status()?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let rest = tokio::time::timeout(Duration::from_secs(5), async {
+        while events.chunk().await?.is_some() {}
+        anyhow::Ok(())
+    });
+    rest.await
+        .map_err(|_| anyhow::anyhow!("the event stream did not end"))??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn standalone_grpc_endpoints_require_edit_permission() -> anyhow::Result<()> {
+    let dir = log_dir("grpc-roles").await?;
+    let addr = alloc_tcp_port().await?.socket_addr();
+    let storage = TestStorage::builder()
+        .account("viewer", "viewer-secret", Role::Viewer, None)
+        .account("editor", "editor-secret", Role::Editor, web_only())
+        .build();
+
+    let app_info = new_appinfo(&dir, &dir);
+    with_server(storage, |channels| async move {
+        tokio::spawn(start_admin(
+            app_info,
+            addr,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+            channels.accounts.clone(),
+        ));
+        wait_for_listener(addr).await?;
+        let client = Client::new();
+
+        let viewer = session_cookie(addr, "viewer", "viewer-secret").await?;
+        let editor = session_cookie(addr, "editor", "editor-secret").await?;
+
+        let invoke_payload = serde_json::json!({
+            "target_url": "http://127.0.0.1:9090",
+            "service": "test.Service",
+            "method": "TestMethod",
+            "payload": {}
+        });
+
+        let res_v = client
+            .post(format!("http://{addr}/api/grpc/invoke"))
+            .header(COOKIE, &viewer)
+            .json(&invoke_payload)
+            .send()
+            .await?;
+        assert_eq!(res_v.status(), StatusCode::FORBIDDEN);
+
+        let res_e = client
+            .post(format!("http://{addr}/api/grpc/invoke"))
+            .header(COOKIE, &editor)
+            .json(&invoke_payload)
+            .send()
+            .await?;
+        assert_eq!(res_e.status(), StatusCode::FORBIDDEN);
+
+        Ok(())
+    })
+    .await?;
+
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+async fn assert_viewer_grpc_invoke_forbidden(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    let payload = serde_json::json!({
+        "service": "test.Service",
+        "method": "TestMethod",
+        "payload": {}
+    });
+    let res = client
+        .post(format!("http://{addr}/api/proxies/px1/grpc/invoke"))
+        .header(COOKIE, cookie)
+        .json(&payload)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+async fn assert_editor_grpc_target_restricted(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    let malicious_payload = serde_json::json!({
+        "target_url": "http://169.254.169.254",
+        "service": "test.Service",
+        "method": "TestMethod",
+        "payload": {}
+    });
+    let res = client
+        .post(format!("http://{addr}/api/proxies/px1/grpc/invoke"))
+        .header(COOKIE, cookie)
+        .json(&malicious_payload)
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
+    let err_json: serde_json::Value = res.json().await?;
+    assert!(
+        err_json["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("target_url must match an upstream server configured for this proxy")
+    );
+    Ok(())
+}
+
+fn setup_grpc_roles_storage(port_num: &common::TestPort) -> TestStorage {
+    TestStorage::builder()
+        .ports(vec![port_entry("p1", port_num.multiaddr_tcp())])
+        .proxies(vec![proxy_entry("px1", "http://127.0.0.1:50051")])
+        .account("viewer", "viewer-secret", Role::Viewer, None)
+        .account("editor", "editor-secret", Role::Editor, None)
+        .build()
+}
+
+async fn run_proxy_grpc_invoke_roles_test(addr: SocketAddr) -> anyhow::Result<()> {
+    let client = Client::new();
+    let viewer = session_cookie(addr, "viewer", "viewer-secret").await?;
+    let editor = session_cookie(addr, "editor", "editor-secret").await?;
+
+    assert_viewer_grpc_invoke_forbidden(&client, addr, &viewer).await?;
+    assert_editor_grpc_target_restricted(&client, addr, &editor).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn proxy_grpc_invoke_requires_edit_and_restricts_target_url() -> anyhow::Result<()> {
+    let dir = log_dir("proxy-grpc-roles").await?;
+    let addr = alloc_tcp_port().await?.socket_addr();
+    let port_num = alloc_tcp_port().await?;
+    let storage = setup_grpc_roles_storage(&port_num);
+
+    let app_info = new_appinfo(&dir, &dir);
+    with_server(storage, |channels| async move {
+        tokio::spawn(start_admin(
+            app_info,
+            addr,
+            channels.command,
+            channels.callback,
+            channels.event.clone(),
+            channels.accounts.clone(),
+        ));
+        wait_for_listener(addr).await?;
+        run_proxy_grpc_invoke_roles_test(addr).await
+    })
+    .await?;
+
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}

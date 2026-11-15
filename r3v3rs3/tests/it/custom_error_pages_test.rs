@@ -1,0 +1,211 @@
+use axum::http::StatusCode;
+use r3v3rs3_api::proxy::{CustomErrorPage, HttpProxy, Route};
+use url::Url;
+
+use crate::common;
+use common::{
+    TestPort, TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route,
+    serve_http_upstream, with_server,
+};
+
+async fn assert_custom_rewritten(
+    client: &reqwest::Client,
+    url: Url,
+    expected_status: u16,
+    expected_body: &str,
+) -> anyhow::Result<()> {
+    let res = client.get(url).send().await?;
+    assert_eq!(res.status(), expected_status);
+    assert_eq!(res.headers()["content-type"], "text/html; charset=utf-8");
+    assert_eq!(res.text().await?, expected_body);
+    Ok(())
+}
+
+fn proxy_with_error_pages(routes: Vec<Route>, error_pages: Vec<CustomErrorPage>) -> HttpProxy {
+    HttpProxy {
+        routes,
+        error_pages,
+        ..Default::default()
+    }
+}
+
+async fn create_test_fixture(
+    custom_404: &str,
+    custom_502: &str,
+    custom_523: &str,
+) -> anyhow::Result<(TestPort, TestStorage)> {
+    let not_found_upstream =
+        serve_http_upstream(axum::Router::new().fallback(|| async { StatusCode::NOT_FOUND }))
+            .await?;
+    let ok_upstream =
+        serve_http_upstream(axum::Router::new().fallback(|| async { "ok upstream" })).await?;
+
+    let port = alloc_tcp_port().await?;
+    let broken_upstream: Url = "http://127.0.0.1:1".parse()?;
+
+    let proxy = proxy_with_error_pages(
+        vec![
+            http_route("/missing", not_found_upstream.as_str(), None),
+            http_route("/broken", broken_upstream.as_str(), None),
+            http_route("/ok", ok_upstream.as_str(), None),
+        ],
+        vec![
+            CustomErrorPage {
+                status: 404,
+                body: custom_404.to_string(),
+            },
+            CustomErrorPage {
+                status: 502,
+                body: custom_502.to_string(),
+            },
+            CustomErrorPage {
+                status: 523,
+                body: custom_523.to_string(),
+            },
+        ],
+    );
+
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &port)])
+        .proxies(vec![http_proxy_entry("test", "http", proxy)])
+        .build();
+
+    Ok((port, storage))
+}
+
+#[tokio::test]
+async fn test_custom_error_pages_for_404_and_502() -> anyhow::Result<()> {
+    let custom_404 = "<html><body>Custom 404 Not Found</body></html>";
+    let custom_502 = "<html><body>Custom 502 Bad Gateway</body></html>";
+    let custom_523 = "<html><body>Custom 523 Origin Unreachable</body></html>";
+    let (port, storage) = create_test_fixture(custom_404, custom_502, custom_523).await?;
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::new();
+        assert_custom_rewritten(&client, port.http_url("/missing"), 404, custom_404).await?;
+        assert_custom_rewritten(&client, port.http_url("/broken"), 523, custom_523).await?;
+
+        let res_200 = client.get(port.http_url("/ok")).send().await?;
+        assert_eq!(res_200.status(), 200);
+        assert_eq!(res_200.text().await?, "ok upstream");
+
+        assert_custom_rewritten(&client, port.http_url("/unknown"), 502, custom_502).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_custom_error_page_escapes_host_xss() -> anyhow::Result<()> {
+    let not_found_upstream =
+        serve_http_upstream(axum::Router::new().fallback(|| async { StatusCode::NOT_FOUND }))
+            .await?;
+    let port = alloc_tcp_port().await?;
+    let custom_404 = "<html><body><h1>Error on {{host}}</h1><p>{{message}}</p></body></html>";
+    let proxy = proxy_with_error_pages(
+        vec![http_route("/missing", not_found_upstream.as_str(), None)],
+        vec![CustomErrorPage {
+            status: 404,
+            body: custom_404.to_string(),
+        }],
+    );
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &port)])
+        .proxies(vec![http_proxy_entry("test", "http", proxy)])
+        .build();
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::new();
+        let xss_host = "target.local\"><script>alert('xss')</script>";
+        let res = client
+            .get(port.http_url("/missing"))
+            .header("Host", xss_host)
+            .send()
+            .await?;
+        assert_eq!(res.status(), 404);
+        let text = res.text().await?;
+        assert!(!text.contains("<script>"));
+        assert!(text.contains("&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;"));
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_upstream_error_page_uses_request_preferences() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let broken_upstream: Url = "http://127.0.0.1:1".parse()?;
+    let proxy = HttpProxy {
+        routes: vec![http_route("/broken", broken_upstream.as_str(), None)],
+        ..Default::default()
+    };
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &port)])
+        .proxies(vec![http_proxy_entry("test", "http", proxy)])
+        .build();
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(port.http_url("/broken"))
+            .header(
+                reqwest::header::COOKIE,
+                "r3v3rs3_lang=tr; r3v3rs3_theme=dark",
+            )
+            .send()
+            .await?;
+        assert_eq!(resp.status(), 523);
+        let body = resp.text().await?;
+        assert!(
+            body.contains(r#"<html lang="tr" data-theme="dark">"#),
+            "{body}"
+        );
+        assert!(
+            body.contains(r3v3rs3_api::i18n::Locale::Tr.t("error_page.523")),
+            "{body}"
+        );
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_error_page_hides_software_branding_when_enabled() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let broken_upstream: Url = "http://127.0.0.1:1".parse()?;
+    let proxy_with_branding = HttpProxy {
+        routes: vec![http_route("/branded", broken_upstream.as_str(), None)],
+        hide_branding: false,
+        ..Default::default()
+    };
+    let proxy_without_branding = HttpProxy {
+        routes: vec![http_route("/unbranded", broken_upstream.as_str(), None)],
+        hide_branding: true,
+        ..Default::default()
+    };
+    let storage = TestStorage::builder()
+        .ports(vec![http_port_entry("http", &port)])
+        .proxies(vec![
+            http_proxy_entry("test1", "http", proxy_with_branding),
+            http_proxy_entry("test2", "http", proxy_without_branding),
+        ])
+        .build();
+
+    with_server(storage, |_| async move {
+        let client = reqwest::Client::new();
+
+        let resp_branded = client.get(port.http_url("/branded")).send().await?;
+        assert_eq!(resp_branded.status(), 523);
+        let body_branded = resp_branded.text().await?;
+        assert!(body_branded.contains("Powered by r3v3rs3"));
+        assert!(body_branded.contains("https://github.com/KilimcininKorOglu/r3v3rs3"));
+
+        let resp_unbranded = client.get(port.http_url("/unbranded")).send().await?;
+        assert_eq!(resp_unbranded.status(), 523);
+        let body_unbranded = resp_unbranded.text().await?;
+        assert!(!body_unbranded.contains("Powered by r3v3rs3"));
+        assert!(!body_unbranded.contains("https://github.com/KilimcininKorOglu/r3v3rs3"));
+        Ok(())
+    })
+    .await
+}

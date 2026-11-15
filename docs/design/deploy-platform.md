@@ -336,7 +336,7 @@ The admin handlers call the platform directly and do not run inside the server l
 
 ## 12. API and WebUI
 
-Every new route follows the existing rules: a `#[utoipa::path]` attribute, a unique `operation_id`, registration with `routes!`, and an entry in `OPERATIONS` of `r3v3rs3/tests/admin_openapi_test.rs`.
+Every new route follows the existing rules: a `#[utoipa::path]` attribute, a unique `operation_id`, registration with `routes!`, and an entry in `OPERATIONS` of `r3v3rs3/tests/it/admin_openapi_test.rs`.
 
 ```
 GET    /api/targets

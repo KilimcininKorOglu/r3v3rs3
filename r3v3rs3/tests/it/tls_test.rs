@@ -1,0 +1,105 @@
+use axum::{Router, routing::get};
+use axum_server::tls_rustls::RustlsConfig;
+use r3v3rs3::certs::Cert;
+use r3v3rs3_api::{
+    port::{Port, PortEntry, PortOptions, UpstreamServer},
+    proxy::{Proxy, ProxyEntry, ProxyKind, TcpProxy},
+    tls::TlsTermination,
+};
+use std::sync::Arc;
+
+use crate::common;
+use common::{TestStorage, alloc_tcp_port, with_server};
+
+#[tokio::test]
+async fn tls_proxy() -> anyhow::Result<()> {
+    let listen_port = alloc_tcp_port().await?;
+    let proxy_port = alloc_tcp_port().await?;
+
+    let root = Arc::new(Cert::new_ca().unwrap());
+    let cert = Arc::new(Cert::new_self_signed(&["localhost".parse().unwrap()], &root).unwrap());
+
+    let config = RustlsConfig::from_pem(
+        cert.pem_chain.to_vec(),
+        cert.pem_key.as_ref().unwrap().to_vec(),
+    )
+    .await
+    .unwrap();
+
+    async fn handler() -> &'static str {
+        "Hello"
+    }
+    let app = Router::new().route("/hello", get(handler));
+
+    let addr = listen_port.socket_addr();
+    tokio::spawn(axum_server::bind_rustls(addr, config).serve(app.into_make_service()));
+
+    let config = TestStorage::builder()
+        .ports(vec![PortEntry {
+            id: "test".parse().unwrap(),
+            port: Port {
+                active: true,
+                name: String::new(),
+                listen: proxy_port.multiaddr_tls(),
+                opts: PortOptions {
+                    tls_termination: Some(TlsTermination {
+                        server_names: vec!["localhost".into()],
+                        ..Default::default()
+                    }),
+                    proxy_protocol: None,
+                    http2_limits: None,
+                    http3_limits: None,
+                    stream_priority: None,
+                },
+            },
+            status: None,
+        }])
+        .proxies(vec![ProxyEntry {
+            id: "test2".parse().unwrap(),
+            source: None,
+            status: None,
+            proxy: Proxy {
+                ports: vec!["test".parse().unwrap()],
+                kind: ProxyKind::Tcp(TcpProxy {
+                    client_cert: None,
+                    connect_timeout: r3v3rs3_api::upstream::DEFAULT_CONNECT_TIMEOUT,
+                    load_balancing: Default::default(),
+                    health_check: Default::default(),
+                    circuit_breaker: Default::default(),
+                    proxy_protocol: None,
+                    upstream_servers: vec![UpstreamServer::new(
+                        format!(
+                            "/dns/localhost/tcp/{}/tls",
+                            listen_port.socket_addr().port()
+                        )
+                        .parse()
+                        .unwrap(),
+                    )],
+                }),
+                ..Default::default()
+            },
+        }])
+        .certs(
+            [(root.id, root.clone()), (cert.id, cert.clone())]
+                .into_iter()
+                .collect(),
+        )
+        .build();
+
+    let ca = reqwest::Certificate::from_pem(&root.pem_chain)?;
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::builder()
+            .add_root_certificate(ca)
+            .build()?;
+        let resp = client
+            .get(proxy_port.https_url("/hello"))
+            .send()
+            .await?
+            .text()
+            .await?;
+        assert_eq!(resp, "Hello");
+        Ok(())
+    })
+    .await
+}

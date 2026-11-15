@@ -1,0 +1,325 @@
+use mockito::Matcher;
+use r3v3rs3::certs::Cert;
+use r3v3rs3::{
+    admin::start_admin, config::new_appinfo, log::DatabaseLayer, server::ServerChannels,
+};
+use r3v3rs3_api::app::{AppConfig, AppInfo, NotificationConfig, WebhookConfig};
+use r3v3rs3_api::auth::Role;
+use reqwest::Method;
+use serde_json::{Value, json};
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use tracing_subscriber::filter::LevelFilter;
+
+use crate::common;
+use common::{TestStorage, alloc_tcp_port, send, session_cookie, wait_for_listener, with_server};
+
+const TOKEN: &str = "hook-token";
+
+/// A storage with one CA certificate and a webhook that marks every certificate as expiring. The
+/// background tasks run every second.
+fn storage(url: &str, ca: Cert) -> TestStorage {
+    let config = AppConfig {
+        background_task_interval: Duration::from_secs(1),
+        notifications: NotificationConfig {
+            cert_expiry_warning: Duration::MAX,
+            webhook: Some(WebhookConfig {
+                url: url.into(),
+                token: Some(TOKEN.into()),
+                ..Default::default()
+            }),
+        },
+        ..Default::default()
+    };
+    TestStorage::builder()
+        .config(config)
+        .certs(HashMap::from([(ca.id(), Arc::new(ca))]))
+        .build()
+}
+
+#[tokio::test]
+async fn the_webhook_gets_each_certificate_event_once() -> anyhow::Result<()> {
+    let mut server = mockito::Server::new_async().await;
+    let ca = Cert::new_ca()?;
+    let body = json!({
+        "event": "certificate_expiring",
+        "certificate": {"id": ca.id().to_string()},
+    });
+    let mock = server
+        .mock("POST", "/")
+        .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+        .match_body(Matcher::PartialJson(body))
+        .expect(1)
+        .create_async()
+        .await;
+
+    with_server(storage(&server.url(), ca), |_| async move {
+        // The leader checks the certificates in three background runs.
+        tokio::time::sleep(Duration::from_millis(3500)).await;
+        Ok(())
+    })
+    .await?;
+    mock.assert_async().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_server_sends_a_deployment_event_of_the_platform() -> anyhow::Result<()> {
+    use r3v3rs3::command::ServerCommand;
+    use r3v3rs3::notify::{DeploymentSummary, Notification, NotificationEvent};
+    let mut server = mockito::Server::new_async().await;
+    let body = json!({
+        "event": "deployment_running",
+        "deployment": {"id": "dep", "app": "app", "app_name": "shop", "trigger": "webhook"},
+    });
+    let mock = server
+        .mock("POST", "/")
+        .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+        .match_body(Matcher::PartialJson(body))
+        .expect(1)
+        .create_async()
+        .await;
+    // No certificate expires, so the deployment event is the only notification.
+    let config = AppConfig {
+        notifications: NotificationConfig {
+            webhook: Some(WebhookConfig {
+                url: server.url(),
+                token: Some(TOKEN.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let storage = TestStorage::builder().config(config).build();
+    with_server(storage, |channels| async move {
+        let summary = DeploymentSummary {
+            id: "dep".parse()?,
+            app: "app".parse()?,
+            app_name: "shop".into(),
+            trigger: "webhook",
+        };
+        let event = NotificationEvent::DeploymentRunning;
+        let notification = Notification::deployment(event, summary, None);
+        channels
+            .command
+            .send(ServerCommand::Notify { notification })
+            .await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        Ok(())
+    })
+    .await?;
+    mock.assert_async().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_server_sends_an_app_alert_notification() -> anyhow::Result<()> {
+    use r3v3rs3::command::ServerCommand;
+    use r3v3rs3::notify::Notification;
+    let mut server = mockito::Server::new_async().await;
+    let body = json!({
+        "event": "app_alert",
+        "alert": {
+            "app": "app",
+            "app_name": "shop",
+            "metric": "cpu",
+            "current_value": "85.0%",
+            "threshold": "80%"
+        },
+    });
+    let mock = server
+        .mock("POST", "/")
+        .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+        .match_body(Matcher::PartialJson(body))
+        .expect(1)
+        .create_async()
+        .await;
+    let config = AppConfig {
+        notifications: NotificationConfig {
+            webhook: Some(WebhookConfig {
+                url: server.url(),
+                token: Some(TOKEN.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let storage = TestStorage::builder().config(config).build();
+    with_server(storage, |channels| async move {
+        let notification = Notification::app_alert(
+            "app".parse()?,
+            "shop".into(),
+            "cpu",
+            "85.0%".into(),
+            "80%".into(),
+        );
+        channels
+            .command
+            .send(ServerCommand::Notify { notification })
+            .await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        Ok(())
+    })
+    .await?;
+    mock.assert_async().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failed_notification_is_sent_three_times() -> anyhow::Result<()> {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/")
+        .with_status(500)
+        .expect(3)
+        .create_async()
+        .await;
+
+    with_server(storage(&server.url(), Cert::new_ca()?), |_| async move {
+        // The second attempt waits one second and the third waits two seconds.
+        tokio::time::sleep(Duration::from_millis(5500)).await;
+        Ok(())
+    })
+    .await?;
+    mock.assert_async().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_admin_sends_a_test_notification_to_the_saved_webhook() -> anyhow::Result<()> {
+    let dir = std::env::temp_dir().join(format!("r3v3rs3-notifications-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
+
+    let mut server = mockito::Server::new_async().await;
+    let url = server.url();
+    let mock = server
+        .mock("POST", "/")
+        .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+        .match_body(Matcher::PartialJson(json!({"event": "test"})))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let addr = alloc_tcp_port().await?.socket_addr();
+    let storage = TestStorage::builder()
+        .account("admin", "admin-secret", Role::Admin, None)
+        .account("editor", "editor-secret", Role::Editor, None)
+        .build();
+    let app_info = new_appinfo(&dir, &dir);
+    with_server(storage, |channels| {
+        check_test_notifications(channels, app_info, addr, url)
+    })
+    .await?;
+
+    mock.assert_async().await;
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// Starts the admin API, signs in as the admin and the editor, and checks the webhook
+/// validation, the saved token, the permissions and a failed test notification.
+async fn check_test_notifications(
+    channels: ServerChannels,
+    app_info: AppInfo,
+    addr: SocketAddr,
+    url: String,
+) -> anyhow::Result<()> {
+    tokio::spawn(start_admin(
+        app_info,
+        addr,
+        channels.command,
+        channels.callback,
+        channels.event.clone(),
+        channels.accounts.clone(),
+    ));
+    wait_for_listener(addr).await?;
+    let admin = session_cookie(addr, "admin", "admin-secret").await?;
+    let editor = session_cookie(addr, "editor", "editor-secret").await?;
+
+    let mut config = check_webhook_validation(addr, &admin).await?;
+    check_saved_token(addr, &admin, &mut config, &url).await?;
+    check_test_permissions(addr, &admin, &editor).await?;
+    check_failed_webhook(addr, &admin, config).await
+}
+
+/// The admin API path that sends a test notification.
+const TEST_PATH: &str = "/api/config/notifications/test";
+
+/// Checks that a test without a webhook and a webhook URL of an unresolvable host are rejected.
+/// Returns the default config as JSON.
+async fn check_webhook_validation(addr: SocketAddr, admin: &str) -> anyhow::Result<Value> {
+    let (status, body) = send(addr, Method::POST, TEST_PATH, admin, None).await?;
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("notification_webhook_missing"), "{body}");
+
+    let mut config = serde_json::to_value(AppConfig::default())?;
+    config["notifications"]["webhook"] = json!({"url": "http://hooks.example.com/"});
+    let (status, body) = send(
+        addr,
+        Method::PUT,
+        "/api/config",
+        admin,
+        Some(config.clone()),
+    )
+    .await?;
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("notification_webhook_url_invalid"), "{body}");
+    Ok(config)
+}
+
+/// Saves the webhook with its token and checks that the admin API keeps the token and returns
+/// only whether it is set.
+async fn check_saved_token(
+    addr: SocketAddr,
+    admin: &str,
+    config: &mut Value,
+    url: &str,
+) -> anyhow::Result<()> {
+    // The admin API keeps the token and returns only whether it is set.
+    config["notifications"]["webhook"] = json!({"url": url, "token": TOKEN});
+    let (status, body) = send(
+        addr,
+        Method::PUT,
+        "/api/config",
+        admin,
+        Some(config.clone()),
+    )
+    .await?;
+    assert_eq!(status, 200, "{body}");
+    let (_, body) = send(addr, Method::GET, "/api/config", admin, None).await?;
+    let saved: Value = serde_json::from_str(&body)?;
+    assert_eq!(
+        saved["notifications"]["webhook"],
+        json!({"url": url, "token_set": true, "timeout": "10s"})
+    );
+    Ok(())
+}
+
+/// Checks that an editor may not send a test notification and that an admin may.
+async fn check_test_permissions(addr: SocketAddr, admin: &str, editor: &str) -> anyhow::Result<()> {
+    let (status, _) = send(addr, Method::POST, TEST_PATH, editor, None).await?;
+    assert_eq!(status, 403);
+    let (status, body) = send(addr, Method::POST, TEST_PATH, admin, None).await?;
+    assert_eq!(status, 200, "{body}");
+    Ok(())
+}
+
+/// Checks that a webhook that does not answer is a failed notification.
+async fn check_failed_webhook(
+    addr: SocketAddr,
+    admin: &str,
+    mut config: Value,
+) -> anyhow::Result<()> {
+    config["notifications"]["webhook"] = json!({"url": "http://127.0.0.1:1/"});
+    let (status, body) = send(addr, Method::PUT, "/api/config", admin, Some(config)).await?;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = send(addr, Method::POST, TEST_PATH, admin, None).await?;
+    assert_eq!(status, 502, "{body}");
+    assert!(body.contains("notification_failed"), "{body}");
+    Ok(())
+}
