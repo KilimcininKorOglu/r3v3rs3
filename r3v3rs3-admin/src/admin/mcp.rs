@@ -378,7 +378,7 @@ pub struct AddRegistryParams {
     /// Username or service account for authentication.
     pub username: String,
     /// Password or personal access token with pull permissions.
-    pub password: Option<String>,
+    pub password: String,
 }
 
 /// The arguments of `update_registry`.
@@ -405,8 +405,8 @@ pub struct AddGitConnectionParams {
     pub url: Option<String>,
     /// Client ID of the OAuth application.
     pub client_id: String,
-    /// OAuth application client secret.
-    pub client_secret: Option<String>,
+    /// Client secret of the OAuth application.
+    pub client_secret: String,
 }
 
 /// The arguments of `list_git_repositories`.
@@ -624,8 +624,8 @@ pub struct SyncProjectEnvParams {
 /// The arguments of `create_dr_backup`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateDrBackupParams {
-    /// Optional passphrase to encrypt the backup bundle with AES-256-GCM.
-    pub passphrase: Option<String>,
+    /// The passphrase that encrypts the bundle with AES-256-GCM; a restore needs the same one.
+    pub passphrase: String,
     /// Whether to replicate the backup to configured S3 storage.
     pub upload_s3: Option<bool>,
 }
@@ -635,8 +635,8 @@ pub struct CreateDrBackupParams {
 pub struct RestoreDrBackupParams {
     /// Identifier of the disaster recovery backup snapshot to restore.
     pub backup_id: String,
-    /// Optional passphrase to decrypt the backup bundle.
-    pub passphrase: Option<String>,
+    /// The passphrase that the bundle was created with.
+    pub passphrase: String,
 }
 
 /// The arguments of `delete_dr_backup`.
@@ -4171,7 +4171,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let request = r3v3rs3_api::platform::CreateDisasterRecoveryRequest {
-            passphrase: params.passphrase,
+            passphrase: Some(params.passphrase),
             upload_s3: params.upload_s3.unwrap_or(true),
         };
         let backup = super::disaster_recovery::create(
@@ -4196,7 +4196,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let request = r3v3rs3_api::platform::RestoreDisasterRecoveryRequest {
-            passphrase: params.passphrase,
+            passphrase: Some(params.passphrase),
         };
         let restored = super::disaster_recovery::restore(
             axum::extract::State(self.state.clone()),
@@ -4847,7 +4847,7 @@ impl McpServer {
         let request = r3v3rs3_api::platform::RegistryRequest {
             server: params.server,
             username: params.username,
-            password: params.password,
+            password: Some(params.password),
         };
         let platform = self
             .state
@@ -4992,7 +4992,7 @@ impl McpServer {
             provider,
             url,
             client_id: params.client_id,
-            client_secret: params.client_secret,
+            client_secret: Some(params.client_secret),
         };
         let platform = self
             .state

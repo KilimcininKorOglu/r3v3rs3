@@ -1729,6 +1729,43 @@ async fn invalid_proxy_ids_of_an_account_are_refused() -> anyhow::Result<()> {
     .await
 }
 
+/// An argument that the server needs is required in the tool schema, so an agent sends it instead
+/// of learning about it from an error.
+#[tokio::test]
+async fn needed_arguments_are_required_in_the_schema() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-required-arguments")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = mcp_client(addr, &access_token(&addr).await?).await?;
+        let tools = client.list_all_tools().await?;
+        let expected = [
+            ("create_dr_backup", "passphrase"),
+            ("restore_dr_backup", "passphrase"),
+            ("add_git_connection", "client_secret"),
+            ("add_registry", "password"),
+        ];
+        for (name, field) in expected {
+            let tool = tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .with_context(|| format!("the tool {name} is missing"))?;
+            let required = tool
+                .input_schema
+                .get("required")
+                .cloned()
+                .unwrap_or_default();
+            assert!(
+                required
+                    .as_array()
+                    .is_some_and(|list| list.contains(&json!(field))),
+                "{name} does not require {field}: {required}"
+            );
+        }
+        client.cancel().await?;
+        Ok(())
+    })
+    .await
+}
+
 /// The app store refresh changes the catalog of every account, so a viewer with a token of the
 /// edit scope must not run it, the same as through the HTTP API.
 #[tokio::test]
