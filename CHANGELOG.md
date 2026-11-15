@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.7] - 2026-11-15
+
+### Changed
+- The release workflow deletes the draft of a release that is not published, so a failed release leaves no draft behind.
+
+### Fixed
+- An app that used a database could not connect to it: the deployment gave it `host.docker.internal` and the published port, but a database publishes its port only on `127.0.0.1` of the host, so every connection from a container was refused. The container of the app now joins the Docker network of the database and of its running replicas, and connects to the database by its host name `r3v3rs3-<database id>` on the container port. A database on another target than the app fails the deployment with the reason. A database deployed before this release gets its host name on its next deployment.
+- The pgAdmin App Store entry waited on port 80, but pgAdmin listens on 8080 because r3v3rs3 starts containers with `no-new-privileges`. Every install stayed in `deploying`. The entry now uses port 8080.
+
 ## [3.3.6] - 2026-11-15
 
 ### Changed
