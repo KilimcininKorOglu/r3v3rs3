@@ -3,7 +3,6 @@ use super::acme_schedule::AcmeSchedule;
 use super::cert_list::CertList;
 use super::connection::{self, HttpChallenges};
 use super::discovery::{self, DiscoveryRegistry, DiscoveryTasks};
-use super::ipc::QuarantineChange;
 use super::proxy_list::ProxyList;
 use super::quic::QuicListenerPool;
 use super::rpc::proxies::validate_proxy;
@@ -17,6 +16,7 @@ use crate::certs::challenges::ServedChallenges;
 use crate::clock::unix_ms;
 use crate::config::storage::Storage;
 use crate::discovery::DiscoverySnapshot;
+use crate::ipc::QuarantineChange;
 use crate::kv::http::ApiClient;
 use crate::log::DatabaseLayer;
 use crate::notify::{Notification, Notifier, certificate_notifications};
@@ -225,7 +225,7 @@ impl ServerState {
         command_sender: mpsc::Sender<ServerCommand>,
         callback_sender: mpsc::Sender<RpcCallback>,
         br_sender: broadcast::Sender<ServerEvent>,
-        listeners: Vec<super::fdmanifest::ListenerFd>,
+        listeners: Vec<crate::fdmanifest::ListenerFd>,
     ) -> Self {
         Self::build(
             ServerRole::Master,
@@ -249,7 +249,7 @@ impl ServerState {
         command_sender: mpsc::Sender<ServerCommand>,
         callback_sender: mpsc::Sender<RpcCallback>,
         br_sender: broadcast::Sender<ServerEvent>,
-        listeners: Vec<super::fdmanifest::ListenerFd>,
+        listeners: Vec<crate::fdmanifest::ListenerFd>,
     ) -> Self {
         Self::build(
             ServerRole::Worker,
@@ -273,7 +273,7 @@ impl ServerState {
         command_sender: mpsc::Sender<ServerCommand>,
         callback_sender: mpsc::Sender<RpcCallback>,
         br_sender: broadcast::Sender<ServerEvent>,
-        listeners: Vec<super::fdmanifest::ListenerFd>,
+        listeners: Vec<crate::fdmanifest::ListenerFd>,
     ) -> Self {
         let config = storage.load_app_config().await;
         let audit = Arc::new(AuditLog::new(audit_store, String::new()));
@@ -384,7 +384,7 @@ impl ServerState {
     async fn initialize(
         &mut self,
         role: ServerRole,
-        listeners: Vec<super::fdmanifest::ListenerFd>,
+        listeners: Vec<crate::fdmanifest::ListenerFd>,
     ) {
         if let Some(exchange) = self.storage.clone().rate_count_exchange() {
             self.registries
@@ -766,7 +766,7 @@ impl ServerState {
     }
 
     /// The listeners that the worker processes take over.
-    pub fn listener_manifest(&self) -> std::io::Result<Vec<super::fdmanifest::ListenerFd>> {
+    pub fn listener_manifest(&self) -> std::io::Result<Vec<crate::fdmanifest::ListenerFd>> {
         let mut fds = self.tcp_pool.listener_fds()?;
         fds.extend(self.udp_pool.listener_fds()?);
         fds.extend(self.quic_pool.listener_fds()?);
@@ -774,15 +774,15 @@ impl ServerState {
     }
 
     /// The configuration that a worker process serves.
-    pub fn worker_config(&self) -> super::ipc::WorkerConfig {
-        super::ipc::WorkerConfig {
+    pub fn worker_config(&self) -> crate::ipc::WorkerConfig {
+        crate::ipc::WorkerConfig {
             ports: self.ports.entries().cloned().collect(),
             proxies: self.proxies.entries().cloned().collect(),
             access_lists: self.access_lists.clone(),
             certs: self
                 .certs
                 .iter()
-                .map(|cert| super::ipc::WorkerCert {
+                .map(|cert| crate::ipc::WorkerCert {
                     kind: cert.kind,
                     pem_chain: cert.pem_chain.clone(),
                     pem_key: cert.pem_key.clone(),
@@ -1212,26 +1212,26 @@ impl ServerState {
     /// them, because their addresses are the addresses of the ports.
     async fn adopt_listeners(
         &mut self,
-        listeners: Vec<super::fdmanifest::ListenerFd>,
+        listeners: Vec<crate::fdmanifest::ListenerFd>,
     ) -> anyhow::Result<()> {
         use std::os::fd::{FromRawFd, IntoRawFd};
         for listener in listeners {
             match listener.proto {
-                super::fdmanifest::ListenerProto::Tcp => {
+                crate::fdmanifest::ListenerProto::Tcp => {
                     let listener =
                         unsafe { std::net::TcpListener::from_raw_fd(listener.fd.into_raw_fd()) };
                     listener.set_nonblocking(true)?;
                     self.tcp_pool
                         .adopt(tokio::net::TcpListener::from_std(listener)?);
                 }
-                super::fdmanifest::ListenerProto::Udp => {
+                crate::fdmanifest::ListenerProto::Udp => {
                     let socket =
                         unsafe { std::net::UdpSocket::from_raw_fd(listener.fd.into_raw_fd()) };
                     socket.set_nonblocking(true)?;
                     self.udp_pool
                         .adopt(tokio::net::UdpSocket::from_std(socket)?);
                 }
-                super::fdmanifest::ListenerProto::Quic => {
+                crate::fdmanifest::ListenerProto::Quic => {
                     self.quic_pool.adopt(listener.fd)?;
                 }
             }

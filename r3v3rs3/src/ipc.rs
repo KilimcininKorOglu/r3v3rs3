@@ -23,7 +23,7 @@ const MAX_FRAME_SIZE: u32 = 64 * 1024 * 1024;
 /// The metadata of one listening socket that travels with its file descriptor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListenerMeta {
-    pub proto: crate::server::fdmanifest::ListenerProto,
+    pub proto: crate::fdmanifest::ListenerProto,
     pub addr: SocketAddr,
 }
 

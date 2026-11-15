@@ -1,7 +1,7 @@
 use super::RpcMethod;
 use crate::accounts::Permission;
 use crate::audit::AuditRecord;
-use crate::server::ipc::QuarantineChange;
+use crate::ipc::QuarantineChange;
 use crate::server::state::ServerState;
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;

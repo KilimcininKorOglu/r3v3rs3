@@ -4,12 +4,12 @@
 //! worker. It restarts the worker with a backoff when it dies, sends the current configuration
 //! whenever the state changes, and pings it as a heartbeat.
 
-use super::fdmanifest::ListenerFd;
-use super::ipc::{
+use crate::command::ServerCommand;
+use crate::fdmanifest::ListenerFd;
+use crate::ipc::{
     Handshake, PROTOCOL_VERSION, QuarantineChange, WorkerCommand, WorkerConfig, WorkerEvent,
     read_frame, write_frame,
 };
-use crate::command::ServerCommand;
 use crate::server::ServerEvent;
 use anyhow::Context;
 use r3v3rs3_api::app::{AppConfig, AppInfo};
@@ -387,7 +387,7 @@ fn handshake(
             protocol: PROTOCOL_VERSION,
             listeners: manifest
                 .iter()
-                .map(|listener| super::ipc::ListenerMeta {
+                .map(|listener| crate::ipc::ListenerMeta {
                     proto: listener.proto,
                     addr: listener.addr,
                 })

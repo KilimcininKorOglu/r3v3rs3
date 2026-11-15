@@ -166,7 +166,7 @@ async fn new_server(
     app_info: AppInfo,
     _local: AppConfig,
     config_dir: &Path,
-    listeners: Vec<r3v3rs3::server::fdmanifest::ListenerFd>,
+    listeners: Vec<r3v3rs3::fdmanifest::ListenerFd>,
 ) -> anyhow::Result<(Server, ServerChannels)> {
     let storage = Arc::new(SqliteStorage::open(config_dir).await?);
     Ok(Server::new_shared_inheriting(app_info, storage, listeners).await)
@@ -221,15 +221,15 @@ async fn start(mut args: StartArgs, exe_args: Vec<String>) -> anyhow::Result<()>
 fn manifest_with_webui(
     server: &r3v3rs3::server::Server,
     webui_listener: Option<&tokio::net::TcpListener>,
-) -> std::io::Result<Vec<r3v3rs3::server::fdmanifest::ListenerFd>> {
+) -> std::io::Result<Vec<r3v3rs3::fdmanifest::ListenerFd>> {
     use std::os::fd::AsFd as _;
     let mut manifest = server.listener_manifest()?;
     let Some(listener) = webui_listener else {
         return Ok(manifest);
     };
     let fd = listener.as_fd().try_clone_to_owned()?;
-    manifest.push(r3v3rs3::server::fdmanifest::ListenerFd::new(
-        r3v3rs3::server::fdmanifest::ListenerProto::Tcp,
+    manifest.push(r3v3rs3::fdmanifest::ListenerFd::new(
+        r3v3rs3::fdmanifest::ListenerProto::Tcp,
         listener.local_addr()?,
         fd,
     ));
@@ -316,7 +316,7 @@ async fn admin_serve(
 async fn inherit_listeners(
     webui: SocketAddr,
 ) -> anyhow::Result<(
-    Vec<r3v3rs3::server::fdmanifest::ListenerFd>,
+    Vec<r3v3rs3::fdmanifest::ListenerFd>,
     Option<tokio::net::TcpListener>,
 )> {
     let Ok(fd) = std::env::var("R3V3RS3_UPGRADE_IPC_FD") else {
@@ -331,7 +331,7 @@ async fn inherit_listeners(
     let mut webui_listener = None;
     for listener in listeners {
         if listener.addr == webui {
-            let r3v3rs3::server::fdmanifest::ListenerFd { fd, .. } = listener;
+            let r3v3rs3::fdmanifest::ListenerFd { fd, .. } = listener;
             let std_listener = std::net::TcpListener::from(fd);
             std_listener.set_nonblocking(true)?;
             webui_listener = Some(tokio::net::TcpListener::from_std(std_listener)?);
@@ -378,7 +378,7 @@ async fn serve_admin(
     app_info: AppInfo,
     channels: ServerChannels,
     exe_args: Vec<String>,
-    manifest: Option<Vec<r3v3rs3::server::fdmanifest::ListenerFd>>,
+    manifest: Option<Vec<r3v3rs3::fdmanifest::ListenerFd>>,
     admin: AdminServe,
     upgrade_sender: tokio::sync::mpsc::Sender<()>,
     mut upgrade_receiver: tokio::sync::mpsc::Receiver<()>,
@@ -484,7 +484,7 @@ fn admin_api(
 /// process must keep serving, for example when the process itself started from an upgrade.
 async fn try_hand_over(
     exe_args: &[String],
-    manifest: Option<&[r3v3rs3::server::fdmanifest::ListenerFd]>,
+    manifest: Option<&[r3v3rs3::fdmanifest::ListenerFd]>,
 ) -> bool {
     match manifest {
         Some(manifest) => match r3v3rs3::server::upgrade::hand_over(exe_args, manifest).await {

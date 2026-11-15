@@ -5,14 +5,14 @@
 //! nothing from a storage: its storage is a memory storage that the master replaces through
 //! [`WorkerCommand::Config`].
 
-use super::fdmanifest::ListenerFd;
 use super::fdpass::recv_fds;
-use super::ipc::{
+use crate::command::ServerCommand;
+use crate::config::memory::MemoryStorage;
+use crate::fdmanifest::ListenerFd;
+use crate::ipc::{
     Handshake, PROTOCOL_VERSION, QuarantineChange, WorkerCommand, WorkerConfig, WorkerEvent,
     WorkerStatus, read_frame, write_frame,
 };
-use crate::command::ServerCommand;
-use crate::config::memory::MemoryStorage;
 use crate::server::Server;
 use anyhow::{Context, anyhow, bail};
 use r3v3rs3_api::app::AppInfo;
@@ -273,7 +273,7 @@ async fn read_command(ipc: &UnixStream) -> Option<WorkerCommand> {
 }
 
 /// Rebuilds the parsed certificates of the configuration.
-fn certs_of(certs: &[super::ipc::WorkerCert]) -> anyhow::Result<Vec<Arc<crate::certs::Cert>>> {
+fn certs_of(certs: &[crate::ipc::WorkerCert]) -> anyhow::Result<Vec<Arc<crate::certs::Cert>>> {
     certs
         .iter()
         .cloned()

@@ -4,9 +4,9 @@
 //! state from the storage, answers with one ready byte, inherits the descriptors of the
 //! listeners, and serves them while the old process drains its open connections.
 
-use super::fdmanifest::ListenerFd;
 use super::fdpass::recv_fds;
-use super::ipc::{Handshake, read_frame, write_frame};
+use crate::fdmanifest::ListenerFd;
+use crate::ipc::{Handshake, read_frame, write_frame};
 use anyhow::{Context, bail};
 use std::os::fd::{AsRawFd as _, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
@@ -35,7 +35,7 @@ pub async fn child_handover(ipc_fd: i32) -> anyhow::Result<Vec<ListenerFd>> {
     // ancillary data that the descriptor message carries.
     let fds = recv_fds(&ipc, MAX_LISTENERS).context("failed to receive the listeners")?;
     let handshake: Handshake = read_frame(&mut ipc)?;
-    if handshake.protocol != super::ipc::PROTOCOL_VERSION {
+    if handshake.protocol != crate::ipc::PROTOCOL_VERSION {
         bail!("the previous process speaks another upgrade protocol");
     }
     Ok(handshake
@@ -59,7 +59,7 @@ pub async fn hand_over(exe_args: &[String], manifest: &[ListenerFd]) -> anyhow::
 
     let metas = manifest
         .iter()
-        .map(|listener| super::ipc::ListenerMeta {
+        .map(|listener| crate::ipc::ListenerMeta {
             proto: listener.proto,
             addr: listener.addr,
         })
@@ -133,7 +133,7 @@ fn new_upgrade_command(
 /// descriptor message and keeps its ancillary data.
 fn write_handover(
     ipc: &mut UnixStream,
-    listeners: &[super::ipc::ListenerMeta],
+    listeners: &[crate::ipc::ListenerMeta],
     fds: &[std::os::fd::RawFd],
 ) -> anyhow::Result<()> {
     use std::io::Read as _;
@@ -147,7 +147,7 @@ fn write_handover(
     write_frame(
         ipc,
         &Handshake {
-            protocol: super::ipc::PROTOCOL_VERSION,
+            protocol: crate::ipc::PROTOCOL_VERSION,
             listeners: listeners.to_vec(),
         },
     )?;

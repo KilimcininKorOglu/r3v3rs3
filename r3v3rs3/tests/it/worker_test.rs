@@ -3,12 +3,12 @@
 
 use crate::common;
 use common::{alloc_tcp_port, port_entry};
-use r3v3rs3::server::fdmanifest::ListenerProto;
-use r3v3rs3::server::fdpass::send_fds;
-use r3v3rs3::server::ipc::{
+use r3v3rs3::fdmanifest::ListenerProto;
+use r3v3rs3::ipc::{
     Handshake, ListenerMeta, PROTOCOL_VERSION, WorkerCommand, WorkerConfig, WorkerEvent,
     read_frame, write_frame,
 };
+use r3v3rs3::server::fdpass::send_fds;
 use r3v3rs3_api::access_list::AccessListEntry;
 use r3v3rs3_api::app::AppConfig;
 use r3v3rs3_api::port::UpstreamServer;
@@ -388,7 +388,7 @@ fn quarantine_entry(ip: std::net::IpAddr) -> r3v3rs3_api::quarantine::Quarantine
 /// go to its worker in the workers mode.
 async fn master_with_link() -> anyhow::Result<(
     r3v3rs3::server::ServerChannels,
-    tokio::sync::mpsc::Receiver<r3v3rs3::server::ipc::QuarantineChange>,
+    tokio::sync::mpsc::Receiver<r3v3rs3::ipc::QuarantineChange>,
     tokio::task::JoinHandle<anyhow::Result<()>>,
 )> {
     let storage = common::TestStorage::builder().build();
@@ -410,7 +410,7 @@ async fn master_with_link() -> anyhow::Result<(
 /// to the worker.
 #[tokio::test]
 async fn the_quarantine_changes_of_the_master_go_to_the_worker() -> anyhow::Result<()> {
-    use r3v3rs3::server::ipc::QuarantineChange;
+    use r3v3rs3::ipc::QuarantineChange;
     use r3v3rs3::server::rpc::quarantine::{QuarantineIp, UnquarantineIp};
 
     let (mut channels, mut link, server_task) = master_with_link().await?;
@@ -432,7 +432,7 @@ async fn the_quarantine_changes_of_the_master_go_to_the_worker() -> anyhow::Resu
 #[tokio::test]
 async fn a_quarantine_of_the_worker_shows_in_the_master() -> anyhow::Result<()> {
     use r3v3rs3::command::ServerCommand;
-    use r3v3rs3::server::ipc::QuarantineChange;
+    use r3v3rs3::ipc::QuarantineChange;
     use r3v3rs3::server::rpc::quarantine::GetQuarantinedList;
 
     let (mut channels, _link, server_task) = master_with_link().await?;
@@ -483,8 +483,9 @@ async fn a_worker_takes_the_quarantine_commands_of_the_master() -> anyhow::Resul
 #[tokio::test]
 async fn the_admin_status_reports_the_workers_of_the_master() -> anyhow::Result<()> {
     use r3v3rs3::command::ServerCommand;
+    use r3v3rs3::ipc::WorkerStatus;
+    use r3v3rs3::server::Server;
     use r3v3rs3::server::rpc::workers::GetWorkers;
-    use r3v3rs3::server::{Server, ipc::WorkerStatus};
     use r3v3rs3_api::app::WorkerMode;
 
     let log_dir = std::env::temp_dir().join(format!("r3v3rs3-wstatus-{}", std::process::id()));

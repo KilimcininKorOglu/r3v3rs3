@@ -93,24 +93,24 @@ pub enum ServerCommand {
     SuspendListeners,
     /// A supervisor asks for the configuration that a worker serves.
     WorkerConfigSnapshot {
-        reply: tokio::sync::mpsc::Sender<crate::server::ipc::WorkerConfig>,
+        reply: tokio::sync::mpsc::Sender<crate::ipc::WorkerConfig>,
     },
     /// A supervisor reports what the worker with this pid serves. A `None` status marks the
     /// worker as unreachable.
     SetWorkerStatus {
         pid: u32,
-        status: Option<crate::server::ipc::WorkerStatus>,
+        status: Option<crate::ipc::WorkerStatus>,
     },
     /// Master key was rotated, so cached encryption keys in storage must be invalidated.
     InvalidateStorageSecrets,
     /// A supervisor gives the master the channel that carries quarantine changes to its worker.
     SetWorkerLink {
-        sender: tokio::sync::mpsc::Sender<crate::server::ipc::QuarantineChange>,
+        sender: tokio::sync::mpsc::Sender<crate::ipc::QuarantineChange>,
     },
     /// Applies a quarantine change of another process of this server. `notify` sends the
     /// webhook of a new quarantine, which only the master does.
     ApplyQuarantine {
-        change: crate::server::ipc::QuarantineChange,
+        change: crate::ipc::QuarantineChange,
         notify: bool,
     },
     /// Sets the channel that carries the quarantines of this worker to its master.

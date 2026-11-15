@@ -1,4 +1,4 @@
-use super::fdmanifest::{ListenerFd, ListenerProto};
+use crate::fdmanifest::{ListenerFd, ListenerProto};
 use crate::proxy::tls::CertResolver;
 use crate::proxy::{PortContext, PortContextEvent, PortContextKind};
 use futures::{Stream, StreamExt};
