@@ -4,10 +4,10 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.4.0] - 2026-11-15
+## [3.4.1] - 2026-11-15
 
 ### Changed
-- The 3.3.9 release was not published, because its WebUI build could not install trunk. 3.4.0 carries every change of 3.3.9. The release workflow now installs trunk and cargo-zigbuild with the job token and `--locked`, so a missed release binary falls back to a source build on the locked dependencies.
+- The 3.3.9 and 3.4.0 releases were not published: 3.3.9 could not install trunk, and 3.4.0 failed a test that still expected one scanner probe to ban at once. 3.4.1 carries every change of both, with the test sending probes up to the threshold. The release workflow now installs trunk and cargo-zigbuild with the job token and `--locked`, so a missed release binary falls back to a source build on the locked dependencies.
 
 ### Fixed
 - One request that matched a scanner pattern counted as the whole violation threshold and banned its address at once for the ban duration. It now counts as one violation, so a ban needs the threshold within the window.
