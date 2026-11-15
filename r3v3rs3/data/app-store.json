@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "updated_at": 1792172616,
+  "updated_at": 1794705612,
   "apps": [
     {
       "id": "uptime-kuma",
@@ -345,23 +345,6 @@
       "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/grist.png",
       "volumes": [
         "/persist"
-      ]
-    },
-    {
-      "id": "ghost",
-      "name": "Ghost",
-      "description": "A publishing platform for blogs and newsletters with a SQLite default store.",
-      "description_tr": "Varsayılan SQLite depolu, blog ve bülten yayınlama platformu.",
-      "image": "ghost:5",
-      "port": 2368,
-      "health_check_path": "/",
-      "website": "https://ghost.org",
-      "category": "Publishing",
-      "category_tr": "Yayıncılık",
-      "logo": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/logos/ghost.svg",
-      "screenshot": "https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3-apps/main/screenshots/ghost.png",
-      "volumes": [
-        "/var/lib/ghost/content"
       ]
     },
     {
