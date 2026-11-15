@@ -325,12 +325,19 @@ pub async fn list_apps(
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<Vec<AppEntry>>, AppError> {
     let platform = state.platform(&caller, Permission::Read).await?;
-    let mut apps = platform.apps().await.map_err(platform_error)?;
+    let mut apps = without_databases(platform.apps().await.map_err(platform_error)?);
     let catalog = crate::appstore::state().catalog.clone();
     for app in &mut apps {
         app.catalog_update = check_catalog_update(app, &catalog);
     }
     Ok(Json(apps))
+}
+
+/// The apps that are not database servers. The databases have their own list.
+pub(super) fn without_databases(apps: Vec<AppEntry>) -> Vec<AppEntry> {
+    apps.into_iter()
+        .filter(|app| app.spec.database.is_none())
+        .collect()
 }
 
 /// Adds an app. The app runs after its first deployment.
@@ -2585,6 +2592,46 @@ mod tests {
         headers_pub.insert(HOST, "internal:80".parse().unwrap());
         headers_pub.insert(ORIGIN, "https://panel.example.com".parse().unwrap());
         assert!(verify_websocket_origin(&headers_pub, Some("https://panel.example.com")).is_ok());
+    }
+
+    /// An image app; with an engine key it is a database server.
+    fn image_app(name: &str, image: &str, database: Option<&str>) -> AppEntry {
+        let id = if database.is_some() {
+            "dbs-one"
+        } else {
+            "app-one"
+        };
+        let mut spec = serde_json::json!({
+            "source": { "type": "image", "image": image },
+            "port": 5432,
+        });
+        if let Some(engine) = database {
+            spec["database"] = serde_json::json!(engine);
+        }
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "name": name,
+            "target": "local",
+            "spec": spec,
+            "git_token_set": false,
+            "webhook_secret_set": false,
+            "created_at": 1,
+            "updated_at": 1,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_app_list_leaves_out_the_database_servers() {
+        let apps = vec![
+            image_app("web-app", "postgres:17-alpine", None),
+            image_app("db-main", "postgres:17-alpine", Some("postgres")),
+        ];
+        let names: Vec<String> = without_databases(apps)
+            .into_iter()
+            .map(|app| app.name.to_string())
+            .collect();
+        assert_eq!(names, ["web-app"]);
     }
 
     #[test]

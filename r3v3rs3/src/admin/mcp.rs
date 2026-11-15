@@ -2460,9 +2460,9 @@ impl McpServer {
     // Group 6: Platform Applications (PaaS)
     // ==========================================
 
-    /// List all PaaS applications.
+    /// List all PaaS applications. Database servers are listed by `list_databases`.
     #[tool(
-        description = "List all deployed PaaS applications with their status and catalog update information."
+        description = "List all deployed PaaS applications with their status and catalog update information. Database servers are not included; list_databases lists them."
     )]
     async fn list_apps(
         &self,
@@ -2474,7 +2474,8 @@ impl McpServer {
             .platform(&caller, Permission::Read)
             .await
             .map_err(any_error)?;
-        let mut apps = platform.apps().await.map_err(any_error)?;
+        let mut apps =
+            super::platform::without_databases(platform.apps().await.map_err(any_error)?);
         let catalog = crate::appstore::state().catalog.clone();
         for app in &mut apps {
             app.catalog_update = super::platform::check_catalog_update(app, &catalog);
