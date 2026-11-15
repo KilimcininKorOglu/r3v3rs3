@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.4] - 2026-11-15
+
+### Fixed
+- The labels of the WebUI sign-in form pointed at an input that does not exist, so a click on a label did not focus its input and screen readers did not announce the field names. Each label now names its own input.
+
 ## [3.3.3] - 2026-11-15
 
 ### Fixed
