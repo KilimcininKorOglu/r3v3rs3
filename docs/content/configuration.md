@@ -1771,7 +1771,7 @@ r3v3rs3 includes an autonomous real-time anomaly detection engine that monitors 
 r3v3rs3 monitors incoming live HTTP and TCP traffic to detect scanner probes, path exploitation attempts, and repeated client error statuses without requiring external threat feed API latency:
 
 - **Local Behavioral Threat Detection**:
-  - Automatically identifies probe patterns such as `/.env`, `/.git`, `/.aws`, `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/phpmyadmin`, and `/config.json`. A pattern matches only the path and the query of a request, never its host, so a host such as `phpmyadmin.example.com` does not match `/phpmyadmin`.
+  - Automatically identifies probe patterns such as `/.env`, `/.git`, `/.aws`, `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/phpmyadmin`, and `/config.json`. A pattern matches only the path and the query of a request, never its host, so a host such as `phpmyadmin.example.com` does not match `/phpmyadmin`. A pattern matches whole path segments only: it ends at the end of the path or before `/`, `.`, `?`, `&` or `#`. `/.git` matches `/.git/config` and `/wp-login` matches `/wp-login.php`, but `/.git` does not match `/.github`. Each matching request counts as one violation, like a blocked status code.
   - Accumulates repeated client status violations (`404`, `403`) across a sliding time window (default: 60 seconds). Only the responses that r3v3rs3 creates itself count: an unknown host, a refused IP filter, a failed sign-in or another route policy. A `403` or `404` from an upstream application never counts, so the login page of an app does not quarantine its users.
   - Instantly quarantines offending client IPs when violations reach the threshold (default: 5 violations).
 - **Allowed Addresses**:

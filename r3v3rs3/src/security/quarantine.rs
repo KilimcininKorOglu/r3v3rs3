@@ -19,6 +19,23 @@ struct ActiveBan {
 
 pub const MAX_VIOLATION_ENTRIES: usize = 10_000;
 
+/// Whether `pattern` occurs in `path` on segment boundaries: it starts at a `/` and ends at the
+/// end of the path or before `/`, `.`, `?`, `&` or `#`. `/.git` matches `/.git/config` and
+/// `/wp-login` matches `/wp-login.php`, but `/.git` does not match `/.github`.
+fn matches_segment(path: &str, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return false;
+    }
+    path.match_indices(pattern).any(|(start, _)| {
+        let starts = pattern.starts_with('/') || path[..start].ends_with('/');
+        let ends = path[start + pattern.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| matches!(next, '/' | '.' | '?' | '&' | '#'));
+        starts && ends
+    })
+}
+
 #[derive(Debug, Clone)]
 struct IpViolationState {
     count: u32,
@@ -82,7 +99,8 @@ impl AutoQuarantineTracker {
 
     /// Checks if the path and the query of a request URI match any scanner patterns. The scheme
     /// and the host of an absolute URI never count, so a host such as `phpmyadmin.example.com`
-    /// does not match the pattern `/phpmyadmin`.
+    /// does not match the pattern `/phpmyadmin`. A pattern matches whole path segments only (see
+    /// [`matches_segment`]).
     pub fn check_scanner_uri(&self, uri: &str) -> Option<String> {
         let config = self.config.load();
         if !config.enabled {
@@ -93,12 +111,11 @@ impl AutoQuarantineTracker {
             .ok()
             .and_then(|parsed| parsed.path_and_query().map(|p| p.as_str().to_owned()));
         let lower = path.as_deref().unwrap_or(uri).to_ascii_lowercase();
-        for pattern in &config.scanner_patterns {
-            if lower.contains(&pattern.to_ascii_lowercase()) {
-                return Some(pattern.clone());
-            }
-        }
-        None
+        config
+            .scanner_patterns
+            .iter()
+            .find(|pattern| matches_segment(&lower, &pattern.to_ascii_lowercase()))
+            .cloned()
     }
 
     /// Checks if an HTTP response status code is considered a violation.
@@ -421,6 +438,26 @@ mod tests {
             Some("/wp-admin".to_string())
         );
         assert_eq!(tracker.check_scanner_uri("/api/users"), None);
+    }
+
+    #[test]
+    fn a_scanner_pattern_matches_whole_path_segments_only() {
+        let tracker = AutoQuarantineTracker::default();
+        assert_eq!(
+            tracker.check_scanner_uri("/.git/config"),
+            Some("/.git".to_string())
+        );
+        assert_eq!(
+            tracker.check_scanner_uri("/wp-login.php"),
+            Some("/wp-login".to_string())
+        );
+        assert_eq!(
+            tracker.check_scanner_uri("/.env.local"),
+            Some("/.env".to_string())
+        );
+        assert_eq!(tracker.check_scanner_uri("/.github/workflows/ci.yml"), None);
+        assert_eq!(tracker.check_scanner_uri("/docs/.environment"), None);
+        assert_eq!(tracker.check_scanner_uri("/app/config.jsonp"), None);
     }
 
     #[test]
