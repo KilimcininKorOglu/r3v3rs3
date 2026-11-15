@@ -10,6 +10,10 @@ name: Warm release caches
 # dependencies of Cargo.toml and Cargo.lock (not the package versions). Keep the env block,
 # the toolchain setup and the cache inputs equal to the webui and binary jobs of
 # release.yml, or the release no longer finds these caches.
+#
+# The webui job also saves the built WebUI under the key of .github/scripts/webui-cache-key.sh.
+# The release restores it and does not build the WebUI, so its server builds start at once.
+# A push that changes a WebUI input runs this workflow, so the WebUI is ready before the tag.
 
 on:
   schedule:
@@ -21,7 +25,11 @@ on:
     # A dependency or toolchain change gives a new key; warm it before the next release.
     paths:
       - Cargo.lock
+      - Cargo.toml
       - rust-toolchain.toml
+      - r3v3rs3-webui/**
+      - r3v3rs3-api/**
+      - .github/scripts/webui-cache-key.sh
       - .github/workflows/release-cache.yml
   workflow_dispatch:
 
@@ -44,25 +52,38 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: WebUI cache key
+        id: webui-key
+        run: echo "key=webui-dist-$(bash .github/scripts/webui-cache-key.sh)" >> "$GITHUB_OUTPUT"
+      - name: WebUI build cache
+        # Saves the built WebUI at the end of the job when the key is new.
+        id: webui-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: r3v3rs3/dist/webui
+          key: ${{ steps.webui-key.outputs.key }}
       - name: Install Rust
         run: rustup toolchain install
       - name: Cache
+        # Restoring keeps the dependency cache of the release fallback build from eviction. The
+        # job saves it only when it builds, so a restored WebUI never saves an empty target.
         id: cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: r3v3rs3-webui
           shared-key: wasm-webui
+          save-if: ${{ steps.webui-cache.outputs.cache-hit != 'true' }}
       - name: Install cargo-binstall
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.webui-cache.outputs.cache-hit != 'true'
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
       - name: Install trunk
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.webui-cache.outputs.cache-hit != 'true'
         # The same token and --locked as the trunk step of release.yml.
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall trunk@0.21.14 --locked --force -y
       - name: Build webui
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.webui-cache.outputs.cache-hit != 'true'
         run: cd r3v3rs3-webui && trunk build --cargo-profile web-release --release
 
   warm:

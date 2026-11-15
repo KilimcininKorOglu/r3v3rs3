@@ -36,7 +36,9 @@ jobs:
           test -s relnotes.md
           gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file relnotes.md --draft
 
-  # The WebUI is WebAssembly, so one build serves every target.
+  # The WebUI is WebAssembly, so one build serves every target. The server jobs wait for it,
+  # so the job first restores the WebUI that release-cache.yml built on main for the same
+  # inputs and builds it only when that cache is missing.
   webui:
     name: Build WebUI
     runs-on: ubuntu-24.04
@@ -47,26 +49,40 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: WebUI cache key
+        id: webui-key
+        run: echo "key=webui-dist-$(bash .github/scripts/webui-cache-key.sh)" >> "$GITHUB_OUTPUT"
+      - name: Restore the WebUI build
+        id: webui-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: r3v3rs3/dist/webui
+          key: ${{ steps.webui-key.outputs.key }}
       - name: Install Rust
         # rustup reads rust-toolchain.toml, so every job builds with the pinned channel and its
         # declared targets.
+        if: steps.webui-cache.outputs.cache-hit != 'true'
         run: rustup toolchain install
       - name: Install cargo-binstall
+        if: steps.webui-cache.outputs.cache-hit != 'true'
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
       - name: Install trunk
         # The token lifts the anonymous GitHub API rate limit, so binstall finds the release
         # binary; --locked keeps a source build on the dependency versions of trunk.
+        if: steps.webui-cache.outputs.cache-hit != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall trunk@0.21.14 --locked --force -y
       - name: Cache
         # The WebUI builds in r3v3rs3-webui with its own wasm target, so its cache is
         # separate from the server caches of the binary jobs.
+        if: steps.webui-cache.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: r3v3rs3-webui
           shared-key: wasm-webui
       - name: Build webui
+        if: steps.webui-cache.outputs.cache-hit != 'true'
         run: cd r3v3rs3-webui && trunk build --cargo-profile web-release --release
       - name: Upload webui
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
