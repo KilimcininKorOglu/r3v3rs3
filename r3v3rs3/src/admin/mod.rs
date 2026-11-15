@@ -91,7 +91,6 @@ mod quarantine;
 mod security_headers;
 mod static_file;
 mod store;
-pub(crate) mod system_metrics;
 mod traffic;
 mod upgrade;
 mod webhooks;

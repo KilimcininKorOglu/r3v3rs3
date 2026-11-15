@@ -42,7 +42,7 @@ fn runtime() -> anyhow::Result<Arc<dyn ContainerRuntime>> {
 /// The environment of the database container: the root password and, for MongoDB, the
 /// root user.
 fn container_env(info: &EngineInfo) -> anyhow::Result<Vec<EnvVar>> {
-    let entries = crate::admin::databases::initial_db_env_entries(info, ROOT_PASSWORD)?;
+    let entries = super::database_env::initial_db_env_entries(info, ROOT_PASSWORD)?;
     Ok(entries
         .into_iter()
         .map(|entry| EnvVar {

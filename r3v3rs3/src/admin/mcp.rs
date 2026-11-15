@@ -1162,7 +1162,7 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let _caller = caller_of(&parts)?;
-        let metrics = super::system_metrics::collect_system_metrics();
+        let metrics = crate::system_metrics::collect_system_metrics();
         json_result(metrics)
     }
 

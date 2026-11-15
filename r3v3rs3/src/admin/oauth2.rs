@@ -52,24 +52,7 @@ pub const SCOPES: [&str; 2] = ["read", "edit"];
 const TOKEN_LENGTH: usize = 48;
 const MAX_GRANTS: usize = 1024;
 
-pub const SCHEMA_CLIENTS: &str = "CREATE TABLE IF NOT EXISTS mcp_clients (
-    id            TEXT PRIMARY KEY,
-    name          TEXT NOT NULL,
-    redirect_uris TEXT NOT NULL,
-    created_at    INTEGER NOT NULL
-)";
-
-pub const SCHEMA_TOKENS: &str = "CREATE TABLE IF NOT EXISTS mcp_tokens (
-    id                 TEXT PRIMARY KEY,
-    access_token       TEXT NOT NULL UNIQUE,
-    refresh_token      TEXT NOT NULL UNIQUE,
-    client_id          TEXT NOT NULL,
-    username           TEXT NOT NULL,
-    scope              TEXT NOT NULL,
-    expires_at         INTEGER NOT NULL,
-    refresh_expires_at INTEGER NOT NULL,
-    created_at         INTEGER NOT NULL
-)";
+use crate::platform::store::{SCHEMA_CLIENTS, SCHEMA_TOKENS};
 
 /// The authorization code that a consent approved, before the client trades it.
 #[derive(Debug, Clone)]

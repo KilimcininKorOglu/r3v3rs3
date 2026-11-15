@@ -984,7 +984,7 @@ impl Platform {
             return Ok(String::new());
         }
         let password = format!("{:032x}", rand::random::<u128>());
-        let entries = crate::admin::databases::initial_db_env_entries(info, &password)?;
+        let entries = super::database_env::initial_db_env_entries(info, &password)?;
         self.set_env(db_id, entries).await?;
         Ok(password)
     }

@@ -116,7 +116,7 @@ fn calculate_realtime_metrics(
 ) -> RealtimeMetrics {
     let (_, _, p99) = stats::latency_quantiles();
     let p99_latency_ms = p99 * 1000.0;
-    let lag_micros = crate::admin::system_metrics::event_loop_lag_micros();
+    let lag_micros = crate::system_metrics::event_loop_lag_micros();
     let event_loop_lag_ms = lag_micros as f64 / 1000.0;
 
     let total_5xx = stats::snapshot_http_statuses()

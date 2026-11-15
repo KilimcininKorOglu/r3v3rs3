@@ -2,7 +2,6 @@
 //! variables and their deployments. The schema is created at the first connection, and every query
 //! binds its values.
 
-use crate::admin::oauth2::{SCHEMA_CLIENTS, SCHEMA_TOKENS};
 use anyhow::{Context as _, anyhow};
 use r3v3rs3_api::container::AppName;
 use r3v3rs3_api::id::ShortId;
@@ -14,6 +13,27 @@ use serde_derive::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteRow, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
 use std::path::Path;
+
+/// The OAuth clients of the MCP endpoint.
+pub const SCHEMA_CLIENTS: &str = "CREATE TABLE IF NOT EXISTS mcp_clients (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    redirect_uris TEXT NOT NULL,
+    created_at    INTEGER NOT NULL
+)";
+
+/// The OAuth tokens of the MCP endpoint.
+pub const SCHEMA_TOKENS: &str = "CREATE TABLE IF NOT EXISTS mcp_tokens (
+    id                 TEXT PRIMARY KEY,
+    access_token       TEXT NOT NULL UNIQUE,
+    refresh_token      TEXT NOT NULL UNIQUE,
+    client_id          TEXT NOT NULL,
+    username           TEXT NOT NULL,
+    scope              TEXT NOT NULL,
+    expires_at         INTEGER NOT NULL,
+    refresh_expires_at INTEGER NOT NULL,
+    created_at         INTEGER NOT NULL
+)";
 
 const SCHEMA: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS targets (

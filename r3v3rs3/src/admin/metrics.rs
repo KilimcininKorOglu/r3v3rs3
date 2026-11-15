@@ -291,7 +291,7 @@ fn format_tls_handshake_quantile_metrics(out: &mut String) {
     ));
 }
 
-fn format_system_metrics(out: &mut String, sys: &super::system_metrics::SystemMetricsSnapshot) {
+fn format_system_metrics(out: &mut String, sys: &crate::system_metrics::SystemMetricsSnapshot) {
     if let Some(fds) = sys.open_fds {
         out.push_str("# HELP r3v3rs3_process_open_fds The number of open file descriptors.\n");
         out.push_str("# TYPE r3v3rs3_process_open_fds gauge\n");
@@ -322,7 +322,7 @@ fn format_system_metrics(out: &mut String, sys: &super::system_metrics::SystemMe
 
 fn format_system_socket_metrics(
     out: &mut String,
-    sys: &super::system_metrics::SystemMetricsSnapshot,
+    sys: &crate::system_metrics::SystemMetricsSnapshot,
 ) {
     if let Some(tw) = sys.tcp_tw {
         out.push_str("# HELP r3v3rs3_host_tcp_tw TCP sockets in TIME_WAIT state.\n");
@@ -342,7 +342,7 @@ fn format_system_socket_metrics(
 
 fn format_system_memory_metrics(
     out: &mut String,
-    sys: &super::system_metrics::SystemMetricsSnapshot,
+    sys: &crate::system_metrics::SystemMetricsSnapshot,
 ) {
     if let Some(rss) = sys.resident_memory_bytes {
         out.push_str(
@@ -377,7 +377,7 @@ pub async fn metrics(
     headers: HeaderMap,
     Extension(_caller): Extension<Caller>,
 ) -> Result<Response, AppError> {
-    let sys = super::system_metrics::collect_system_metrics();
+    let sys = crate::system_metrics::collect_system_metrics();
     if headers
         .get(header::ACCEPT)
         .and_then(|val| val.to_str().ok())

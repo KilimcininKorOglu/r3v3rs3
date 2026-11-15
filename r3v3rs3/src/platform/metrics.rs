@@ -697,8 +697,8 @@ async fn check_node_fd_alert(
         return;
     };
     let (Some(open), Some(max)) = (
-        crate::admin::system_metrics::open_fds(),
-        crate::admin::system_metrics::max_fds(),
+        crate::system_metrics::open_fds(),
+        crate::system_metrics::max_fds(),
     ) else {
         return;
     };
@@ -736,7 +736,7 @@ async fn check_node_socket_alert(
     let Some(max_tw) = rules.max_time_wait_sockets else {
         return;
     };
-    let sock = crate::admin::system_metrics::socket_stats();
+    let sock = crate::system_metrics::socket_stats();
     let Some(tw) = sock.tcp_tw else {
         return;
     };
