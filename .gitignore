@@ -14,5 +14,8 @@ minisign.key
 /r3v3rs3-apps/
 plan.md
 
+# The commit of the cached library crates, written by .github/scripts/workspace-cache.sh
+/.workspace-cache/
+
 !/r3v3rs3-platform/src/build/
 !/r3v3rs3-platform/src/build/**

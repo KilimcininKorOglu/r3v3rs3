@@ -23,13 +23,15 @@ on:
   push:
     branches: [main]
     # A dependency or toolchain change gives a new key; warm it before the next release.
+    # A source change of a library crate needs the release build of that commit in the cache.
     paths:
       - Cargo.lock
       - Cargo.toml
       - rust-toolchain.toml
-      - r3v3rs3-webui/**
-      - r3v3rs3-api/**
+      - r3v3rs3/**
+      - r3v3rs3-*/**
       - .github/scripts/webui-cache-key.sh
+      - .github/scripts/workspace-cache.sh
       - .github/workflows/release.yml
       - .github/workflows/release-cache.yml
   workflow_dispatch:
@@ -99,32 +101,85 @@ jobs:
           - target: x86_64-unknown-linux-gnu
           - target: aarch64-unknown-linux-gnu
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      # Deletes the library crate cache of the previous commit.
+      actions: write
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          # workspace-cache.sh compares this commit with the commit of the cached crates.
+          fetch-depth: 0
       - name: Install Rust
         run: |
           rustup toolchain install
           rustup target add "${{ matrix.target }}"
       - name: Cache
-        id: cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: release-${{ matrix.target }}-2.17
+      - name: Library crate cache
+        # Restores the library crates of the newest main commit and saves those of this commit
+        # at the end of the job. Its save runs before the cleanup of rust-cache, which drops the
+        # workspace crates, because post steps run in reverse order. The tag run of release.yml
+        # restores it, so a release compiles only r3v3rs3 and r3v3rs3-cli after a version bump.
+        # Keep the paths equal to release.yml. The daily run of an unchanged main finds the exact
+        # key and builds nothing.
+        id: crates
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: workspace-crates-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: workspace-crates-${{ matrix.target }}-
+          path: |
+            .workspace-cache
+            target/release/build/r3v3rs3-core-*
+            target/release/.fingerprint/r3v3rs3-core-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_api-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_core-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_proxy-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_platform-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_server-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_admin-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-api-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-core-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-proxy-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-platform-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-server-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-admin-*
+            target/${{ matrix.target }}/release/build/r3v3rs3-core-*
+      - name: Mark the unchanged sources of the cached crates
+        if: steps.crates.outputs.cache-hit != 'true'
+        run: bash .github/scripts/workspace-cache.sh restore
       - name: Install cargo-binstall
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.crates.outputs.cache-hit != 'true'
         uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
       - name: Install zig and cargo-zigbuild
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.crates.outputs.cache-hit != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 -m pip install ziglang==0.17.0
           cargo binstall cargo-zigbuild@0.23.4 --locked --force -y
       - name: Build the server and the command line client for glibc 2.17
-        # The cache keeps only the dependencies, so the empty dist directory of the
-        # repository is enough here; the release embeds the real WebUI.
-        if: steps.cache.outputs.cache-hit != 'true'
+        # The cached crates do not embed the WebUI, so the empty dist directory of the
+        # repository is enough here; the release embeds the real WebUI in r3v3rs3.
+        if: steps.crates.outputs.cache-hit != 'true'
         run: cargo zigbuild --release --locked -p r3v3rs3 -p r3v3rs3-cli --target ${{ matrix.target }}.2.17
+      - name: Record the commit of the cached crates
+        if: steps.crates.outputs.cache-hit != 'true'
+        run: bash .github/scripts/workspace-cache.sh record
+      - name: Delete the library crate caches of older commits
+        # GitHub keeps at most 10 GB of caches per repository; one entry per target is enough,
+        # because the next run restores the newest. This commit's entry is saved after this step.
+        if: steps.crates.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PREFIX: workspace-crates-${{ matrix.target }}-
+        run: |
+          gh cache list --key "$PREFIX" --limit 100 --json key --jq '.[].key' |
+            while IFS= read -r key; do
+              gh cache delete "$key"
+            done

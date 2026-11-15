@@ -114,6 +114,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          # workspace-cache.sh compares the tag with the commit of the cached crates.
+          fetch-depth: 0
       - name: Install Rust
         # rustup reads rust-toolchain.toml, so every job builds with the pinned channel.
         run: |
@@ -131,6 +133,33 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: release-${{ matrix.target }}-2.17
+      - name: Restore the library crates
+        # release-cache.yml saves the release build of the library crates of every main push.
+        # The library crates have a fixed version, so after a version bump only r3v3rs3 and
+        # r3v3rs3-cli compile. Keep the paths equal to release-cache.yml.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: workspace-crates-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: workspace-crates-${{ matrix.target }}-
+          path: |
+            .workspace-cache
+            target/release/build/r3v3rs3-core-*
+            target/release/.fingerprint/r3v3rs3-core-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_api-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_core-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_proxy-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_platform-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_server-*
+            target/${{ matrix.target }}/release/deps/*r3v3rs3_admin-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-api-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-core-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-proxy-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-platform-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-server-*
+            target/${{ matrix.target }}/release/.fingerprint/r3v3rs3-admin-*
+            target/${{ matrix.target }}/release/build/r3v3rs3-core-*
+      - name: Mark the unchanged sources of the cached crates
+        run: bash .github/scripts/workspace-cache.sh restore
       - name: Download webui
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
