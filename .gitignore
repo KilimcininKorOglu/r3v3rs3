@@ -14,5 +14,5 @@ minisign.key
 /r3v3rs3-apps/
 plan.md
 
-!/r3v3rs3/src/build/
-!/r3v3rs3/src/build/**
+!/r3v3rs3-platform/src/build/
+!/r3v3rs3-platform/src/build/**
