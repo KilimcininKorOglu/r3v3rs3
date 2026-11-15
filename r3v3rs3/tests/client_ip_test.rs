@@ -127,12 +127,16 @@ async fn quarantine_enforces_against_resolved_client_ip() -> anyhow::Result<()> 
         let bad_ip = "203.0.113.150";
         let good_ip = "203.0.113.151";
 
-        // 1. Probing /.env from bad_ip triggers scanner pattern quarantine
-        let _ = client
-            .get(trusted_port.http_url("/.env"))
-            .header("x-forwarded-for", bad_ip)
-            .send()
-            .await;
+        // 1. Each /.env probe from bad_ip counts as one violation, so the default threshold of
+        //    probes quarantines it.
+        let threshold = r3v3rs3_api::quarantine::AutoQuarantineConfig::default().max_violations;
+        for _ in 0..threshold {
+            let _ = client
+                .get(trusted_port.http_url("/.env"))
+                .header("x-forwarded-for", bad_ip)
+                .send()
+                .await;
+        }
 
         // 2. Next request from bad_ip should be dropped by quarantine
         let resp_bad = client
