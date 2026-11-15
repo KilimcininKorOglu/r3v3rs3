@@ -1,8 +1,8 @@
 name: Clean up build leftovers
 
 # The single cleanup workflow of the repository: untagged container images, old workflow
-# runs, idle caches, the caches of dead branches and closed pull requests, and stale
-# artifacts. One run a day keeps the storage quota free.
+# runs, idle caches, the caches of dead branches and closed pull requests, caches that a
+# newer cache of the same job replaced, and stale artifacts. One run a day keeps the storage quota free.
 
 on:
   schedule:
@@ -103,10 +103,15 @@ jobs:
             fi
           done < caches.txt
 
-      - name: Delete caches of dead branches and closed pull requests
+      - name: Delete caches of dead refs and caches that a newer one replaced
         # A cache written for a ref nobody builds again occupies the 10 GB limit until a
         # build of that ref evicts it, and that build never comes. A live branch and an open
         # pull request keep their caches, so the next CI run still starts warm.
+        #
+        # rust-cache, the WebUI cache and the library crate cache end their key with a hash
+        # of their inputs, so every input change saves a new entry beside the old one, and
+        # all of them stay read within CACHE_IDLE_DAYS. A run of the current inputs restores
+        # the newest entry of the ref and key prefix, so only that one is kept.
         if: always()
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
@@ -153,6 +158,20 @@ jobs:
               return true;
             }
 
+            // The ref and the key without its trailing input hash. A key that does not end
+            // in a hex hash of at least 7 digits forms its own group, because its last part
+            // can name a target or a platform rather than an input state.
+            function groupOf(entry) {
+              const prefix = entry.key.replace(/-[0-9a-f]{7,}$/, '');
+              return prefix === entry.key ? `${entry.ref} ${entry.id}` : `${entry.ref} ${prefix}`;
+            }
+
+            const newest = new Map();
+            for (const entry of caches) {
+              const top = newest.get(groupOf(entry));
+              if (!top || entry.created_at > top.created_at) newest.set(groupOf(entry), entry);
+            }
+
             // Cache the verdict per ref, because one ref carries many caches.
             const verdicts = new Map();
             let deleted = 0, freed = 0, kept = 0, failed = 0;
@@ -161,9 +180,10 @@ jobs:
               if (!verdicts.has(entry.ref)) {
                 verdicts.set(entry.ref, await refIsLive(entry.ref));
               }
-              if (verdicts.get(entry.ref)) { kept++; continue; }
+              const replaced = newest.get(groupOf(entry)) !== entry;
+              if (verdicts.get(entry.ref) && !replaced) { kept++; continue; }
               if (dryRun) {
-                core.info(`would delete cache ${entry.id} (${entry.key} @ ${entry.ref})`);
+                core.info(`would delete cache ${entry.id} (${entry.key} @ ${entry.ref}, ${replaced ? 'replaced' : 'dead ref'})`);
                 deleted++;
                 freed += entry.size_in_bytes;
                 continue;
