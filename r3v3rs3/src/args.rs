@@ -255,6 +255,10 @@ fn parse_boolish(value: &str) -> Result<bool, String> {
 mod tests {
     use super::*;
 
+    /// Serializes the tests that read or write the `R3V3RS3_*` environment, because
+    /// `cargo test` runs them as threads of one process that share it.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_parse_boolish() {
         assert_eq!(parse_boolish("1"), Ok(true));
@@ -271,6 +275,7 @@ mod tests {
 
     #[test]
     fn test_no_webui_cli_parsing() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let default_cli = Cli::try_parse_from(["r3-server", "start"]).unwrap();
         if let Command::Start(args) = default_cli.command {
             assert!(!args.no_webui);
@@ -340,6 +345,7 @@ mod tests {
 
     #[test]
     fn test_no_webui_env_parsing() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         unsafe {
             std::env::set_var("R3V3RS3_NO_WEBUI", "1");
             std::env::set_var("R3V3RS3_WEBUI", "127.0.0.1:46492");
