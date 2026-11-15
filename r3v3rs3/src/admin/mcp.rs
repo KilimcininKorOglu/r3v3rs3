@@ -687,7 +687,8 @@ pub struct UpdateQuarantineConfigParams {
     pub ban_duration_seconds: Option<u64>,
     /// Status codes considered violations (e.g. [404, 403, 401]).
     pub block_status_codes: Option<Vec<u16>>,
-    /// Scanner URI path substrings (e.g. ["/.env", "/.git"]).
+    /// Scanner paths matched on whole path segments; each match is one violation
+    /// (e.g. ["/.env", "/.git"]).
     pub scanner_patterns: Option<Vec<String>>,
     /// Addresses or CIDR networks that are never quarantined (e.g. ["198.51.100.0/24"]).
     /// Replaces the whole list; an empty list removes every entry.

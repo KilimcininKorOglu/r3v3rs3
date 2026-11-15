@@ -1169,7 +1169,7 @@
   "settings.quarantine_status_codes_hint": "Separate the codes with commas, for example 404, 403.",
   "settings.quarantine_status_codes_invalid": "Status codes must be numbers from 100 to 599.",
   "settings.quarantine_scanner_patterns": "Scanner Paths",
-  "settings.quarantine_scanner_patterns_hint": "Write one path part on each line. A request whose URI contains one of them is quarantined at once.",
+  "settings.quarantine_scanner_patterns_hint": "Write one path on each line. A request whose path holds one of them as whole path segments counts as one violation.",
   "settings.quarantine_allowed_ips": "Allowed Addresses",
   "settings.quarantine_allowed_ips_hint": "Addresses or CIDR networks that are never quarantined, separated by commas or spaces. Add the network of the administrators here.",
   "settings.quarantine_config_saved": "The auto-quarantine settings are saved.",

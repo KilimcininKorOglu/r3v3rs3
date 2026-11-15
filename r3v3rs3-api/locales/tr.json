@@ -1169,7 +1169,7 @@
   "settings.quarantine_status_codes_hint": "Kodları virgülle ayırın, örneğin 404, 403.",
   "settings.quarantine_status_codes_invalid": "Durum kodları 100 ile 599 arasında sayı olmalıdır.",
   "settings.quarantine_scanner_patterns": "Tarayıcı Yolları",
-  "settings.quarantine_scanner_patterns_hint": "Her satıra bir yol parçası yazın. URI'si bunlardan birini içeren istek hemen karantinaya alınır.",
+  "settings.quarantine_scanner_patterns_hint": "Her satıra bir yol yazın. Path'inde bunlardan birini tam path segmentleri olarak taşıyan her istek bir ihlal sayılır.",
   "settings.quarantine_allowed_ips": "İzinli Adresler",
   "settings.quarantine_allowed_ips_hint": "Hiçbir zaman karantinaya alınmayan adresler veya CIDR ağları. Virgül veya boşlukla ayırın. Yöneticilerin ağını buraya ekleyin.",
   "settings.quarantine_config_saved": "Otomatik karantina ayarları kaydedildi.",

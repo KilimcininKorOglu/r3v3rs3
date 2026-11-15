@@ -24,7 +24,8 @@ pub struct AutoQuarantineConfig {
     /// HTTP status codes considered violations when returned to the client (e.g. 404, 403, 401).
     #[serde(default = "default_block_status_codes")]
     pub block_status_codes: Vec<u16>,
-    /// URI substrings triggering an immediate scan violation (e.g. "/.env", "/.git").
+    /// Scanner paths matched on whole path segments; each match is one violation
+    /// (e.g. "/.env", "/.git").
     #[serde(default = "default_scanner_patterns")]
     pub scanner_patterns: Vec<String>,
     /// Client addresses and networks that are never quarantined, for example the network of

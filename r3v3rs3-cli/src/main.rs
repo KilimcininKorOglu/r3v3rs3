@@ -769,7 +769,8 @@ pub enum SecurityCommand {
         /// Comma-separated status codes of r3v3rs3 responses that count as violations.
         #[arg(long)]
         block_status_codes: Option<String>,
-        /// Comma-separated URI substrings that quarantine at once (e.g. "/.env,/.git").
+        /// Comma-separated scanner paths, matched on whole path segments; each match is one
+        /// violation (e.g. "/.env,/.git").
         #[arg(long)]
         scanner_patterns: Option<String>,
         /// Comma-separated addresses or CIDR networks that are never quarantined; "" clears it.
