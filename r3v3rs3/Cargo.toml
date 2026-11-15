@@ -1,8 +1,8 @@
 [package]
 name = "r3v3rs3"
-version = "3.4.1"
+version.workspace = true
 publish = false
-edition = "2024"
+edition.workspace = true
 include = ["/src", "/templates", "/data", "/build.rs", "/LICENSE", "/dist/webui"]
 build = "build.rs"
 description = "A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket and HTTP/3, and a deployment platform that runs your apps behind it."
@@ -13,8 +13,8 @@ categories = [
     "web-programming",
     "web-programming::websocket",
 ]
-license = "MIT"
-repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
+license.workspace = true
+repository.workspace = true
 homepage = "https://r3v3rs3.keremgok.tr/"
 readme = "../README.md"
 default-run = "r3-server"

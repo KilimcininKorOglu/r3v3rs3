@@ -1,10 +1,10 @@
 [package]
 name = "r3v3rs3-cli"
-version = "3.4.1"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 publish = false
-license = "MIT"
-repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
+license.workspace = true
+repository.workspace = true
 description = "A command line client for the r3v3rs3 admin API"
 authors = ["KilimcininKorOglu <k@keremgok.tr>"]
 

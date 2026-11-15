@@ -2,6 +2,14 @@
 members = ["r3v3rs3", "r3v3rs3-api", "r3v3rs3-cli", "r3v3rs3-webui"]
 resolver = "2"
 
+# The release version of the server, the command line client and the server crates. A release
+# bumps only this line.
+[workspace.package]
+version = "3.4.1"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
+
 [patch.crates-io]
 r3v3rs3-api = { path = "./r3v3rs3-api" }
 

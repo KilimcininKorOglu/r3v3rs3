@@ -16,10 +16,10 @@ set -euo pipefail
 readonly WORKSPACE_PACKAGES='r3v3rs3|r3v3rs3-cli|r3v3rs3-api|r3v3rs3-webui'
 readonly MAX_HOPS=10
 
-# Prints a Cargo.toml without the version line of its [package] table.
+# Prints a Cargo.toml without the version line of its [package] or [workspace.package] table.
 strip_manifest_version() {
     awk '
-        /^\[/ { in_package = ($0 == "[package]") }
+        /^\[/ { in_package = ($0 == "[package]" || $0 == "[workspace.package]") }
         in_package && /^version = / { next }
         { print }
     '
