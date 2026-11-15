@@ -17,7 +17,7 @@ use super::{
         server_cert_resolver,
     },
 };
-use crate::server::cert_list::CertList;
+use crate::certs::cert_list::CertList;
 use anyhow::Context as _;
 use arc_swap::{ArcSwap, Cache};
 use bytes::{Buf, Bytes};

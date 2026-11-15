@@ -1,9 +1,9 @@
+use crate::certs::cert_list::CertList;
 use crate::proxy::dns::DnsResolver;
 use crate::proxy::health::{ConnGuard, Permit, UpstreamGroup};
 use crate::proxy::http::error::ProxyError;
 use crate::proxy::http::{HTTP2_MAX_FRAME_SIZE, hyper_tls::client::HttpsConnector};
 use crate::proxy::tls::upstream_client_config;
-use crate::server::cert_list::CertList;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited, combinators::BoxBody};
 use hyper::{

@@ -1,6 +1,6 @@
 use crate::certs::Cert;
 use crate::certs::alpn::offers_only_acme_tls;
-use crate::server::cert_list::CertList;
+use crate::certs::cert_list::CertList;
 use dashmap::DashMap;
 use r3v3rs3_api::cert::CertKind;
 use r3v3rs3_api::error::Error;

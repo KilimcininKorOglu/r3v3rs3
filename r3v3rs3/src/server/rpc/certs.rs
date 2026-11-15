@@ -1,6 +1,8 @@
 use super::RpcMethod;
 use crate::{
-    accounts::Permission, audit::AuditRecord, certs::Cert, server::cert_list::CertList,
+    accounts::Permission,
+    audit::AuditRecord,
+    certs::{Cert, cert_list::CertList},
     server::state::ServerState,
 };
 use flate2::{Compression, write::GzEncoder};

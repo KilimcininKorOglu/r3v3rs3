@@ -15,7 +15,6 @@ use tracing::{info, warn};
 
 mod acme_list;
 mod acme_schedule;
-pub mod cert_list;
 mod connection;
 mod credentials;
 mod discovery;

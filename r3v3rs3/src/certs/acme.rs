@@ -3,9 +3,9 @@ use crate::{
     certs::{
         Cert,
         alpn::TlsAlpnChallenge,
+        cert_list::CertList,
         dns::{self, TxtName},
     },
-    server::cert_list::CertList,
 };
 use anyhow::{anyhow, bail};
 use bytes::Bytes;

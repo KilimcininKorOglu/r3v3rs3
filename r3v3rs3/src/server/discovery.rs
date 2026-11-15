@@ -2,9 +2,9 @@
 //! the server builds from the snapshots and the provider statuses.
 
 use super::acme_list::AcmeList;
-use super::cert_list::CertList;
 use super::credentials::seal;
 use super::proxy_list::accepts;
+use crate::certs::cert_list::CertList;
 use crate::certs::{Cert, acme::AcmeTarget};
 use crate::discovery::{DiscoveredProxy, DiscoverySnapshot, ids};
 use crate::proxy::tls::upstream_client_config;

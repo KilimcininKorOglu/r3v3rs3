@@ -6,7 +6,7 @@ use super::{
     spawn_connection,
     tls::{Handshake, PortTls, TlsTermination, port_acceptor, port_tls, upstream_client_config},
 };
-use crate::server::cert_list::CertList;
+use crate::certs::cert_list::CertList;
 use anyhow::Context as _;
 use r3v3rs3_api::{error::Error, id::ShortId, multiaddr::Multiaddr};
 use r3v3rs3_api::{

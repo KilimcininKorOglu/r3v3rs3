@@ -1,6 +1,5 @@
 use super::acme_list::AcmeList;
 use super::acme_schedule::AcmeSchedule;
-use super::cert_list::CertList;
 use super::connection::{self, HttpChallenges};
 use super::discovery::{self, DiscoveryRegistry, DiscoveryTasks};
 use super::proxy_list::ProxyList;
@@ -12,6 +11,7 @@ use crate::accounts::{AccountDirectory, Caller};
 use crate::audit::{AuditLog, AuditRecord, AuditStore, DAY_MS};
 use crate::certs::acme::{AcmeEntry, AcmeOrder, AcmeTarget};
 use crate::certs::alpn::{ChallengeCerts, TlsAlpnChallenge, challenge_config};
+use crate::certs::cert_list::CertList;
 use crate::certs::challenges::ServedChallenges;
 use crate::clock::unix_ms;
 use crate::config::storage::Storage;

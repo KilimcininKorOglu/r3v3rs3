@@ -23,6 +23,7 @@ use x509_parser::{parse_x509_certificate, prelude::X509Certificate};
 
 pub mod acme;
 pub mod alpn;
+pub mod cert_list;
 pub mod challenges;
 pub mod cname;
 pub mod ct;
