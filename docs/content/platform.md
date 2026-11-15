@@ -147,6 +147,8 @@ The App Store provides instant search and category filtering:
 
 When an app installed from the App Store has a newer version available in the catalog (for example, an updated image tag or an updated Compose configuration), r3v3rs3 displays an **Update available in catalog** badge next to the app in the app list and on the app details page. Clicking **Upgrade to Catalog Version** (or calling `POST /api/apps/{id}/upgrade-catalog`) updates the app specification to match the latest catalog entry and immediately triggers a deployment with the new version.
 
+The upgrade stays in the major version of the installed image: `louislam/uptime-kuma:1` is offered `louislam/uptime-kuma:1.23`, but not `louislam/uptime-kuma:2`, and an image with a tag such as `latest` is offered no image upgrade. A new major version can need a data migration that the upgrade does not run, so a new major version in the catalog reaches only new installations; move an installed app by changing its image in the app settings after a backup. `POST /api/apps/{id}/upgrade-catalog` answers `404 id_not_found` when no upgrade is offered.
+
 ### Git Source
 
 An app with a `git` source builds its image from a branch of a repository with the Dockerfile of the repository:

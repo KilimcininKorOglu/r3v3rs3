@@ -147,6 +147,8 @@ App Store, anlık arama ve kategori filtreleme özellikleri sunar:
 
 App Store'dan kurulan bir uygulamanın katalogda daha yeni bir sürümü bulunduğunda (örneğin güncellenmiş bir imaj etiketi veya yeni bir Compose yapılandırması), r3v3rs3 uygulamalar listesinde ve uygulama detay sayfasında **Katalogda yeni sürüm var** rozeti gösterir. **Katalog Sürümüne Yükselt** butonuna tıklamak (veya `POST /api/apps/{id}/upgrade-catalog` çağırmak) uygulama yapılandırmasını en son katalog sürümüyle günceller ve hemen yeni sürümle deployment başlatır.
 
+Yükseltme kurulu image'ın ana sürümü içinde kalır: `louislam/uptime-kuma:1` için `louislam/uptime-kuma:1.23` önerilir, `louislam/uptime-kuma:2` önerilmez. `latest` gibi bir tag'i olan image'a image yükseltmesi önerilmez. Yeni bir ana sürüm, yükseltmenin çalıştırmadığı bir veri taşıması gerektirebilir. Bu yüzden katalogdaki yeni bir ana sürüm yalnız yeni kurulumlara gider. Kurulu bir uygulamayı yeni ana sürüme taşımak için önce yedek alın, sonra uygulama ayarlarında image'ı değiştirin. Hiçbir yükseltme önerilmediğinde `POST /api/apps/{id}/upgrade-catalog` `404 id_not_found` döner.
+
 ### Git kaynağı
 
 `git` kaynağı olan bir uygulama, image'ını bir reponun bir branch'inden, reponun Dockerfile'ı ile build eder:

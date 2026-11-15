@@ -1639,7 +1639,9 @@ pub async fn upgrade_app_catalog(
     let platform = state.platform(&caller, Permission::Edit).await?;
     let mut app = platform.app(id).await.map_err(platform_error)?;
     let catalog = crate::appstore::state().catalog.clone();
-    let Some(store_app) = find_catalog_app(&app.spec, &catalog) else {
+    // Only the upgrade that the app list offers runs, never a jump to a new major version.
+    let offered = check_catalog_update(&app, &catalog).is_some();
+    let Some(store_app) = find_catalog_app(&app.spec, &catalog).filter(|_| offered) else {
         return Err(Error::IdNotFound { id: id.to_string() }.into());
     };
     apply_catalog_upgrade(&mut app.spec, store_app)?;
@@ -1702,7 +1704,10 @@ fn diff_catalog_version(
     match source {
         r3v3rs3_api::platform::AppSource::Image { image } => {
             let cat_img = store_app.image.as_ref()?;
-            if image.as_str() != cat_img {
+            let catalog_image: r3v3rs3_api::container::ImageRef = cat_img.parse().ok()?;
+            // A new major version can need a data migration that the upgrade does not run,
+            // so only a version of the same major version is offered to an installed app.
+            if image.as_str() != cat_img && same_major_version(image, &catalog_image) {
                 Some((image.as_str().to_string(), cat_img.clone()))
             } else {
                 None
@@ -1723,6 +1728,23 @@ fn diff_catalog_version(
         }
         _ => None,
     }
+}
+
+/// Whether two images are the same repository with the same major version in their tags. A tag
+/// without a leading number, such as `latest`, has no major version and never matches.
+fn same_major_version(
+    current: &r3v3rs3_api::container::ImageRef,
+    catalog: &r3v3rs3_api::container::ImageRef,
+) -> bool {
+    let major = |image: &r3v3rs3_api::container::ImageRef| {
+        let tag = image.tag_or_digest();
+        let tag = tag.strip_prefix(['v', 'V']).unwrap_or(tag);
+        let digits = tag.split(|c: char| !c.is_ascii_digit()).next()?;
+        digits.parse::<u64>().ok()
+    };
+    current.repository() == catalog.repository()
+        && major(current).is_some()
+        && major(current) == major(catalog)
 }
 
 pub(super) fn check_catalog_update(
@@ -2632,6 +2654,38 @@ mod tests {
             .map(|app| app.name.to_string())
             .collect();
         assert_eq!(names, ["web-app"]);
+    }
+
+    /// A one-entry app store catalog that offers `image`.
+    fn store_offering(image: &str) -> r3v3rs3_api::store::StoreCatalog {
+        r3v3rs3_api::store::StoreCatalog {
+            apps: vec![r3v3rs3_api::store::StoreApp {
+                id: "entry".into(),
+                image: Some(image.into()),
+                port: 80,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// The catalog version that an installed app with `installed` is offered, if any.
+    fn offered(installed: &str, catalog: &str) -> Option<String> {
+        let app = image_app("web-app", installed, None);
+        check_catalog_update(&app, &store_offering(catalog)).map(|update| update.catalog_version)
+    }
+
+    #[test]
+    fn a_catalog_upgrade_stays_in_the_major_version_of_the_app() {
+        assert_eq!(offered("ghost:5", "ghost:5.1"), Some("ghost:5.1".into()));
+        assert_eq!(
+            offered("traefik/whoami:v1.10.3", "traefik/whoami:v1.12.0"),
+            Some("traefik/whoami:v1.12.0".into())
+        );
+        assert_eq!(offered("ghost:5", "ghost:6"), None);
+        assert_eq!(offered("nextcloud:29-apache", "nextcloud:35-apache"), None);
+        assert_eq!(offered("ghost:latest", "ghost:6"), None);
+        assert_eq!(offered("ghost:6", "ghost:6"), None);
     }
 
     #[test]
