@@ -1,5 +1,5 @@
-//! The keys of a key-value store as labels. The Consul and the etcd providers use the same key
-//! layout: the key `<prefix>/http/app/ports` is the label `r3v3rs3.http.app.ports`.
+//! The keys of a key-value store as labels. The etcd provider uses this key layout: the key
+//! `<prefix>/http/app/ports` is the label `r3v3rs3.http.app.ports`.
 
 use super::labels;
 use super::{Built, ProxyGroups};

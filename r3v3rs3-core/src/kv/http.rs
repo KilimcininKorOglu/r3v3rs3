@@ -1,4 +1,4 @@
-//! A small HTTP/1.1 client for the APIs of Docker, etcd and Consul. It connects over a Unix
+//! A small HTTP/1.1 client for the APIs of Docker and etcd. It connects over a Unix
 //! socket, TCP or TLS, and reads JSON bodies and line-delimited streams.
 
 use anyhow::{Context as _, anyhow, bail};
