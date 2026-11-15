@@ -80,13 +80,19 @@ impl AutoQuarantineTracker {
         false
     }
 
-    /// Checks if a request URI matches any scanner patterns.
+    /// Checks if the path and the query of a request URI match any scanner patterns. The scheme
+    /// and the host of an absolute URI never count, so a host such as `phpmyadmin.example.com`
+    /// does not match the pattern `/phpmyadmin`.
     pub fn check_scanner_uri(&self, uri: &str) -> Option<String> {
         let config = self.config.load();
         if !config.enabled {
             return None;
         }
-        let lower = uri.to_ascii_lowercase();
+        let path = uri
+            .parse::<http::Uri>()
+            .ok()
+            .and_then(|parsed| parsed.path_and_query().map(|p| p.as_str().to_owned()));
+        let lower = path.as_deref().unwrap_or(uri).to_ascii_lowercase();
         for pattern in &config.scanner_patterns {
             if lower.contains(&pattern.to_ascii_lowercase()) {
                 return Some(pattern.clone());
@@ -408,6 +414,27 @@ mod tests {
             Some("/wp-admin".to_string())
         );
         assert_eq!(tracker.check_scanner_uri("/api/users"), None);
+    }
+
+    #[test]
+    fn a_scanner_pattern_ignores_the_host_of_an_absolute_uri() {
+        let tracker = AutoQuarantineTracker::default();
+        assert_eq!(
+            tracker.check_scanner_uri("https://phpmyadmin.example.com/"),
+            None
+        );
+        assert_eq!(
+            tracker.check_scanner_uri("https://phpmyadmin.example.com/index.php?route=/"),
+            None
+        );
+        assert_eq!(
+            tracker.check_scanner_uri("https://app.example.com/phpmyadmin/index.php"),
+            Some("/phpmyadmin".to_string())
+        );
+        assert_eq!(
+            tracker.check_scanner_uri("https://app.example.com/?next=/.env"),
+            Some("/.env".to_string())
+        );
     }
 
     #[test]
