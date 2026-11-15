@@ -1698,6 +1698,37 @@ async fn unknown_choices_are_refused() -> anyhow::Result<()> {
     .await
 }
 
+/// An invalid proxy id in the proxy list of an account is refused. Dropping it gave the account a
+/// shorter list than the caller asked for, or no limit at all when every id was invalid.
+#[tokio::test]
+async fn invalid_proxy_ids_of_an_account_are_refused() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-invalid-proxy-ids")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = mcp_client(addr, &access_token(&addr).await?).await?;
+        let calls = [
+            (
+                "create_account",
+                json!({ "username": "scoped", "password": "password", "role": "viewer",
+                        "proxies": ["not a proxy id"] }),
+            ),
+            (
+                "update_account",
+                json!({ "username": "editor", "role": "editor", "proxies": ["not a proxy id"] }),
+            ),
+        ];
+        for (tool, args) in calls {
+            mcp_call(&client, tool, args)
+                .await
+                .expect_err("an invalid proxy id was dropped");
+        }
+        let accounts = mcp_call(&client, "list_accounts", json!({})).await?;
+        assert!(!accounts.contains("\"scoped\""), "{accounts}");
+        client.cancel().await?;
+        Ok(())
+    })
+    .await
+}
+
 /// The app store refresh changes the catalog of every account, so a viewer with a token of the
 /// edit scope must not run it, the same as through the HTTP API.
 #[tokio::test]

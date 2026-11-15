@@ -965,6 +965,54 @@ fn parse_optional_choice<T: serde::de::DeserializeOwned>(
     value.map_or(Ok(default), |value| parse_choice(field, value))
 }
 
+/// The validated sync request of `sync_project_env`.
+fn sync_request(
+    params: &SyncProjectEnvParams,
+) -> Result<r3v3rs3_api::platform::EnvironmentSyncRequest, ErrorData> {
+    let request = r3v3rs3_api::platform::EnvironmentSyncRequest {
+        source_env_id: parse_id(&params.source_env_id)?,
+        target_env_id: parse_id(&params.target_env_id)?,
+        mode: parse_optional_choice(
+            "mode",
+            params.mode.as_deref(),
+            r3v3rs3_api::platform::EnvironmentSyncMode::SyncMissing,
+        )?,
+        keys: parse_values(params.keys.iter().flatten())?,
+    };
+    request.validate().map_err(any_error)?;
+    Ok(request)
+}
+
+/// Parses every value of a tool argument; an invalid value is an error, never dropped.
+fn parse_values<T, C>(values: impl IntoIterator<Item = impl AsRef<str>>) -> Result<C, ErrorData>
+where
+    T: std::str::FromStr<Err = Error>,
+    C: FromIterator<T>,
+{
+    values
+        .into_iter()
+        .map(|value| {
+            value
+                .as_ref()
+                .parse()
+                .map_err(|err: Error| ErrorData::invalid_params(err.to_string(), None))
+        })
+        .collect()
+}
+
+/// Parses an optional value; an invalid value is an error, never `None`.
+fn parse_optional_value<T: std::str::FromStr<Err = Error>>(
+    value: Option<&str>,
+) -> Result<Option<T>, ErrorData> {
+    value
+        .map(|value| {
+            value
+                .parse()
+                .map_err(|err: Error| ErrorData::invalid_params(err.to_string(), None))
+        })
+        .transpose()
+}
+
 /// Formats any displayable error into an ErrorData.
 fn any_error(err: impl std::fmt::Display) -> ErrorData {
     ErrorData::internal_error(err.to_string(), None)
@@ -996,13 +1044,7 @@ fn build_store_app_request(
         .parse()
         .map_err(|e: Error| ErrorData::invalid_params(e.to_string(), None))?;
 
-    let domains: Vec<SubjectName> = params
-        .domains
-        .clone()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|d| d.parse().ok())
-        .collect();
+    let domains: Vec<SubjectName> = parse_values(params.domains.iter().flatten())?;
 
     let source = if store_app.is_compose() {
         let service: ServiceName = store_app
@@ -1012,13 +1054,9 @@ fn build_store_app_request(
             .parse()
             .map_err(|e: Error| ErrorData::invalid_params(e.to_string(), None))?;
         AppSource::Compose {
-            repository: store_app.repository.as_deref().and_then(|r| r.parse().ok()),
-            branch: store_app
-                .branch
-                .as_deref()
-                .and_then(|b| b.parse().ok())
-                .unwrap_or_else(GitRef::main),
-            file: store_app.file.as_deref().and_then(|f| f.parse().ok()),
+            repository: parse_optional_value(store_app.repository.as_deref())?,
+            branch: parse_optional_value(store_app.branch.as_deref())?.unwrap_or_else(GitRef::main),
+            file: parse_optional_value(store_app.file.as_deref())?,
             service,
             connection: None,
             compose_yaml: None,
@@ -4077,26 +4115,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let project_id: ShortId = parse_id(&params.project_id)?;
-        let source_env_id: ShortId = parse_id(&params.source_env_id)?;
-        let target_env_id: ShortId = parse_id(&params.target_env_id)?;
-        let mode = parse_optional_choice(
-            "mode",
-            params.mode.as_deref(),
-            r3v3rs3_api::platform::EnvironmentSyncMode::SyncMissing,
-        )?;
-        let keys = params
-            .keys
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|k| k.parse().ok())
-            .collect();
-        let request = r3v3rs3_api::platform::EnvironmentSyncRequest {
-            source_env_id,
-            target_env_id,
-            mode,
-            keys,
-        };
-        request.validate().map_err(any_error)?;
+        let request = sync_request(&params)?;
         let platform = self
             .state
             .platform(&caller, Permission::Edit)
@@ -5109,11 +5128,7 @@ impl McpServer {
             params.role.as_deref(),
             r3v3rs3_api::auth::Role::Admin,
         )?;
-        let proxies = params.proxies.map(|list| {
-            list.into_iter()
-                .filter_map(|s| s.parse::<ShortId>().ok())
-                .collect::<std::collections::BTreeSet<_>>()
-        });
+        let proxies = params.proxies.as_ref().map(parse_values).transpose()?;
         let account = r3v3rs3_api::auth::NewAccount {
             username: params.username,
             password: params.password,
@@ -5141,11 +5156,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let role = parse_choice("role", &params.role)?;
-        let proxies = params.proxies.map(|list| {
-            list.into_iter()
-                .filter_map(|s| s.parse::<ShortId>().ok())
-                .collect::<std::collections::BTreeSet<_>>()
-        });
+        let proxies = params.proxies.as_ref().map(parse_values).transpose()?;
         let password = match params.password {
             Some(p) if !p.is_empty() => Some(p),
             _ => None,
