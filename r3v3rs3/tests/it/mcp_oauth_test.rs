@@ -1662,6 +1662,42 @@ async fn token_rate_limit_throttles_rapid_requests() -> anyhow::Result<()> {
     .await
 }
 
+/// An unknown role or token scope is refused, because a fallback to a default choice turned a
+/// typo into an admin account.
+#[tokio::test]
+async fn unknown_choices_are_refused() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-unknown-choices")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = mcp_client(addr, &access_token(&addr).await?).await?;
+        let calls = [
+            (
+                "create_account",
+                json!({ "username": "typo", "password": "password", "role": "viewr" }),
+            ),
+            (
+                "update_account",
+                json!({ "username": "editor", "role": "edtor" }),
+            ),
+            (
+                "create_auth_token",
+                json!({ "name": "ci", "scope": "write" }),
+            ),
+        ];
+        for (tool, args) in calls {
+            let err = mcp_call(&client, tool, args)
+                .await
+                .expect_err("an unknown choice was accepted");
+            assert!(err.to_string().contains("unknown"), "{tool}: {err}");
+        }
+        let accounts = mcp_call(&client, "list_accounts", json!({})).await?;
+        assert!(!accounts.contains("\"typo\""), "{accounts}");
+        assert!(accounts.contains("\"editor\""), "{accounts}");
+        client.cancel().await?;
+        Ok(())
+    })
+    .await
+}
+
 /// The app store refresh changes the catalog of every account, so a viewer with a token of the
 /// edit scope must not run it, the same as through the HTTP API.
 #[tokio::test]

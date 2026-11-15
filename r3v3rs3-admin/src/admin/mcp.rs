@@ -949,6 +949,22 @@ fn parse_id(id: &str) -> Result<ShortId, ErrorData> {
         .map_err(|err: Error| ErrorData::invalid_params(err.to_string(), None))
 }
 
+/// Parses a snake_case choice of a tool argument, such as a role or a mode. An unknown value is
+/// an error, never a fallback to another choice.
+fn parse_choice<T: serde::de::DeserializeOwned>(field: &str, value: &str) -> Result<T, ErrorData> {
+    serde_json::from_value(serde_json::Value::String(value.to_string()))
+        .map_err(|_| ErrorData::invalid_params(format!("unknown {field} `{value}`"), None))
+}
+
+/// Parses an optional choice; an omitted argument takes `default`.
+fn parse_optional_choice<T: serde::de::DeserializeOwned>(
+    field: &str,
+    value: Option<&str>,
+    default: T,
+) -> Result<T, ErrorData> {
+    value.map_or(Ok(default), |value| parse_choice(field, value))
+}
+
 /// Formats any displayable error into an ErrorData.
 fn any_error(err: impl std::fmt::Display) -> ErrorData {
     ErrorData::internal_error(err.to_string(), None)
@@ -4063,11 +4079,11 @@ impl McpServer {
         let project_id: ShortId = parse_id(&params.project_id)?;
         let source_env_id: ShortId = parse_id(&params.source_env_id)?;
         let target_env_id: ShortId = parse_id(&params.target_env_id)?;
-        let mode = match params.mode.as_deref() {
-            Some("clone_all") => r3v3rs3_api::platform::EnvironmentSyncMode::CloneAll,
-            Some("selected_keys") => r3v3rs3_api::platform::EnvironmentSyncMode::SelectedKeys,
-            _ => r3v3rs3_api::platform::EnvironmentSyncMode::SyncMissing,
-        };
+        let mode = parse_optional_choice(
+            "mode",
+            params.mode.as_deref(),
+            r3v3rs3_api::platform::EnvironmentSyncMode::SyncMissing,
+        )?;
         let keys = params
             .keys
             .unwrap_or_default()
@@ -4545,11 +4561,11 @@ impl McpServer {
         caller.authorize(Permission::Edit).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
         let monitor = super::ct::get_or_init_state(&config_dir);
-        let status = match params.status.as_deref() {
-            Some("investigating") => Some(r3v3rs3_api::ct::CtAlertStatus::Investigating),
-            Some("confirmed_rogue") => Some(r3v3rs3_api::ct::CtAlertStatus::ConfirmedRogue),
-            _ => Some(r3v3rs3_api::ct::CtAlertStatus::Dismissed),
-        };
+        let status = Some(parse_optional_choice(
+            "status",
+            params.status.as_deref(),
+            r3v3rs3_api::ct::CtAlertStatus::Dismissed,
+        )?);
         monitor.dismiss_alert(&params.id, status).map_err(|e| {
             ErrorData::invalid_params(format!("failed to dismiss alert: {e}"), None)
         })?;
@@ -5088,11 +5104,11 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let role = match params.role.as_deref() {
-            Some("viewer") => r3v3rs3_api::auth::Role::Viewer,
-            Some("editor") => r3v3rs3_api::auth::Role::Editor,
-            _ => r3v3rs3_api::auth::Role::Admin,
-        };
+        let role = parse_optional_choice(
+            "role",
+            params.role.as_deref(),
+            r3v3rs3_api::auth::Role::Admin,
+        )?;
         let proxies = params.proxies.map(|list| {
             list.into_iter()
                 .filter_map(|s| s.parse::<ShortId>().ok())
@@ -5124,11 +5140,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let role = match params.role.as_str() {
-            "viewer" => r3v3rs3_api::auth::Role::Viewer,
-            "editor" => r3v3rs3_api::auth::Role::Editor,
-            _ => r3v3rs3_api::auth::Role::Admin,
-        };
+        let role = parse_choice("role", &params.role)?;
         let proxies = params.proxies.map(|list| {
             list.into_iter()
                 .filter_map(|s| s.parse::<ShortId>().ok())
@@ -5210,10 +5222,11 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let scope = match params.scope.as_deref() {
-            Some("edit") => r3v3rs3_api::auth::TokenScope::Edit,
-            _ => r3v3rs3_api::auth::TokenScope::Read,
-        };
+        let scope = parse_optional_choice(
+            "scope",
+            params.scope.as_deref(),
+            r3v3rs3_api::auth::TokenScope::Read,
+        )?;
         if caller.role == r3v3rs3_api::auth::Role::Viewer
             && scope == r3v3rs3_api::auth::TokenScope::Edit
         {
