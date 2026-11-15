@@ -14,9 +14,22 @@ use std::time::Duration;
 use tracing_subscriber::filter::LevelFilter;
 
 use crate::common;
-use common::{TestStorage, alloc_tcp_port, send, session_cookie, wait_for_listener, with_server};
+use common::{
+    TestStorage, alloc_tcp_port, send, session_cookie, wait_for_listener, wait_until, with_server,
+};
 
 const TOKEN: &str = "hook-token";
+
+/// Waits until the webhook got the expected requests. The notifier delivers in a background
+/// task with a new HTTP client, which takes longer than a fixed sleep while the other test
+/// files run in the same process, and the server stops sending once the test ends.
+async fn wait_for_delivery(mock: Arc<mockito::Mock>) -> anyhow::Result<()> {
+    let delivered = || {
+        let mock = mock.clone();
+        async move { Ok(mock.matched_async().await) }
+    };
+    wait_until(delivered, "the webhook did not get the notification").await
+}
 
 /// A storage with one CA certificate and a webhook that marks every certificate as expiring. The
 /// background tasks run every second.
@@ -74,13 +87,16 @@ async fn the_server_sends_a_deployment_event_of_the_platform() -> anyhow::Result
         "event": "deployment_running",
         "deployment": {"id": "dep", "app": "app", "app_name": "shop", "trigger": "webhook"},
     });
-    let mock = server
-        .mock("POST", "/")
-        .match_header("authorization", format!("Bearer {TOKEN}").as_str())
-        .match_body(Matcher::PartialJson(body))
-        .expect(1)
-        .create_async()
-        .await;
+    let mock = Arc::new(
+        server
+            .mock("POST", "/")
+            .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+            .match_body(Matcher::PartialJson(body))
+            .expect(1)
+            .create_async()
+            .await,
+    );
+    let delivered = mock.clone();
     // No certificate expires, so the deployment event is the only notification.
     let config = AppConfig {
         notifications: NotificationConfig {
@@ -107,8 +123,7 @@ async fn the_server_sends_a_deployment_event_of_the_platform() -> anyhow::Result
             .command
             .send(ServerCommand::Notify { notification })
             .await?;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        Ok(())
+        wait_for_delivery(delivered).await
     })
     .await?;
     mock.assert_async().await;
@@ -130,13 +145,16 @@ async fn the_server_sends_an_app_alert_notification() -> anyhow::Result<()> {
             "threshold": "80%"
         },
     });
-    let mock = server
-        .mock("POST", "/")
-        .match_header("authorization", format!("Bearer {TOKEN}").as_str())
-        .match_body(Matcher::PartialJson(body))
-        .expect(1)
-        .create_async()
-        .await;
+    let mock = Arc::new(
+        server
+            .mock("POST", "/")
+            .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+            .match_body(Matcher::PartialJson(body))
+            .expect(1)
+            .create_async()
+            .await,
+    );
+    let delivered = mock.clone();
     let config = AppConfig {
         notifications: NotificationConfig {
             webhook: Some(WebhookConfig {
@@ -161,8 +179,7 @@ async fn the_server_sends_an_app_alert_notification() -> anyhow::Result<()> {
             .command
             .send(ServerCommand::Notify { notification })
             .await?;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        Ok(())
+        wait_for_delivery(delivered).await
     })
     .await?;
     mock.assert_async().await;
