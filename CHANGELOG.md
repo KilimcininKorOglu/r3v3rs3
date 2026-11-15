@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.9] - 2026-11-15
+
+### Fixed
+- One request that matched a scanner pattern counted as the whole violation threshold and banned its address at once for the ban duration. It now counts as one violation, so a ban needs the threshold within the window.
+- A scanner pattern matched any substring of the path, so `/.git` caught `/.github`, `/.env` caught `/.environment` and `/config.json` caught an app that loads its own config file. A pattern now matches whole path segments only: it ends at the end of the path or before `/`, `.`, `?`, `&` or `#`.
+
 ## [3.3.8] - 2026-11-15
 
 ### Added
