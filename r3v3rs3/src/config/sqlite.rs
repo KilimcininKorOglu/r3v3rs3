@@ -4,14 +4,13 @@
 //! ACME configs, sealed DNS credentials, accounts, certificate metadata, and sent notifications
 //! in a single unified SQLite database (`r3v3rs3.db`).
 
-use super::{account, storage::Storage};
+use super::{DATABASE_FILE, KEY_FILE, account, storage::Storage};
 use crate::audit::AuditStore;
 use crate::cdn::CdnRanges;
 use crate::certs::{Cert, acme::AcmeEntry};
 use crate::dns_credential::StoredDnsCredential;
 use crate::keys::crypto::ClusterKeys;
 use crate::keys::key_file::{load_keys, write_new_key_file};
-use crate::platform::{DATABASE_FILE, KEY_FILE};
 use anyhow::Context as _;
 use indexmap::map::IndexMap;
 use r3v3rs3_api::{

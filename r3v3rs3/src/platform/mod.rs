@@ -90,11 +90,7 @@ const DASHBOARD_LOG_TIMEOUT: Duration = if cfg!(test) {
     Duration::from_secs(5)
 };
 
-/// The database of the platform in the config directory.
-pub const DATABASE_FILE: &str = "r3v3rs3.db";
-
-/// The encryption key of the environment variables in the config directory.
-pub const KEY_FILE: &str = "r3v3rs3.key";
+pub use crate::config::{DATABASE_FILE, KEY_FILE};
 
 /// The archived previous encryption key after rotation.
 pub const KEY_FILE_OLD: &str = "r3v3rs3.key.old";

@@ -9,6 +9,12 @@ pub mod rate_share;
 pub mod sqlite;
 pub mod storage;
 
+/// The database of the configuration and the platform in the config directory.
+pub const DATABASE_FILE: &str = "r3v3rs3.db";
+
+/// The encryption key of the stored secrets in the config directory.
+pub const KEY_FILE: &str = "r3v3rs3.key";
+
 mod build_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
