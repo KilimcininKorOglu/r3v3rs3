@@ -113,7 +113,7 @@ jobs:
         # all of them stay read within CACHE_IDLE_DAYS. A run of the current inputs restores
         # the newest entry of the ref and key prefix, so only that one is kept.
         if: always()
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DRY_RUN: ${{ inputs.dry_run || false }}
         with:
