@@ -11,7 +11,6 @@ use r3v3rs3_api::port::{NetworkAddr, NetworkInterface, Port, PortEntry, PortStat
 
 pub struct GetPortList;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetPortList {
     type Output = Vec<PortEntry>;
 
@@ -34,7 +33,6 @@ pub struct GetPort {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for GetPort {
     type Output = PortEntry;
 
@@ -57,7 +55,6 @@ pub struct GetPortStatus {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for GetPortStatus {
     type Output = PortStatus;
 
@@ -76,7 +73,6 @@ pub struct DeletePort {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeletePort {
     type Output = ();
     const MUTATES: bool = true;
@@ -106,7 +102,6 @@ pub struct AddPort {
     pub entry: Port,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for AddPort {
     type Output = ();
     const MUTATES: bool = true;
@@ -165,7 +160,6 @@ pub struct UpdatePort {
     pub entry: PortEntry,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UpdatePort {
     type Output = ();
     const MUTATES: bool = true;
@@ -193,7 +187,6 @@ pub struct ResetPort {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for ResetPort {
     type Output = ();
     const PERMISSION: Permission = Permission::Edit;
@@ -215,7 +208,6 @@ impl RpcMethod for ResetPort {
 
 pub struct GetNetworkInterfaceList;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetNetworkInterfaceList {
     type Output = Vec<NetworkInterface>;
 

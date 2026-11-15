@@ -9,7 +9,6 @@ use r3v3rs3_api::proxy::ProxyKind;
 
 pub struct GetErrorPageThemes;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetErrorPageThemes {
     type Output = Vec<ErrorPageTheme>;
 
@@ -27,7 +26,6 @@ pub struct GetErrorPageTheme {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for GetErrorPageTheme {
     type Output = ErrorPageTheme;
 
@@ -48,7 +46,6 @@ pub struct AddErrorPageTheme {
     pub theme: ErrorPageTheme,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for AddErrorPageTheme {
     type Output = ShortId;
     const MUTATES: bool = true;
@@ -72,7 +69,6 @@ pub struct UpdateErrorPageTheme {
     pub theme: ErrorPageTheme,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UpdateErrorPageTheme {
     type Output = ();
     const MUTATES: bool = true;
@@ -102,7 +98,6 @@ pub struct DeleteErrorPageTheme {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeleteErrorPageTheme {
     type Output = ();
     const MUTATES: bool = true;
@@ -134,7 +129,6 @@ impl RpcMethod for DeleteErrorPageTheme {
 
 pub struct ResetErrorPageThemes;
 
-#[async_trait::async_trait]
 impl RpcMethod for ResetErrorPageThemes {
     type Output = Vec<ErrorPageTheme>;
     const MUTATES: bool = true;

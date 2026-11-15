@@ -9,7 +9,6 @@ use r3v3rs3_api::id::ShortId;
 
 pub struct GetAccessLists;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetAccessLists {
     type Output = Vec<AccessListEntry>;
 
@@ -22,7 +21,6 @@ pub struct AddAccessList {
     pub list: AccessList,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for AddAccessList {
     type Output = ();
     const MUTATES: bool = true;
@@ -44,7 +42,6 @@ pub struct UpdateAccessList {
     pub entry: AccessListEntry,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UpdateAccessList {
     type Output = ();
     const MUTATES: bool = true;
@@ -72,7 +69,6 @@ pub struct DeleteAccessList {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeleteAccessList {
     type Output = ();
     const MUTATES: bool = true;

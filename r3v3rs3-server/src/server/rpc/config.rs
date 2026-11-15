@@ -8,7 +8,6 @@ use r3v3rs3_api::error::Error;
 
 pub struct GetConfig;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetConfig {
     type Output = AppConfig;
     const PERMISSION: Permission = Permission::Admin;
@@ -22,7 +21,6 @@ pub struct SetConfig {
     pub config: AppConfig,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for SetConfig {
     type Output = ();
     const MUTATES: bool = true;
@@ -41,7 +39,6 @@ impl RpcMethod for SetConfig {
 /// notification with them outside the server loop, so a slow webhook does not delay the server.
 pub struct GetNotificationWebhook;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetNotificationWebhook {
     type Output = Option<WebhookConfig>;
     const PERMISSION: Permission = Permission::Admin;
@@ -55,7 +52,6 @@ impl RpcMethod for GetNotificationWebhook {
 /// Exports a complete configuration backup with secrets masked and accounts excluded.
 pub struct ExportConfigBackup;
 
-#[async_trait::async_trait]
 impl RpcMethod for ExportConfigBackup {
     type Output = r3v3rs3_api::config_backup::ConfigBackup;
     const PERMISSION: Permission = Permission::Admin;
@@ -70,7 +66,6 @@ pub struct ImportConfigBackup {
     pub backup: Box<r3v3rs3_api::config_backup::ConfigBackup>,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for ImportConfigBackup {
     type Output = ();
     const MUTATES: bool = true;

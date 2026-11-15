@@ -21,7 +21,6 @@ use tracing::error;
 
 pub struct GetCertList;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetCertList {
     type Output = Vec<CertInfo>;
 
@@ -34,7 +33,6 @@ pub struct GetCert {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for GetCert {
     type Output = Arc<Cert>;
 
@@ -49,7 +47,6 @@ pub struct AddCert {
     pub cert: Arc<Cert>,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for AddCert {
     type Output = ();
     const MUTATES: bool = true;
@@ -73,7 +70,6 @@ pub struct DeleteCert {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeleteCert {
     type Output = ();
     const MUTATES: bool = true;
@@ -96,7 +92,6 @@ pub struct DeleteCerts {
     pub ids: Vec<ShortId>,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeleteCerts {
     type Output = Vec<DeleteCertResult>;
     const MUTATES: bool = true;
@@ -188,7 +183,6 @@ pub struct DownloadCert {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DownloadCert {
     type Output = Bytes;
     /// The archive holds the private key.
@@ -247,7 +241,6 @@ pub struct GetCertCoverage {
     pub domains: Vec<String>,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for GetCertCoverage {
     type Output = Vec<DomainCoverageInfo>;
 

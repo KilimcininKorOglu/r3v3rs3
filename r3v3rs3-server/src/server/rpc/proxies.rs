@@ -19,7 +19,6 @@ use r3v3rs3_api::vhost::VirtualHost;
 
 pub struct GetProxyList;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetProxyList {
     type Output = Vec<ProxyEntry>;
 
@@ -46,7 +45,6 @@ pub struct GetProxy {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for GetProxy {
     type Output = ProxyEntry;
 
@@ -73,7 +71,6 @@ pub struct GetProxyStatus {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for GetProxyStatus {
     type Output = ProxyStatus;
 
@@ -111,7 +108,6 @@ pub struct PurgeProxyCache {
     pub path: Option<String>,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for PurgeProxyCache {
     type Output = ();
     const PERMISSION: Permission = Permission::EditProxies;
@@ -145,7 +141,6 @@ pub struct DeleteProxy {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeleteProxy {
     type Output = ();
     const MUTATES: bool = true;
@@ -175,7 +170,6 @@ pub struct AddProxy {
     pub owner: Option<String>,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for AddProxy {
     type Output = ();
     const MUTATES: bool = true;
@@ -215,7 +209,6 @@ pub struct UpdateProxy {
     pub entry: ProxyEntry,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UpdateProxy {
     type Output = ();
     const MUTATES: bool = true;
@@ -290,7 +283,6 @@ pub struct UpdateProxyStreamPriority {
     pub mutation: StreamPriorityMutation,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UpdateProxyStreamPriority {
     type Output = ();
     const MUTATES: bool = true;
@@ -335,7 +327,6 @@ pub struct ApplyProxySecurityHeadersProfile {
     pub profile: SecurityProfile,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for ApplyProxySecurityHeadersProfile {
     type Output = SecurityHeadersAudit;
     const MUTATES: bool = true;

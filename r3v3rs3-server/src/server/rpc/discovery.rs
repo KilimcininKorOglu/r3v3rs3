@@ -5,7 +5,6 @@ use r3v3rs3_api::error::Error;
 
 pub struct GetDiscoveryStatus;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetDiscoveryStatus {
     type Output = Vec<DiscoveryStatus>;
 

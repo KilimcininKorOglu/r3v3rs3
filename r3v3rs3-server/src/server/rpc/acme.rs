@@ -13,7 +13,6 @@ use r3v3rs3_api::{
 
 pub struct GetAcmeList;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetAcmeList {
     type Output = Vec<AcmeInfo>;
 
@@ -30,7 +29,6 @@ pub struct GetAcme {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for GetAcme {
     type Output = AcmeInfo;
 
@@ -43,7 +41,6 @@ pub struct GetAcmeCnameInstructions {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for GetAcmeCnameInstructions {
     type Output = Vec<r3v3rs3_api::acme::AcmeCnameInstruction>;
 
@@ -64,7 +61,6 @@ pub struct AddAcme {
     pub request: AcmeRequest,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for AddAcme {
     type Output = ();
     const MUTATES: bool = true;
@@ -109,7 +105,6 @@ pub struct UpdateAcme {
     pub config: AcmeConfig,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UpdateAcme {
     type Output = ();
     const MUTATES: bool = true;
@@ -138,7 +133,6 @@ pub struct RequestAcme {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for RequestAcme {
     type Output = ();
     const MUTATES: bool = true;
@@ -152,7 +146,6 @@ impl RpcMethod for RequestAcme {
     }
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeleteAcme {
     type Output = ();
     const MUTATES: bool = true;

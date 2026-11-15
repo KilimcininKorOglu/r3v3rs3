@@ -6,7 +6,6 @@ use r3v3rs3_api::error::Error;
 /// Reports the workers that serve the ports of this master.
 pub struct GetWorkers;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetWorkers {
     type Output = WorkerStatusReport;
 

@@ -13,7 +13,6 @@ use std::sync::Arc;
 /// The sessions that the admin API shares with the proxies, and in a cluster with the other nodes.
 pub struct GetSessionBackend;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetSessionBackend {
     type Output = Arc<dyn SessionBackend>;
     const PERMISSION: Permission = Permission::Admin;
@@ -26,7 +25,6 @@ impl RpcMethod for GetSessionBackend {
 /// The audit log, for the sign-ins and the other changes of the admin API outside the RPC methods.
 pub struct GetAuditLog;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetAuditLog {
     type Output = Arc<AuditLog>;
     const PERMISSION: Permission = Permission::Admin;
@@ -39,7 +37,6 @@ impl RpcMethod for GetAuditLog {
 /// The deployment platform, which the admin API calls outside the server loop.
 pub struct GetPlatform;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetPlatform {
     type Output = PlatformHandle;
     const PERMISSION: Permission = Permission::Admin;
@@ -52,7 +49,6 @@ impl RpcMethod for GetPlatform {
 /// The unified SQLite connection pool, shared across storage, platform, and OAuth.
 pub struct GetSqlitePool;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetSqlitePool {
     type Output = Option<sqlx::SqlitePool>;
     const PERMISSION: Permission = Permission::Admin;
@@ -65,7 +61,6 @@ impl RpcMethod for GetSqlitePool {
 /// The tag of the newest release, when the update check found a newer one.
 pub struct GetUpdateAvailable;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetUpdateAvailable {
     type Output = Option<String>;
     const PERMISSION: Permission = Permission::Read;
@@ -79,7 +74,6 @@ pub struct VerifyAccount {
     pub request: LoginRequest,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for VerifyAccount {
     type Output = LoginResponse;
     const PERMISSION: Permission = Permission::Admin;

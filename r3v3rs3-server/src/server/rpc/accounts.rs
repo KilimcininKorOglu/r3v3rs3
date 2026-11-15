@@ -21,7 +21,6 @@ pub use r3v3rs3_api::auth::{MAX_USERNAME_LENGTH, validate_username};
 
 pub struct GetAccountList;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetAccountList {
     type Output = Vec<AccountInfo>;
     const PERMISSION: Permission = Permission::Admin;
@@ -65,7 +64,6 @@ pub struct AddAccount {
     pub account: NewAccount,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for AddAccount {
     type Output = AccountCreated;
     const MUTATES: bool = true;
@@ -125,7 +123,6 @@ pub struct UpdateAccount {
     pub update: AccountUpdate,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UpdateAccount {
     type Output = ();
     const MUTATES: bool = true;
@@ -145,7 +142,7 @@ impl RpcMethod for UpdateAccount {
         let is_admin = role.is_admin();
         let username = self.username;
         let username_clone = username.clone();
-        let result = state
+        state
             .edit_accounts(move |accounts| {
                 let account =
                     accounts
@@ -163,7 +160,7 @@ impl RpcMethod for UpdateAccount {
                 .platform()
                 .cancel_git_authorizations_for_user(&username_clone);
         }
-        Ok(result)
+        Ok(())
     }
 
     fn audit(&self) -> Option<AuditRecord> {
@@ -186,7 +183,6 @@ pub struct DeleteAccount {
     pub username: String,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeleteAccount {
     type Output = ();
     const MUTATES: bool = true;
@@ -198,7 +194,7 @@ impl RpcMethod for DeleteAccount {
         }
         let username = self.username;
         let username_clone = username.clone();
-        let result = state
+        state
             .edit_accounts(move |accounts| {
                 if accounts.remove(&username).is_none() {
                     return Err(Error::AccountNotFound { username });
@@ -210,7 +206,7 @@ impl RpcMethod for DeleteAccount {
         state
             .platform()
             .cancel_git_authorizations_for_user(&username_clone);
-        Ok(result)
+        Ok(())
     }
 
     fn audit(&self) -> Option<AuditRecord> {
@@ -223,7 +219,6 @@ pub struct RegisterPasskey {
     pub credential: PasskeyCredential,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for RegisterPasskey {
     type Output = ();
     const MUTATES: bool = true;
@@ -262,7 +257,6 @@ pub struct DeletePasskey {
     pub credential_id: String,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeletePasskey {
     type Output = ();
     const MUTATES: bool = true;
@@ -305,7 +299,6 @@ pub struct CreateApiToken {
     pub scope: TokenScope,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for CreateApiToken {
     type Output = ApiTokenCreated;
     const MUTATES: bool = true;
@@ -372,7 +365,6 @@ pub struct DeleteApiToken {
     pub token_id: String,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeleteApiToken {
     type Output = ();
     const MUTATES: bool = true;

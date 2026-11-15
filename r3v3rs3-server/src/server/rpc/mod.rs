@@ -22,7 +22,9 @@ pub mod proxies;
 pub mod quarantine;
 pub mod workers;
 
-#[async_trait::async_trait]
+/// The methods return plain `Send` futures instead of `#[async_trait]` boxes: the
+/// `Self: 'async_trait` bound of a boxed future gave each implementation its own trait
+/// environment, so the compiler proved `ServerState: Send` from scratch for each of them.
 pub trait RpcMethod: Any + Send + Sync + Sized {
     type Output: Any + Send + Sync;
     /// Whether the method changes the stored state. Such a method runs only when the storage can
@@ -35,16 +37,19 @@ pub trait RpcMethod: Any + Send + Sync + Sized {
     } else {
         Permission::Read
     };
-    async fn call(self, _state: &mut ServerState) -> Result<Self::Output, Error> {
-        unimplemented!()
+    fn call(
+        self,
+        _state: &mut ServerState,
+    ) -> impl Future<Output = Result<Self::Output, Error>> + Send {
+        async { unimplemented!() }
     }
 
-    async fn call_with_caller(
+    fn call_with_caller(
         self,
         state: &mut ServerState,
         _caller: &Caller,
-    ) -> Result<Self::Output, Error> {
-        self.call(state).await
+    ) -> impl Future<Output = Result<Self::Output, Error>> + Send {
+        self.call(state)
     }
 
     /// The proxy that the method reads or changes. The method fails with `IdNotFound` for a caller

@@ -9,7 +9,6 @@ use r3v3rs3_api::{
 
 pub struct GetDnsCredentialList;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetDnsCredentialList {
     type Output = Vec<DnsCredentialInfo>;
 
@@ -22,7 +21,6 @@ pub struct GetDnsCredential {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for GetDnsCredential {
     type Output = DnsCredentialInfo;
 
@@ -61,7 +59,6 @@ pub struct AddDnsCredential {
     pub request: DnsCredentialRequest,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for AddDnsCredential {
     type Output = DnsCredentialInfo;
     const MUTATES: bool = true;
@@ -98,7 +95,6 @@ pub struct UpdateDnsCredential {
     pub request: DnsCredentialRequest,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UpdateDnsCredential {
     type Output = ();
     const MUTATES: bool = true;
@@ -140,7 +136,6 @@ pub struct DeleteDnsCredential {
     pub id: ShortId,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for DeleteDnsCredential {
     type Output = ();
     const MUTATES: bool = true;

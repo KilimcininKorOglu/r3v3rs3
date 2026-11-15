@@ -10,7 +10,6 @@ use r3v3rs3_api::webhook::WebhookEvent;
 /// Retrieves the status and metadata of the currently loaded GeoIP database.
 pub struct GetGeoIpStatus;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetGeoIpStatus {
     type Output = GeoIpStatus;
     const PERMISSION: Permission = Permission::Read;
@@ -28,7 +27,6 @@ pub struct UpdateGeoIpConfig {
     pub request: UpdateGeoIpConfigRequest,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UpdateGeoIpConfig {
     type Output = GeoIpStatus;
     const MUTATES: bool = true;
@@ -72,7 +70,6 @@ impl RpcMethod for UpdateGeoIpConfig {
 /// Triggers a download and hot-reload of the latest MaxMind GeoLite2 database.
 pub struct RefreshGeoIpDatabase;
 
-#[async_trait::async_trait]
 impl RpcMethod for RefreshGeoIpDatabase {
     type Output = GeoIpStatus;
     const MUTATES: bool = true;
@@ -125,7 +122,6 @@ impl RpcMethod for RefreshGeoIpDatabase {
 /// and the update_interval_days has elapsed.
 pub struct PeriodicGeoIpUpdateCheck;
 
-#[async_trait::async_trait]
 impl RpcMethod for PeriodicGeoIpUpdateCheck {
     type Output = bool;
     const MUTATES: bool = true;

@@ -11,7 +11,6 @@ use std::net::IpAddr;
 /// Retrieves the list of currently quarantined IP addresses.
 pub struct GetQuarantinedList;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetQuarantinedList {
     type Output = Vec<QuarantinedIpEntry>;
     const PERMISSION: Permission = Permission::Read;
@@ -28,7 +27,6 @@ pub struct QuarantineIp {
     pub duration_seconds: u64,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for QuarantineIp {
     type Output = QuarantinedIpEntry;
     const PERMISSION: Permission = Permission::Edit;
@@ -58,7 +56,6 @@ pub struct UnquarantineIp {
     pub ip: IpAddr,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UnquarantineIp {
     type Output = bool;
     const PERMISSION: Permission = Permission::Edit;
@@ -76,7 +73,6 @@ impl RpcMethod for UnquarantineIp {
 /// Retrieves the current auto-quarantine configuration.
 pub struct GetQuarantineConfig;
 
-#[async_trait::async_trait]
 impl RpcMethod for GetQuarantineConfig {
     type Output = AutoQuarantineConfig;
     const PERMISSION: Permission = Permission::Read;
@@ -91,7 +87,6 @@ pub struct UpdateQuarantineConfig {
     pub config: AutoQuarantineConfig,
 }
 
-#[async_trait::async_trait]
 impl RpcMethod for UpdateQuarantineConfig {
     type Output = ();
     const MUTATES: bool = true;
