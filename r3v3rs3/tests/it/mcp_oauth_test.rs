@@ -1664,15 +1664,22 @@ async fn mcp_platform_changes_are_audited() -> anyhow::Result<()> {
         );
         let client = serve_client(TestClient, transport).await?;
         change_platform_through_mcp(&client).await?;
-        let actions = audit_actions(&client).await?;
-        for action in [
+        // The audit log writes its entries in the background, so the test waits for them.
+        let expected = [
             "add_project",
             "delete_project",
             "add_env_group",
             "delete_env_group",
-        ] {
-            assert!(actions.iter().any(|a| a == action), "{action}: {actions:?}");
-        }
+        ];
+        let client_ref = &client;
+        common::wait_until(
+            move || async move {
+                let actions = audit_actions(client_ref).await?;
+                Ok(expected.iter().all(|e| actions.iter().any(|a| a == e)))
+            },
+            "the audit log misses a platform change made through MCP",
+        )
+        .await?;
         client.cancel().await?;
         Ok(())
     })
