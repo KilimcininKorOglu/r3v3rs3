@@ -179,16 +179,16 @@ pub fn login() -> Html {
             { login_error_view(error_text) }
 
             if let Some(totp) = &*totp {
-                <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.one_time_password")}</label>
-                <input type="number" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocomplete="one-time-code" oninput={oninput_totp} />
+                <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="totp">{locale.t("login.one_time_password")}</label>
+                <input id="totp" name="totp" type="number" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocomplete="one-time-code" oninput={oninput_totp} />
                 <input type="submit" class={submit_class()} value={locale.t("login.continue")} disabled={totp.is_empty()} />
             } else {
                 <div class="mb-4">
-                    <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.username")}</label>
-                    <input type="text" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocapitalize="off" autocomplete="username" autofocus={true} oninput={oninput_username} />
+                    <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="username">{locale.t("login.username")}</label>
+                    <input id="username" name="username" type="text" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocapitalize="off" autocomplete="username" autofocus={true} oninput={oninput_username} />
                 </div>
-                <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="name">{locale.t("login.password")}</label>
-                <input type="password" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocomplete="current-password" oninput={oninput_password} />
+                <label class="mr-4 text-neutral-700 dark:text-neutral-200 font-bold inline-block mb-2" for="password">{locale.t("login.password")}</label>
+                <input id="password" name="password" type="password" class="border bg-white dark:bg-neutral-800 dark:border-neutral-600 py-2 px-4 w-full outline-none focus:ring-2 focus:ring-neutral-400 rounded" autocomplete="current-password" oninput={oninput_password} />
                 <input type="submit" class={submit_class()} value={locale.t("login.submit")} disabled={username.is_empty() || password.is_empty()} />
                 { passkey_login_button(locale, on_passkey_login) }
             }
