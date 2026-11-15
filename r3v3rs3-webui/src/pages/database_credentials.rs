@@ -20,7 +20,7 @@ use r3v3rs3_api::platform::{
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
-const COLUMNS: [Column; 5] = [
+const COLUMNS: [Column; 6] = [
     Column {
         label: "databases.account",
         class: "whitespace-nowrap",
@@ -35,6 +35,10 @@ const COLUMNS: [Column; 5] = [
     },
     Column {
         label: "databases.connection",
+        class: "font-mono break-all",
+    },
+    Column {
+        label: "databases.internal_connection",
         class: "font-mono break-all",
     },
     Column {
@@ -180,6 +184,7 @@ fn account_row(ctx: &RowContext<'_>, account: &DatabaseAccount) -> Row {
             html! { {account.user.clone()} },
             html! { {account.password.clone()} },
             html! { {account.url.clone()} },
+            html! { {account.internal_url.clone()} },
             html! { {apps} },
         ],
         actions: html! {

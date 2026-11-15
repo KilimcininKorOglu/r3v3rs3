@@ -1665,6 +1665,7 @@
   "databases.delete_tenant": "Tenant'ı sil",
   "databases.confirm_delete_tenant": "{name} tenant'ı kullanıcısı, veritabanı ve verisiyle birlikte silinsin mi?",
   "databases.connection": "Bağlantı:",
+  "databases.internal_connection": "İç bağlantı (uygulamalar ve container'lar):",
   "databases.clone": "Klonla",
   "databases.clone_prompt": "Klonlanan veritabanı için bir ad girin:",
   "databases.cloned": "Veritabanı klonlandı ve dağıtımı başlatıldı.",

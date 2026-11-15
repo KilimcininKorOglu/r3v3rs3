@@ -1838,6 +1838,10 @@ pub struct DatabaseAccount {
     pub key_prefix: Option<String>,
     /// The connection string on `127.0.0.1` of the r3v3rs3 server.
     pub url: String,
+    /// The connection string for an app on the shared network of the target: the host name
+    /// `r3v3rs3-<database id>` and the container port.
+    #[serde(default)]
+    pub internal_url: String,
 }
 
 /// The accounts of a database with their passwords. Only an Admin account reads them.

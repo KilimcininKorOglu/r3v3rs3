@@ -1665,6 +1665,7 @@
   "databases.delete_tenant": "Delete the tenant",
   "databases.confirm_delete_tenant": "Delete the tenant {name} with its user, its database and its data?",
   "databases.connection": "Connection:",
+  "databases.internal_connection": "Internal connection (apps and containers):",
   "databases.clone": "Clone",
   "databases.clone_prompt": "Enter a name for the cloned database:",
   "databases.cloned": "The database was cloned and its deployment started.",

@@ -30,6 +30,9 @@ struct Database {
 impl Database {
     fn account(&self, tenant: Option<&str>, credentials: Credentials) -> DatabaseAccount {
         let url = super::deploy::format_url(&self.info, LOCAL_HOST, self.host_port, &credentials);
+        let host = super::deploy::app_host(self.app.id);
+        let internal_url =
+            super::deploy::format_url(&self.info, &host, self.app.spec.port, &credentials);
         DatabaseAccount {
             tenant: tenant.map(String::from),
             user: credentials.user,
@@ -37,6 +40,7 @@ impl Database {
             database: credentials.database,
             key_prefix: credentials.key_prefix,
             url,
+            internal_url,
         }
     }
 }
@@ -251,5 +255,52 @@ impl Platform {
             }
         }
         (redeployed, failed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use r3v3rs3_api::platform::{EnginesCatalog, LOCAL_TARGET};
+    use serde_json::json;
+
+    fn postgres() -> Database {
+        let catalog: EnginesCatalog =
+            serde_json::from_str(include_str!("../../data/engines.json")).unwrap();
+        let info = catalog
+            .engines
+            .into_iter()
+            .find(|info| info.engine == "postgres")
+            .unwrap();
+        let app: AppEntry = serde_json::from_value(json!({
+            "id": "abc-def",
+            "name": "db",
+            "target": LOCAL_TARGET,
+            "spec": {
+                "source": { "type": "image", "image": "postgres:18-alpine" },
+                "port": info.container_port,
+                "host_port": 63000,
+            },
+            "created_at": 1,
+            "updated_at": 1,
+        }))
+        .unwrap();
+        Database {
+            app,
+            info,
+            host_port: 63000,
+        }
+    }
+
+    #[test]
+    fn an_account_names_the_host_port_and_the_shared_network_address() {
+        let db = postgres();
+        let credentials = Credentials::tenant(&db.info, "a_app", "secret".to_string());
+        let account = db.account(Some("a_app"), credentials);
+        assert_eq!(account.url, "postgres://a_app:secret@127.0.0.1:63000/a_app");
+        assert_eq!(
+            account.internal_url,
+            "postgres://a_app:secret@r3v3rs3-abc-def:5432/a_app"
+        );
     }
 }
