@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "updated_at": 1794705612,
+  "updated_at": 1794706084,
   "apps": [
     {
       "id": "uptime-kuma",
@@ -739,7 +739,7 @@
       "name": "whoami",
       "description": "A tiny container that echoes the request headers, a simple connectivity test.",
       "description_tr": "İstek header'larını yankılayan minik container, basit bir bağlantı testi.",
-      "image": "traefik/whoami:v1.10.3",
+      "image": "traefik/whoami:v1.12.0",
       "port": 80,
       "health_check_path": "/",
       "website": "https://github.com/traefik/whoami",
