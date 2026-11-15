@@ -1,5 +1,6 @@
 use crate::{
-    accounts::Caller,
+    accounts::{Caller, Permission},
+    audit::AuditRecord,
     cdn::CdnRanges,
     certs::{
         Cert,
@@ -7,9 +8,30 @@ use crate::{
     },
     discovery::DiscoverySnapshot,
     notify::Notification,
-    server::rpc::ErasedRpcMethod,
 };
-use std::sync::Arc;
+use r3v3rs3_api::{error::Error, id::ShortId};
+use std::{any::Any, sync::Arc};
+
+/// An RPC method with its type erased, as the admin API sends it to the server loop.
+///
+/// The state is the `ServerState` of the server loop. It is passed as `Any`, so this trait does
+/// not depend on the server module; the implementation downcasts it.
+#[async_trait::async_trait]
+pub trait ErasedRpcMethod: Any + Send + Sync {
+    async fn call(
+        &mut self,
+        state: &mut (dyn Any + Send),
+        caller: &Caller,
+    ) -> Result<Box<dyn Any + Send + Sync>, Error>;
+
+    fn mutates(&self) -> bool;
+
+    fn permission(&self) -> Permission;
+
+    fn proxy_scope(&self) -> Option<ShortId>;
+
+    fn audit(&self) -> Option<AuditRecord>;
+}
 
 pub enum ServerCommand {
     AddCert {

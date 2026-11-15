@@ -5,6 +5,8 @@ use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use std::any::Any;
 
+pub use crate::command::ErasedRpcMethod;
+
 pub mod access_lists;
 pub mod accounts;
 pub mod acme;
@@ -82,9 +84,12 @@ where
 {
     async fn call(
         &mut self,
-        state: &mut ServerState,
+        state: &mut (dyn Any + Send),
         caller: &Caller,
     ) -> Result<Box<dyn Any + Send + Sync>, Error> {
+        let state = state
+            .downcast_mut::<ServerState>()
+            .ok_or(Error::FailedToInvokeRpc)?;
         let this = self.inner.take().ok_or(Error::FailedToInvokeRpc)?;
         <T as RpcMethod>::call_with_caller(this, state, caller)
             .await
@@ -106,23 +111,6 @@ where
     fn audit(&self) -> Option<AuditRecord> {
         self.inner.as_ref().and_then(RpcMethod::audit)
     }
-}
-
-#[async_trait::async_trait]
-pub trait ErasedRpcMethod: Any + Send + Sync {
-    async fn call(
-        &mut self,
-        state: &mut ServerState,
-        caller: &Caller,
-    ) -> Result<Box<dyn Any + Send + Sync>, Error>;
-
-    fn mutates(&self) -> bool;
-
-    fn permission(&self) -> Permission;
-
-    fn proxy_scope(&self) -> Option<ShortId>;
-
-    fn audit(&self) -> Option<AuditRecord>;
 }
 
 pub struct RpcCallback {
