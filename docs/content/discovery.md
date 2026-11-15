@@ -35,7 +35,7 @@ An issue names the resource and the reason, for example `web-1: http.app: port n
 
 # Labels
 
-Docker labels, Consul tags and key-value entries use the same keys. Each key has this form:
+Docker labels and etcd keys use the same keys. Each key has this form:
 
 ```
 r3v3rs3.<protocol>.<name>.<field>=<value>
@@ -254,7 +254,7 @@ etcdctl user grant-role r3v3rs3 r3v3rs3-reader
 
 ## Keys
 
-- The keys use the layout of the Consul key-value store. With the prefix `r3v3rs3`, the key `r3v3rs3/http/app/ports` is the label `r3v3rs3.http.app.ports`.
+- Each `/` of a key path is a `.` of the label. With the prefix `r3v3rs3`, the key `r3v3rs3/http/app/ports` is the label `r3v3rs3.http.app.ports`.
 - r3v3rs3 reads every proxy under the prefix, so the keys do not need `r3v3rs3.enable`.
 - A key has no address, so `port` is not available. Use `routes.<n>.servers.<n>.url` or `upstream_servers.<n>.addr`.
 - A part of a key cannot contain a `.`. Such a key is an issue.

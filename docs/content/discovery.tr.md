@@ -35,7 +35,7 @@ Her sorun, kaynağı ve sebebi gösterir, örneğin `web-1: http.app: port not f
 
 # Etiketler
 
-Docker etiketleri, Consul etiketleri ve key-value kayıtları aynı key'leri kullanır. Her key şu biçimdedir:
+Docker etiketleri ve etcd key'leri aynı key'leri kullanır. Her key şu biçimdedir:
 
 ```
 r3v3rs3.<protocol>.<name>.<field>=<value>
@@ -256,7 +256,7 @@ etcdctl user grant-role r3v3rs3 r3v3rs3-reader
 
 ## Key'ler
 
-- Key'ler Consul key-value store'unun düzenini kullanır. Önek `r3v3rs3` ise `r3v3rs3/http/app/ports` key'i `r3v3rs3.http.app.ports` etiketi olur.
+- Key yolundaki her `/`, etikette bir `.` olur. Önek `r3v3rs3` ise `r3v3rs3/http/app/ports` key'i `r3v3rs3.http.app.ports` etiketi olur.
 - r3v3rs3 önekin altındaki her proxy'yi okur. Bu yüzden key'ler `r3v3rs3.enable` gerektirmez.
 - Key'in adresi yoktur, bu yüzden `port` kullanılamaz. `routes.<n>.servers.<n>.url` veya `upstream_servers.<n>.addr` kullanın.
 - Key'in bir parçası `.` içeremez. Böyle bir key sorun sayılır.

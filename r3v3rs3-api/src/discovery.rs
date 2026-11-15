@@ -52,8 +52,8 @@ impl fmt::Display for DiscoveryProvider {
 )]
 pub struct DiscoverySource {
     pub provider: DiscoveryProvider,
-    /// The resource that defines the proxy, e.g. a container name, `ingress default/app`, a Consul
-    /// service or a key prefix.
+    /// The resource that defines the proxy, e.g. a container name, an etcd key prefix or the name
+    /// of a platform app.
     #[schema(example = "web-1")]
     pub resource: String,
 }
