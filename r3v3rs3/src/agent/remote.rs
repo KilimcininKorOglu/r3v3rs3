@@ -42,7 +42,7 @@ impl RemoteRuntime {
             .agents
             .status(self.target)
             .ok_or(Error::AgentOffline { id: self.target })?;
-        let version_of = crate::server::self_upgrade::version_of;
+        let version_of = crate::config::version_of;
         if version_of(&status.version) < version_of(minimum) {
             return Err(anyhow!(
                 "the agent of the target {} runs r3v3rs3 {}; upgrade it to {minimum} or newer to build with BuildKit",

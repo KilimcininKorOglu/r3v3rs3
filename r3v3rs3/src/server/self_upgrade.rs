@@ -85,7 +85,7 @@ pub fn parse_release(json: &str, current: &str) -> anyhow::Result<Option<Release
 fn parse_release_for(json: &str, current: &str, target: &str) -> anyhow::Result<Option<Release>> {
     let release: ReleaseJson =
         serde_json::from_str(json).context("the release information is not valid JSON")?;
-    if version_of(&release.tag_name) <= version_of(current) {
+    if crate::config::version_of(&release.tag_name) <= crate::config::version_of(current) {
         return Ok(None);
     }
     let asset = release
@@ -108,15 +108,6 @@ fn parse_release_for(json: &str, current: &str, target: &str) -> anyhow::Result<
         url: asset.browser_download_url.clone(),
         digest,
     }))
-}
-
-/// Compares the numeric parts of two versions and ignores a leading `v` and any suffix.
-pub(crate) fn version_of(version: &str) -> Vec<u64> {
-    version
-        .trim_start_matches('v')
-        .split(|c: char| !c.is_ascii_digit())
-        .filter_map(|part| part.parse().ok())
-        .collect()
 }
 
 /// Downloads the release JSON of the latest release.

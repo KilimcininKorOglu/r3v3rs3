@@ -19,6 +19,15 @@ mod build_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
+/// Compares the numeric parts of two versions and ignores a leading `v` and any suffix.
+pub fn version_of(version: &str) -> Vec<u64> {
+    version
+        .trim_start_matches('v')
+        .split(|c: char| !c.is_ascii_digit())
+        .filter_map(|part| part.parse().ok())
+        .collect()
+}
+
 pub fn new_appinfo(config_path: &Path, log_path: &Path) -> AppInfo {
     AppInfo {
         version: build_info::PKG_VERSION,
