@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "updated_at": 1794706084,
+  "updated_at": 1794734161,
   "apps": [
     {
       "id": "uptime-kuma",
@@ -976,7 +976,7 @@
       "description": "Comprehensive web-based administration and development platform for PostgreSQL.",
       "description_tr": "PostgreSQL için kapsamlı web tabanlı yönetim ve geliştirme platformu.",
       "image": "dpage/pgadmin4:latest",
-      "port": 80,
+      "port": 8080,
       "health_check_path": "/misc/ping",
       "website": "https://www.pgadmin.org",
       "category": "Database",
