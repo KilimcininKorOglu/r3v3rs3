@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.3] - 2026-11-16
+
+### Changed
+- The MCP tool descriptions state the arguments, defaults, results, side effects and the role and token scope that each tool needs.
+
+### Fixed
+- A change of the password, role or proxy list of an account now also ends its MCP access: a refresh token issued before the change is refused with `invalid_grant`, and an authorization code approved before the change gives no access when it is traded after it. Earlier, a refresh restored the access.
+- An MCP token issued in the same second as a change of its account works; the token time is now kept in milliseconds like the account change time.
+- The MCP `refresh_store` tool checks the role like the HTTP API, so a viewer or an editor with a proxy list can no longer replace the app store catalog.
+- The core build script no longer reruns after the release cache restore, so a release compiles only `r3v3rs3` and `r3v3rs3-cli`.
+
 ## [3.4.2] - 2026-11-15
 
 ### Changed
