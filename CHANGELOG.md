@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.5] - 2026-11-15
+
+### Added
+- The database engine catalog offers MongoDB 9 (`mongo:9`) and MariaDB 13 (`mariadb:13-resolute`).
+
+### Changed
+- The tests that set `R3V3RS3_*` environment variables run one at a time, so `cargo test` no longer fails at random in `args::tests::test_no_webui_cli_parsing`.
+
+### Fixed
+- The app list (`GET /api/apps`, the MCP `list_apps` tool and the `/apps` page) also listed the database servers. Database servers are now listed only on the Databases page and by `GET /api/databases`.
+- Database servers showed an "Update available" badge from the hourly registry tag check, which offered tags of other major versions, such as `mysql:9` to `26.10.0`. A database update now comes only from the engine catalog: the Databases page shows it when the catalog holds a later version than the running image, and the registry check skips database servers and clears their old results.
+- A catalog upgrade of an App Store app could move it to a new major version, such as `louislam/uptime-kuma:1` to `:2`, which can change the data layout. Catalog upgrades now stay in the major version of the running image, and the upgrade endpoint refuses other upgrades with `404`.
+- The Ghost App Store entry exited at once, because the image needs a MySQL server that an image entry cannot configure. The entry is removed.
+- The whoami App Store entry is pinned to `traefik/whoami:v1.12.0` instead of `v1.10.3`.
+
 ## [3.3.4] - 2026-11-15
 
 ### Fixed
