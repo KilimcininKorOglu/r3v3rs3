@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.8] - 2026-11-15
+
+### Added
+- Every image app, Git app and database container joins one Docker network, `r3v3rs3-shared`, on its target. Any app reaches any database server by its host name `r3v3rs3-<database id>` and the container port, so an admin UI such as phpMyAdmin or pgAdmin connects with `PMA_HOST=r3v3rs3-<database id>` and the root account. The per-app and per-database networks are no longer created. Compose apps keep their own project network. A container deployed before this release joins the shared network on its next deployment.
+- The **Credentials** panel of a database shows an **Internal connection** string next to the `127.0.0.1` one: the host name `r3v3rs3-<database id>` and the container port for an app or a container on the shared network.
+- The quarantine logs every address it bans with the reason, the violation count and the ban length.
+
+### Fixed
+- A scanner pattern such as `/phpmyadmin` matched the host of an HTTP/2 request, because an HTTP/2 request carries an absolute URI. A visit to `https://phpmyadmin.example.com/` counted as a scanner probe and could ban the visitor. The patterns now match only the path and the query.
+
 ## [3.3.7] - 2026-11-15
 
 ### Changed
