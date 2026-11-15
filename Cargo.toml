@@ -1,5 +1,15 @@
 [workspace]
-members = ["r3v3rs3", "r3v3rs3-api", "r3v3rs3-cli", "r3v3rs3-webui"]
+members = [
+    "r3v3rs3",
+    "r3v3rs3-admin",
+    "r3v3rs3-api",
+    "r3v3rs3-cli",
+    "r3v3rs3-core",
+    "r3v3rs3-platform",
+    "r3v3rs3-proxy",
+    "r3v3rs3-server",
+    "r3v3rs3-webui",
+]
 resolver = "2"
 
 # The release version of the server, the command line client and the server crates. A release
@@ -9,6 +19,168 @@ version = "3.4.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
+
+# The server crates share one set of dependency versions and features. Each crate names only the
+# dependencies it uses.
+[workspace.dependencies]
+r3v3rs3-admin = { path = "r3v3rs3-admin" }
+r3v3rs3-core = { path = "r3v3rs3-core" }
+r3v3rs3-platform = { path = "r3v3rs3-platform" }
+r3v3rs3-proxy = { path = "r3v3rs3-proxy" }
+r3v3rs3-server = { path = "r3v3rs3-server" }
+anyhow = "1.0.71"
+arc-swap = "1.6.0"
+argon2 = "0.6.0"
+async-compression = { version = "0.4.22", features = [
+    "tokio",
+    "gzip",
+    "brotli",
+    "zstd",
+] }
+async-trait = "0.1.71"
+axum = { version = "0.8.1", features = ["ws", "multipart"] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
+base64 = "0.23.1"
+brotli = "8.0.4"
+built = "0.8.1"
+bytes = "1.8.0"
+clap = { version = "4.3.11", features = ["derive", "env"] }
+dashmap = "6.0.1"
+directories = "6.0.0"
+flate2 = "1.0.26"
+fnv = "1.0.7"
+futures = "0.3.28"
+globwalk = "0.9.1"
+governor = "0.10.4"
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+hex = "0.4.3"
+hmac = "0.13.0"
+http = "1.1.0"
+hickory-proto = { version = "0.26.3", features = ["dnssec-aws-lc-rs"] }
+hickory-resolver = { version = "0.26.3", features = [
+    "tokio",
+    "system-config",
+] }
+http-body-util = "0.1.2"
+httpdate = "1.0.3"
+humantime-serde = "1.1.1"
+hyper = { version = "1.4.1", features = ["full"] }
+hyper-util = { version = "0.1.10", features = [
+    "full",
+    "http1",
+    "http2",
+    "server",
+] }
+ignore = "0.4"
+include_dir = "0.7.3"
+indexmap = { version = "2.0.0", features = ["serde"] }
+ipnet = { version = "2.11.0", features = ["serde"] }
+instant-acme = { version = "0.8.5", default-features = false, features = ["aws-lc-rs"] }
+libc = "0.2.189"
+log = "0.4.19"
+maxminddb = "0.32.0"
+mime_guess = "2.0.4"
+mockito = "1.6.1"
+rmcp = { version = "3.5.1", features = [
+    "server",
+    "transport-streamable-http-server",
+] }
+schemars = "1.1.0"
+moka = { version = "0.12.16", features = ["sync"] }
+network-interface = "2.0.0"
+once_cell = "1.18.0"
+percent-encoding = "2.3.0"
+phf = { version = "0.14.0", features = ["macros"] }
+pin-project-lite = "0.2.10"
+pkcs8 = { version = "0.11.0", features = ["pem"] }
+ppp = "2.3.0"
+quinn = { version = "0.11.6", default-features = false, features = [
+    "runtime-tokio",
+    "rustls-aws-lc-rs",
+] }
+rand = "0.10.2"
+rcgen = { version = "0.14.10", default-features = false, features = [
+    "aws_lc_rs",
+    "pem",
+    "x509-parser",
+] }
+reqwest = { version = "0.13.5", default-features = false, features = [
+    "rustls-no-provider",
+    "http2",
+    "json",
+] }
+aws-lc-rs = "1.14.1"
+rpassword = "7.2.0"
+rsa = "0.9.8"
+rustls = { version = "0.23.46", default-features = false, features = [
+    "aws_lc_rs",
+    "prefer-post-quantum",
+    "std",
+    "tls12",
+    "logging",
+] }
+rustls-native-certs = "0.8.0"
+sailfish = "0.11.7"
+serde = { version = "1.0.171", features = ["rc"] }
+serde_default = "0.2.0"
+serde_derive = "1.0.171"
+serde_json = "1.0.102"
+serde_qs = "1.1.3"
+sha1 = "0.11.0"
+sha2 = "0.11.0"
+shellexpand = "3.1.0"
+socket2 = "0.6.1"
+subtle = "2.6.1"
+sqlx = { version = "0.9.0", features = [
+    "runtime-tokio",
+    "tls-rustls-aws-lc-rs",
+    "sqlite",
+    "time",
+] }
+tar = "0.4.38"
+r3v3rs3-api = { version = "0.2.98" }
+thiserror = "2.0.0"
+time = { version = "0.3.36", features = ["serde"] }
+tokio = { version = "1.29.1", features = [
+    "macros",
+    "rt-multi-thread",
+    "net",
+    "signal",
+    "io-util",
+    "process",
+    "time",
+] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = [
+    "tls12",
+    "aws_lc_rs",
+] }
+tokio-stream = { version = "0.1.14", features = ["sync", "net"] }
+tokio-tungstenite = { version = "0.30.0", features = [
+    "rustls-tls-native-roots",
+] }
+tokio-util = { version = "0.7.14", features = ["compat", "io"] }
+toml = { version = "1.1.6", features = ["preserve_order"] }
+toml_edit = { version = "0.25.15", features = ["serde"] }
+totp-rs = { version = "6.0.0", features = ["gen_secret", "zeroize"] }
+tower-http = { version = "0.6.11", features = [
+    "compression-gzip",
+    "compression-br",
+    "compression-zstd",
+] }
+tower-service = "0.3.3"
+tower_governor = "0.8.0"
+tracing = "0.1.37"
+tracing-appender = "0.2.2"
+tracing-subscriber = { version = "0.3.17", features = ["json"] }
+url = { version = "2.4.0", features = ["serde"] }
+utoipa = "6.0"
+utoipa-axum = "0.3"
+utoipa-swagger-ui = { version = "10.0", features = ["axum", "vendored"] }
+x509-parser = "0.18.1"
+yamux = "0.14.1"
+zstd = "0.14.3"
 
 [patch.crates-io]
 r3v3rs3-api = { path = "./r3v3rs3-api" }

@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # Workspace packages whose version line a version bump changes in Cargo.lock.
-readonly WORKSPACE_PACKAGES='r3v3rs3|r3v3rs3-cli|r3v3rs3-api|r3v3rs3-webui'
+readonly WORKSPACE_PACKAGES='r3v3rs3|r3v3rs3-cli|r3v3rs3-api|r3v3rs3-webui|r3v3rs3-core|r3v3rs3-proxy|r3v3rs3-platform|r3v3rs3-server|r3v3rs3-admin'
 readonly MAX_HOPS=10
 
 # Prints a Cargo.toml without the version line of its [package] or [workspace.package] table.

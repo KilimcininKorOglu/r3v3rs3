@@ -1,0 +1,2458 @@
+use self::{
+    auth::{AuthContext, AuthRejection},
+    cache::CacheRequest,
+    compression::ResponseCompression,
+    error::ProxyError,
+    header_rules::HeaderVariables,
+    page::PagePreferences,
+    pool::{Upstream, UpstreamClients, UpstreamH2c},
+    route::{FilteredRoute, Router},
+};
+use super::{
+    PortContextEvent, ProxyRegistries,
+    proxy_protocol::{self, Client},
+    spawn_connection,
+    tls::{
+        ClientCertInfo, Handshake, PortTls, TlsTermination, port_acceptor, port_tls,
+        server_cert_resolver,
+    },
+};
+use crate::certs::cert_list::CertList;
+use anyhow::Context as _;
+use arc_swap::{ArcSwap, Cache};
+use bytes::{Buf, Bytes};
+use futures::{Stream, StreamExt};
+use h3::{quic::BidiStream, server::RequestStream};
+use http_body_util::{BodyExt, BodyStream, Full, StreamBody, combinators::BoxBody};
+use hyper::{
+    Method, Request, Response, StatusCode, Uri,
+    body::{Body, Frame, Incoming},
+    header::{
+        AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ETAG, HOST, HeaderName,
+        LOCATION,
+    },
+    http::{
+        HeaderValue,
+        uri::{Parts, PathAndQuery, Scheme},
+    },
+    service::service_fn,
+};
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use quinn::{
+    crypto::rustls::QuicServerConfig,
+    rustls::{ServerConfig, pki_types::CertificateDer, server::WebPkiClientVerifier},
+};
+use r3v3rs3_api::app::{Http2Limits, Http3Limits};
+use r3v3rs3_api::error::Error;
+use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::port::{PortStatus, SocketState};
+use r3v3rs3_api::vhost::VirtualHost;
+use r3v3rs3_api::{port::PortEntry, proxy::ProxyEntry, proxy_protocol::ProxyProtocolReceive};
+use rewriter::{RequestRewriter, ResponseRewriter, ResponseRewriterBuilder};
+use std::{net::SocketAddr, ops::ControlFlow, sync::Arc, time::SystemTime};
+use tokio::{
+    io::{AsyncRead, AsyncWrite, BufStream},
+    sync::Notify,
+};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
+use tokio_rustls::{TlsAcceptor, rustls::pki_types::ServerName};
+use tracing::{Instrument, Level, Span, debug, error, info, span};
+
+pub mod affinity;
+pub mod auth;
+mod body_limit;
+mod byte_count;
+use byte_count::ByteCountBody;
+pub(crate) mod bot;
+pub(crate) mod cache;
+pub mod client_ip;
+mod compression;
+pub(crate) mod concurrency_limit;
+mod cookie;
+mod error;
+pub mod filter;
+mod fixed;
+pub(crate) mod grpc_web;
+pub mod header_rules;
+mod mirror;
+pub mod page;
+pub mod pool;
+pub(crate) mod rate_limit;
+pub mod redirect;
+pub mod rewrite;
+mod rewriter;
+mod route;
+pub(crate) mod trace;
+
+pub use auth::SessionService;
+
+const MAX_BUFFER_SIZE: usize = 4096;
+const HTTP2_MAX_FRAME_SIZE: usize = 16384;
+/// Builds the server-side connection builder with the HTTP/2 flood limits. The limits come from
+/// the global config or from the options of the port. Every server-side connection of the admin
+/// API, the challenge handler and the proxies uses this builder.
+pub fn http_server_builder(
+    limits: &r3v3rs3_api::app::Http2Limits,
+) -> hyper_util::server::conn::auto::Builder<TokioExecutor> {
+    let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    builder
+        .http1()
+        .timer(hyper_util::rt::TokioTimer::new())
+        .header_read_timeout(std::time::Duration::from_secs(30));
+    builder
+        .http2()
+        .timer(hyper_util::rt::TokioTimer::new())
+        .max_header_list_size(limits.max_header_list_size)
+        .max_pending_accept_reset_streams(limits.max_pending_accept_reset_streams);
+    builder
+}
+
+/// Starts a client connection of an HTTP port.
+pub struct HttpStarter {
+    /// `None` when the TLS config of the port is invalid.
+    tls_acceptor: Option<Option<TlsAcceptor>>,
+    proxy_protocol: Option<Arc<ProxyProtocolReceive>>,
+    http2: Http2Limits,
+    shared: Arc<ArcSwap<SharedContext>>,
+    stop_notifier: Arc<Notify>,
+    span: Span,
+}
+
+impl HttpStarter {
+    /// `challenge` is the TLS config of the active TLS-ALPN-01 challenges.
+    pub fn start(self, stream: BufStream<TcpStream>, challenge: Option<Arc<ServerConfig>>) {
+        let Some(tls) = port_tls(self.tls_acceptor, challenge) else {
+            return;
+        };
+        let (shared, stop_notifier) = (Cache::new(self.shared), self.stop_notifier);
+        let (proxy_protocol, span) = (self.proxy_protocol, self.span.clone());
+        let http2 = self.http2;
+        let peer = stream.get_ref().peer_addr().ok();
+        let task = async move {
+            let client = proxy_protocol::accept(stream, proxy_protocol.as_deref())
+                .await
+                .context("proxy protocol")?;
+            start(client, tls, http2, shared, stop_notifier, span).await
+        };
+        spawn_connection(self.span, peer, task);
+    }
+}
+
+#[derive(Debug)]
+pub struct HttpPortContext {
+    pub listen: SocketAddr,
+    status: PortStatus,
+    span: Span,
+    tls_termination: Option<TlsTermination>,
+    proxy_protocol: Option<Arc<ProxyProtocolReceive>>,
+    /// The effective HTTP/2 flood limits: the port override or the global config.
+    http2_limits: Http2Limits,
+    /// The effective HTTP/3 stream limits: the port override or the global config.
+    http3_limits: Http3Limits,
+    h3_server_config: Option<Arc<quinn::ServerConfig>>,
+    shared: Arc<ArcSwap<SharedContext>>,
+    stop_notifier: Arc<Notify>,
+}
+
+impl HttpPortContext {
+    pub fn new(
+        entry: &PortEntry,
+        global_http2: &Http2Limits,
+        global_http3: &Http3Limits,
+    ) -> Result<Self, Error> {
+        let span = span!(
+            Level::INFO,
+            "proxy",
+            resource_id = entry.id.to_string(),
+            listen = %entry.port.listen
+        );
+        let enter = span.clone();
+        let _enter = enter.enter();
+
+        info!("initializing http proxy");
+        let listen = entry.port.listen.socket_addr()?;
+
+        let tls_termination = if let Some(tls) = &entry.port.opts.tls_termination {
+            let alpn = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            Some(TlsTermination::new(tls, alpn)?)
+        } else if entry.port.listen.is_tls() {
+            return Err(Error::TlsTerminationConfigMissing);
+        } else {
+            None
+        };
+
+        Ok(Self {
+            listen,
+            status: Default::default(),
+            span,
+            tls_termination,
+            proxy_protocol: entry.port.opts.proxy_protocol.clone().map(Arc::new),
+            http2_limits: entry.port.opts.http2_limits.unwrap_or(*global_http2),
+            http3_limits: entry.port.opts.http3_limits.unwrap_or(*global_http3),
+            h3_server_config: None,
+            shared: Arc::new(ArcSwap::from_pointee(SharedContext {
+                router: Default::default(),
+                header_rewriter: Default::default(),
+                geoip: Arc::new(crate::proxy::geoip::GeoIpResolver::empty()),
+                quarantine: Arc::new(crate::security::AutoQuarantineTracker::default()),
+            })),
+            stop_notifier: Arc::new(Notify::new()),
+        })
+    }
+
+    /// The effective HTTP/3 stream limits of this port.
+    pub fn http3_limits(&self) -> &Http3Limits {
+        &self.http3_limits
+    }
+
+    /// The effective HTTP/2 flood limits of this port.
+    pub fn http2_limits(&self) -> &Http2Limits {
+        &self.http2_limits
+    }
+
+    pub async fn setup(
+        &mut self,
+        ports: &[PortEntry],
+        certs: &CertList,
+        proxies: Vec<ProxyEntry>,
+        sessions: &Arc<SessionService>,
+        registries: &ProxyRegistries,
+    ) -> Result<(), Error> {
+        let https_ports = ports
+            .iter()
+            .filter(|entry| entry.port.listen.is_http() && entry.port.listen.is_tls())
+            .filter(|entry| {
+                proxies
+                    .iter()
+                    .any(|proxy| proxy.proxy.ports.contains(&entry.id))
+            })
+            .collect::<Vec<_>>();
+        let https_port = if self.listen.is_ipv4() {
+            https_ports.iter().find(|entry| {
+                entry
+                    .port
+                    .listen
+                    .ip_addr()
+                    .map(|ip| ip.is_ipv4())
+                    .unwrap_or_default()
+            })
+        } else {
+            https_ports.iter().find(|entry| {
+                entry
+                    .port
+                    .listen
+                    .ip_addr()
+                    .map(|ip| ip.is_ipv6())
+                    .unwrap_or_default()
+            })
+        }
+        .or(https_ports.first())
+        .and_then(|entry| entry.port.listen.port().ok());
+
+        let quic_ports = ports
+            .iter()
+            .filter(|entry| entry.port.listen.is_http() && entry.port.listen.is_udp())
+            .filter(|entry| {
+                proxies
+                    .iter()
+                    .any(|proxy| proxy.proxy.ports.contains(&entry.id))
+            })
+            .collect::<Vec<_>>();
+
+        let quic_port = if self.listen.is_ipv4() {
+            quic_ports.iter().find(|entry| {
+                entry
+                    .port
+                    .listen
+                    .ip_addr()
+                    .map(|ip| ip.is_ipv4())
+                    .unwrap_or_default()
+            })
+        } else {
+            quic_ports.iter().find(|entry| {
+                entry
+                    .port
+                    .listen
+                    .ip_addr()
+                    .map(|ip| ip.is_ipv6())
+                    .unwrap_or_default()
+            })
+        }
+        .or(quic_ports.first())
+        .and_then(|entry| entry.port.listen.port().ok());
+
+        let mut upstream = UpstreamClients::new(certs, registries.dns.clone())?;
+        self.shared.store(Arc::new(SharedContext {
+            router: Router::new(
+                proxies,
+                https_port,
+                quic_port,
+                &mut upstream,
+                sessions,
+                registries,
+            ),
+            header_rewriter: RequestRewriter::builder()
+                .set_via(HeaderValue::from_static("r3v3rs3"))
+                .build(),
+            geoip: registries.geoip.clone(),
+            quarantine: registries.quarantine.clone(),
+        }));
+
+        if let Some(tls) = &mut self.tls_termination {
+            self.status.state.tls = Some(tls.setup(certs).await);
+        }
+
+        self.h3_server_config = h3_server_config(certs, self.tls_termination.as_ref());
+        Ok(())
+    }
+
+    pub fn apply(&mut self, new: Self) {
+        *self = Self {
+            stop_notifier: self.stop_notifier.clone(),
+            ..new
+        };
+    }
+
+    pub fn event(&mut self, event: PortContextEvent) {
+        match event {
+            PortContextEvent::SocketStateUpdated(state) => {
+                if self.status.state.socket != state {
+                    self.status.started_at = if state == SocketState::Listening {
+                        Some(SystemTime::now())
+                    } else {
+                        None
+                    };
+                }
+                self.status.state.socket = state;
+            }
+        }
+    }
+
+    pub fn status(&self) -> &PortStatus {
+        &self.status
+    }
+
+    pub fn reset(&mut self) {
+        self.stop_notifier.notify_waiters();
+    }
+
+    pub fn starter(&self) -> HttpStarter {
+        HttpStarter {
+            tls_acceptor: port_acceptor(self.tls_termination.as_ref()),
+            proxy_protocol: self.proxy_protocol.clone(),
+            http2: self.http2_limits,
+            shared: Arc::clone(&self.shared),
+            stop_notifier: self.stop_notifier.clone(),
+            span: self.span.clone(),
+        }
+    }
+
+    async fn accept_quic(
+        conn: quinn::Incoming,
+        server_config: Arc<quinn::ServerConfig>,
+    ) -> anyhow::Result<quinn::Connection> {
+        Ok(conn.accept_with(server_config)?.await?)
+    }
+
+    pub fn start_quic_proxy(&mut self, conn: quinn::Incoming) {
+        let span = self.span.clone();
+        let stop_notifier = self.stop_notifier.clone();
+        let span_cloned = span.clone();
+        let shared_cache = Cache::new(Arc::clone(&self.shared));
+
+        let server_config = if let Some(config) = &self.h3_server_config {
+            config.clone()
+        } else {
+            return;
+        };
+
+        tokio::spawn(
+            async move {
+                let _lease = crate::stats::ConnectionLease::acquire();
+                match Self::accept_quic(conn, server_config).await {
+                    Ok(conn) => {
+                        let local = conn.local_ip();
+                        let remote = conn.remote_address();
+                        let client_cert = quic_client_cert(&conn);
+                        let h3_conn = h3::server::Connection::<_, Bytes>::new(
+                            h3_quinn::Connection::new(conn),
+                        )
+                        .await;
+                        match h3_conn {
+                            Ok(mut conn) => loop {
+                                match conn.accept().await {
+                                    Ok(Some(resolver)) => {
+                                        // h3 0.0.8 reads the request headers here, not in accept.
+                                        let (req, stream) = match resolver.resolve_request().await {
+                                            Ok(request) => request,
+                                            Err(err) => {
+                                                error!("{err}");
+                                                break;
+                                            }
+                                        };
+                                        spawn_quic_stream(
+                                            req,
+                                            stream,
+                                            shared_cache.clone(),
+                                            QuickContext {
+                                                local,
+                                                remote,
+                                                client_cert: client_cert.clone(),
+                                            },
+                                            span_cloned.clone(),
+                                            stop_notifier.clone(),
+                                        );
+                                    }
+                                    Ok(None) => break,
+                                    Err(err) => {
+                                        error!("{err}");
+                                        break;
+                                    }
+                                }
+                            },
+                            Err(err) => {
+                                error!("{err}");
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("{err}");
+                    }
+                }
+            }
+            .instrument(span),
+        );
+    }
+}
+
+/// Builds the HTTP/3 server config with the client authentication of the port. `None` means that
+/// the client authentication config is invalid, so the port refuses QUIC connections.
+fn h3_server_config(
+    certs: &CertList,
+    tls: Option<&TlsTermination>,
+) -> Option<Arc<quinn::ServerConfig>> {
+    let verifier = match tls {
+        Some(tls) => tls.client_verifier(certs).ok()?,
+        None => WebPkiClientVerifier::no_client_auth(),
+    };
+    let mut tls_config = ServerConfig::builder()
+        .with_client_cert_verifier(verifier)
+        .with_cert_resolver(server_cert_resolver(certs, vec![]));
+    tls_config.max_early_data_size = u32::MAX;
+    tls_config.alpn_protocols = vec!["h3".into()];
+
+    QuicServerConfig::try_from(tls_config)
+        .ok()
+        .map(|config| Arc::new(quinn::ServerConfig::with_crypto(Arc::new(config))))
+}
+
+/// Reads the verified client certificate of a QUIC connection.
+fn quic_client_cert(conn: &quinn::Connection) -> Option<Arc<ClientCertInfo>> {
+    let chain = conn
+        .peer_identity()?
+        .downcast::<Vec<CertificateDer<'static>>>()
+        .ok()?;
+    ClientCertInfo::from_chain(Some(chain.as_slice())).map(Arc::new)
+}
+
+async fn start(
+    client: Client,
+    tls: Option<PortTls>,
+    http2: Http2Limits,
+    mut shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
+    stop_notifier: Arc<Notify>,
+    span: Span,
+) -> anyhow::Result<()> {
+    let Client {
+        mut stream,
+        remote,
+        peer,
+    } = client;
+    let local = stream.get_ref().local_addr()?;
+    let (mut client_stream, server_stream) = tokio::io::duplex(MAX_BUFFER_SIZE);
+
+    let first_byte = stream.read_u8().await.context("read initial byte")?;
+    client_stream.write_u8(first_byte).await?;
+
+    spawn_pipe(stream, client_stream, stop_notifier, span.clone());
+
+    if tls.is_some() && local.port() != 80 && first_byte != 0x16 {
+        spawn_redirect(
+            server_stream,
+            http2,
+            shared_cache.load().clone(),
+            local,
+            span.clone(),
+        );
+        return Ok(());
+    }
+
+    let forwarded_proto = if tls.is_some() { "https" } else { "http" };
+    let Some((stream, tls_info)) = handshake(tls, Box::new(server_stream), remote)
+        .await
+        .context("tls handshake")?
+    else {
+        return Ok(());
+    };
+    let TlsInfo {
+        http2: server_http2,
+        sni,
+        client_cert,
+        early_data,
+    } = tls_info;
+
+    let span_cloned = span.clone();
+    let service = hyper::service::service_fn(move |req: Request<Incoming>| {
+        let mut shared_cache = shared_cache.clone();
+        let span = span_cloned.clone();
+        let enter = span.clone();
+        let _enter = enter.enter();
+
+        let shared = shared_cache.load().clone();
+        let sni = sni.clone();
+        let client_cert = client_cert.clone();
+
+        async move {
+            let info = RequestInfo {
+                remote,
+                peer,
+                local: local.to_string(),
+                sni: sni.as_deref(),
+                proto: forwarded_proto,
+                client_cert: client_cert.as_deref(),
+                early_data,
+            };
+            let fronting = is_domain_fronting(&req, sni.as_deref());
+            proxied_response(&shared, req, &info, fronting).await
+        }
+        .instrument(span)
+    });
+
+    spawn_http(stream, service, server_http2, http2, span.clone());
+
+    Ok(())
+}
+
+/// Serves the connection with the HTTP service. `http2_only` skips the protocol detection, because
+/// the TLS handshake already selected HTTP/2 through ALPN.
+fn spawn_http<I, S, B>(stream: I, service: S, http2_only: bool, limits: Http2Limits, span: Span)
+where
+    I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    S: hyper::service::Service<Request<Incoming>, Response = Response<B>> + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    B: Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    tokio::task::spawn(
+        async move {
+            let stream = TokioIo::new(stream);
+            let builder = http_server_builder(&limits);
+            let builder = if http2_only {
+                builder.http2_only()
+            } else {
+                builder
+            };
+            let http = builder.serve_connection_with_upgrades(stream, service);
+            if let Err(err) = http.await {
+                debug!(%err, "client HTTP connection closed");
+            }
+        }
+        .instrument(span),
+    );
+}
+
+/// Copies the bytes of the client connection into the duplex stream of the proxy until one side
+/// closes or the port stops.
+fn spawn_pipe(
+    mut stream: BufStream<TcpStream>,
+    mut client_stream: tokio::io::DuplexStream,
+    stop_notifier: Arc<Notify>,
+    span: Span,
+) {
+    tokio::spawn(
+        async move {
+            tokio::select! {
+                result = tokio::io::copy_bidirectional(&mut stream, &mut client_stream) => {
+                    if let Err(err) = result {
+                        if super::is_client_io_error(&err) {
+                            debug!(%err, "client pipe closed");
+                        } else {
+                            error!(%err, "pipe error");
+                        }
+                    }
+                },
+                _ = stop_notifier.notified() => {
+                    debug!("stop");
+                },
+            }
+        }
+        .instrument(span),
+    );
+}
+
+/// Answers a plain HTTP request on a TLS port with a redirect to the secure address.
+fn spawn_redirect(
+    server_stream: tokio::io::DuplexStream,
+    limits: Http2Limits,
+    shared: Arc<SharedContext>,
+    local: SocketAddr,
+    span: Span,
+) {
+    tokio::task::spawn(
+        async move {
+            let server_stream = TokioIo::new(server_stream);
+            let service = service_fn(move |req| {
+                let shared = shared.clone();
+                async move { redirect(req, &shared.router, local).await }
+            });
+            if let Err(err) = http_server_builder(&limits)
+                .serve_connection(server_stream, service)
+                .await
+            {
+                error!("Failed to serve the connection: {:?}", err);
+            }
+        }
+        .instrument(span),
+    );
+}
+
+/// Routes one request and rewrites its response. A domain fronting request gets no route.
+async fn proxied_response(
+    shared: &SharedContext,
+    req: Request<Incoming>,
+    info: &RequestInfo<'_>,
+    fronting: bool,
+) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
+    let start = std::time::Instant::now();
+    let method = req.method().to_string();
+    let uri = req.uri().to_string();
+    let host = req
+        .headers()
+        .get(hyper::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let proto = info.proto.to_string();
+    let request_headers = extract_headers(req.headers());
+    let is_websocket = req
+        .headers()
+        .get(hyper::header::UPGRADE)
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"));
+    let content_type = req
+        .headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(ToString::to_string);
+    let (req, request_body) = buffer_request_body(req, is_websocket).await;
+
+    let (req, response_rewriter, resource_id, route_path, client_ip) = if fronting {
+        (
+            ProxiedRequest::Err(ProxyError::DomainFrontingDetected),
+            ResponseRewriter::builder(),
+            None,
+            None,
+            info.remote.ip(),
+        )
+    } else {
+        route_request(shared, req, info).await
+    };
+    let proxy_id = resource_id.map(|id| id.to_string());
+    crate::stats::count_http_request(proxy_id.as_deref(), route_path.as_deref());
+    if shared.quarantine.is_quarantined(&client_ip) {
+        return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
+    }
+    let own_response = answered_by_r3v3rs3(&req);
+    let res = upstream_response(req).await;
+    let mapped = response_rewriter.build().map_response(res);
+    let duration = start.elapsed();
+    crate::stats::record_request_duration(duration, proxy_id.as_deref(), route_path.as_deref());
+
+    let country = shared.geoip.lookup_country(client_ip);
+    check_and_record_quarantine(&shared.quarantine, client_ip, &uri, own_response, &mapped);
+    record_access_log(
+        AccessLogMeta {
+            resource_id,
+            client_ip,
+            country,
+            method,
+            host,
+            uri,
+            proto,
+            request_headers,
+            request_body,
+            content_type,
+            is_websocket,
+        },
+        duration,
+        &mapped,
+    );
+
+    mapped.map(|res| res.map(|body| BoxBody::new(ByteCountBody::tx(body))))
+}
+
+const SENSITIVE_KEYWORDS: &[&str] = &[
+    "password",
+    "secret",
+    "token",
+    "apikey",
+    "api_key",
+    "credential",
+];
+
+fn is_sensitive_header_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "authorization"
+            | "proxy-authorization"
+            | "cookie"
+            | "set-cookie"
+            | "x-api-key"
+            | "api-key"
+            | "x-auth-token"
+            | "x-csrf-token"
+            | "x-xsrf-token"
+    )
+}
+
+fn is_sensitive_field_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    SENSITIVE_KEYWORDS.iter().any(|&k| lower.contains(k))
+}
+
+fn redact_json_value(val: &mut serde_json::Value) {
+    match val {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                if is_sensitive_field_name(k) {
+                    *v = serde_json::Value::String("[REDACTED]".to_string());
+                } else {
+                    redact_json_value(v);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                redact_json_value(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_form_data(body: &str) -> String {
+    if !body.contains('=') {
+        return body.to_string();
+    }
+    let mut parts = Vec::new();
+    for pair in body.split('&') {
+        if let Some((k, _)) = pair.split_once('=') {
+            if is_sensitive_field_name(k) {
+                parts.push(format!("{k}=[REDACTED]"));
+            } else {
+                parts.push(pair.to_string());
+            }
+        } else {
+            parts.push(pair.to_string());
+        }
+    }
+    parts.join("&")
+}
+
+fn sanitize_body_preview(body: Option<String>) -> Option<String> {
+    let body = body?;
+    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&body) {
+        redact_json_value(&mut json);
+        return serde_json::to_string(&json).ok();
+    }
+    Some(redact_form_data(&body))
+}
+
+fn extract_headers(headers: &hyper::HeaderMap) -> Vec<r3v3rs3_api::traffic::HeaderEntry> {
+    headers
+        .iter()
+        .map(|(k, v)| {
+            let value = if is_sensitive_header_name(k.as_str()) {
+                "[REDACTED]".to_string()
+            } else {
+                v.to_str().unwrap_or_default().to_string()
+            };
+            r3v3rs3_api::traffic::HeaderEntry {
+                name: k.to_string(),
+                value,
+            }
+        })
+        .collect()
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("{0}")]
+struct BodyStreamError(String);
+
+async fn buffer_request_body(
+    req: Request<Incoming>,
+    is_websocket: bool,
+) -> (Request<BoxBody<Bytes, BodyStreamError>>, Option<String>) {
+    let cl = req
+        .headers()
+        .get(hyper::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+    let should_buffer = !is_websocket && matches!(cl, Some(len) if len > 0 && len <= 16384);
+    let (parts, incoming) = req.into_parts();
+    let tracked = ByteCountBody::rx(incoming);
+    if should_buffer {
+        if let Ok(collected) = tracked.collect().await {
+            let bytes = collected.to_bytes();
+            let preview = sanitize_body_preview(String::from_utf8(bytes.to_vec()).ok());
+            let full = Full::new(bytes)
+                .map_err(|e: std::convert::Infallible| -> BodyStreamError { match e {} });
+            return (Request::from_parts(parts, BoxBody::new(full)), preview);
+        }
+        let empty = http_body_util::Empty::new()
+            .map_err(|e: std::convert::Infallible| -> BodyStreamError { match e {} });
+        return (Request::from_parts(parts, BoxBody::new(empty)), None);
+    }
+    let boxed = BoxBody::new(tracked.map_err(|e| BodyStreamError(e.to_string())));
+    (Request::from_parts(parts, boxed), None)
+}
+
+struct AccessLogMeta {
+    resource_id: Option<ShortId>,
+    client_ip: std::net::IpAddr,
+    country: Option<String>,
+    method: String,
+    host: String,
+    uri: String,
+    proto: String,
+    request_headers: Vec<r3v3rs3_api::traffic::HeaderEntry>,
+    request_body: Option<String>,
+    content_type: Option<String>,
+    is_websocket: bool,
+}
+
+fn emit_completed_access_log(
+    meta: &AccessLogMeta,
+    status: u16,
+    latency_ms: f64,
+    bytes_sent: u64,
+    error: Option<&str>,
+) {
+    if let Some(err) = error {
+        info!(
+            target: "r3v3rs3::access_log",
+            resource_id = ?meta.resource_id,
+            client = %meta.client_ip,
+            method = %meta.method,
+            host = %meta.host,
+            uri = %meta.uri,
+            status,
+            latency_ms,
+            bytes_sent,
+            error = %err,
+            "request completed with error"
+        );
+    } else {
+        info!(
+            target: "r3v3rs3::access_log",
+            resource_id = ?meta.resource_id,
+            client = %meta.client_ip,
+            method = %meta.method,
+            host = %meta.host,
+            uri = %meta.uri,
+            status,
+            latency_ms,
+            bytes_sent,
+            "request completed"
+        );
+    }
+}
+
+fn record_access_log<B>(
+    meta: AccessLogMeta,
+    duration: std::time::Duration,
+    mapped: &Result<Response<B>, anyhow::Error>,
+) {
+    let (status, error, response_headers, bytes_sent) = match mapped {
+        Ok(res) => {
+            let bytes = res
+                .headers()
+                .get(hyper::header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok());
+            (
+                res.status().as_u16(),
+                None,
+                extract_headers(res.headers()),
+                bytes.unwrap_or(0),
+            )
+        }
+        Err(err) => (502, Some(err.to_string()), Vec::new(), 0),
+    };
+    crate::stats::record_http_response(status);
+    let latency_ms = duration.as_secs_f64() * 1000.0;
+    emit_completed_access_log(&meta, status, latency_ms, bytes_sent, error.as_deref());
+
+    crate::proxy::access_log::record(r3v3rs3_api::traffic::AccessLogEntry {
+        id: 0,
+        timestamp: time::OffsetDateTime::now_utc(),
+        resource_id: meta.resource_id,
+        client_ip: meta.client_ip.to_string(),
+        country: meta.country,
+        method: meta.method,
+        host: meta.host,
+        uri: meta.uri,
+        status,
+        latency_ms,
+        proto: meta.proto,
+        error,
+        request_headers: meta.request_headers,
+        response_headers,
+        request_body: meta.request_body,
+        response_body: None,
+        content_type: meta.content_type,
+        is_websocket: Some(meta.is_websocket),
+    });
+}
+
+/// Whether r3v3rs3 answers the request itself, without an upstream server: no route, a refused
+/// request or a response of a route policy.
+fn answered_by_r3v3rs3<R>(req: &ProxiedRequest<R>) -> bool {
+    !matches!(req, ProxiedRequest::Ok(_))
+}
+
+/// Records a quarantine violation for a scanner path, or for a blocked status code of a response
+/// that r3v3rs3 created itself. The status of an upstream response never counts, because a 403
+/// or 404 of the application is no sign of a hostile client.
+fn check_and_record_quarantine<B>(
+    quarantine: &crate::security::AutoQuarantineTracker,
+    client_ip: std::net::IpAddr,
+    uri: &str,
+    own_response: bool,
+    mapped: &Result<Response<B>, anyhow::Error>,
+) {
+    if client_ip.is_loopback() {
+        return;
+    }
+    let config = quarantine.get_config();
+    if !config.enabled {
+        return;
+    }
+
+    if let Some(pattern) = quarantine.check_scanner_uri(uri) {
+        let reason = format!("Scanner pattern probe: {pattern}");
+        let _ = quarantine.record_violation(client_ip, reason, 1);
+        return;
+    }
+
+    if !own_response {
+        return;
+    }
+
+    let status_code = match mapped {
+        Ok(res) => res.status().as_u16(),
+        Err(_) => 500,
+    };
+
+    if quarantine.is_violating_status(status_code) {
+        let reason = format!("Repeated HTTP {status_code} error");
+        let _ = quarantine.record_violation(client_ip, reason, 1);
+    }
+}
+
+/// The details of the TLS connection of a client.
+#[derive(Default)]
+struct TlsInfo {
+    http2: bool,
+    sni: Option<String>,
+    client_cert: Option<Arc<ClientCertInfo>>,
+    early_data: bool,
+}
+
+/// Runs the TLS handshake when the port terminates TLS. `None` when the connection served a
+/// TLS-ALPN-01 challenge.
+async fn handshake(
+    tls: Option<PortTls>,
+    stream: Box<dyn IoStream>,
+    remote: SocketAddr,
+) -> anyhow::Result<Option<(Box<dyn IoStream>, TlsInfo)>> {
+    let Some(tls) = tls else {
+        return Ok(Some((stream, TlsInfo::default())));
+    };
+    debug!(%remote, "server: tls handshake");
+    let start = std::time::Instant::now();
+    let mut accepted = match tls.accept(stream).await {
+        Ok(Handshake::Established(accepted)) => {
+            crate::stats::record_tls_handshake(start.elapsed());
+            accepted
+        }
+        Ok(Handshake::ChallengeServed) => return Ok(None),
+        Err(err) => {
+            crate::stats::count_tls_handshake_error();
+            return Err(err.into());
+        }
+    };
+    let early_data = accepted.get_mut().1.early_data().is_some();
+    let conn = &accepted.get_ref().1;
+    let info = TlsInfo {
+        http2: conn.alpn_protocol() == Some(b"h2"),
+        sni: conn.server_name().map(str::to_string),
+        client_cert: ClientCertInfo::from_chain(conn.peer_certificates()).map(Arc::new),
+        early_data,
+    };
+    Ok(Some((accepted, info)))
+}
+
+/// A request for the upstream server with the upstream connections of the route, and its
+/// cache state when the proxy has a cache.
+struct UpstreamCall<R> {
+    req: R,
+    upstream: Upstream,
+    span: Span,
+    cache_request: Option<CacheRequest>,
+    guard: Option<concurrency_limit::ConcurrencyGuard>,
+    stream_permit: Option<r3v3rs3_api::priority::StreamPermit>,
+}
+
+enum ProxiedRequest<R> {
+    /// Boxed, because the call is much larger than the other variants.
+    Ok(Box<UpstreamCall<R>>),
+    /// A response that r3v3rs3 sends without contacting the upstream server.
+    Respond(Response<Full<Bytes>>),
+    Err(ProxyError),
+}
+
+#[derive(Debug)]
+struct SharedContext {
+    pub router: Router,
+    pub header_rewriter: RequestRewriter,
+    pub geoip: Arc<crate::proxy::geoip::GeoIpResolver>,
+    pub quarantine: Arc<crate::security::AutoQuarantineTracker>,
+}
+
+pub trait IoStream: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<S> IoStream for S where S: AsyncRead + AsyncWrite + Unpin + Send {}
+
+#[derive(Debug, Clone)]
+pub struct Connection {
+    pub name: ServerName<'static>,
+    pub port: u16,
+    pub tls: bool,
+}
+
+async fn redirect(
+    req: hyper::Request<Incoming>,
+    router: &Router,
+    local: SocketAddr,
+) -> Result<Response<String>, hyper::http::Error> {
+    if let Ok(uri) = get_secure_uri(&req, router, local) {
+        Response::builder()
+            .header("Location", uri.to_string())
+            .status(StatusCode::PERMANENT_REDIRECT)
+            .body(String::new())
+    } else {
+        Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(String::from("TLS required\r\n"))
+    }
+}
+
+fn is_valid_secure_redirect_host(host_clean: &str, router: &Router, local: SocketAddr) -> bool {
+    if host_clean.is_empty() {
+        return false;
+    }
+    if is_local_or_ip(host_clean) || host_clean == local.ip().to_string() {
+        return true;
+    }
+    router.has_matching_vhost(host_clean)
+}
+
+fn is_local_or_ip(host: &str) -> bool {
+    host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host.parse::<std::net::IpAddr>().is_ok()
+}
+
+fn get_secure_uri(
+    req: &hyper::Request<Incoming>,
+    router: &Router,
+    local: SocketAddr,
+) -> anyhow::Result<Uri> {
+    let mut parts = req.uri().clone().into_parts();
+    let host_str = req
+        .headers()
+        .get(HOST)
+        .and_then(|h| h.to_str().ok())
+        .or_else(|| req.uri().authority().map(|a| a.as_str()))
+        .unwrap_or_default();
+    let host_only = host_str.split(':').next().unwrap_or(host_str);
+    let host_clean = host_only.trim_start_matches('[').trim_end_matches(']');
+    if !is_valid_secure_redirect_host(host_clean, router, local) {
+        anyhow::bail!("unrecognized host for secure redirect");
+    }
+    parts.authority = Some(host_str.parse()?);
+    parts.scheme = Some(Scheme::HTTPS);
+    Ok(Uri::from_parts(parts)?)
+}
+
+struct QuickContext {
+    local: Option<std::net::IpAddr>,
+    remote: SocketAddr,
+    client_cert: Option<Arc<ClientCertInfo>>,
+}
+
+/// Connection details that the TCP and QUIC paths pass to [`route_request`].
+struct RequestInfo<'a> {
+    /// The client address from the PROXY protocol header, or the peer address.
+    remote: SocketAddr,
+    /// The address of the connected peer.
+    peer: SocketAddr,
+    local: String,
+    sni: Option<&'a str>,
+    proto: &'static str,
+    /// The verified client certificate of the TLS connection.
+    client_cert: Option<&'a ClientCertInfo>,
+    early_data: bool,
+}
+
+fn split_host_port(host: &str) -> Option<&str> {
+    if host.is_empty() {
+        return None;
+    }
+    if host.starts_with('[') {
+        let closing = host.find(']')?;
+        Some(&host[..=closing])
+    } else {
+        host.split(':').next()
+    }
+}
+
+fn header_host<B>(req: &Request<B>) -> Option<&str> {
+    req.headers()
+        .get(HOST)
+        .and_then(|h| h.to_str().ok())
+        .and_then(split_host_port)
+}
+
+fn is_domain_fronting<B>(req: &Request<B>, sni: Option<&str>) -> bool {
+    match (sni, header_host(req)) {
+        (Some(sni), Some(header)) => !sni.eq_ignore_ascii_case(header),
+        _ => false,
+    }
+}
+
+fn validate_early_data<B>(
+    req: &mut Request<B>,
+    info: &RequestInfo<'_>,
+) -> Option<Response<Full<Bytes>>> {
+    if !info.early_data {
+        req.headers_mut()
+            .remove(r3v3rs3_api::early_data::EARLY_DATA_HEADER);
+        return None;
+    }
+
+    let path_and_query = req
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or("");
+    if !r3v3rs3_api::early_data::GLOBAL_ANTI_REPLAY.check_and_record(
+        info.remote.ip(),
+        req.method().as_str(),
+        path_and_query,
+    ) {
+        return Some(too_early_response("425 Too Early (Replay Detected)\n"));
+    }
+
+    if !r3v3rs3_api::early_data::is_safe_http_method(req.method().as_str()) {
+        return Some(too_early_response(
+            "425 Too Early (Unsafe Method in Early Data)\n",
+        ));
+    }
+
+    if let (Ok(hname), Ok(hval)) = (
+        HeaderName::from_bytes(r3v3rs3_api::early_data::EARLY_DATA_HEADER.as_bytes()),
+        HeaderValue::from_str(r3v3rs3_api::early_data::EARLY_DATA_VALUE),
+    ) {
+        req.headers_mut().insert(hname, hval);
+    }
+
+    None
+}
+
+fn too_early_response(body: &'static str) -> Response<Full<Bytes>> {
+    Response::builder()
+        .status(StatusCode::TOO_EARLY)
+        .header(hyper::header::RETRY_AFTER, "0")
+        .body(Full::new(Bytes::from(body)))
+        .unwrap_or_default()
+}
+
+fn no_route_fallback<B>(
+    shared: &SharedContext,
+    info: &RequestInfo<'_>,
+    request_host: Option<String>,
+    response_rewriter: ResponseRewriterBuilder,
+    headers: &hyper::HeaderMap,
+) -> (
+    ProxiedRequest<Request<B>>,
+    ResponseRewriterBuilder,
+    Option<ShortId>,
+    Option<String>,
+    std::net::IpAddr,
+) {
+    let error_pages = shared.router.find_error_pages(request_host.as_deref());
+    let hide_branding = shared.router.is_branding_hidden(request_host.as_deref());
+    let client_cert = info.client_cert.cloned().unwrap_or_default();
+    let request_id = trace::resolve_request_id(headers);
+    let fallback_vars = header_rules::HeaderVariables {
+        client_ip: info.remote.ip(),
+        host: request_host.unwrap_or_default(),
+        scheme: if info.proto == "http" {
+            "http"
+        } else {
+            "https"
+        },
+        request_id,
+        route: String::new(),
+        client_cert_subject: client_cert.subject,
+        client_cert_fingerprint: client_cert.fingerprint,
+    };
+    (
+        ProxiedRequest::Err(ProxyError::NoRouteFound),
+        response_rewriter
+            .error_pages(error_pages)
+            .hide_branding(hide_branding)
+            .variables(fallback_vars),
+        None,
+        None,
+        info.remote.ip(),
+    )
+}
+
+fn normalize_request_path<B>(req: &mut Request<B>) {
+    let uri = req.uri();
+    let path = uri.path();
+    let normalized = filter::normalize_path(path);
+    if normalized == path {
+        return;
+    }
+    let new_path_and_query = match uri.query() {
+        Some(query) => format!("{normalized}?{query}"),
+        None => normalized,
+    };
+    if let Ok(pq) = new_path_and_query.parse::<PathAndQuery>() {
+        let mut parts = req.uri().clone().into_parts();
+        parts.path_and_query = Some(pq);
+        if let Ok(new_uri) = Uri::from_parts(parts) {
+            *req.uri_mut() = new_uri;
+        }
+    }
+}
+
+fn is_authorized_request_headers(headers: &hyper::HeaderMap, has_auth: bool) -> bool {
+    headers.contains_key(AUTHORIZATION) || headers.contains_key(COOKIE) || has_auth
+}
+
+fn is_request_authorized<B>(req: &Request<B>, route: &FilteredRoute) -> bool {
+    is_authorized_request_headers(req.headers(), route.auth.is_some())
+}
+
+/// Matches the request to a route, applies the route policies and prepares
+/// the request for the upstream server.
+async fn route_request<B>(
+    shared: &SharedContext,
+    mut req: Request<B>,
+    info: &RequestInfo<'_>,
+) -> (
+    ProxiedRequest<Request<B>>,
+    ResponseRewriterBuilder,
+    Option<ShortId>,
+    Option<String>,
+    std::net::IpAddr,
+)
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    normalize_request_path(&mut req);
+    if let Some(early_resp) = validate_early_data(&mut req, info) {
+        return (
+            ProxiedRequest::Respond(early_resp),
+            ResponseRewriter::builder(),
+            None,
+            None,
+            info.remote.ip(),
+        );
+    }
+
+    let preferences = PagePreferences::from_headers(req.headers());
+    let response_rewriter = ResponseRewriter::builder().preferences(preferences);
+    let header_host = header_host(&req).map(str::to_string);
+    let request_host = request_host(&req, header_host.clone(), info.sni);
+    let Some((res, route)) = shared.router.get_route(&req, request_host.as_deref()) else {
+        return no_route_fallback(shared, info, request_host, response_rewriter, req.headers());
+    };
+    let response_rewriter = configure_response_rewriter(response_rewriter, route, &req);
+
+    let resource_id = route.resource_id;
+    let route_path = route.route_path.clone();
+    if let Some(key) = &route.metric_key {
+        crate::stats::count_resource_request(key);
+    }
+    let client = route
+        .client_ip
+        .resolve(info.remote.ip(), req.headers(), &crate::cdn::table());
+    let action = format!("{} {}", req.method().as_str(), req.uri());
+
+    let upstream = match check_route_access(
+        route,
+        &req,
+        &client,
+        info,
+        header_host.as_deref(),
+        request_host.as_deref(),
+    ) {
+        Ok(upstream) => upstream,
+        Err(EarlyExit::Err(err)) => {
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
+            return (
+                ProxiedRequest::Err(err),
+                response_rewriter,
+                Some(resource_id),
+                Some(route_path),
+                client.ip,
+            );
+        }
+        Err(EarlyExit::Respond(response)) => {
+            if route.maintenance.enabled {
+                info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, status = route.maintenance.status);
+            }
+            return (
+                ProxiedRequest::Respond(*response),
+                response_rewriter,
+                Some(resource_id),
+                Some(route_path),
+                client.ip,
+            );
+        }
+    };
+
+    // Authentication removes the credentials, so the cache reads them before. The cache key uses
+    // the request scheme, host and path, so the selected upstream server does not split the cache
+    // and HTTP/HTTPS requests do not share cached responses.
+    let authorized = is_request_authorized(&req, route);
+    let cache_key = format!(
+        "{} {} {}",
+        info.proto,
+        request_host.as_deref().unwrap_or_default(),
+        req.uri().path_and_query().map_or("/", |path| path.as_str())
+    );
+    let auth_ctx = AuthContext {
+        client: client.ip,
+        peer: client.peer,
+        host: request_host.as_deref(),
+        proto: info.proto,
+        base_path: &route.base_path,
+        path_segments: &res.path_segments,
+        preferences,
+        vhosts: &route.filter.vhosts,
+    };
+    let req = match authenticate_request(route, req, &auth_ctx, info, &client, &action).await {
+        Ok(req) => req,
+        Err(proxied) => {
+            return (
+                *proxied,
+                response_rewriter,
+                Some(resource_id),
+                Some(route_path),
+                client.ip,
+            );
+        }
+    };
+    if let Some(response) =
+        check_post_auth_early_response(route, &req, request_host.as_deref(), info, &client, &action)
+    {
+        return (
+            ProxiedRequest::Respond(response),
+            response_rewriter,
+            Some(resource_id),
+            Some(route_path),
+            client.ip,
+        );
+    }
+    if upstream.servers.is_empty() {
+        let err = ProxyError::NoUpstreamServers;
+        info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
+        return (
+            ProxiedRequest::Err(err),
+            response_rewriter,
+            Some(resource_id),
+            Some(route_path),
+            client.ip,
+        );
+    }
+
+    let concurrency_guard = match acquire_concurrency(route, req.headers(), client.ip) {
+        Ok(guard) => guard,
+        Err(err) => {
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
+            return (
+                ProxiedRequest::Err(err),
+                response_rewriter,
+                Some(resource_id),
+                Some(route_path),
+                client.ip,
+            );
+        }
+    };
+
+    let prepared = PreparedRequest {
+        route,
+        res,
+        info,
+        client: &client,
+        action,
+        request_host,
+        cache_key,
+        authorized,
+        concurrency_guard,
+    };
+    prepare_upstream_request(shared, req, upstream, prepared, response_rewriter)
+}
+
+enum EarlyExit {
+    Respond(Box<Response<Full<Bytes>>>),
+    Err(ProxyError),
+}
+
+fn is_bot_request(headers: &hyper::HeaderMap) -> bool {
+    if let Some(user_agent) = headers.get(hyper::header::USER_AGENT)
+        && let Ok(ua_str) = user_agent.to_str()
+    {
+        return bot::is_bot_or_ai_scraper(ua_str);
+    }
+    false
+}
+
+fn check_route_access<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    client: &client_ip::ClientAddr,
+    info: &RequestInfo<'_>,
+    header_host: Option<&str>,
+    request_host: Option<&str>,
+) -> Result<Upstream, EarlyExit> {
+    if route.maintenance.enabled {
+        let response = maintenance_response(&route.maintenance);
+        return Err(EarlyExit::Respond(Box::new(response)));
+    }
+    if let Some(response) = check_dictionary_request(route, req) {
+        return Err(EarlyExit::Respond(Box::new(response)));
+    }
+    if route.bot_blocker && is_bot_request(req.headers()) {
+        return Err(EarlyExit::Err(ProxyError::BotBlocked));
+    }
+    let upstream = check_policies(route, client.ip, info.client_cert).map_err(EarlyExit::Err)?;
+    if let Some(redirect) = redirect_of(route, req, header_host, request_host, info.proto) {
+        return Err(EarlyExit::Respond(Box::new(redirect)));
+    }
+    if body_limit::declared_too_large(req.headers(), upstream.max_body_size) {
+        return Err(EarlyExit::Err(ProxyError::PayloadTooLarge));
+    }
+    Ok(upstream)
+}
+
+fn acquire_concurrency(
+    route: &FilteredRoute,
+    headers: &hyper::HeaderMap,
+    client_ip: std::net::IpAddr,
+) -> Result<Option<concurrency_limit::ConcurrencyGuard>, ProxyError> {
+    match &route.concurrency_limiter {
+        Some(limiter) => limiter.acquire(headers, client_ip).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// The host of the request: the `Host` header, then the host of the URI, then the SNI name.
+fn request_host<B>(
+    req: &Request<B>,
+    header_host: Option<String>,
+    sni: Option<&str>,
+) -> Option<String> {
+    header_host
+        .or_else(|| req.uri().host().map(str::to_string))
+        .or_else(|| sni.map(str::to_string))
+}
+
+/// The redirect response of the request: the HTTPS upgrade first, then the redirect rules.
+fn redirect_of<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    header_host: Option<&str>,
+    request_host: Option<&str>,
+    proto: &str,
+) -> Option<Response<Full<Bytes>>> {
+    upgrade_redirect(route, req, header_host, proto)
+        .or_else(|| redirect::redirect_rule(&route.redirects, request_host, req))
+}
+
+/// Authenticates the request. A sign-in page, a redirect or a rejection ends the routing, and a
+/// rejection also writes an access log entry. The error is boxed, because `ProxiedRequest` is
+/// large and this function never returns its largest variant.
+async fn authenticate_request<B>(
+    route: &FilteredRoute,
+    req: Request<B>,
+    auth_ctx: &AuthContext<'_>,
+    info: &RequestInfo<'_>,
+    client: &client_ip::ClientAddr,
+    action: &str,
+) -> Result<Request<B>, Box<ProxiedRequest<Request<B>>>>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    match authenticate(route, req, auth_ctx).await {
+        Authenticated::Pass(req) => Ok(req),
+        Authenticated::Respond(response) => Err(Box::new(ProxiedRequest::Respond(response))),
+        Authenticated::Rejected(rejection) => {
+            let resource_id = route.resource_id;
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %rejection);
+            Err(Box::new(rejected(rejection)))
+        }
+    }
+}
+
+/// What `prepare_upstream_request` needs about the matched route and the client.
+struct PreparedRequest<'a> {
+    route: &'a FilteredRoute,
+    res: filter::FilterResult,
+    info: &'a RequestInfo<'a>,
+    client: &'a client_ip::ClientAddr,
+    action: String,
+    request_host: Option<String>,
+    cache_key: String,
+    authorized: bool,
+    concurrency_guard: Option<concurrency_limit::ConcurrencyGuard>,
+}
+
+/// The client of the request with the `Host` it sent, an HTTP/2 client in the URI authority.
+fn proxied_client<B>(
+    req: &Request<B>,
+    ip: std::net::IpAddr,
+    secure: bool,
+) -> client_ip::ProxiedClient {
+    let host = req.headers().get(hyper::header::HOST).cloned().or_else(|| {
+        req.uri()
+            .authority()
+            .and_then(|authority| hyper::header::HeaderValue::from_str(authority.as_str()).ok())
+    });
+    client_ip::ProxiedClient { ip, secure, host }
+}
+
+/// Selects the upstream server, applies the header rules and builds the cache request. The route
+/// accepted the request already.
+fn prepare_upstream_request<B>(
+    shared: &SharedContext,
+    mut req: Request<B>,
+    upstream: Upstream,
+    prepared: PreparedRequest<'_>,
+    response_rewriter: ResponseRewriterBuilder,
+) -> (
+    ProxiedRequest<Request<B>>,
+    ResponseRewriterBuilder,
+    Option<ShortId>,
+    Option<String>,
+    std::net::IpAddr,
+)
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    let PreparedRequest {
+        route,
+        res,
+        info,
+        client,
+        action,
+        request_host,
+        cache_key,
+        authorized,
+        concurrency_guard,
+    } = prepared;
+    let resource_id = route.resource_id;
+    let route_path = route.route_path.clone();
+    let secure = info.proto != "http";
+    let proxied = proxied_client(&req, client.ip, secure);
+    req.extensions_mut().insert(proxied);
+    let sticky_cookie = match upstream.select(&mut req, res.path_segments, client.ip, secure) {
+        Ok(sticky_cookie) => sticky_cookie,
+        Err(err) => {
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
+            return (
+                ProxiedRequest::Err(err),
+                response_rewriter,
+                Some(resource_id),
+                Some(route_path),
+                client.ip,
+            );
+        }
+    };
+    let response_rewriter = response_rewriter.sticky_cookie(sticky_cookie);
+    if route.h2c || route.grpc_web {
+        req.extensions_mut().insert(UpstreamH2c);
+    }
+    let response_rewriter = if route.grpc_web && grpc_web::is_grpc_web_request(req.headers()) {
+        let origin = req
+            .headers()
+            .get(hyper::header::ORIGIN)
+            .and_then(|v| v.to_str().ok())
+            .filter(|o| {
+                grpc_web::is_allowed_origin(o, &route.filter.vhosts, request_host.as_deref())
+            })
+            .map(String::from);
+        grpc_web::prepare_grpc_request(req.headers_mut());
+        response_rewriter.grpc_web(origin)
+    } else {
+        response_rewriter
+    };
+
+    info!(target: "r3v3rs3::access_log", remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
+    let span: Span = span!(Level::INFO, "http", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
+
+    let stream_permit = match apply_stream_priority(route, &mut req) {
+        Ok(permit) => permit,
+        Err(err) => {
+            info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
+            return (
+                ProxiedRequest::Err(err),
+                response_rewriter,
+                Some(resource_id),
+                Some(route_path),
+                client.ip,
+            );
+        }
+    };
+
+    auth::remove_auth_cookies(req.headers_mut());
+    let method = req.method().clone();
+    rewriter::remove_hop_by_hop_headers(req.headers_mut(), &method);
+    shared
+        .header_rewriter
+        .pre_process(req.headers_mut(), client, request_host.clone(), info.proto);
+    shared.header_rewriter.post_process(req.headers_mut());
+    let response_rewriter = apply_header_rules(
+        route,
+        req.headers_mut(),
+        client.ip,
+        request_host,
+        info,
+        response_rewriter,
+    );
+    let cache_request = route
+        .cache
+        .as_ref()
+        .and_then(|cache| CacheRequest::new(cache, &mut req, cache_key, authorized));
+    if route.cache.is_some() && cache_request.as_ref().is_none_or(|c| c.is_unsafe()) {
+        crate::stats::count_cache_bypass();
+    }
+    (
+        ProxiedRequest::Ok(Box::new(UpstreamCall {
+            req,
+            upstream,
+            span,
+            cache_request,
+            guard: concurrency_guard,
+            stream_permit,
+        })),
+        response_rewriter,
+        Some(resource_id),
+        Some(route_path),
+        client.ip,
+    )
+}
+
+fn apply_stream_priority<B>(
+    route: &FilteredRoute,
+    req: &mut Request<B>,
+) -> Result<Option<r3v3rs3_api::priority::StreamPermit>, ProxyError> {
+    if !route.stream_priority.enabled {
+        return Ok(None);
+    }
+    let client_priority = req.headers().get("priority").and_then(|v| v.to_str().ok());
+    let path_and_query = req.uri().path_and_query().map_or("/", |p| p.as_str());
+    let content_type = req
+        .headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok());
+    let priority = r3v3rs3_api::priority::resolve_stream_priority(
+        client_priority,
+        path_and_query,
+        content_type,
+        &route.stream_priority,
+    );
+    r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER.record_request(&priority);
+
+    if route.stream_priority.adaptive_concurrency
+        && priority.is_background()
+        && r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER
+            .should_throttle_background(r3v3rs3_api::priority::DEFAULT_MAX_BACKGROUND_CONCURRENCY)
+    {
+        return Err(ProxyError::TooManyConcurrentRequests);
+    }
+
+    if route.stream_priority.inject_header
+        && let (Ok(hname), Ok(hval)) = (
+            hyper::header::HeaderName::from_bytes(b"priority"),
+            hyper::header::HeaderValue::from_str(&priority.to_header_value()),
+        )
+    {
+        req.headers_mut().insert(hname, hval);
+    }
+    Ok(Some(
+        r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER.acquire_permit(priority),
+    ))
+}
+
+/// Applies the request header rules of the route and hands the response header rules to the
+/// response rewriter. Request rules run after the forwarded headers, so they can replace them.
+fn apply_header_rules(
+    route: &FilteredRoute,
+    headers: &mut hyper::HeaderMap,
+    client: std::net::IpAddr,
+    host: Option<String>,
+    info: &RequestInfo<'_>,
+    response_rewriter: ResponseRewriterBuilder,
+) -> ResponseRewriterBuilder {
+    let request_id = trace::extract_and_propagate_trace_context(headers);
+    let client_cert = info.client_cert.cloned().unwrap_or_default();
+    let variables = HeaderVariables {
+        client_ip: client,
+        host: host.unwrap_or_default(),
+        scheme: if info.proto == "http" {
+            "http"
+        } else {
+            "https"
+        },
+        request_id,
+        route: if route.base_path.is_empty() {
+            "/".to_string()
+        } else {
+            route.base_path.clone()
+        },
+        client_cert_subject: client_cert.subject,
+        client_cert_fingerprint: client_cert.fingerprint,
+    };
+    if route.header_rules.is_empty() {
+        return response_rewriter.variables(variables);
+    }
+    route.header_rules.apply_request(headers, &variables);
+    response_rewriter.header_rules(route.header_rules.clone(), variables)
+}
+
+/// Applies the client IP filter, client certificate requirement and the rate limit of the route,
+/// and returns the upstream connections of the route.
+fn check_policies(
+    route: &FilteredRoute,
+    client: std::net::IpAddr,
+    client_cert: Option<&ClientCertInfo>,
+) -> Result<Upstream, ProxyError> {
+    let country = (!route.ip_filter.allow_countries.is_empty()
+        || !route.ip_filter.deny_countries.is_empty())
+    .then(|| route.geoip.lookup_country(client))
+    .flatten();
+    if !route
+        .ip_filter
+        .allows_with_country(client, country.as_deref())
+    {
+        return Err(ProxyError::IpNotAllowed);
+    }
+    if route.require_client_cert && client_cert.is_none() {
+        return Err(ProxyError::ClientCertRequired);
+    }
+    if let Some(retry_after) = route
+        .rate_limiter
+        .as_ref()
+        .and_then(|limiter| limiter.check(client).err())
+    {
+        return Err(ProxyError::TooManyRequests { retry_after });
+    }
+    route
+        .upstream
+        .clone()
+        .ok_or(ProxyError::UpstreamClientCertInvalid)
+}
+
+enum Authenticated<B> {
+    Pass(Request<B>),
+    /// A response of the authenticator itself, like the sign-in page.
+    Respond(Response<Full<Bytes>>),
+    Rejected(AuthRejection),
+}
+
+/// Authenticates the request when the route requires authentication. The HTTPS redirect runs
+/// first, so a browser sends the credentials on the secure connection.
+async fn authenticate<B>(
+    route: &FilteredRoute,
+    req: Request<B>,
+    ctx: &AuthContext<'_>,
+) -> Authenticated<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    let Some(auth) = &route.auth else {
+        return Authenticated::Pass(req);
+    };
+    let mut req = match auth.serve(req, ctx).await {
+        ControlFlow::Continue(req) => req,
+        ControlFlow::Break(response) => return Authenticated::Respond(response),
+    };
+    match auth.authorize(&mut req, ctx).await {
+        Ok(()) => Authenticated::Pass(req),
+        Err(rejection) => Authenticated::Rejected(rejection),
+    }
+}
+
+/// Converts a failed authentication into the response for the client.
+fn rejected<R>(rejection: AuthRejection) -> ProxiedRequest<R> {
+    match rejection {
+        AuthRejection::Error(err) => ProxiedRequest::Err(err),
+        AuthRejection::Response(res) => ProxiedRequest::Respond(*res),
+    }
+}
+
+fn is_valid_vhost_target(host_str: &str, vhosts: &[VirtualHost]) -> bool {
+    let host_only = host_str.split(':').next().unwrap_or(host_str);
+    let host_clean = host_only.trim_start_matches('[').trim_end_matches(']');
+    if host_clean.is_empty() {
+        return false;
+    }
+    if !vhosts.is_empty() {
+        return vhosts.iter().any(|vhost| vhost.test(host_clean));
+    }
+    is_local_or_ip(host_clean)
+}
+
+/// Builds the HTTPS redirect for a plain HTTP request when the route upgrades insecure requests.
+fn upgrade_redirect<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    header_host: Option<&str>,
+    proto: &str,
+) -> Option<Response<Full<Bytes>>> {
+    if proto != "http" || !route.upgrade_insecure {
+        return None;
+    }
+    let host_str = header_host?;
+    if !is_valid_vhost_target(host_str, &route.filter.vhosts) {
+        return None;
+    }
+    let port = route.https_port?;
+    let mut parts = Parts::from(host_str.parse::<Uri>().ok()?);
+    parts.scheme = Some(Scheme::HTTPS);
+    if let Some(authority) = parts.authority {
+        parts.authority = format!("{}:{}", authority.host(), port).parse().ok();
+    }
+    parts.path_and_query = req.uri().path_and_query().cloned();
+    let uri = Uri::from_parts(parts).ok()?;
+    Response::builder()
+        .status(301)
+        .header(LOCATION, uri.to_string())
+        .body(Full::new(Bytes::new()))
+        .ok()
+}
+
+fn spawn_quic_stream<T>(
+    req: Request<()>,
+    stream: RequestStream<T, Bytes>,
+    shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
+    ctx: QuickContext,
+    span: Span,
+    stop_notifier: Arc<Notify>,
+) where
+    T: BidiStream<Bytes> + Send + 'static,
+    <T as BidiStream<Bytes>>::RecvStream: Send + Sync,
+    <T as BidiStream<Bytes>>::SendStream: Send + 'static,
+{
+    tokio::spawn(async move {
+        if let Err(err) = start_quic(req, stream, shared_cache, ctx, span, stop_notifier).await {
+            error!("{err}");
+        }
+    });
+}
+
+async fn start_quic<T>(
+    req: Request<()>,
+    stream: RequestStream<T, Bytes>,
+    mut shared_cache: Cache<Arc<ArcSwap<SharedContext>>, Arc<SharedContext>>,
+    ctx: QuickContext,
+    span: Span,
+    stop_notifier: Arc<Notify>,
+) -> anyhow::Result<()>
+where
+    T: BidiStream<Bytes> + Send + 'static,
+    <T as BidiStream<Bytes>>::RecvStream: Send + Sync,
+    <T as BidiStream<Bytes>>::SendStream: Send + 'static,
+{
+    let enter = span.clone();
+    let _enter = enter.enter();
+
+    let shared = shared_cache.load();
+    let info = RequestInfo {
+        remote: ctx.remote,
+        peer: ctx.remote,
+        local: ctx.local.map(|ip| ip.to_string()).unwrap_or_default(),
+        sni: None,
+        proto: "h3",
+        client_cert: ctx.client_cert.as_deref(),
+        early_data: false,
+    };
+    let start = std::time::Instant::now();
+    let method = req.method().to_string();
+    let uri = req.uri().to_string();
+    let host = req
+        .headers()
+        .get(hyper::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let request_headers = extract_headers(req.headers());
+    let content_type = req
+        .headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(ToString::to_string);
+    // The body is attached before routing, so an authenticator can read a form submission.
+    let (mut send, recv) = stream.split();
+    let body = BoxBody::new(ByteCountBody::rx(StreamBody::new(StreamWrapper::<T> {
+        stream: recv,
+    })));
+    let (req, response_rewriter, resource_id, route_path, client_ip) =
+        route_request(shared, req.map(|()| body), &info).await;
+    let proxy_id = resource_id.map(|id| id.to_string());
+    crate::stats::count_h3_request(proxy_id.as_deref(), route_path.as_deref());
+    if shared.quarantine.is_quarantined(&client_ip) {
+        return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
+    }
+
+    let own_response = answered_by_r3v3rs3(&req);
+    let res = upstream_response(req).await;
+    let mapped = response_rewriter.build().map_response(res);
+    let mapped = mapped.map(|res| res.map(|b| BoxBody::new(ByteCountBody::tx(b))));
+    let duration = start.elapsed();
+    crate::stats::record_request_duration(duration, proxy_id.as_deref(), route_path.as_deref());
+    let country = shared.geoip.lookup_country(client_ip);
+    check_and_record_quarantine(&shared.quarantine, client_ip, &uri, own_response, &mapped);
+    record_access_log(
+        AccessLogMeta {
+            resource_id,
+            client_ip,
+            country,
+            method,
+            host,
+            uri,
+            proto: "h3".to_string(),
+            request_headers,
+            request_body: None,
+            content_type,
+            is_websocket: false,
+        },
+        duration,
+        &mapped,
+    );
+    let (parts, body) = mapped?.into_parts();
+    let mut res = Response::from_parts(parts, ());
+    res.headers_mut().remove("transfer-encoding");
+    let mut res_stream = BodyStream::new(body);
+
+    send.send_response(res).await?;
+
+    loop {
+        tokio::select! {
+            frame = res_stream.next() => {
+                if send_frame(&mut send, frame).await?.is_break() {
+                    break;
+                }
+            },
+            _ = stop_notifier.notified() => {
+                debug!("stop");
+            },
+        }
+    }
+
+    Ok(send.finish().await?)
+}
+
+/// Sends one body frame of the response. The end of the stream breaks the send loop.
+async fn send_frame<T>(
+    send: &mut RequestStream<T, Bytes>,
+    frame: Option<Result<Frame<Bytes>, anyhow::Error>>,
+) -> anyhow::Result<ControlFlow<()>>
+where
+    T: h3::quic::SendStream<Bytes>,
+{
+    let Some(Ok(frame)) = frame else {
+        return Ok(ControlFlow::Break(()));
+    };
+    match frame.into_data() {
+        Ok(data) => send.send_data(data).await?,
+        Err(frame) => {
+            if let Ok(trailers) = frame.into_trailers() {
+                send.send_trailers(trailers).await?;
+            }
+        }
+    }
+    Ok(ControlFlow::Continue(()))
+}
+
+/// Runs the routed request against its upstream server, or returns the response the router built.
+async fn upstream_response<B>(
+    req: ProxiedRequest<Request<B>>,
+) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error>
+where
+    B: Body<Data = Bytes> + Send + Sync + 'static,
+    B::Error: Into<anyhow::Error>,
+{
+    match req {
+        ProxiedRequest::Ok(call) => {
+            let UpstreamCall {
+                req,
+                upstream,
+                span,
+                cache_request,
+                guard,
+                stream_permit,
+            } = *call;
+            let req = req.map(|b| BoxBody::new(b.map_err(Into::into)));
+            let res = cache::fetch(&upstream, req, cache_request)
+                .instrument(span)
+                .await;
+            match res {
+                Ok(mut resp) => {
+                    let route_guard = (guard, stream_permit);
+                    if let Some(sender) = resp
+                        .extensions_mut()
+                        .remove::<pool::UpgradeRouteGuardSender>()
+                    {
+                        if let Ok(mut lock) = sender.0.lock()
+                            && let Some(tx) = lock.take()
+                        {
+                            let _ = tx.send(Box::new(route_guard));
+                        }
+                        let (parts, body) = resp.into_parts();
+                        let guarded = concurrency_limit::GuardedBody::new(body, None, None);
+                        Ok(Response::from_parts(parts, BoxBody::new(guarded)))
+                    } else {
+                        let (parts, body) = resp.into_parts();
+                        let guarded =
+                            concurrency_limit::GuardedBody::new(body, route_guard.0, route_guard.1);
+                        Ok(Response::from_parts(parts, BoxBody::new(guarded)))
+                    }
+                }
+                Err(err) => {
+                    drop(guard);
+                    drop(stream_permit);
+                    Err(err)
+                }
+            }
+        }
+        ProxiedRequest::Respond(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
+        ProxiedRequest::Err(err) => {
+            crate::stats::count_upstream_error_kind(classify_proxy_error(&err));
+            Err(err.into())
+        }
+    }
+}
+
+fn classify_proxy_error(err: &ProxyError) -> crate::stats::UpstreamErrorKind {
+    use crate::stats::UpstreamErrorKind;
+    match err {
+        ProxyError::UpstreamTimeout => UpstreamErrorKind::Timeout,
+        ProxyError::NoUpstreamAvailable => UpstreamErrorKind::CircuitOpen,
+        ProxyError::NoRouteFound | ProxyError::NoUpstreamServers => UpstreamErrorKind::NoRoute,
+        _ => UpstreamErrorKind::Other,
+    }
+}
+
+struct StreamWrapper<T: BidiStream<Bytes>> {
+    stream: RequestStream<T::RecvStream, Bytes>,
+}
+
+impl<T: BidiStream<Bytes>> Stream for StreamWrapper<T> {
+    type Item = Result<Frame<Bytes>, anyhow::Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.stream.poll_recv_data(cx) {
+            std::task::Poll::Ready(Ok(Some(mut data))) => {
+                std::task::Poll::Ready(Some(Ok(Frame::data(data.copy_to_bytes(data.remaining())))))
+            }
+            std::task::Poll::Ready(Ok(None)) => std::task::Poll::Ready(None),
+            std::task::Poll::Ready(Err(err)) => std::task::Poll::Ready(Some(Err(err.into()))),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+fn configure_response_rewriter<B>(
+    builder: ResponseRewriterBuilder,
+    route: &FilteredRoute,
+    req: &Request<B>,
+) -> ResponseRewriterBuilder {
+    builder
+        .https_port(route.https_port)
+        .quic_port(route.quic_port)
+        .error_pages(route.error_pages.clone())
+        .hide_branding(route.hide_branding)
+        .compression(route.compression.clone().map(|config| {
+            ResponseCompression::new(config, req.method(), req.uri().path(), req.headers())
+        }))
+}
+
+const DEFAULT_MAINTENANCE_BODY: &str = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>Under Maintenance</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 1rem; box-sizing: border-box; }\n    .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 2.5rem; max-width: 32rem; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }\n    h1 { font-size: 1.5rem; margin-top: 0; margin-bottom: 0.75rem; color: #f1f5f9; }\n    p { font-size: 0.95rem; line-height: 1.5; color: #94a3b8; margin: 0; }\n  </style>\n</head>\n<body>\n  <div class=\"card\">\n    <h1>Under Maintenance</h1>\n    <p>This service is temporarily undergoing scheduled maintenance. Please check back shortly.</p>\n  </div>\n</body>\n</html>\n";
+
+fn is_html_body(body: &[u8], body_str: &str) -> bool {
+    body.starts_with(b"<!DOCTYPE") || body.starts_with(b"<html") || body_str.contains("</html>")
+}
+
+fn maintenance_response(
+    maintenance: &r3v3rs3_api::proxy::MaintenanceConfig,
+) -> Response<Full<Bytes>> {
+    let status =
+        StatusCode::from_u16(maintenance.status).unwrap_or(StatusCode::SERVICE_UNAVAILABLE);
+    let body = if maintenance.body.is_empty() {
+        DEFAULT_MAINTENANCE_BODY.as_bytes().to_vec()
+    } else {
+        maintenance.body.as_bytes().to_vec()
+    };
+    let content_type = if is_html_body(&body, &maintenance.body) {
+        HeaderValue::from_static("text/html; charset=utf-8")
+    } else {
+        HeaderValue::from_static("text/plain; charset=utf-8")
+    };
+    let mut res = Response::new(Full::new(Bytes::from(body)));
+    *res.status_mut() = status;
+    res.headers_mut()
+        .insert(hyper::header::CONTENT_TYPE, content_type);
+    if let Some(retry_after) = maintenance.retry_after
+        && let Ok(val) = HeaderValue::from_str(&retry_after.to_string())
+    {
+        res.headers_mut().insert(hyper::header::RETRY_AFTER, val);
+    }
+    res
+}
+
+fn check_dictionary_request<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+) -> Option<Response<Full<Bytes>>> {
+    let compression = route.compression.as_ref()?;
+    if req.method() != Method::GET && req.method() != Method::HEAD {
+        return None;
+    }
+    let path = req.uri().path();
+    let dict = compression.dictionaries.iter().find(|d| d.path == path)?;
+    Some(dictionary_response(dict, req.method()))
+}
+
+fn dictionary_response(
+    dict: &r3v3rs3_api::compression_dictionary::CompressionDictionary,
+    method: &Method,
+) -> Response<Full<Bytes>> {
+    let raw_bytes = dict.raw_data.as_bytes();
+    let body = if method == Method::HEAD {
+        Full::new(Bytes::new())
+    } else {
+        Full::new(Bytes::copy_from_slice(raw_bytes))
+    };
+    let mut res = Response::new(body);
+    *res.status_mut() = StatusCode::OK;
+    let headers = res.headers_mut();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=31536000, immutable"),
+    );
+    headers.insert(CONTENT_LENGTH, HeaderValue::from(raw_bytes.len()));
+    let use_as_dict = format!("match=\"{}\", id=\"{}\"", dict.match_pattern, dict.id);
+    if let Ok(val) = HeaderValue::from_str(&use_as_dict) {
+        headers.insert(HeaderName::from_static("use-as-dictionary"), val);
+    }
+    let clean_hash = dict.sha256_sf.trim_matches(':');
+    let etag_val = format!("\"{clean_hash}\"");
+    if let Ok(val) = HeaderValue::from_str(&etag_val) {
+        headers.insert(ETAG, val);
+    }
+    res
+}
+
+fn is_purge_authorized(has_auth: bool, client: &client_ip::ClientAddr) -> bool {
+    client.peer.is_loopback() || client.ip.is_loopback() || client.trusted_peer || has_auth
+}
+
+fn handle_purge_request<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    client: &client_ip::ClientAddr,
+) -> (StatusCode, String) {
+    if !is_purge_authorized(route.auth.is_some(), client) {
+        return (
+            StatusCode::FORBIDDEN,
+            "Forbidden: cache purge requires authentication or trusted client IP\n".to_string(),
+        );
+    }
+    if let Some(cache) = &route.cache {
+        let path = req.uri().path_and_query().map_or("/", |p| p.as_str());
+        let count = cache.purge_path(path);
+        (
+            StatusCode::OK,
+            format!("Purged {} entries matching {}\n", count, req.uri()),
+        )
+    } else {
+        (
+            StatusCode::BAD_REQUEST,
+            "Cache is not enabled for this proxy\n".to_string(),
+        )
+    }
+}
+
+fn build_purge_response(status: StatusCode, msg: String) -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from(msg)));
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        hyper::header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
+}
+
+fn check_post_auth_early_response<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    request_host: Option<&str>,
+    info: &RequestInfo<'_>,
+    client: &client_ip::ClientAddr,
+    action: &str,
+) -> Option<Response<Full<Bytes>>> {
+    if route.grpc_web && grpc_web::is_grpc_web_preflight(req) {
+        return Some(grpc_web::cors_preflight_response(
+            req.headers(),
+            &route.filter.vhosts,
+            request_host,
+        ));
+    }
+    handle_purge_or_fixed(route, req, info, client, action)
+}
+
+fn handle_purge_or_fixed<B>(
+    route: &FilteredRoute,
+    req: &Request<B>,
+    info: &RequestInfo<'_>,
+    client: &client_ip::ClientAddr,
+    action: &str,
+) -> Option<Response<Full<Bytes>>> {
+    if route.cache.is_some() && req.method().as_str() == "PURGE" {
+        let (status, msg) = handle_purge_request(route, req, client);
+        let resource_id = route.resource_id;
+        info!(
+            target: "r3v3rs3::access_log",
+            %resource_id,
+            remote = %info.remote,
+            peer = %info.peer,
+            client = %client.ip,
+            local = %info.local,
+            action,
+            status = status.as_u16(),
+        );
+        Some(build_purge_response(status, msg))
+    } else {
+        route
+            .response
+            .as_ref()
+            .map(|resp| fixed::respond(resp, req))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyper::HeaderMap;
+    use hyper::header::{AUTHORIZATION, COOKIE, HeaderValue, SET_COOKIE, USER_AGENT};
+
+    #[test]
+    fn one_scanner_probe_counts_as_one_violation() {
+        let quarantine = crate::security::AutoQuarantineTracker::default();
+        let ip: std::net::IpAddr = "203.0.113.9".parse().unwrap();
+        let ok: Result<Response<()>, anyhow::Error> = Ok(Response::new(()));
+        let max = quarantine.get_config().max_violations;
+        for _ in 1..max {
+            check_and_record_quarantine(&quarantine, ip, "/.env", false, &ok);
+            assert!(!quarantine.is_quarantined(&ip));
+        }
+        check_and_record_quarantine(&quarantine, ip, "/.env", false, &ok);
+        assert!(quarantine.is_quarantined(&ip));
+    }
+
+    #[test]
+    fn test_extract_headers_redaction() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer secret-token-xyz"),
+        );
+        headers.insert(COOKIE, HeaderValue::from_static("session_id=abcdef123456"));
+        headers.insert(
+            SET_COOKIE,
+            HeaderValue::from_static("jwt=header.payload.sig"),
+        );
+        headers.insert(
+            HeaderName::from_static("x-api-key"),
+            HeaderValue::from_static("key-999"),
+        );
+        headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0"));
+
+        let extracted = extract_headers(&headers);
+        for entry in extracted {
+            match entry.name.to_ascii_lowercase().as_str() {
+                "authorization" | "cookie" | "set-cookie" | "x-api-key" => {
+                    assert_eq!(entry.value, "[REDACTED]");
+                }
+                "user-agent" => {
+                    assert_eq!(entry.value, "Mozilla/5.0");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn test_sanitize_json_body_preview() {
+        let json_body = r#"{"username":"admin","password":"secret_pass_123","nested":{"token":"jwt-123","ok":true}}"#;
+        let sanitized = sanitize_body_preview(Some(json_body.to_string())).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&sanitized).unwrap();
+
+        assert_eq!(parsed["username"], "admin");
+        assert_eq!(parsed["password"], "[REDACTED]");
+        assert_eq!(parsed["nested"]["token"], "[REDACTED]");
+        assert_eq!(parsed["nested"]["ok"], true);
+    }
+
+    #[test]
+    fn test_sanitize_form_body_preview() {
+        let form_body = "username=admin&password=my_password&action=login";
+        let sanitized = sanitize_body_preview(Some(form_body.to_string())).unwrap();
+        assert_eq!(sanitized, "username=admin&password=[REDACTED]&action=login");
+    }
+
+    #[test]
+    fn test_purge_authorization() {
+        let loopback_addr = client_ip::ClientAddr {
+            peer: "127.0.0.1".parse().unwrap(),
+            ip: "127.0.0.1".parse().unwrap(),
+            trusted_peer: false,
+        };
+        assert!(is_purge_authorized(false, &loopback_addr));
+        assert!(is_purge_authorized(true, &loopback_addr));
+
+        let ipv6_loopback = client_ip::ClientAddr {
+            peer: "::1".parse().unwrap(),
+            ip: "::1".parse().unwrap(),
+            trusted_peer: false,
+        };
+        assert!(is_purge_authorized(false, &ipv6_loopback));
+
+        let trusted_peer_addr = client_ip::ClientAddr {
+            peer: "198.51.100.10".parse().unwrap(),
+            ip: "203.0.113.5".parse().unwrap(),
+            trusted_peer: true,
+        };
+        assert!(is_purge_authorized(false, &trusted_peer_addr));
+
+        let remote_addr = client_ip::ClientAddr {
+            peer: "198.51.100.1".parse().unwrap(),
+            ip: "198.51.100.1".parse().unwrap(),
+            trusted_peer: false,
+        };
+        assert!(!is_purge_authorized(false, &remote_addr));
+        assert!(is_purge_authorized(true, &remote_addr));
+    }
+
+    #[test]
+    fn test_authorized_request_headers() {
+        let empty = HeaderMap::new();
+        assert!(!is_authorized_request_headers(&empty, false));
+        assert!(is_authorized_request_headers(&empty, true));
+
+        let mut cookie_headers = HeaderMap::new();
+        cookie_headers.insert(COOKIE, HeaderValue::from_static("session_id=abc123456"));
+        assert!(is_authorized_request_headers(&cookie_headers, false));
+
+        let mut auth_headers = HeaderMap::new();
+        auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer token123"));
+        assert!(is_authorized_request_headers(&auth_headers, false));
+    }
+
+    #[test]
+    fn test_is_valid_vhost_target() {
+        let vhost: VirtualHost = "example.com".parse().unwrap();
+        let vhosts = vec![vhost];
+
+        assert!(is_valid_vhost_target("example.com", &vhosts));
+        assert!(is_valid_vhost_target("example.com:8080", &vhosts));
+        assert!(!is_valid_vhost_target("evil.com", &vhosts));
+        assert!(!is_valid_vhost_target("evil.com:8080", &vhosts));
+
+        let empty_vhosts: Vec<VirtualHost> = vec![];
+        assert!(is_valid_vhost_target("localhost", &empty_vhosts));
+        assert!(is_valid_vhost_target("127.0.0.1", &empty_vhosts));
+        assert!(is_valid_vhost_target("192.168.1.1:8080", &empty_vhosts));
+        assert!(!is_valid_vhost_target("evil.com", &empty_vhosts));
+    }
+
+    #[test]
+    fn test_is_valid_secure_redirect_host() {
+        let router = Router::default();
+        let local: SocketAddr = "127.0.0.1:443".parse().unwrap();
+
+        assert!(is_valid_secure_redirect_host("localhost", &router, local));
+        assert!(is_valid_secure_redirect_host("127.0.0.1", &router, local));
+        assert!(!is_valid_secure_redirect_host("evil.com", &router, local));
+    }
+
+    #[test]
+    fn test_header_host_ipv6_literal() {
+        let req = Request::builder()
+            .header(HOST, "[::1]:8080")
+            .body(())
+            .unwrap();
+        assert_eq!(header_host(&req), Some("[::1]"));
+
+        let req = Request::builder().header(HOST, "[::1]").body(()).unwrap();
+        assert_eq!(header_host(&req), Some("[::1]"));
+
+        let req = Request::builder()
+            .header(HOST, "example.com:8080")
+            .body(())
+            .unwrap();
+        assert_eq!(header_host(&req), Some("example.com"));
+
+        let req = Request::builder()
+            .header(HOST, "example.com")
+            .body(())
+            .unwrap();
+        assert_eq!(header_host(&req), Some("example.com"));
+    }
+}

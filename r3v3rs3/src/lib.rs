@@ -1,32 +1,4 @@
-pub mod accounts;
-pub mod admin;
-pub mod agent;
-pub mod appstore;
-pub mod args;
-pub mod audit;
-pub mod build;
-pub mod cdn;
-pub mod certs;
-pub mod clock;
-pub mod command;
-pub mod config;
-pub mod discovery;
-pub mod dns_credential;
-pub mod engines;
-pub mod fdmanifest;
-pub mod grpc;
-pub mod hyper_tls;
-pub mod ipc;
-pub mod jwt;
-pub mod keys;
-pub mod kv;
-pub mod log;
-pub mod notify;
-pub mod platform;
-pub mod proxy;
-pub mod runtime;
-pub mod security;
-pub mod server;
-pub mod sessions;
-pub mod stats;
-pub mod system_metrics;
+//! The r3v3rs3 server. The modules live in the `r3v3rs3-*` crates, which compile in parallel;
+//! this crate re-exports all of them for the `r3-server` binary and the integration tests.
+
+pub use r3v3rs3_admin::*;

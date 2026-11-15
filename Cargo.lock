@@ -2879,49 +2879,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "phf"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "010378780309880b08997fae13be7834dba947d36393bd372f2b1556deb2a2f6"
-dependencies = [
- "phf_macros",
- "phf_shared",
- "serde",
-]
-
-[[package]]
-name = "phf_generator"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aeb62e0959d5a1bebc965f4d15d9e2b7cea002b6b0f5ba8cde6cc26738467100"
-dependencies = [
- "fastrand",
- "phf_shared",
-]
-
-[[package]]
-name = "phf_macros"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fa8d0ca26d424d27630da600c6624696e7dec8bf7b3b492b383c5dc49e5e085"
-dependencies = [
- "phf_generator",
- "phf_shared",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6fd9027e2d9319be6349febd1db4e8d02aa544921200c9b777720ac34a3aa89"
-dependencies = [
- "siphasher",
-]
-
-[[package]]
 name = "pin-project"
 version = "1.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3197,26 +3154,17 @@ name = "r3v3rs3"
 version = "3.4.1"
 dependencies = [
  "anyhow",
- "arc-swap",
  "argon2",
  "async-compression",
  "async-trait",
  "aws-lc-rs",
  "axum",
- "axum-extra",
  "axum-server",
  "base64 0.23.1",
- "brotli",
- "built",
  "bytes",
  "clap",
- "dashmap",
  "directories",
- "flate2",
- "fnv",
  "futures",
- "globwalk",
- "governor",
  "h3",
  "h3-quinn",
  "hex",
@@ -3225,29 +3173,16 @@ dependencies = [
  "hmac",
  "http 1.5.0",
  "http-body-util",
- "httpdate",
- "humantime-serde",
  "hyper",
  "hyper-util",
- "ignore",
- "include_dir",
- "indexmap",
- "instant-acme",
  "ipnet",
  "libc",
  "log",
- "maxminddb",
- "mime_guess",
  "mockito",
- "moka",
- "network-interface",
- "once_cell",
- "percent-encoding",
- "phf",
- "pin-project-lite",
  "pkcs8 0.11.0",
  "ppp",
  "quinn",
+ "r3v3rs3-admin",
  "r3v3rs3-api",
  "rand 0.10.2",
  "rcgen",
@@ -3256,43 +3191,71 @@ dependencies = [
  "rpassword",
  "rsa",
  "rustls",
- "rustls-native-certs",
- "sailfish",
- "schemars",
  "serde",
- "serde_default",
- "serde_derive",
  "serde_json",
- "serde_qs",
  "sha1 0.11.0",
  "sha2 0.11.0",
- "shellexpand",
  "socket2",
- "sqlx",
- "subtle",
  "tar",
- "thiserror 2.0.20",
  "time",
  "tokio",
  "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite 0.30.0",
- "tokio-util",
- "toml",
- "toml_edit 0.25.15+spec-1.1.0",
- "totp-rs",
- "tower-http",
- "tower-service",
- "tower_governor",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "url",
+ "zstd",
+]
+
+[[package]]
+name = "r3v3rs3-admin"
+version = "3.4.1"
+dependencies = [
+ "anyhow",
+ "aws-lc-rs",
+ "axum",
+ "axum-extra",
+ "base64 0.23.1",
+ "brotli",
+ "bytes",
+ "flate2",
+ "fnv",
+ "futures",
+ "hex",
+ "http 1.5.0",
+ "http-body-util",
+ "hyper",
+ "include_dir",
+ "ipnet",
+ "libc",
+ "log",
+ "mime_guess",
+ "percent-encoding",
+ "r3v3rs3-api",
+ "r3v3rs3-server",
+ "rand 0.10.2",
+ "reqwest",
+ "rmcp",
+ "sailfish",
+ "schemars",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "subtle",
+ "time",
+ "tokio",
+ "tokio-stream",
+ "tower-http",
+ "tower_governor",
+ "tracing",
+ "url",
  "utoipa",
  "utoipa-axum",
  "utoipa-swagger-ui",
- "x509-parser",
- "yamux",
  "zstd",
 ]
 
@@ -3342,6 +3305,205 @@ dependencies = [
  "url",
  "webbrowser",
  "zip",
+]
+
+[[package]]
+name = "r3v3rs3-core"
+version = "3.4.1"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "argon2",
+ "async-trait",
+ "aws-lc-rs",
+ "base64 0.23.1",
+ "built",
+ "bytes",
+ "clap",
+ "dashmap",
+ "globwalk",
+ "hex",
+ "hickory-proto",
+ "hickory-resolver",
+ "hmac",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "indexmap",
+ "instant-acme",
+ "ipnet",
+ "libc",
+ "log",
+ "once_cell",
+ "percent-encoding",
+ "pkcs8 0.11.0",
+ "r3v3rs3-api",
+ "rand 0.10.2",
+ "rcgen",
+ "reqwest",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_qs",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
+ "shellexpand",
+ "sqlx",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "toml",
+ "toml_edit 0.25.15+spec-1.1.0",
+ "totp-rs",
+ "tower-service",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "url",
+ "x509-parser",
+]
+
+[[package]]
+name = "r3v3rs3-platform"
+version = "3.4.1"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "async-compression",
+ "async-trait",
+ "aws-lc-rs",
+ "base64 0.23.1",
+ "bytes",
+ "flate2",
+ "futures",
+ "hex",
+ "hmac",
+ "http 1.5.0",
+ "http-body-util",
+ "hyper",
+ "ignore",
+ "libc",
+ "mockito",
+ "percent-encoding",
+ "r3v3rs3-api",
+ "r3v3rs3-core",
+ "rand 0.10.2",
+ "rcgen",
+ "rsa",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "subtle",
+ "tar",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tracing",
+ "url",
+ "x509-parser",
+ "yamux",
+]
+
+[[package]]
+name = "r3v3rs3-proxy"
+version = "3.4.1"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "argon2",
+ "async-compression",
+ "aws-lc-rs",
+ "axum",
+ "base64 0.23.1",
+ "brotli",
+ "bytes",
+ "dashmap",
+ "flate2",
+ "fnv",
+ "futures",
+ "governor",
+ "h3",
+ "h3-quinn",
+ "hex",
+ "hickory-proto",
+ "hickory-resolver",
+ "hmac",
+ "http 1.5.0",
+ "http-body-util",
+ "httpdate",
+ "hyper",
+ "hyper-util",
+ "ipnet",
+ "maxminddb",
+ "moka",
+ "once_cell",
+ "pin-project-lite",
+ "ppp",
+ "quinn",
+ "r3v3rs3-api",
+ "r3v3rs3-core",
+ "rand 0.10.2",
+ "reqwest",
+ "sailfish",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "tar",
+ "thiserror 2.0.20",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tower-service",
+ "tracing",
+ "url",
+ "x509-parser",
+ "zstd",
+]
+
+[[package]]
+name = "r3v3rs3-server"
+version = "3.4.1"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "async-trait",
+ "base64 0.23.1",
+ "flate2",
+ "futures",
+ "h3-quinn",
+ "hex",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "indexmap",
+ "libc",
+ "network-interface",
+ "quinn",
+ "r3v3rs3-api",
+ "r3v3rs3-platform",
+ "r3v3rs3-proxy",
+ "rand 0.10.2",
+ "rcgen",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "sha2 0.11.0",
+ "socket2",
+ "sqlx",
+ "tar",
+ "tokio",
+ "tokio-rustls",
+ "toml",
+ "toml_edit 0.25.15+spec-1.1.0",
+ "tracing",
+ "url",
+ "x509-parser",
 ]
 
 [[package]]
@@ -4197,12 +4359,6 @@ name = "similar"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
-
-[[package]]
-name = "siphasher"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "slab"

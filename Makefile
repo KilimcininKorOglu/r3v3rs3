@@ -7,6 +7,10 @@ PEBBLE_COMPOSE := r3v3rs3/tests/pebble/docker-compose.yml
 PEBBLE_CA := target/pebble/pebble.minica.pem
 DISCOVERY_COMPOSE := docker compose -f r3v3rs3/tests/discovery/docker-compose.yml
 DISCOVERY_DIR := target/discovery
+# The server packages: the r3v3rs3 facade with the binary and the integration tests, and the crates
+# that hold the server code.
+SERVER_PACKAGES := -p r3v3rs3 -p r3v3rs3-core -p r3v3rs3-proxy -p r3v3rs3-platform -p r3v3rs3-server -p r3v3rs3-admin
+SERVER_SOURCES := r3v3rs3/src r3v3rs3/tests r3v3rs3-core/src r3v3rs3-proxy/src r3v3rs3-platform/src r3v3rs3-server/src r3v3rs3-admin/src
 
 all: build
 
@@ -23,13 +27,13 @@ webui-release:
 	cd $(WEBUI_DIR) && $(TRUNK) build --cargo-profile web-release --release
 
 test:
-	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 -p r3v3rs3-api -p r3v3rs3-webui --all-features --no-fail-fast
+	CARGO_INCREMENTAL=0 $(CARGO) test $(SERVER_PACKAGES) -p r3v3rs3-api -p r3v3rs3-webui --all-features --no-fail-fast
 
 test-api:
 	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3-api --all-features
 
 test-server:
-	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --all-features
+	CARGO_INCREMENTAL=0 $(CARGO) test $(SERVER_PACKAGES) --all-features
 
 test-webui:
 	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3-webui --all-features
@@ -55,7 +59,7 @@ test-discovery-e2e:
 # remove their containers, networks and images.
 test-runtime-docker:
 	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test it -- --ignored runtime_docker_test:: platform_deploy_test::
-	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --lib on_the_docker_engine -- --ignored
+	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3-platform --lib on_the_docker_engine -- --ignored
 
 lint:
 	$(CARGO) clippy --workspace --all-targets --all-features -- -D warnings
@@ -69,7 +73,7 @@ fmt-check:
 # The CI complexity gate: every function, the integration tests included, stays at or below
 # a cyclomatic complexity of 10.
 complexity:
-	lizard -l rust -C 10 -w r3v3rs3/src r3v3rs3/tests r3v3rs3-api/src r3v3rs3-cli/src r3v3rs3-webui/src
+	lizard -l rust -C 10 -w $(SERVER_SOURCES) r3v3rs3-api/src r3v3rs3-cli/src r3v3rs3-webui/src
 
 check: fmt-check lint complexity test webui
 
@@ -86,7 +90,7 @@ run:
 
 # Downloads the CDN IP ranges into r3v3rs3/data/cdn-ranges.json.
 cdn-snapshot:
-	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --lib cdn::fetch::tests::update_embedded_snapshot -- --ignored --exact
+	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3-core --lib cdn::fetch::tests::update_embedded_snapshot -- --ignored --exact
 
 clean:
 	$(CARGO) clean

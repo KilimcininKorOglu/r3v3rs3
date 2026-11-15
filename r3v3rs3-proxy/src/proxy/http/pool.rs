@@ -1,0 +1,1314 @@
+use crate::certs::cert_list::CertList;
+use crate::hyper_tls::client::HttpsConnector;
+use crate::proxy::dns::DnsResolver;
+use crate::proxy::health::{ConnGuard, Permit, UpstreamGroup};
+use crate::proxy::http::HTTP2_MAX_FRAME_SIZE;
+use crate::proxy::http::error::ProxyError;
+use crate::proxy::tls::upstream_client_config;
+use bytes::Bytes;
+use http_body_util::{BodyExt, Full, Limited, combinators::BoxBody};
+use hyper::{
+    Method, Request, Response, StatusCode, Uri,
+    body::Body,
+    header::{CONNECTION, CONTENT_LENGTH, HOST, HeaderValue, UPGRADE},
+    http::uri::{Authority, Scheme},
+};
+use hyper_util::{
+    client::legacy::{Client, connect::HttpConnector},
+    rt::{TokioExecutor, TokioIo},
+};
+use r3v3rs3_api::upstream::{RetryOn, RetryPolicy};
+use r3v3rs3_api::{error::Error, id::ShortId, proxy::Server};
+use std::collections::HashMap;
+use std::future::Future;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::pin::Pin;
+use std::str::FromStr;
+use std::sync::{Arc, PoisonError};
+use std::task::{Context, Poll};
+use std::time::Duration;
+use std::{fmt, io};
+use tokio_rustls::rustls::ClientConfig;
+use tracing::{error, warn};
+use url::Url;
+
+use super::affinity::{Affinity, CookieSlot};
+use super::body_limit::BodyLimit;
+use super::client_ip::ProxiedClient;
+use super::mirror::Mirror;
+use super::rewrite::Rewrite;
+
+type ProxyBody = BoxBody<Bytes, anyhow::Error>;
+type ProxyClient = Client<HttpsConnector<HttpConnector<DnsResolver>>, ProxyBody>;
+
+#[derive(Clone)]
+struct UpgradeGuardSender(
+    Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Option<ConnGuard>>>>>,
+);
+
+type RouteGuardSlot = Option<tokio::sync::oneshot::Sender<Box<dyn std::any::Any + Send>>>;
+
+#[derive(Clone)]
+pub struct UpgradeRouteGuardSender(pub Arc<std::sync::Mutex<RouteGuardSlot>>);
+
+pin_project_lite::pin_project! {
+    struct ConnGuardedBody<B> {
+        #[pin]
+        inner: B,
+        _guard: ConnGuard,
+    }
+}
+
+impl<B: Body> Body for ConnGuardedBody<B> {
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+        self.project().inner.poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+/// Marks a request for a plain HTTP upstream server that accepts HTTP/2 with prior knowledge.
+#[derive(Debug, Clone, Copy)]
+pub struct UpstreamH2c;
+
+/// Marks a request whose `Host` header is the host of the client (`preserve_host`).
+#[derive(Debug, Clone, Copy)]
+pub struct KeptHost;
+
+/// The clients that connect to one upstream server, keyed by the server and the h2c option.
+type PinnedClients = std::sync::Mutex<HashMap<(String, bool), ProxyClient>>;
+
+/// Upstream clients shared by the proxies of a port that use the same client certificate and
+/// connect timeout.
+pub struct ConnectionPool {
+    /// Negotiates HTTP/2 or HTTP/1.1 with ALPN on TLS, and uses HTTP/1.1 on plain HTTP.
+    client: ProxyClient,
+    /// Offers only HTTP/1.1 with ALPN, because an HTTP upgrade needs HTTP/1.1.
+    http1_client: ProxyClient,
+    /// Uses HTTP/2 with prior knowledge.
+    h2c_client: ProxyClient,
+    /// The TLS config with h2 and HTTP/1.1, the connect timeout and the resolver of the clients
+    /// in `pinned`.
+    negotiated: Arc<ClientConfig>,
+    connect_timeout: Duration,
+    resolver: DnsResolver,
+    /// The clients for the requests that keep the host of the client and may speak HTTP/2.
+    pinned: PinnedClients,
+}
+
+impl fmt::Debug for ConnectionPool {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectionPool").finish_non_exhaustive()
+    }
+}
+
+/// The upstream server, the host of the client and the h2c option of a request that keeps the
+/// host of the client and goes to a server that may speak HTTP/2.
+fn kept_host_target<B>(req: &Request<B>) -> Option<(Uri, Authority, bool)> {
+    req.extensions().get::<KeptHost>()?;
+    let h2c = req.extensions().get::<UpstreamH2c>().is_some();
+    let server = http2_capable_server(req.uri(), h2c)?;
+    let host = req.headers().get(HOST)?.to_str().ok()?.parse().ok()?;
+    Some((server, host, h2c))
+}
+
+/// The scheme and authority of `uri` when the server may speak HTTP/2: an HTTPS server, or a
+/// plain HTTP server with h2c.
+fn http2_capable_server(uri: &Uri, h2c: bool) -> Option<Uri> {
+    let scheme = uri.scheme()?;
+    let may_speak_h2 = *scheme == Scheme::HTTPS || (h2c && *scheme == Scheme::HTTP);
+    if !may_speak_h2 {
+        return None;
+    }
+    Uri::builder()
+        .scheme(scheme.clone())
+        .authority(uri.authority()?.clone())
+        .path_and_query("/")
+        .build()
+        .ok()
+}
+
+fn is_websocket_upgrade_request<B>(req: &Request<B>) -> bool {
+    req.method() == hyper::Method::GET
+        && req
+            .headers()
+            .get(UPGRADE)
+            .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"))
+        && req.headers().get(CONNECTION).is_some_and(|v| {
+            v.to_str().is_ok_and(|s| {
+                s.split(',')
+                    .any(|p| p.trim().eq_ignore_ascii_case("upgrade"))
+            })
+        })
+}
+
+impl ConnectionPool {
+    pub fn new(
+        tls_client_config: Arc<ClientConfig>,
+        connect_timeout: Duration,
+        resolver: DnsResolver,
+    ) -> Self {
+        let negotiated = with_alpn(&tls_client_config, &[b"h2", b"http/1.1"]);
+        let http1 = with_alpn(&tls_client_config, &[b"http/1.1"]);
+        Self {
+            client: build_client(negotiated.clone(), false, connect_timeout, resolver.clone()),
+            http1_client: build_client(http1, false, connect_timeout, resolver.clone()),
+            h2c_client: build_client(negotiated.clone(), true, connect_timeout, resolver.clone()),
+            negotiated,
+            connect_timeout,
+            resolver,
+            pinned: PinnedClients::default(),
+        }
+    }
+
+    /// Prepares a request that keeps the host of the client for an upstream server that may
+    /// speak HTTP/2 (HTTPS, or plain HTTP with h2c). HTTP/2 has no separate `Host` header: the
+    /// server reads the URI authority as `:authority`. The URI then names the host of the client,
+    /// and the returned client connects to the upstream server whatever the URI names. Returns
+    /// `None` for every other request, which keeps the URI of the server.
+    fn pin_kept_host<B>(&self, req: &mut Request<B>) -> Option<ProxyClient> {
+        let (server, host, h2c) = kept_host_target(req)?;
+        let mut parts = req.uri().clone().into_parts();
+        parts.authority = Some(host);
+        *req.uri_mut() = Uri::from_parts(parts).ok()?;
+        // HTTP/1.1 writes the `Host` header from the URI again.
+        req.headers_mut().remove(HOST);
+        Some(self.pinned_client(server, h2c))
+    }
+
+    fn pinned_client(&self, server: Uri, h2c: bool) -> ProxyClient {
+        let mut clients = self.pinned.lock().unwrap_or_else(PoisonError::into_inner);
+        clients
+            .entry((server.to_string(), h2c))
+            .or_insert_with(|| {
+                Client::builder(TokioExecutor::new())
+                    .http2_only(h2c)
+                    .http2_max_frame_size(Some(HTTP2_MAX_FRAME_SIZE as u32))
+                    .build(
+                        HttpsConnector::new_with_resolver(
+                            self.negotiated.clone(),
+                            self.resolver.clone(),
+                        )
+                        .with_connect_timeout(self.connect_timeout)
+                        .with_destination(server),
+                    )
+            })
+            .clone()
+    }
+
+    fn client_for<B>(&self, req: &Request<B>, upgrading: bool) -> &ProxyClient {
+        if upgrading {
+            &self.http1_client
+        } else if req.extensions().get::<UpstreamH2c>().is_some()
+            && req.uri().scheme() == Some(&Scheme::HTTP)
+        {
+            &self.h2c_client
+        } else {
+            &self.client
+        }
+    }
+
+    /// Sends `GET` to the URI without a body, and returns the status of the response.
+    pub async fn probe(&self, uri: Uri) -> anyhow::Result<StatusCode> {
+        let req = Request::get(uri).body(empty_body())?;
+        self.send_discarded(req, Duration::ZERO).await
+    }
+
+    /// Sends the request, drops the response body and returns the status of the response.
+    pub async fn send_discarded(
+        &self,
+        req: Request<ProxyBody>,
+        request_timeout: Duration,
+    ) -> anyhow::Result<StatusCode> {
+        let res = self
+            .send(req, request_timeout)
+            .await
+            .map_err(|err| err.error)?;
+        Ok(res.status())
+    }
+
+    /// Sends the request. `request_timeout` limits the time until the response headers arrive,
+    /// and `Duration::ZERO` disables the limit.
+    async fn send(
+        &self,
+        mut req: Request<ProxyBody>,
+        request_timeout: Duration,
+    ) -> Result<Response<ProxyBody>, SendError> {
+        if let Some(panel) = req.uri().authority().and_then(crate::proxy::panel::matches) {
+            return panel_send(panel, req, request_timeout).await;
+        }
+        let is_ws = is_websocket_upgrade_request(&req);
+        let upgrading_req = if is_ws {
+            let mut cloned_req = Request::builder()
+                .method(req.method().clone())
+                .uri(req.uri())
+                .body(empty_body())
+                .map_err(SendError::other)?;
+            cloned_req.headers_mut().clone_from(req.headers());
+            Some(std::mem::replace(&mut req, cloned_req))
+        } else {
+            req.headers_mut().remove(UPGRADE);
+            req.headers_mut().remove("http2-settings");
+            None
+        };
+
+        // The connection decides the protocol. An HTTP/1 connection rejects an HTTP/2 request
+        // version, and an HTTP/2 connection ignores the request version.
+        *req.version_mut() = hyper::Version::HTTP_11;
+
+        let pinned = upgrading_req
+            .is_none()
+            .then(|| self.pin_kept_host(&mut req))
+            .flatten();
+        let sending = match &pinned {
+            Some(client) => client.request(req),
+            None => self.client_for(&req, upgrading_req.is_some()).request(req),
+        };
+        let res = response_headers(sending, request_timeout)
+            .await?
+            .map(|body| BoxBody::new(body.map_err(Into::into)));
+
+        match upgrading_req {
+            Some(upgrading_req) if res.status() == StatusCode::SWITCHING_PROTOCOLS => {
+                let mut cloned_res = Response::builder()
+                    .status(res.status())
+                    .body(empty_body())
+                    .map_err(SendError::other)?;
+                cloned_res.headers_mut().clone_from(res.headers());
+                let (guard_tx, guard_rx) = tokio::sync::oneshot::channel();
+                let (route_guard_tx, route_guard_rx) = tokio::sync::oneshot::channel();
+                cloned_res
+                    .extensions_mut()
+                    .insert(UpgradeGuardSender(Arc::new(std::sync::Mutex::new(Some(
+                        guard_tx,
+                    )))));
+                cloned_res
+                    .extensions_mut()
+                    .insert(UpgradeRouteGuardSender(Arc::new(std::sync::Mutex::new(
+                        Some(route_guard_tx),
+                    ))));
+                tokio::spawn(upgrade_connection(
+                    upgrading_req,
+                    res,
+                    guard_rx,
+                    route_guard_rx,
+                    request_timeout,
+                ));
+                Ok(cloned_res)
+            }
+            _ => Ok(res),
+        }
+    }
+}
+
+/// Hands the request to the router of a panel that this process serves, without a TCP
+/// connection. The panel sees the client that the proxy resolved as the peer address and the
+/// `Host` that the client sent. An upgrade request keeps the upgrade of the client connection,
+/// which the panel takes over itself.
+async fn panel_send(
+    mut panel: axum::Router,
+    mut req: Request<ProxyBody>,
+    request_timeout: Duration,
+) -> Result<Response<ProxyBody>, SendError> {
+    let client = req.extensions().get::<ProxiedClient>().cloned();
+    let ip = client
+        .as_ref()
+        .map_or(IpAddr::V4(Ipv4Addr::LOCALHOST), |client| client.ip);
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::new(ip, 0)));
+    if let Some(host) = client.and_then(|client| client.host) {
+        req.headers_mut().insert(HOST, host);
+    }
+    // The panel saw HTTP/1.1 over the loopback connection, and an upgrade needs it.
+    *req.version_mut() = hyper::Version::HTTP_11;
+    let sending = async move {
+        let Ok(()) = std::future::poll_fn(|cx| {
+            tower_service::Service::<Request<ProxyBody>>::poll_ready(&mut panel, cx)
+        })
+        .await;
+        let Ok(res) = tower_service::Service::call(&mut panel, req).await;
+        res
+    };
+    let res = if request_timeout.is_zero() {
+        sending.await
+    } else {
+        tokio::time::timeout(request_timeout, sending)
+            .await
+            .map_err(|_| SendError::other(ProxyError::UpstreamTimeout))?
+    };
+    Ok(res.map(|body| BoxBody::new(SyncBody::new(body).map_err(anyhow::Error::from))))
+}
+
+/// A body that is `Send` but not `Sync`, made usable as a [`ProxyBody`]. The body is polled
+/// through `&mut self`, so polling never locks the mutex.
+struct SyncBody<B>(std::sync::Mutex<B>);
+
+impl<B> SyncBody<B> {
+    fn new(body: B) -> Self {
+        Self(std::sync::Mutex::new(body))
+    }
+}
+
+impl<B: Body + Unpin> Body for SyncBody<B> {
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+        let body = self
+            .get_mut()
+            .0
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner);
+        Pin::new(body).poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .size_hint()
+    }
+}
+
+/// A failed upstream request.
+struct SendError {
+    error: anyhow::Error,
+    /// True when the connection to the upstream server failed, so the server received nothing.
+    connect: bool,
+}
+
+impl SendError {
+    fn other(error: impl Into<anyhow::Error>) -> Self {
+        Self {
+            error: error.into(),
+            connect: false,
+        }
+    }
+}
+
+/// Waits for the response headers. A request timeout or a connect timeout becomes
+/// [`ProxyError::UpstreamTimeout`].
+async fn response_headers<F, B>(
+    sending: F,
+    request_timeout: Duration,
+) -> Result<Response<B>, SendError>
+where
+    F: Future<Output = Result<Response<B>, hyper_util::client::legacy::Error>>,
+{
+    let result = if request_timeout.is_zero() {
+        sending.await
+    } else {
+        tokio::time::timeout(request_timeout, sending)
+            .await
+            .map_err(|_| SendError::other(ProxyError::UpstreamTimeout))?
+    };
+    result.map_err(|err| SendError {
+        connect: err.is_connect(),
+        error: if is_timeout(&err) {
+            ProxyError::UpstreamTimeout.into()
+        } else {
+            err.into()
+        },
+    })
+}
+
+/// Returns true when the error or one of its sources is an `io::ErrorKind::TimedOut` error.
+fn is_timeout(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = Some(err);
+    while let Some(err) = source {
+        if err
+            .downcast_ref::<io::Error>()
+            .is_some_and(|err| err.kind() == io::ErrorKind::TimedOut)
+        {
+            return true;
+        }
+        source = err.source();
+    }
+    false
+}
+
+/// The upstream servers of a route, their connections and the time limit of their requests.
+#[derive(Debug, Clone)]
+pub struct Upstream {
+    pub proxy_id: ShortId,
+    pub route_path: String,
+    pub pool: Arc<ConnectionPool>,
+    /// `Duration::ZERO` disables the limit.
+    pub request_timeout: Duration,
+    pub servers: Arc<[Server]>,
+    pub group: Arc<UpstreamGroup>,
+    pub retry: RetryPolicy,
+    /// `None` when the route has no sticky sessions.
+    pub affinity: Option<Arc<Affinity>>,
+    /// The largest request body in bytes. `0` has no limit.
+    pub max_body_size: u64,
+    pub rewrite: Arc<Rewrite>,
+    /// `None` when the route has no mirror.
+    pub mirror: Option<Arc<Mirror>>,
+    /// Sends the `Host` of the client instead of the authority of the server.
+    pub preserve_host: bool,
+}
+
+/// The `Host` that the client sent; an HTTP/2 or HTTP/3 client sends it as the URI authority.
+/// A retry finds the header that the first attempt set.
+fn client_host<B>(req: &Request<B>) -> Option<HeaderValue> {
+    req.headers()
+        .get(HOST)
+        .cloned()
+        .or_else(|| req.uri().authority().and_then(authority_value))
+}
+
+/// The `Host` header that names the server of `uri`.
+fn authority_header(uri: &Uri) -> Option<HeaderValue> {
+    uri.authority().and_then(authority_value)
+}
+
+fn authority_value(authority: &hyper::http::uri::Authority) -> Option<HeaderValue> {
+    HeaderValue::from_str(authority.as_str()).ok()
+}
+
+/// The servers to try for a request in order, and the part of the client URI that follows the
+/// route path.
+#[derive(Debug, Clone)]
+struct UpstreamTarget {
+    candidates: Vec<usize>,
+    path_segments: Vec<String>,
+    query: Option<String>,
+    sticky: Option<StickyTarget>,
+}
+
+/// The sticky session of a request.
+#[derive(Debug, Clone)]
+struct StickyTarget {
+    /// The server that the cookie of the request names, when that server can take the request.
+    pinned: Option<usize>,
+    /// Adds `Secure` to the cookie.
+    secure: bool,
+    cookie: CookieSlot,
+}
+
+impl Upstream {
+    /// Selects the upstream server of the request, and sets the request URI and the `Host` header
+    /// for that server. A route without a server leaves the request unchanged. `client` is the
+    /// IP address of the client, and `secure` is true for a TLS connection. Returns the slot of
+    /// the sticky cookie of the response when the route has sticky sessions. Fails when the
+    /// request URI for the server cannot be built.
+    pub fn select<B>(
+        &self,
+        req: &mut Request<B>,
+        path_segments: Vec<String>,
+        client: IpAddr,
+        secure: bool,
+    ) -> Result<Option<CookieSlot>, ProxyError> {
+        if self.servers.is_empty() {
+            return Ok(None);
+        }
+        let mut candidates = self.group.candidates(client);
+        let sticky = self
+            .affinity
+            .as_ref()
+            .map(|affinity| self.pin(affinity, req, &mut candidates, secure));
+        let cookie = sticky.as_ref().map(|sticky| sticky.cookie.clone());
+        let target = UpstreamTarget {
+            candidates,
+            path_segments: self.rewrite.apply(path_segments),
+            query: req.uri().query().map(str::to_string),
+            sticky,
+        };
+        if let Some(&first) = target.candidates.first() {
+            self.apply(req, first, &target)?;
+        }
+        req.extensions_mut().insert(target);
+        Ok(cookie)
+    }
+
+    /// Moves the server of the sticky cookie to the front of the candidates, and removes the
+    /// cookie from the request.
+    fn pin<B>(
+        &self,
+        affinity: &Affinity,
+        req: &mut Request<B>,
+        candidates: &mut Vec<usize>,
+        secure: bool,
+    ) -> StickyTarget {
+        let pinned = affinity
+            .pinned(req.headers())
+            .filter(|&index| self.group.is_pinnable(index));
+        affinity.strip(req.headers_mut());
+        if let Some(index) = pinned {
+            candidates.retain(|&candidate| candidate != index);
+            candidates.insert(0, index);
+        }
+        StickyTarget {
+            pinned,
+            secure,
+            cookie: CookieSlot::default(),
+        }
+    }
+
+    /// Sets the sticky cookie of the response to the server that answered. A client that keeps
+    /// its server gets no new cookie.
+    fn remember(&self, target: &UpstreamTarget, index: usize) {
+        let (Some(affinity), Some(sticky)) = (&self.affinity, &target.sticky) else {
+            return;
+        };
+        let cookie = if sticky.pinned == Some(index) {
+            None
+        } else {
+            affinity.set_cookie(index, sticky.secure)
+        };
+        *sticky.cookie.lock().unwrap_or_else(PoisonError::into_inner) = cookie;
+    }
+
+    /// Points the request at the server. The request must not be sent when this fails, because
+    /// it still carries the URI of the client. The `Host` header names the server, or with
+    /// `preserve_host` the host that the client asked for.
+    fn apply<B>(
+        &self,
+        req: &mut Request<B>,
+        index: usize,
+        target: &UpstreamTarget,
+    ) -> Result<(), ProxyError> {
+        let server = self
+            .servers
+            .get(index)
+            .ok_or(ProxyError::NoUpstreamServers)?;
+        let uri = upstream_uri(
+            &server.url.0,
+            &target.path_segments,
+            target.query.as_deref(),
+        )?;
+        let client_host = self.preserve_host.then(|| client_host(req)).flatten();
+        if client_host.is_some() {
+            req.extensions_mut().insert(KeptHost);
+        }
+        if let Some(host) = client_host.or_else(|| authority_header(&uri)) {
+            req.headers_mut().insert(HOST, host);
+        }
+        *req.uri_mut() = uri;
+        Ok(())
+    }
+
+    /// Sends the request to the selected server. A failure that the retry policy names sends the
+    /// request again to the next server, until the policy has no attempts left. When the circuit
+    /// of every server blocks the request, the client receives 503. A request body larger than
+    /// the limit fails the request with 413.
+    pub async fn request(
+        &self,
+        req: Request<ProxyBody>,
+    ) -> Result<Response<ProxyBody>, anyhow::Error> {
+        let (req, limit) = BodyLimit::apply(req, self.max_body_size);
+        let req = self.mirror(req);
+        let result = self.send_request(req).await.map_err(|err| {
+            if limit.exceeded() {
+                SendError::other(ProxyError::PayloadTooLarge)
+            } else {
+                err
+            }
+        });
+        let proxy_id = self.proxy_id.to_string();
+        finish(result, Some(&proxy_id), Some(&self.route_path))
+    }
+
+    /// Starts the copy of the request for the mirror servers when the mirror admits the request.
+    fn mirror(&self, req: Request<ProxyBody>) -> Request<ProxyBody> {
+        let Some(mirror) = &self.mirror else {
+            return req;
+        };
+        let (Some(target), Some(permit)) =
+            (req.extensions().get::<UpstreamTarget>(), mirror.admit(&req))
+        else {
+            return req;
+        };
+        let uris = mirror
+            .servers
+            .iter()
+            .filter_map(|server| {
+                upstream_uri(
+                    &server.url.0,
+                    &target.path_segments,
+                    target.query.as_deref(),
+                )
+                .ok()
+            })
+            .collect();
+        mirror.tee(req, uris, permit)
+    }
+
+    async fn send_request(
+        &self,
+        req: Request<ProxyBody>,
+    ) -> Result<Response<ProxyBody>, SendError> {
+        let Some(target) = req.extensions().get::<UpstreamTarget>().cloned() else {
+            return self.pool.send(req, self.request_timeout).await;
+        };
+        let replay = Replay::prepare(req, self.retry.replay_body_limit).await?;
+        self.send_with_retries(replay, &target).await
+    }
+
+    async fn send_with_retries(
+        &self,
+        mut replay: Replay,
+        target: &UpstreamTarget,
+    ) -> Result<Response<ProxyBody>, SendError> {
+        let mut candidates = target.candidates.iter().copied();
+        let mut result = Err(SendError::other(ProxyError::NoUpstreamAvailable));
+        for attempt in 1..=self.retry.attempts.max(1) {
+            let Some(mut req) = replay.next() else {
+                break;
+            };
+            let Some(permit) = self
+                .claim(&mut req, target, &mut candidates)
+                .map_err(SendError::other)?
+            else {
+                break;
+            };
+            if attempt > 1 {
+                warn!(uri = %req.uri(), attempt, "retrying the request on the next upstream server");
+            }
+            let index = permit.index();
+            result = self.attempt(req, permit).await;
+            if result.is_ok() {
+                self.remember(target, index);
+            }
+            if !self.should_retry(&result, &replay.method) {
+                break;
+            }
+        }
+        result
+    }
+
+    /// True when the policy names the failure. A failure after the server received the request
+    /// retries only an idempotent method.
+    fn should_retry(
+        &self,
+        result: &Result<Response<ProxyBody>, SendError>,
+        method: &Method,
+    ) -> bool {
+        retry_reason(result).is_some_and(|reason| {
+            self.retry.retry_on.contains(&reason)
+                && (reason == RetryOn::Connect || is_idempotent(method))
+        })
+    }
+
+    /// Takes the next candidate whose circuit lets the request through, and points the request at
+    /// that server when `select` chose another server. Returns `None` when no candidate is left.
+    fn claim<B>(
+        &self,
+        req: &mut Request<B>,
+        target: &UpstreamTarget,
+        candidates: &mut impl Iterator<Item = usize>,
+    ) -> Result<Option<Permit>, ProxyError> {
+        let Some(permit) = candidates.find_map(|index| self.group.acquire(index)) else {
+            return Ok(None);
+        };
+        if target.candidates.first() != Some(&permit.index()) {
+            self.apply(req, permit.index(), target)?;
+        }
+        Ok(Some(permit))
+    }
+
+    /// Sends the request and records the result in the health and the circuit of the server.
+    async fn attempt(
+        &self,
+        req: Request<ProxyBody>,
+        permit: Permit,
+    ) -> Result<Response<ProxyBody>, SendError> {
+        let result = self.pool.send(req, self.request_timeout).await;
+        let guard = record_response_permit(&result, permit);
+        result.map(|res| attach_guard_or_upgrade(res, guard))
+    }
+}
+
+fn attach_guard_or_upgrade(
+    mut res: Response<ProxyBody>,
+    guard: Option<ConnGuard>,
+) -> Response<ProxyBody> {
+    if let Some(sender) = res.extensions_mut().remove::<UpgradeGuardSender>() {
+        if let Ok(mut lock) = sender.0.lock()
+            && let Some(tx) = lock.take()
+        {
+            let _ = tx.send(guard);
+        }
+        res
+    } else if let Some(guard) = guard {
+        res.map(|body| {
+            BoxBody::new(ConnGuardedBody {
+                inner: body,
+                _guard: guard,
+            })
+        })
+    } else {
+        res
+    }
+}
+
+fn record_response_permit(
+    result: &Result<Response<ProxyBody>, SendError>,
+    permit: Permit,
+) -> Option<ConnGuard> {
+    if let Ok(res) = result
+        && let Some(cl) = res.headers().get(hyper::header::CONTENT_LENGTH)
+        && let Ok(bytes) = cl.to_str().unwrap_or_default().parse::<u64>()
+    {
+        permit.record_bytes(bytes);
+    }
+    match result {
+        Ok(res) if is_gateway_error(res.status()) => {
+            permit.error_response(&format!("the server answered {}", res.status()));
+            None
+        }
+        Ok(_) => Some(permit.success_keep()),
+        Err(err) => {
+            permit.failure(&format!("{:#}", err.error));
+            None
+        }
+    }
+}
+
+/// The failure of one try that a retry policy can name.
+fn retry_reason(result: &Result<Response<ProxyBody>, SendError>) -> Option<RetryOn> {
+    match result {
+        Err(err) if err.connect => Some(RetryOn::Connect),
+        Err(err) => matches!(
+            err.error.downcast_ref::<ProxyError>(),
+            Some(ProxyError::UpstreamTimeout)
+        )
+        .then_some(RetryOn::Timeout),
+        Ok(res) => match res.status() {
+            StatusCode::BAD_GATEWAY => Some(RetryOn::Http502),
+            StatusCode::SERVICE_UNAVAILABLE => Some(RetryOn::Http503),
+            StatusCode::GATEWAY_TIMEOUT => Some(RetryOn::Http504),
+            _ => None,
+        },
+    }
+}
+
+/// The idempotent methods of RFC 9110 section 9.2.2.
+fn is_idempotent(method: &Method) -> bool {
+    matches!(
+        *method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE | Method::PUT | Method::DELETE
+    )
+}
+
+/// A 502, 503 or 504 response, which the circuit breaker counts as a failure.
+fn is_gateway_error(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT
+    )
+}
+
+/// The URL of a request to a server: the path of the server URL, then the request path segments
+/// after the route path, then the query of the request. The segments keep their percent-encoding.
+/// A request without segments keeps the server path unchanged.
+pub fn upstream_url(server: &Url, segments: &[String], query: Option<&str>) -> Url {
+    let mut url = server.clone();
+    if !segments.is_empty() {
+        let rest = segments
+            .iter()
+            .map(String::as_str)
+            .filter(|segment| !is_dot_segment(segment))
+            .collect::<Vec<_>>()
+            .join("/");
+        let path = format!("{}/{rest}", url.path().trim_end_matches('/'));
+        url.set_path(&path);
+    }
+    url.set_query(query);
+    url
+}
+
+/// The URI of a request to a server, built as [`upstream_url`] builds its URL. A URL that is not
+/// a valid URI, for example one longer than the URI limit, fails with
+/// [`ProxyError::UpstreamUriInvalid`].
+fn upstream_uri(server: &Url, segments: &[String], query: Option<&str>) -> Result<Uri, ProxyError> {
+    Uri::from_str(upstream_url(server, segments, query).as_str())
+        .map_err(|_| ProxyError::UpstreamUriInvalid)
+}
+
+/// A `.` or `..` segment, also percent-encoded. The URL parser resolves these segments, so they
+/// could move the request out of the server path.
+fn is_dot_segment(segment: &str) -> bool {
+    matches!(
+        segment.to_ascii_lowercase().as_str(),
+        "." | ".." | "%2e" | ".%2e" | "%2e." | "%2e%2e"
+    )
+}
+
+/// Logs a failed request, and returns the result.
+fn finish(
+    result: Result<Response<ProxyBody>, SendError>,
+    proxy: Option<&str>,
+    route: Option<&str>,
+) -> Result<Response<ProxyBody>, anyhow::Error> {
+    let result = result.map_err(|err| err.error);
+    if let Err(err) = &result {
+        error!("{err:#}");
+        crate::stats::count_upstream_error_with_kind(
+            proxy,
+            route,
+            classify_upstream_error(err.as_ref()),
+        );
+    }
+    result
+}
+
+fn classify_upstream_error(
+    err: &(dyn std::error::Error + 'static),
+) -> crate::stats::UpstreamErrorKind {
+    use crate::stats::UpstreamErrorKind;
+    if err
+        .downcast_ref::<ProxyError>()
+        .is_some_and(|e| matches!(e, ProxyError::UpstreamTimeout))
+    {
+        return UpstreamErrorKind::Timeout;
+    }
+    if is_timeout(err) {
+        return UpstreamErrorKind::Timeout;
+    }
+    if err
+        .downcast_ref::<hyper_util::client::legacy::Error>()
+        .is_some_and(|e| e.is_connect())
+    {
+        return UpstreamErrorKind::Connect;
+    }
+    if has_io_connect_error(err) {
+        return UpstreamErrorKind::Connect;
+    }
+    UpstreamErrorKind::Other
+}
+
+fn has_io_connect_error(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = err.source();
+    while let Some(s) = source {
+        if s.downcast_ref::<io::Error>().is_some_and(|e| {
+            matches!(
+                e.kind(),
+                io::ErrorKind::ConnectionRefused
+                    | io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::NotConnected
+            )
+        }) {
+            return true;
+        }
+        source = s.source();
+    }
+    false
+}
+
+/// The request of the first try, and a copy of the request for the retries.
+struct Replay {
+    first: Option<Request<ProxyBody>>,
+    copy: Option<Request<Bytes>>,
+    method: Method,
+}
+
+impl Replay {
+    /// Keeps a copy of a request without a body, and of a request whose body length is known and
+    /// at most `limit` bytes. The body of such a request is read into memory. An upgrade request
+    /// and a request with a longer or an unknown body length have no copy.
+    async fn prepare(req: Request<ProxyBody>, limit: u64) -> Result<Self, SendError> {
+        let method = req.method().clone();
+        let length = body_length(&req).filter(|length| *length <= limit);
+        if req.headers().contains_key(UPGRADE) || length.is_none() {
+            return Ok(Self {
+                first: Some(req),
+                copy: None,
+                method,
+            });
+        }
+        if req.body().size_hint().exact() == Some(0) {
+            let copy = copy_request(&req, Bytes::new());
+            return Ok(Self {
+                first: Some(req),
+                copy: Some(copy),
+                method,
+            });
+        }
+        let (parts, body) = req.into_parts();
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        let body = Limited::new(body, limit)
+            .collect()
+            .await
+            .map_err(|err| SendError::other(anyhow::anyhow!(err)))?
+            .to_bytes();
+        let copy = Request::from_parts(parts, body);
+        Ok(Self {
+            first: Some(copy_request(&copy, full_body(copy.body().clone()))),
+            copy: Some(copy),
+            method,
+        })
+    }
+
+    /// Returns the request of the first try, then a new copy for each retry.
+    fn next(&mut self) -> Option<Request<ProxyBody>> {
+        self.first.take().or_else(|| {
+            let copy = self.copy.as_ref()?;
+            Some(copy_request(copy, full_body(copy.body().clone())))
+        })
+    }
+}
+
+/// The body length from the body, or from the `Content-Length` header when the body does not
+/// know it, e.g. on HTTP/3.
+fn body_length<B: Body>(req: &Request<B>) -> Option<u64> {
+    req.body().size_hint().exact().or_else(|| {
+        req.headers()
+            .get(CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse().ok())
+    })
+}
+
+/// Copies the method, the URI, the version, the headers and the extensions of a request.
+fn copy_request<B, C>(req: &Request<B>, body: C) -> Request<C> {
+    let mut copy = Request::new(body);
+    *copy.method_mut() = req.method().clone();
+    *copy.uri_mut() = req.uri().clone();
+    *copy.version_mut() = req.version();
+    *copy.headers_mut() = req.headers().clone();
+    *copy.extensions_mut() = req.extensions().clone();
+    copy
+}
+
+type UpstreamClient = (Arc<ClientConfig>, Option<Arc<ConnectionPool>>);
+
+/// Builds the upstream TLS client config and the connection pool of each proxy on a port. Proxies
+/// with the same client certificate and connect timeout share one pool.
+pub struct UpstreamClients<'a> {
+    certs: &'a CertList,
+    default_config: Arc<ClientConfig>,
+    clients: HashMap<(Option<ShortId>, Duration), UpstreamClient>,
+    dns: DnsResolver,
+}
+
+impl<'a> UpstreamClients<'a> {
+    pub fn new(certs: &'a CertList, dns: DnsResolver) -> Result<Self, Error> {
+        Ok(Self {
+            certs,
+            default_config: Arc::new(upstream_client_config(certs, None)?),
+            clients: HashMap::new(),
+            dns,
+        })
+    }
+
+    /// Returns the TLS client config and the connection pool for the client certificate and the
+    /// connect timeout. The pool is `None` when the certificate is invalid, so the proxy does not
+    /// connect without it.
+    pub fn get(
+        &mut self,
+        client_cert: Option<ShortId>,
+        connect_timeout: Duration,
+    ) -> UpstreamClient {
+        let key = (client_cert, connect_timeout);
+        if let Some(client) = self.clients.get(&key) {
+            return client.clone();
+        }
+        let client = self.build(client_cert, connect_timeout);
+        self.clients.insert(key, client.clone());
+        client
+    }
+
+    fn build(&self, client_cert: Option<ShortId>, connect_timeout: Duration) -> UpstreamClient {
+        let config = match client_cert {
+            None => Ok(self.default_config.clone()),
+            Some(_) => upstream_client_config(self.certs, client_cert).map(Arc::new),
+        };
+        match config {
+            Ok(config) => {
+                let pool = Arc::new(ConnectionPool::new(
+                    config.clone(),
+                    connect_timeout,
+                    self.dns.clone(),
+                ));
+                (config, Some(pool))
+            }
+            Err(err) => {
+                error!(%err, "the proxy cannot connect to its upstream servers");
+                (self.default_config.clone(), None)
+            }
+        }
+    }
+}
+
+fn with_alpn(config: &ClientConfig, protocols: &[&[u8]]) -> Arc<ClientConfig> {
+    let mut config = config.clone();
+    config.alpn_protocols = protocols.iter().map(|protocol| protocol.to_vec()).collect();
+    Arc::new(config)
+}
+
+fn build_client(
+    tls_client_config: Arc<ClientConfig>,
+    http2_only: bool,
+    connect_timeout: Duration,
+    resolver: DnsResolver,
+) -> ProxyClient {
+    Client::builder(TokioExecutor::new())
+        .http2_only(http2_only)
+        .http2_max_frame_size(Some(HTTP2_MAX_FRAME_SIZE as u32))
+        .build(
+            HttpsConnector::new_with_resolver(tls_client_config, resolver)
+                .with_connect_timeout(connect_timeout),
+        )
+}
+
+fn empty_body() -> ProxyBody {
+    full_body(Bytes::new())
+}
+
+fn full_body(data: Bytes) -> ProxyBody {
+    BoxBody::new(Full::new(data).map_err(Into::into))
+}
+
+async fn upgrade_connection(
+    req: Request<ProxyBody>,
+    res: Response<ProxyBody>,
+    mut guard_rx: tokio::sync::oneshot::Receiver<Option<ConnGuard>>,
+    mut route_guard_rx: tokio::sync::oneshot::Receiver<Box<dyn std::any::Any + Send>>,
+    idle_timeout: Duration,
+) {
+    let is_ws = req
+        .headers()
+        .get(hyper::header::UPGRADE)
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"));
+    let proto = if is_ws {
+        r3v3rs3_api::traffic::ConnectionProtocol::WebSocket
+    } else {
+        r3v3rs3_api::traffic::ConnectionProtocol::HttpUpgrade
+    };
+    let client_addr = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+    let upstream_addr = req.uri().to_string();
+
+    let early_guard = guard_rx.try_recv().ok().flatten();
+    let early_route_guard = route_guard_rx.try_recv().ok();
+
+    match tokio::try_join!(hyper::upgrade::on(req), hyper::upgrade::on(res)) {
+        Ok((req, res)) => {
+            let _conn_guard = match early_guard {
+                Some(g) => Some(g),
+                None => guard_rx.await.ok().flatten(),
+            };
+            let _route_guard = match early_route_guard {
+                Some(g) => Some(g),
+                None => route_guard_rx.await.ok(),
+            };
+            let mut req = TokioIo::new(req);
+            let mut res = TokioIo::new(res);
+
+            let (_id, _guard, cancel_rx, sent, recv) = crate::proxy::connection_tracker::register(
+                None,
+                if is_ws { "websocket" } else { "http-upgrade" },
+                proto,
+                client_addr,
+                upstream_addr,
+            );
+
+            if let Err(err) =
+                crate::proxy::connection_tracker::copy_tracked_bidirectional_with_timeout(
+                    &mut req,
+                    &mut res,
+                    sent,
+                    recv,
+                    cancel_rx,
+                    idle_timeout,
+                )
+                .await
+            {
+                error!("upgraded io error: {}", err);
+            }
+        }
+        Err(err) => {
+            error!("upgrading io error: {}", err);
+        }
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_timeout_reads_the_error_sources() {
+        let timed_out = io::Error::new(io::ErrorKind::TimedOut, "timed out");
+        assert!(is_timeout(&timed_out));
+
+        let wrapped = anyhow::Error::new(timed_out).context("connect error");
+        assert!(is_timeout(wrapped.as_ref()));
+
+        let refused = io::Error::new(io::ErrorKind::ConnectionRefused, "refused");
+        assert!(!is_timeout(&refused));
+    }
+
+    fn joined(server: &str, segments: &[&str], query: Option<&str>) -> String {
+        let segments = segments.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        upstream_url(&server.parse().unwrap(), &segments, query).to_string()
+    }
+
+    #[test]
+    fn the_server_path_is_joined_with_one_slash() {
+        let base = "http://up/base/";
+        assert_eq!(joined(base, &["x"], Some("q=1")), "http://up/base/x?q=1");
+        assert_eq!(joined("http://up/base", &["x"], None), "http://up/base/x");
+        assert_eq!(joined("http://up/", &["x"], None), "http://up/x");
+        assert_eq!(joined(base, &["x", ""], None), "http://up/base/x/");
+        assert_eq!(joined("http://up/base", &[], None), "http://up/base");
+    }
+
+    #[test]
+    fn the_request_segments_keep_their_percent_encoding() {
+        let url = joined("http://up/base/", &["a%20b", "c%2Fd"], None);
+        assert_eq!(url, "http://up/base/a%20b/c%2Fd");
+    }
+
+    #[test]
+    fn dot_segments_cannot_leave_the_server_path() {
+        let segments = ["..", "%2e%2E", ".", "%2e", "secret"];
+        assert_eq!(
+            joined("http://up/base/", &segments, None),
+            "http://up/base/secret"
+        );
+    }
+
+    #[test]
+    fn a_url_that_is_no_valid_uri_fails_the_request() {
+        let server = "http://up/base/".parse().unwrap();
+        let short = upstream_uri(&server, &["x".to_string()], None).unwrap();
+        assert_eq!(short, "http://up/base/x");
+
+        // The percent-encoding of `{` makes the path three times longer than the URI limit.
+        let long = vec!["{".repeat(u16::MAX as usize / 3 + 1)];
+        assert!(matches!(
+            upstream_uri(&server, &long, None),
+            Err(ProxyError::UpstreamUriInvalid)
+        ));
+    }
+
+    async fn prepared(req: Request<ProxyBody>, limit: u64) -> Replay {
+        match Replay::prepare(req, limit).await {
+            Ok(replay) => replay,
+            Err(err) => panic!("{}", err.error),
+        }
+    }
+
+    async fn body_text(req: Request<ProxyBody>) -> String {
+        let body = req.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(body.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_replay_copies_a_request_without_a_body_or_with_a_small_body() {
+        let mut get = Request::get("http://127.0.0.1:9000/a?b=c")
+            .header("x-test", "1")
+            .body(empty_body())
+            .unwrap();
+        get.extensions_mut().insert(UpstreamH2c);
+        let mut replay = prepared(get, 0).await;
+        let first = replay.next().unwrap();
+        let copy = replay.next().unwrap();
+        assert_eq!(copy.method(), first.method());
+        assert_eq!(copy.uri(), first.uri());
+        assert_eq!(copy.headers(), first.headers());
+        assert!(copy.extensions().get::<UpstreamH2c>().is_some());
+
+        let data = || full_body(Bytes::from_static(b"data"));
+        let post = Request::post("http://127.0.0.1:9000/")
+            .body(data())
+            .unwrap();
+        let mut replay = prepared(post, 4).await;
+        assert_eq!(body_text(replay.next().unwrap()).await, "data");
+        assert_eq!(body_text(replay.next().unwrap()).await, "data");
+
+        let post = Request::post("http://127.0.0.1:9000/")
+            .body(data())
+            .unwrap();
+        let mut replay = prepared(post, 3).await;
+        assert_eq!(body_text(replay.next().unwrap()).await, "data");
+        assert!(replay.next().is_none());
+
+        let upgrade = Request::get("http://127.0.0.1:9000/")
+            .header(UPGRADE, "websocket")
+            .body(empty_body())
+            .unwrap();
+        let mut replay = prepared(upgrade, 1024).await;
+        assert!(replay.next().is_some());
+        assert!(replay.next().is_none());
+    }
+
+    #[test]
+    fn retry_reasons_name_the_failure_of_a_try() {
+        let status = |code: u16| -> Result<Response<ProxyBody>, SendError> {
+            Ok(Response::builder().status(code).body(empty_body()).unwrap())
+        };
+        assert_eq!(retry_reason(&status(502)), Some(RetryOn::Http502));
+        assert_eq!(retry_reason(&status(503)), Some(RetryOn::Http503));
+        assert_eq!(retry_reason(&status(504)), Some(RetryOn::Http504));
+        assert_eq!(retry_reason(&status(500)), None);
+
+        let timeout = SendError::other(ProxyError::UpstreamTimeout);
+        assert_eq!(retry_reason(&Err(timeout)), Some(RetryOn::Timeout));
+        let refused = SendError {
+            error: anyhow::anyhow!("connection refused"),
+            connect: true,
+        };
+        assert_eq!(retry_reason(&Err(refused)), Some(RetryOn::Connect));
+        let reset = SendError::other(anyhow::anyhow!("connection reset"));
+        assert_eq!(retry_reason(&Err(reset)), None);
+
+        assert!(is_idempotent(&Method::PUT));
+        assert!(!is_idempotent(&Method::POST));
+        assert!(!is_idempotent(&Method::PATCH));
+    }
+
+    #[test]
+    fn test_is_websocket_upgrade_request() {
+        let ws = Request::get("http://127.0.0.1/")
+            .header(UPGRADE, "websocket")
+            .header(CONNECTION, "Upgrade")
+            .body(())
+            .unwrap();
+        assert!(is_websocket_upgrade_request(&ws));
+
+        let h2c = Request::get("http://127.0.0.1/")
+            .header(UPGRADE, "h2c")
+            .header(CONNECTION, "Upgrade")
+            .body(())
+            .unwrap();
+        assert!(!is_websocket_upgrade_request(&h2c));
+
+        let post_ws = Request::post("http://127.0.0.1/")
+            .header(UPGRADE, "websocket")
+            .header(CONNECTION, "Upgrade")
+            .body(())
+            .unwrap();
+        assert!(!is_websocket_upgrade_request(&post_ws));
+    }
+}

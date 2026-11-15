@@ -1,0 +1,2 @@
+# The page templates are shared with the proxy crate and live in the r3v3rs3 package.
+template_dirs = ["${CARGO_MANIFEST_DIR}/../r3v3rs3/templates"]

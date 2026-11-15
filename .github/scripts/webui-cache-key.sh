@@ -3,7 +3,7 @@
 #
 # release-cache.yml builds the WebUI on main and saves it under this key, and release.yml
 # restores it, so a release does not build the WebUI again. A version bump changes only the
-# `[workspace.package]` version of the root Cargo.toml and the versions of r3v3rs3 and
+# `[workspace.package]` version of the root Cargo.toml and the versions of the server crates and
 # r3v3rs3-cli in Cargo.lock, which the WebUI does not build, so the key leaves those lines out
 # and the bump commit finds the WebUI of the commit before it.
 #
@@ -23,7 +23,7 @@ cd "$(git rev-parse --show-toplevel)"
         { print }
     ' Cargo.toml
     awk '
-        /^name = "(r3v3rs3|r3v3rs3-cli)"$/ { print; skip = 1; next }
+        /^name = "(r3v3rs3|r3v3rs3-cli|r3v3rs3-core|r3v3rs3-proxy|r3v3rs3-platform|r3v3rs3-server|r3v3rs3-admin)"$/ { print; skip = 1; next }
         skip && /^version = / { skip = 0; next }
         { skip = 0; print }
     ' Cargo.lock
