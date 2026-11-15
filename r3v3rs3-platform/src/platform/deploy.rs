@@ -2433,17 +2433,16 @@ mod tests {
         ping_from(platform, &admin, &deployment, ping).await
     }
 
-    /// Deletes the apps before the databases that they use, then the shared network.
+    /// Deletes the apps before the databases that they use. The shared network stays, as it
+    /// does in production: other Docker tests run in parallel and keep containers on it, so
+    /// Docker refuses to remove it while they run.
     async fn remove_test_apps(platform: &Arc<Platform>) -> anyhow::Result<()> {
         let mut apps = platform.store.apps().await?;
         apps.sort_by_key(|app| app.spec.database.is_some());
         for app in apps {
             platform.delete_app(app.id).await?;
         }
-        platform
-            .local
-            .remove_network(&SHARED_NETWORK.parse()?)
-            .await
+        Ok(())
     }
 
     #[tokio::test]
