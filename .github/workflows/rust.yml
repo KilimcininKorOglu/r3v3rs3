@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # release.yml runs the tests before it publishes the crates.
+  # release.yml runs the tests when no green Rust run of the tag's commit or its parent exists.
   workflow_call:
 
 concurrency:
