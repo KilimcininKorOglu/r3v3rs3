@@ -26,6 +26,7 @@ pub mod dns;
 pub mod geoip;
 pub mod health;
 pub mod http;
+pub mod panel;
 pub mod proxy_protocol;
 pub mod registry;
 pub mod srv;

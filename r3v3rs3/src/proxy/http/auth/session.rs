@@ -2,8 +2,9 @@ use super::super::cookie::{cookie_values, remove_cookie};
 use super::super::page::PagePreferences;
 use super::{AuthContext, AuthRejection};
 use crate::accounts::AccountDirectory;
-use crate::admin::auth::{LoginAttemptKey, LoginAttempts};
 use crate::config::storage::Storage;
+use crate::security::ban::IpBanTracker;
+use crate::security::login_attempts::{LoginAttemptKey, LoginAttempts};
 use crate::sessions::{self, SessionBackend, SessionRecord, SessionScope};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
@@ -63,7 +64,7 @@ pub struct SessionService {
 struct SessionState {
     config: AdminConfig,
     attempts: LoginAttempts,
-    ban_tracker: crate::admin::ban::IpBanTracker,
+    ban_tracker: IpBanTracker,
     rate_limits: HashMap<IpAddr, (u32, Instant)>,
 }
 

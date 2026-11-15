@@ -246,7 +246,7 @@ impl ConnectionPool {
         mut req: Request<ProxyBody>,
         request_timeout: Duration,
     ) -> Result<Response<ProxyBody>, SendError> {
-        if let Some(panel) = req.uri().authority().and_then(crate::admin::panel::matches) {
+        if let Some(panel) = req.uri().authority().and_then(crate::proxy::panel::matches) {
             return panel_send(panel, req, request_timeout).await;
         }
         let is_ws = is_websocket_upgrade_request(&req);

@@ -2,11 +2,13 @@ use crate::accounts::{AccountDirectory, AccountEntry, Caller};
 use crate::audit::{AuditLog, AuditRecord};
 use crate::command::ServerCommand;
 use crate::platform::PlatformHandle;
+use crate::proxy::panel;
+use crate::security::ban::IpBanTracker;
+use crate::security::login_attempts::{LoginAttempts, TotpAttempts};
 use crate::server::rpc::auth::{GetAuditLog, GetPlatform, GetSessionBackend, GetSqlitePool};
 use crate::server::rpc::config::GetConfig;
 use crate::server::rpc::{ErasedRpcMethod, RpcCallback, RpcMethod, RpcWrapper};
 use crate::sessions::{LocalSessions, SessionBackend};
-use auth::LoginAttempts;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{
     HeaderName, HeaderValue, StatusCode,
@@ -82,7 +84,6 @@ mod metrics;
 mod oauth;
 pub(crate) mod oauth2;
 mod openapi;
-pub mod panel;
 mod platform;
 mod ports;
 mod proxies;
@@ -1492,9 +1493,9 @@ pub struct Data {
     /// The server replaces these sessions with its own sessions at the start of the admin API.
     pub sessions: Arc<dyn SessionBackend>,
     pub login_attempts: LoginAttempts,
-    pub totp_attempts: auth::TotpAttempts,
+    pub totp_attempts: TotpAttempts,
     pub passkey_challenges: auth::PasskeyChallenges,
-    pub ban_tracker: ban::IpBanTracker,
+    pub ban_tracker: IpBanTracker,
     pub log: Arc<LogReader>,
     /// The audit log of the server. The admin API reads it at its start.
     pub audit: Option<Arc<AuditLog>>,

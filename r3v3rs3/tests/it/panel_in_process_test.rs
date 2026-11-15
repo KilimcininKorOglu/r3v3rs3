@@ -13,7 +13,7 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use hyper::Uri;
-use r3v3rs3::admin::panel;
+use r3v3rs3::proxy::panel;
 use r3v3rs3_api::proxy::HttpProxy;
 use std::net::SocketAddr;
 use std::time::Duration;
