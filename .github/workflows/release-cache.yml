@@ -37,9 +37,12 @@ on:
 permissions:
   contents: read
 
+# A running warm-up finishes, because the caches are saved only at the end of a job: a cancel
+# by the next push (a version bump right after the feature commit) would lose the WebUI build
+# that the release then needs. The next run waits in the queue.
 concurrency:
   group: release-cache
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
