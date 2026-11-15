@@ -240,7 +240,7 @@ pub struct UpdateAppParams {
 pub struct AppLogsParams {
     /// The id of the application.
     pub id: String,
-    /// Number of lines to tail from container logs (default: 100).
+    /// Number of lines to return from the end of the container log, 1 to 1000 (default: 200).
     pub tail: Option<u32>,
     /// Optional service name for multi-service Compose applications.
     pub service: Option<String>,
@@ -399,11 +399,11 @@ pub struct UpdateRegistryParams {
 pub struct AddGitConnectionParams {
     /// Distinct identifier name for the connection (e.g. "github-org", "company-gitlab").
     pub name: String,
-    /// Git provider type: "github", "gitlab", or "gitea".
+    /// Git provider type: "gitlab" or "gitea". A GitHub connection is created as a GitHub App in the panel.
     pub provider: String,
-    /// Optional self-hosted provider base URL (e.g. "https://gitlab.example.com"). Not used for github.
+    /// Base URL of a self-hosted provider (e.g. "https://gitlab.example.com"). Required for Gitea; GitLab defaults to https://gitlab.com.
     pub url: Option<String>,
-    /// OAuth application or GitHub App client ID.
+    /// Client ID of the OAuth application.
     pub client_id: String,
     /// OAuth application client secret.
     pub client_secret: Option<String>,
@@ -547,7 +547,9 @@ pub struct RestoreDatabasePitrParams {
 /// The `{ "config": {...} }` argument of `update_backup_config`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateBackupConfigParams {
-    /// Backup storage configuration (`{"cron": "0 2 * * *", "s3": {...}, ...}`).
+    /// The whole backup configuration (`{"schedule": "02:00", "keep": 7, "s3": {...}, "sftp": {...},
+    /// "rsync": {...}, "restore_test_enabled": true, "heartbeat_url": "https://..."}`).
+    /// `schedule` is a time of day as `HH:MM`; an empty schedule turns the backup scheduler off.
     pub config: r3v3rs3_api::platform::BackupConfig,
 }
 
@@ -570,14 +572,17 @@ pub struct SetTargetRegionParams {
 /// The `{ "spec": {...} }` argument of `create_project`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateProjectParams {
-    /// Project specification (`{"name": "my-project", "description": "..."}`).
+    /// Project specification (`{"name": "my-project", "description": "...",
+    /// "default_environments": ["staging", "production"]}`); the default environments are created
+    /// with the project, and without them a `production` environment is created.
     pub spec: r3v3rs3_api::platform::ProjectSpec,
 }
 
 /// The `{ "group": {...} }` argument of `create_env_group`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateEnvGroupParams {
-    /// Environment group specification (`{"name": "shared-env", "entries": [...]}`).
+    /// Environment group specification (`{"name": "shared-env", "description": "...",
+    /// "variables": [{"key": "FOO", "value": "bar", "secret": false}]}`).
     pub group: r3v3rs3_api::platform::EnvGroupSpec,
 }
 
@@ -815,19 +820,32 @@ fn parse_mcp_security_profile(
     }
 }
 
+/// The arguments of `update_prune_policy`. An omitted field keeps its stored value.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdatePrunePolicyParams {
+    /// Whether the automatic prune runs.
     pub enabled: Option<bool>,
+    /// The time between automatic prune runs, in hours or days, for example "24h", "7d" or "7days".
     pub interval: Option<String>,
+    /// The disk usage percentage (10 to 99) at which an emergency prune runs at once.
     pub disk_pressure_threshold: Option<u8>,
+    /// Whether to delete unused images.
     pub prune_images: Option<bool>,
+    /// Whether to delete unused volumes. This deletes their data for good.
     pub prune_volumes: Option<bool>,
+    /// Whether to delete the build cache.
     pub prune_build_cache: Option<bool>,
+    /// Whether to delete stopped containers.
     pub prune_containers: Option<bool>,
+    /// Whether to empty container log files during a prune.
     pub prune_logs: Option<bool>,
+    /// Empty only the container logs larger than this many MB.
     pub log_vacuum_threshold_mb: Option<u64>,
+    /// The MB of build cache to keep; older cache goes first.
     pub build_cache_keep_storage_mb: Option<u64>,
+    /// The number of newest build images kept per app for rollbacks (default 5).
     pub kept_builds_count: Option<u32>,
+    /// Delete only dangling images and layers (true) or every unused image (false).
     pub dangling_layers_only: Option<bool>,
 }
 
@@ -1052,7 +1070,7 @@ impl McpServer {
 
     /// The version, the target and the state of the server.
     #[tool(
-        description = "Show the version, the profile and the runtime state of this r3v3rs3 server: the workers that serve the ports."
+        description = "Show the release version and the build target of this r3v3rs3 server, and the state of the worker processes that serve the ports (in `workers = off` mode the master serves them itself). Use it first to check which server and version you talk to. Takes no arguments. Read-only; any account can call it."
     )]
     async fn server_status(
         &self,
@@ -1077,7 +1095,9 @@ impl McpServer {
     }
 
     /// Get the current status and step of the server self-upgrade.
-    #[tool(description = "Get the current step and status of the server self-upgrade process.")]
+    #[tool(
+        description = "Show the stage of the server self-upgrade that runs at the moment: `checking_release`, `downloading`, `installing`, `handing_over` or `done`; `null` when no upgrade runs. Poll it after `run_server_upgrade` until the stage is `done`. Takes no arguments. Read-only; any account can call it."
+    )]
     async fn get_server_upgrade_status(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1094,7 +1114,7 @@ impl McpServer {
 
     /// Run server self-upgrade to the latest release.
     #[tool(
-        description = "Fetch, download, install and hand over to the newest release of the server binary. Needs the edit scope and Admin role."
+        description = "Upgrade this server to the newest GitHub release: download and install the binary, start the new version and hand the listening sockets over to it, so open connections are not dropped. The call returns the release tag as soon as the upgrade starts; follow it with `get_server_upgrade_status`. Takes no arguments. Needs a token with the edit scope and an admin account."
     )]
     async fn run_server_upgrade(
         &self,
@@ -1114,7 +1134,7 @@ impl McpServer {
 
     /// The settings that the admin API can change.
     #[tool(
-        description = "Show the settings of the server, for example the addresses of the ACME challenges, the notification webhooks and the discovery providers."
+        description = "Show the global settings of the server (public URL, ACME, notifications, discovery, MCP, platform and the other settings of the Settings page). Secret values such as keys and passwords are masked. Takes no arguments. Read-only; admin accounts only."
     )]
     async fn get_config(
         &self,
@@ -1130,7 +1150,9 @@ impl McpServer {
     }
 
     /// List recent audit log entries.
-    #[tool(description = "List recent audit log entries recording administrative actions.")]
+    #[tool(
+        description = "List the newest entries of the audit log: who changed what, when, from which client address, and the action name (for example `add_proxy` or `deploy_app`). `limit` caps the number of entries (default 50). Read-only; admin accounts only."
+    )]
     async fn list_audit_log(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1155,7 +1177,7 @@ impl McpServer {
 
     /// Process and system performance metrics.
     #[tool(
-        description = "Get system and process performance metrics: open file descriptors, memory usage, and event loop lag."
+        description = "Show the current resource use of the server process and host: open file descriptors against their limit, memory use and the event loop lag of the runtime. Use it to check whether the server is overloaded. Takes no arguments. Read-only; any account can call it."
     )]
     async fn get_system_metrics(
         &self,
@@ -1168,7 +1190,7 @@ impl McpServer {
 
     /// Real-time system anomaly detection.
     #[tool(
-        description = "Get detected real-time system anomalies, alert status, and performance thresholds."
+        description = "Show the active and recent anomalies of the background monitor (high p99 latency, high 5xx error rate, request rate spike, event loop lag), the current requests per second and event loop lag, and the alert thresholds it compares against. Takes no arguments. Read-only; any account can call it."
     )]
     async fn get_system_anomalies(
         &self,
@@ -1185,7 +1207,9 @@ impl McpServer {
     }
 
     /// Banned client IP addresses.
-    #[tool(description = "List client IP addresses currently banned by brute-force protection.")]
+    #[tool(
+        description = "List the client addresses that the sign-in brute-force protection bans at the moment, with the failed sign-in count, the end time and the remaining seconds of each ban. These bans block sign-in to the panel only; `list_quarantined_ips` lists the addresses blocked from all traffic. Takes no arguments. Read-only; admin accounts only."
+    )]
     async fn list_banned_ips(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1201,7 +1225,9 @@ impl McpServer {
     }
 
     /// Unban a client IP address.
-    #[tool(description = "Unban a client IP address. Needs the edit scope.")]
+    #[tool(
+        description = "Lift the sign-in ban of one client address (`ip`, IPv4 or IPv6), so it can sign in to the panel again at once. It does not release a quarantine; use `unban_quarantined_ip` for that. Needs a token with the edit scope and an admin account."
+    )]
     async fn unban_ip(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1221,7 +1247,7 @@ impl McpServer {
 
     /// Quarantined client IP addresses.
     #[tool(
-        description = "List client IP addresses currently quarantined by threat intelligence and behavioral detection."
+        description = "List the client addresses in quarantine at the moment, with the reason and the end time. A quarantined address gets no answer on any port. Addresses enter quarantine automatically (scanner paths, repeated error status codes) or through `quarantine_ip`. Takes no arguments. Read-only; any account can call it."
     )]
     async fn list_quarantined_ips(
         &self,
@@ -1239,7 +1265,7 @@ impl McpServer {
 
     /// Place a client IP into quarantine.
     #[tool(
-        description = "Manually place a client IP address into quarantine with a reason and duration. Needs the edit scope."
+        description = "Put one client address (`ip`) into quarantine at once, so it gets no answer on any port until the quarantine ends. `reason` is shown in the quarantine list, `duration_seconds` sets the length (default 3600). Never quarantine your own address: it also blocks the panel and this MCP endpoint. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn quarantine_ip(
         &self,
@@ -1269,7 +1295,7 @@ impl McpServer {
 
     /// Release an IP address from quarantine.
     #[tool(
-        description = "Release a client IP address from quarantine early. Needs the edit scope."
+        description = "Release one client address (`ip`) from quarantine before its end time, so its traffic is served again. To keep it from returning to quarantine, add it to `allowed_ips` with `update_quarantine_config`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn unban_quarantined_ip(
         &self,
@@ -1290,7 +1316,7 @@ impl McpServer {
 
     /// Get auto-quarantine threat detection configuration.
     #[tool(
-        description = "Get current auto-quarantine and behavioral threat detection configuration."
+        description = "Show the rules of the automatic quarantine: whether it is on, how many violations within which window trigger it, the quarantine length, the status codes and scanner paths that count as violations, and the addresses that are never quarantined. Takes no arguments. Read-only; any account can call it."
     )]
     async fn get_quarantine_config(
         &self,
@@ -1308,7 +1334,7 @@ impl McpServer {
 
     /// Update auto-quarantine threat detection configuration.
     #[tool(
-        description = "Update and persist auto-quarantine threat detection configuration. Needs the edit scope."
+        description = "Change the rules of the automatic quarantine and save them; they apply at once. Pass only the fields to change, every omitted field keeps its value. `allowed_ips` replaces the whole list of never-quarantined addresses and CIDR networks (an empty list removes all of them), so read the current list with `get_quarantine_config` first. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn update_quarantine_config(
         &self,
@@ -1338,7 +1364,7 @@ impl McpServer {
 
     /// Get the current status and metadata of the loaded GeoIP database.
     #[tool(
-        description = "Get the loaded GeoIP database status, file metadata, build date, and auto-update configuration."
+        description = "Show the GeoIP country database that country rules and GeoIP steering use: whether one is loaded, its path, size and build date, the MaxMind account and whether a license key is set (the key itself is not shown), and the automatic update settings. Takes no arguments. Read-only; any account can call it."
     )]
     async fn get_geoip_status(
         &self,
@@ -1356,7 +1382,7 @@ impl McpServer {
 
     /// Update GeoIP configuration and MaxMind license key.
     #[tool(
-        description = "Update GeoIP configuration, MaxMind license key, database path, and auto-update interval. Needs the edit scope."
+        description = "Change the GeoIP settings: MaxMind `account_id`, `license_key`, the `database` file path, `auto_update` and `update_interval_days` (1 to 90). Omitted fields keep their value; an empty `license_key` removes the stored key. It does not download a database; call `update_geoip_database` for that. Returns the new GeoIP status. Needs a token with the edit scope and an admin account."
     )]
     async fn update_geoip_config(
         &self,
@@ -1384,7 +1410,7 @@ impl McpServer {
 
     /// Download and hot-reload the latest GeoLite2-Country database from MaxMind.
     #[tool(
-        description = "Immediately download, verify, and hot-reload the latest GeoLite2-Country MMDB database from MaxMind. Needs the edit scope."
+        description = "Download the newest GeoLite2-Country database from MaxMind now, verify it and load it without a restart. Needs a MaxMind license key (set it with `update_geoip_config`). Returns the new GeoIP status. Takes no arguments. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn update_geoip_database(
         &self,
@@ -1407,7 +1433,7 @@ impl McpServer {
 
     /// The ports with their state.
     #[tool(
-        description = "List the ports that the server listens on, with their addresses and their state."
+        description = "List every port (listener) of the server with its id, name, listen address in multiaddr form (for example `/ip4/0.0.0.0/tcp/443/https`), TLS termination settings and current state. A port is the listening socket; a proxy names the ids of the ports it serves in its `ports` list. Use the ids from here for the other port tools and for `add_proxy`. Takes no arguments. Read-only; any account can call it."
     )]
     async fn list_ports(
         &self,
@@ -1423,7 +1449,9 @@ impl McpServer {
     }
 
     /// One port by id.
-    #[tool(description = "Show one port by its id, including its TLS termination settings.")]
+    #[tool(
+        description = "Show the full configuration of one port by its `id`: name, active flag, listen address and all options, including TLS termination (server names, client certificate authentication and its CA certificates, 0-RTT early data). Use the output as the starting point of `update_port`. Read-only; any account can call it."
+    )]
     async fn get_port(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1440,7 +1468,9 @@ impl McpServer {
     }
 
     /// Port runtime socket and TLS status.
-    #[tool(description = "Get the socket and TLS status of a port by its id.")]
+    #[tool(
+        description = "Show the runtime state of one port by its `id`: `listening`, `inactive`, `address_already_in_use`, `permission_denied`, `address_not_available` or `error`, and since when it listens. Use it after `add_port`, `update_port` or `reset_port` to confirm that the listener is up. Read-only; any account can call it."
+    )]
     async fn get_port_status(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1458,7 +1488,7 @@ impl McpServer {
 
     /// Create a listening port.
     #[tool(
-        description = "Create a listening port. The argument is one JSON object matching POST /api/ports. Needs the edit scope."
+        description = "Create a port and start listening on it. `port` is the same JSON object as the body of POST /api/ports, for example {\"name\": \"https\", \"listen\": \"/ip4/0.0.0.0/tcp/443/https\"}; the protocol at the end of `listen` (tcp, tls, http, https, udp, quic) selects the handler. Returns the name of the new port; read its id with `list_ports`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn add_port(
         &self,
@@ -1477,7 +1507,9 @@ impl McpServer {
     }
 
     /// Update an existing port configuration.
-    #[tool(description = "Update an existing port configuration. Needs the edit scope.")]
+    #[tool(
+        description = "Replace the whole configuration of an existing port. `entry` is the port object with its `id`, as `get_port` returns it, with your changes applied; fields you leave out fall back to their defaults, so start from the output of `get_port`. The new settings apply at once. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn update_port(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1494,7 +1526,9 @@ impl McpServer {
     }
 
     /// Delete a port by its id.
-    #[tool(description = "Delete a port by its id. Needs the edit scope.")]
+    #[tool(
+        description = "Delete a port by its `id` and close its listener. The proxies are reloaded, so a proxy that listed the port is no longer served on it. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn delete_port(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1511,7 +1545,9 @@ impl McpServer {
     }
 
     /// Reset and reload listener socket of a port.
-    #[tool(description = "Reset and reload the listener socket of a port. Needs the edit scope.")]
+    #[tool(
+        description = "End every open connection of a port by its `id` (TCP and HTTP connections close, UDP sessions are dropped). The listener keeps running and the configuration does not change; clients reconnect on their own. Use it to drop stuck or unwanted connections at once. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn reset_port(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1529,7 +1565,7 @@ impl McpServer {
 
     /// Enable or disable TLS 1.3 0-RTT early data on a port.
     #[tool(
-        description = "Enable or disable TLS 1.3 0-RTT early data with anti-replay protection on a port. Needs the edit scope."
+        description = "Turn TLS 1.3 0-RTT early data on or off for one port (`id`, `enabled`). Early data lets a returning client send its first request in the handshake; r3v3rs3 guards it against replay. Enabling fails on a port without TLS termination. Other port settings stay unchanged. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn set_port_early_data(
         &self,
@@ -1560,7 +1596,9 @@ impl McpServer {
     }
 
     /// List host network interfaces.
-    #[tool(description = "List host network interfaces that ports can bind to.")]
+    #[tool(
+        description = "List the network interfaces of the host with their IP addresses and MAC address, to pick the address a port listens on. Takes no arguments. Read-only; any account can call it."
+    )]
     async fn list_network_interfaces(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1579,7 +1617,9 @@ impl McpServer {
     // ==========================================
 
     /// The proxies with their state.
-    #[tool(description = "List the proxies with their upstream servers and their state.")]
+    #[tool(
+        description = "List every proxy with its id, name, active flag, the ids of the ports it serves and its full configuration (`protocol` is `tcp`, `udp` or `http`; an HTTP proxy holds its `vhosts`, `routes` with upstream `servers`, headers, cache, auth and limits). Proxies created from Docker labels, etcd or the deployment platform are listed too. An account with a proxy list sees only the proxies on its list. Takes no arguments. Read-only; any account can call it."
+    )]
     async fn list_proxies(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1594,7 +1634,9 @@ impl McpServer {
     }
 
     /// One proxy by id.
-    #[tool(description = "Show one proxy by its id, with its full configuration.")]
+    #[tool(
+        description = "Show the full configuration of one proxy by its `id`. Use the output as the starting point of `update_proxy`, because that tool replaces the whole configuration. An account with a proxy list gets `id_not_found` for a proxy outside its list. Read-only; any account can call it."
+    )]
     async fn get_proxy(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1611,7 +1653,9 @@ impl McpServer {
     }
 
     /// Proxy runtime health and upstream connection status.
-    #[tool(description = "Get the runtime health and upstream connection status of a proxy.")]
+    #[tool(
+        description = "Show the runtime state of one proxy by its `id`: whether it is configured and served, the health of each upstream server, and the resolved targets of DNS SRV upstreams. Use it to find out why a site does not answer. Read-only; any account can call it."
+    )]
     async fn get_proxy_status(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1629,7 +1673,7 @@ impl McpServer {
 
     /// Check upstream gRPC health using grpc.health.v1.Health/Check protocol.
     #[tool(
-        description = "Check the health of a gRPC upstream server using the grpc.health.v1.Health/Check protocol. Specify a proxy_id or a direct target_url, and an optional gRPC service name."
+        description = "Call `grpc.health.v1.Health/Check` on a gRPC server now and report whether it serves, the gRPC status and the latency. Give `target_url` (for example `http://127.0.0.1:50051`; `https://` uses TLS, anything else plaintext HTTP/2) or `proxy_id` (the first upstream server of its routes is checked; `target_url` wins when both are given). `service` checks one service; empty checks the whole server. The timeout is 5 seconds. Read-only; any account can call it."
     )]
     async fn check_grpc_health(
         &self,
@@ -1673,7 +1717,7 @@ impl McpServer {
 
     /// List all predefined OWASP security hardening profiles.
     #[tool(
-        description = "List all available predefined OWASP security hardening profiles (Strict, Balanced, API Only, SPA) and their associated response header rules."
+        description = "List the built-in security header profiles (`strict`, `balanced`, `api_only`, `spa_frontend`) with the response headers each one sets (for example Content-Security-Policy, Strict-Transport-Security, X-Frame-Options). Use it to choose a profile for `apply_security_header_profile`. Takes no arguments. Read-only; any account can call it."
     )]
     async fn list_security_header_profiles(
         &self,
@@ -1690,7 +1734,7 @@ impl McpServer {
 
     /// Analyze the security headers of an HTTP proxy and return a security audit score.
     #[tool(
-        description = "Analyze the response headers of an HTTP proxy and return a security audit score (A+ to F), grade, and detailed OWASP risk mitigations."
+        description = "Grade the response header rules configured on one HTTP proxy (`id`) from A+ to F, with the score and, for each security header, whether it is set and which risk a missing one leaves open. It reads the configuration, not live responses. Fails for TCP and UDP proxies. Read-only; any account can call it."
     )]
     async fn analyze_proxy_security_headers(
         &self,
@@ -1720,7 +1764,7 @@ impl McpServer {
 
     /// Apply a predefined OWASP security profile to an HTTP proxy.
     #[tool(
-        description = "Apply a predefined OWASP security hardening profile (strict, balanced, api_only, spa_frontend) to an existing HTTP proxy. Needs the edit scope."
+        description = "Set the security response headers of one HTTP proxy (`proxy_id`) to a built-in profile: `strict`, `balanced`, `api_only` or `spa_frontend` (see `list_security_header_profiles`). It changes the live proxy at once and returns the new grade, as `analyze_proxy_security_headers` gives it. A strict Content-Security-Policy can break a site that loads scripts from other origins. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
     )]
     async fn apply_security_header_profile(
         &self,
@@ -1740,7 +1784,9 @@ impl McpServer {
     }
 
     /// Returns the HTTP/2 and HTTP/3 stream priority configuration of a proxy.
-    #[tool(description = "Get the RFC 9218 stream priority configuration of an HTTP proxy.")]
+    #[tool(
+        description = "Show the HTTP/2 and HTTP/3 stream priority settings (RFC 9218) of one HTTP proxy (`id`): whether adaptive priority is on, whether a `Priority` header is sent upstream, and whether adaptive concurrency backpressure is on. Fails for TCP and UDP proxies. Read-only; any account can call it."
+    )]
     async fn get_stream_priority(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1764,7 +1810,7 @@ impl McpServer {
 
     /// Update the stream priority configuration of an HTTP proxy.
     #[tool(
-        description = "Configure RFC 9218 adaptive stream priority on an HTTP proxy. Needs the edit scope."
+        description = "Turn RFC 9218 adaptive stream priority on or off for one HTTP proxy (`id`, `enabled`). `inject_header` sends the `Priority` header to the upstream servers; `adaptive_concurrency` limits concurrent streams when the upstream slows down. An omitted optional flag keeps its value. Applies at once. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
     )]
     async fn set_stream_priority(
         &self,
@@ -1793,7 +1839,7 @@ impl McpServer {
 
     /// Get HTTP stream priority and adaptive concurrency statistics.
     #[tool(
-        description = "Get global statistics on RFC 9218 stream priority, multiplexed urgency classes, and adaptive backpressure throttling."
+        description = "Show the server-wide counters of the stream priority scheduler since the start: streams per RFC 9218 urgency class and how often adaptive backpressure throttled streams. Takes no arguments. Read-only; any account can call it."
     )]
     async fn get_stream_priority_stats(
         &self,
@@ -1805,7 +1851,7 @@ impl McpServer {
 
     /// A new proxy from the JSON form of the admin API.
     #[tool(
-        description = "Create a proxy. The argument is one JSON object in the same form as the body of POST /api/proxies, for example {\"kind\": {\"http\": {...}}, \"ports\": [\"my-port\"], ...}. Needs the edit scope."
+        description = "Create a proxy and start serving it on its ports at once. `proxy` is the same JSON object as the body of POST /api/proxies: `name`, `ports` (the port ids from `list_ports`), `protocol` (`http`, `tcp` or `udp`) and the fields of that protocol on the same level, for example {\"name\": \"site\", \"ports\": [\"<port id>\"], \"protocol\": \"http\", \"vhosts\": [\"example.com\"], \"routes\": [{\"path\": \"/\", \"servers\": [{\"url\": \"http://127.0.0.1:8080/\"}]}]}; a TCP proxy takes {\"protocol\": \"tcp\", \"upstream_servers\": [{\"addr\": \"/dns/db.internal/tcp/5432\"}]}. Returns the name of the new proxy; read its id with `list_proxies`. Needs a token with the edit scope and an editor or admin account."
     )]
     async fn add_proxy(
         &self,
@@ -1832,7 +1878,7 @@ impl McpServer {
 
     /// An update of a proxy from the JSON form of the admin API.
     #[tool(
-        description = "Replace the configuration of a proxy. The argument is one JSON object with the id and the new configuration, in the same form as the body of PUT /api/proxies/{id}. Needs the edit scope."
+        description = "Replace the whole configuration of a proxy. `entry` is the proxy object with its `id`, as `get_proxy` returns it, with your changes applied; a field you leave out falls back to its default and is lost, so always start from `get_proxy`. A basic auth user or a bearer token sent without a new secret keeps its stored hash. Applies at once. A proxy that discovery (Docker labels, etcd) created is read-only and is refused with `proxy_read_only`. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
     )]
     async fn update_proxy(
         &self,
@@ -1850,7 +1896,9 @@ impl McpServer {
     }
 
     /// A deletion of a proxy.
-    #[tool(description = "Delete a proxy by its id. Needs the edit scope.")]
+    #[tool(
+        description = "Delete a proxy by its `id`; its sites stop being served at once. A proxy that discovery (Docker labels, etcd) created is refused with `proxy_read_only`. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list deletes only the proxies on its list."
+    )]
     async fn delete_proxy(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1868,7 +1916,7 @@ impl McpServer {
 
     /// Purge cache for a proxy.
     #[tool(
-        description = "Purge cached responses for a proxy. Optional path prefix. Needs the edit scope."
+        description = "Delete cached responses of one HTTP proxy (`id`) from the response cache, so the next requests go to the upstream servers. `path` limits the purge to URLs that start with that path prefix; without it the whole cache of the proxy is purged. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list purges only the proxies on its list."
     )]
     async fn purge_proxy_cache(
         &self,
@@ -1893,7 +1941,7 @@ impl McpServer {
 
     /// List all compression dictionaries for an HTTP proxy.
     #[tool(
-        description = "List all pre-shared compression dictionaries (RFC 9651 / RFC 9652) configured for an HTTP proxy."
+        description = "List the compression dictionaries of one HTTP proxy (`proxy_id`) with their id, name, URL match pattern, serving path, raw content and SHA-256 hash. A browser that fetched a dictionary sends its hash back, and the proxy then compresses matching responses against it (Compression Dictionary Transport). Fails for TCP and UDP proxies. Read-only; any account can call it."
     )]
     async fn list_compression_dictionaries(
         &self,
@@ -1918,7 +1966,7 @@ impl McpServer {
 
     /// Get a compression dictionary by proxy id and dictionary id.
     #[tool(
-        description = "Get detailed configuration of a pre-shared compression dictionary by proxy id and dictionary id."
+        description = "Show one compression dictionary of an HTTP proxy by `proxy_id` and `dict_id` (from `list_compression_dictionaries`), with its match pattern, serving path, raw content and SHA-256 hash. Read-only; any account can call it."
     )]
     async fn get_compression_dictionary(
         &self,
@@ -1952,7 +2000,7 @@ impl McpServer {
 
     /// Add a compression dictionary to an HTTP proxy.
     #[tool(
-        description = "Add a pre-shared compression dictionary to an HTTP proxy. r3v3rs3 computes SHA-256 and serves it with Use-As-Dictionary. Needs the edit scope."
+        description = "Add a compression dictionary to one HTTP proxy (`proxy_id`). The proxy serves `raw_data` at `path` with a `Use-As-Dictionary: match=\"<match_pattern>\"` header, computes its SHA-256 hash itself, and compresses later responses whose URL matches `match_pattern` against it. Returns the new dictionary id and its hash. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
     )]
     async fn add_compression_dictionary(
         &self,
@@ -1997,7 +2045,7 @@ impl McpServer {
 
     /// Delete a compression dictionary from an HTTP proxy.
     #[tool(
-        description = "Delete a pre-shared compression dictionary from an HTTP proxy by its id. Needs the edit scope."
+        description = "Delete one compression dictionary (`dict_id`) from an HTTP proxy (`proxy_id`); the proxy stops serving it and stops compressing against it. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
     )]
     async fn delete_compression_dictionary(
         &self,
@@ -2039,7 +2087,9 @@ impl McpServer {
     // ==========================================
 
     /// The certificates.
-    #[tool(description = "List the server certificates with their domains and their expiry dates.")]
+    #[tool(
+        description = "List every stored certificate with its id, kind (`server`, `client` or `root`), fingerprint, issuer, the domain names it covers (SAN) and its expiry time (`not_after`, Unix seconds). Certificates from ACME and uploads are both listed. Takes no arguments. Read-only; any account can call it."
+    )]
     async fn list_certs(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2054,7 +2104,9 @@ impl McpServer {
     }
 
     /// Details of one certificate.
-    #[tool(description = "Get detailed information about a certificate by its id.")]
+    #[tool(
+        description = "Show one certificate by its `id` (from `list_certs`): kind, fingerprint, issuer, covered domain names and expiry time. The private key is never returned. Read-only; any account can call it."
+    )]
     async fn get_cert(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2072,7 +2124,7 @@ impl McpServer {
 
     /// Certificate domain coverage check.
     #[tool(
-        description = "Check certificate coverage and wildcard auto-sharing status for domain names."
+        description = "Check for each name in `domains` whether a stored certificate covers it, and whether the cover comes from a shared wildcard certificate of the parent domain (with that root domain). Use it before you add a site, to see whether it needs a new ACME request. Read-only; any account can call it."
     )]
     async fn check_cert_coverage(
         &self,
@@ -2094,7 +2146,9 @@ impl McpServer {
     }
 
     /// Delete a certificate.
-    #[tool(description = "Delete a certificate by its id. Needs the edit scope.")]
+    #[tool(
+        description = "Delete a certificate by its `id` with its private key. TLS ports stop offering it at once; a site that has no other covering certificate fails its TLS handshake. An ACME request renews into a new certificate on its own schedule. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn delete_cert(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2111,7 +2165,9 @@ impl McpServer {
     }
 
     /// List ACME certificate orders.
-    #[tool(description = "List all ACME automated certificate requests.")]
+    #[tool(
+        description = "List every ACME request (automatic certificate) with its id, active flag, CA provider name, domain names, challenge type (`http-01`, `tls-alpn-01` or `dns-01`), DNS provider or DNS credential, CNAME alias, renewal period in days and the next renewal time. Whether an order succeeded shows in `list_certs`. Takes no arguments. Read-only; any account can call it."
+    )]
     async fn list_acme(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2126,7 +2182,9 @@ impl McpServer {
     }
 
     /// Get one ACME request.
-    #[tool(description = "Get details of one ACME automated certificate request.")]
+    #[tool(
+        description = "Show one ACME request by its `id` (from `list_acme`): active flag, CA provider name, domain names, challenge type, DNS provider name or DNS credential id, CNAME alias, renewal period and next renewal time. DNS provider credentials are never returned. Read-only; any account can call it."
+    )]
     async fn get_acme(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2144,7 +2202,7 @@ impl McpServer {
 
     /// Create an ACME certificate request.
     #[tool(
-        description = "Create an ACME certificate request. The argument matches POST /api/acme. Needs the edit scope."
+        description = "Create an ACME request that obtains a certificate and renews it automatically. `request` is the body of POST /api/acme: `server_url` (the CA directory, for example Let's Encrypt), `contacts`, `identifiers` (the domain names), `challenge_type` (`http-01` needs port 80, `tls-alpn-01` needs port 443, `dns-01` is required for wildcards and needs `dns_credential` from `list_dns_credentials` or an inline `dns_provider`), optional `dns_alias` and `eab`, and `renewal_days`. The first order starts in the background; follow it with `list_acme` and `list_certs`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn add_acme(
         &self,
@@ -2162,7 +2220,9 @@ impl McpServer {
     }
 
     /// Delete an ACME certificate request.
-    #[tool(description = "Delete an ACME certificate request by id. Needs the edit scope.")]
+    #[tool(
+        description = "Delete an ACME request by its `id`; its certificate is no longer renewed. Certificates it already issued stay until you delete them with `delete_cert`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn delete_acme(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2180,7 +2240,7 @@ impl McpServer {
 
     /// Trigger immediate ACME order/renewal.
     #[tool(
-        description = "Trigger an immediate ACME certificate order or renewal. Needs the edit scope."
+        description = "Start an order of the ACME request `id` now instead of waiting for its renewal time, for example after you fixed DNS or a firewall. The order runs in the background; check the result with `list_acme` and `list_certs`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn request_acme(
         &self,
@@ -2199,7 +2259,7 @@ impl McpServer {
 
     /// Get CNAME delegation instructions and verification status for an ACME request.
     #[tool(
-        description = "Get CNAME delegation instructions and public DNS verification status for an ACME automated certificate request (RFC 8555 DNS alias mode)."
+        description = "For a `dns-01` ACME request with a `dns_alias` (`id`), list per domain the CNAME record to create (`_acme-challenge.<domain>` pointing at the alias name), whether public DNS already shows it, and a message. Use it to set up DNS delegation before `request_acme`. Read-only; any account can call it."
     )]
     async fn get_acme_cname_instructions(
         &self,
@@ -2217,7 +2277,9 @@ impl McpServer {
     }
 
     /// List configured DNS provider credentials.
-    #[tool(description = "List configured DNS provider credentials for ACME DNS-01 challenges.")]
+    #[tool(
+        description = "List the stored DNS provider credentials that `dns-01` ACME requests reference, with their id, name and provider (for example `cloudflare`). The API keys themselves are never returned. Pass an id from here as `dns_credential` in `add_acme`. Takes no arguments. Read-only; any account can call it."
+    )]
     async fn list_dns_credentials(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2236,7 +2298,9 @@ impl McpServer {
     // ==========================================
 
     /// List all access control lists.
-    #[tool(description = "List all access control lists.")]
+    #[tool(
+        description = "List every access list with its id, name, IP filter (`allow` and `deny` CIDR blocks, `allow_countries` and `deny_countries` ISO codes; deny wins) and authentication policy. An access list is a reusable rule set that HTTP proxies and routes reference by id through their `access_list` field. Secrets of its users and tokens are not returned. Takes no arguments. Read-only; any account can call it."
+    )]
     async fn list_access_lists(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2252,7 +2316,7 @@ impl McpServer {
 
     /// Create an access control list.
     #[tool(
-        description = "Create an access control list. Matches POST /api/access_lists. Needs the edit scope."
+        description = "Create an access list. `list` is the body of POST /api/access_lists: `name`, `ip_filter` and `auth`. Reference the new list from an HTTP proxy or route with its `access_list` field (read the id with `list_access_lists`). Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn add_access_list(
         &self,
@@ -2270,7 +2334,9 @@ impl McpServer {
     }
 
     /// Update an access control list.
-    #[tool(description = "Update an access control list. Needs the edit scope.")]
+    #[tool(
+        description = "Replace the whole content of an access list. `entry` is the list with its `id` and new `name`, `ip_filter` and `auth`; start from `list_access_lists`, because omitted fields fall back to their defaults. A user or a token sent without a new secret keeps its stored hash. Every proxy that references the list uses the new rules at once. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn update_access_list(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2287,7 +2353,9 @@ impl McpServer {
     }
 
     /// Delete an access control list.
-    #[tool(description = "Delete an access control list by id. Needs the edit scope.")]
+    #[tool(
+        description = "Delete an access list by its `id`. It is refused with `access_list_in_use` while a proxy or route references it; remove the reference first. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn delete_access_list(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2308,7 +2376,9 @@ impl McpServer {
     // ==========================================
 
     /// List all error page themes.
-    #[tool(description = "List all reusable error page themes in the centralized hub.")]
+    #[tool(
+        description = "List every error page theme with its id, name, description and the custom pages it defines per HTTP status code. An HTTP proxy shows the pages of the theme set in its `error_page_theme` field instead of the built-in error pages. Takes no arguments. Read-only; any account can call it."
+    )]
     async fn list_error_page_themes(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2327,7 +2397,7 @@ impl McpServer {
 
     /// Get an error page theme by id.
     #[tool(
-        description = "Get detailed configuration of an error page theme including all mapped status code pages."
+        description = "Show one error page theme by its `id`: name, description and every page with its HTTP status code and HTML body. Read-only; any account can call it."
     )]
     async fn get_error_page_theme(
         &self,
@@ -2349,7 +2419,7 @@ impl McpServer {
 
     /// Add a new error page theme.
     #[tool(
-        description = "Create a new error page theme in the centralized pool. Needs the edit scope."
+        description = "Create an error page theme from `name`, an optional `description` and `pages`, a list of {\"status\": <HTTP status code>, \"body\": \"<HTML>\"}. Returns the id of the new theme; set it as `error_page_theme` of an HTTP proxy to use it. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn add_error_page_theme(
         &self,
@@ -2377,7 +2447,9 @@ impl McpServer {
     }
 
     /// Update an existing error page theme.
-    #[tool(description = "Update an existing error page theme. Needs the edit scope.")]
+    #[tool(
+        description = "Change an error page theme by its `id`. Pass only the fields to change: `name`, `description`, or `pages` (which replaces the whole page list). Proxies that use the theme show the new pages at once. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn update_error_page_theme(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2416,7 +2488,7 @@ impl McpServer {
 
     /// Delete an error page theme.
     #[tool(
-        description = "Delete an error page theme by id. Fails if any proxy uses it. Needs the edit scope."
+        description = "Delete an error page theme by its `id`. It is refused with `error_page_theme_in_use` while an HTTP proxy uses the theme; remove it from those proxies first. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn delete_error_page_theme(
         &self,
@@ -2438,7 +2510,7 @@ impl McpServer {
 
     /// Reset error page themes to default templates.
     #[tool(
-        description = "Reset error page themes pool to standard built-in themes. Needs the edit scope."
+        description = "Replace all error page themes with the built-in default themes and return them. Every custom theme and every change to a built-in theme is lost. Takes no arguments. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn reset_error_page_themes(
         &self,
@@ -2463,7 +2535,7 @@ impl McpServer {
 
     /// List all PaaS applications. Database servers are listed by `list_databases`.
     #[tool(
-        description = "List all deployed PaaS applications with their status and catalog update information. Database servers are not included; list_databases lists them."
+        description = "List every app of the deployment platform with its id, name, target, spec (image, Git or Compose source, domains, ports), the image update status, the Git push webhook and, for App Store apps, whether the catalog has a newer version. The state of the deployments comes from `list_app_deployments`. Managed databases are not included; `list_databases` lists them. Takes no arguments. Read-only; any account without a proxy list. The platform must be enabled in the settings."
     )]
     async fn list_apps(
         &self,
@@ -2485,7 +2557,9 @@ impl McpServer {
     }
 
     /// Get detailed configuration and status of an application.
-    #[tool(description = "Get detailed configuration and status of an application by its id.")]
+    #[tool(
+        description = "Show one app by its `id` (from `list_apps`): name, target, the full spec, the image update status, the Git push webhook and whether a Git token and a webhook secret are set (never their values), plus the catalog update status of App Store apps. Use the output as the starting point of `update_app`, because that tool replaces the whole spec. Read-only; any account without a proxy list."
+    )]
     async fn get_app(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2506,7 +2580,7 @@ impl McpServer {
 
     /// Create a new PaaS application.
     #[tool(
-        description = "Create a new PaaS application. Matches the body of POST /api/apps. Needs the edit scope."
+        description = "Create an app on the deployment platform without starting it. `app` is the body of POST /api/apps: `name`, `target` (`local` for the Docker engine of this server, or an agent target id from `list_targets`) and `spec` with `source` ({\"type\": \"image\", \"image\": \"nginx:1.27\"}, {\"type\": \"git\", \"repository\": \"https://...\", \"branch\": \"main\"} or {\"type\": \"compose\", ...}), the container `port`, `domains` and the listener `ports` that route to it. Returns the new app with its id. Set environment variables with `update_app_env`, then start it with `deploy_app`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn add_app(
         &self,
@@ -2526,7 +2600,9 @@ impl McpServer {
     }
 
     /// Update an application's specification.
-    #[tool(description = "Update the specification of an application. Needs the edit scope.")]
+    #[tool(
+        description = "Replace the name, the target and the whole spec of an app (`id`, `app` in the form of POST /api/apps). Start from `get_app`, because fields you leave out fall back to their defaults. The running containers change only at the next deployment; call `deploy_app` to apply the change. Returns the updated app. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn update_app(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2547,7 +2623,9 @@ impl McpServer {
     }
 
     /// Delete an application.
-    #[tool(description = "Delete an application and its containers. Needs the edit scope.")]
+    #[tool(
+        description = "Delete an app by its `id` with its containers on every target, its environment variables, its deployment history and its Git push webhook; its domains stop being served. A database that apps still connect to is refused. This cannot be undone. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn delete_app(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2567,7 +2645,9 @@ impl McpServer {
     }
 
     /// Trigger immediate application deployment.
-    #[tool(description = "Trigger immediate deployment of an application. Needs the edit scope.")]
+    #[tool(
+        description = "Start a deployment of the current spec and environment of an app (`id`): pull the image, build it from Git or run `docker compose`, start the new containers and switch the traffic over (blue-green for image apps). It returns the queued deployment at once; follow it with `list_app_deployments` and `get_app_logs`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn deploy_app(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2588,7 +2668,7 @@ impl McpServer {
 
     /// Retrieve container execution logs.
     #[tool(
-        description = "Retrieve container execution logs for an application (with optional tail count and service name)."
+        description = "Return the last lines of the container log of an app (`id`). `tail` sets the number of lines (1 to 1000, default 200); `service` selects one service of a Compose app. Use it to find why a deployment or a container fails. Read-only; any account without a proxy list."
     )]
     async fn get_app_logs(
         &self,
@@ -2611,7 +2691,9 @@ impl McpServer {
     }
 
     /// Inspect container log file sizes and overview for an application.
-    #[tool(description = "Inspect container log file sizes and storage status for an application.")]
+    #[tool(
+        description = "Show the total disk size of the container log files of an app (`id`) and the size per container, to decide whether `vacuum_app_logs` is needed. Read-only; any account without a proxy list."
+    )]
     async fn get_app_log_size(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2630,7 +2712,7 @@ impl McpServer {
 
     /// Get container resource throttling, CFS quota, and OOM diagnostic status for an application.
     #[tool(
-        description = "Get live container resource throttling, CFS quota, memory saturation, and OOM diagnostic status for an application."
+        description = "Show live resource diagnostics of an app (`id`): whether it runs, a health verdict, CPU use and how much of the time the CPU quota throttled it, memory use against the memory limit with the failed allocation count, and whether the kernel killed it for running out of memory (OOM). Use it when an app is slow or restarts. Read-only; any account without a proxy list."
     )]
     async fn get_app_resource_diagnostics(
         &self,
@@ -2653,7 +2735,7 @@ impl McpServer {
 
     /// Get unified dashboard summary for an application.
     #[tool(
-        description = "Get unified dashboard summary for an application including status, telemetry, resource diagnostics, deployments, and services."
+        description = "Return everything about one app (`id`) in one call, as the app page of the panel shows it: the app, its latest and its running deployment, the state of its Compose services, resource diagnostics, metric points, a preview of the latest log lines, the log size and the uptime. Use it as the first look at an app. Read-only; any account without a proxy list."
     )]
     async fn get_app_dashboard(
         &self,
@@ -2673,7 +2755,7 @@ impl McpServer {
 
     /// Truncate (vacuum) container log files for an application.
     #[tool(
-        description = "Truncate (vacuum) container log files for an application to reclaim disk space immediately. Needs the edit scope."
+        description = "Empty the container log files of an app (`id`) to free disk space at once, and return the number of bytes freed. The old log lines are lost; `get_app_logs` then shows only new lines. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn vacuum_app_logs(
         &self,
@@ -2702,7 +2784,9 @@ impl McpServer {
     }
 
     /// Get environment variables of an application.
-    #[tool(description = "Get environment variables of an application.")]
+    #[tool(
+        description = "List the environment variables of an app (`id`) as {key, value, secret}. A secret variable is returned without its value. Read-only, but it needs an admin account or an editor without a proxy list."
+    )]
     async fn get_app_env(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2720,7 +2804,9 @@ impl McpServer {
     }
 
     /// Update environment variables of an application.
-    #[tool(description = "Update environment variables of an application. Needs the edit scope.")]
+    #[tool(
+        description = "Replace the whole list of environment variables of an app (`id`) with `entries`, a list of {\"key\": \"FOO\", \"value\": \"bar\", \"secret\": false}. A variable missing from the list is deleted, so start from `get_app_env`. A secret variable sent without a value keeps its stored value. The containers get the new values only at the next deployment; call `deploy_app`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn update_app_env(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2742,7 +2828,7 @@ impl McpServer {
 
     /// Generate cryptographically secure secrets for missing or placeholder environment variables of an application.
     #[tool(
-        description = "Generate cryptographically secure secrets for missing or placeholder environment variables of an application. Needs the edit scope."
+        description = "Fill the empty or placeholder environment variables of an app (`id`) with random secrets (for example passwords and keys that a Compose template asks for). `save` (default true) stores them on the app; `overwrite` (default false) also replaces variables that already have a value. Returns the generated keys. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn generate_app_env_secrets(
         &self,
@@ -2769,7 +2855,7 @@ impl McpServer {
 
     /// Resolve an environment variable template (.env text or entries) and generate cryptographically secure secrets.
     #[tool(
-        description = "Resolve a Compose or .env template and generate cryptographically secure secrets for missing or placeholder values. Needs the edit scope."
+        description = "Fill the empty or placeholder values of an environment template with random secrets and return the result; nothing is stored. Give either `template` (the text of a .env file; the result comes back as text and as entries) or `entries` (a list of {key, value, secret}). `overwrite` (default false) also replaces values that are already set. Returns the filled template or entries and the names of the generated keys. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn resolve_compose_env_template(
         &self,
@@ -2813,7 +2899,9 @@ impl McpServer {
     }
 
     /// List deployment history of an application.
-    #[tool(description = "List deployment history and statuses for an application.")]
+    #[tool(
+        description = "List the deployments of an app (`id`), newest first, with each deployment id, trigger, state (`queued`, `pending_approval`, `building`, `deploying`, `running`, `superseded`, `failed` or `cancelled`), image digest and times. Use a deployment id from here for `rollback_deployment` or `cancel_deployment`. Read-only; any account without a proxy list."
+    )]
     async fn list_app_deployments(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2831,7 +2919,9 @@ impl McpServer {
     }
 
     /// Roll back an application to a prior deployment.
-    #[tool(description = "Roll back an application to a prior deployment. Needs the edit scope.")]
+    #[tool(
+        description = "Start a new deployment that repeats an earlier one (`deployment_id` from `list_app_deployments`): the same image digest, spec and environment. Use it to go back to the last working version. Returns the queued deployment. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn rollback_deployment(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2851,7 +2941,9 @@ impl McpServer {
     }
 
     /// Cancel an in-progress or pending deployment.
-    #[tool(description = "Cancel an in-progress or pending deployment. Needs the edit scope.")]
+    #[tool(
+        description = "Cancel a queued or running deployment (`deployment_id`). The containers of the previous deployment keep serving. Returns the cancelled deployment. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn cancel_deployment(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2871,7 +2963,9 @@ impl McpServer {
     }
 
     /// Check registry for updated container image.
-    #[tool(description = "Check registry for updated container image. Needs the edit scope.")]
+    #[tool(
+        description = "Ask the container registry whether the image tag of an image app (`id`) points to a newer digest than the running one. When the app has auto-deploy on and an update is found, a deployment starts. Returns the result of the check. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn check_app_update(
         &self,
         Extension(parts): Extension<Parts>,
@@ -2892,7 +2986,7 @@ impl McpServer {
 
     /// List scheduled commands and cron tasks configured for an application.
     #[tool(
-        description = "List scheduled commands and cron tasks configured for an application by its id."
+        description = "List the scheduled commands of an app (`id`) with their id, name, cron schedule, shell command, enabled flag, and the time, status and output of the last run. Read-only; any account without a proxy list."
     )]
     async fn list_app_scheduled_commands(
         &self,
@@ -2912,7 +3006,7 @@ impl McpServer {
 
     /// Add a new scheduled cron command to an application.
     #[tool(
-        description = "Add a new scheduled cron command to an application. Needs the edit scope."
+        description = "Add a command that runs on a schedule inside the running container of an app: `app_id`, `name`, `schedule` (cron syntax, for example `0 3 * * *` or `@daily`), `command` (a shell command) and `enabled` (default true). Returns the new command with its id. Needs a token with the edit scope and an admin account."
     )]
     async fn add_app_scheduled_command(
         &self,
@@ -2948,7 +3042,7 @@ impl McpServer {
 
     /// Update an existing scheduled cron command of an application.
     #[tool(
-        description = "Update an existing scheduled cron command of an application. Needs the edit scope."
+        description = "Replace a scheduled command (`app_id`, `command_id`) with a new `name`, `schedule`, `command` and `enabled`; all of `name`, `schedule` and `command` are required, and an omitted `enabled` turns the command on. Returns the updated command. Needs a token with the edit scope and an admin account."
     )]
     async fn update_app_scheduled_command(
         &self,
@@ -2985,7 +3079,7 @@ impl McpServer {
 
     /// Delete a scheduled command from an application.
     #[tool(
-        description = "Delete a scheduled cron command from an application. Needs the edit scope."
+        description = "Delete a scheduled command (`app_id`, `command_id`); it no longer runs. Needs a token with the edit scope and an admin account."
     )]
     async fn delete_app_scheduled_command(
         &self,
@@ -3016,7 +3110,7 @@ impl McpServer {
 
     /// Run a scheduled command immediately inside the running container of an application.
     #[tool(
-        description = "Run a scheduled command immediately inside the running container of an application. Needs the edit scope."
+        description = "Run a scheduled command (`app_id`, `command_id`) once, now, inside the running container of the app, and return whether it succeeded, its status, its output and its duration. Its schedule does not change. Needs a token with the edit scope and an admin account."
     )]
     async fn run_app_scheduled_command(
         &self,
@@ -3050,7 +3144,9 @@ impl McpServer {
     // ==========================================
 
     /// View the App Store catalog.
-    #[tool(description = "View the App Store catalog of one-click deployable templates.")]
+    #[tool(
+        description = "Show the App Store catalog: every one-click app with its catalog id, name, description, category, image or Compose source, container port and the environment template a Compose app asks for. Pass a catalog id to `install_store_app`. Takes no arguments. Read-only; any account can call it."
+    )]
     async fn get_store(
         &self,
         Extension(_parts): Extension<Parts>,
@@ -3061,7 +3157,7 @@ impl McpServer {
 
     /// Refresh the App Store catalog.
     #[tool(
-        description = "Refresh the App Store catalog from the official repository. Needs the edit scope."
+        description = "Download the App Store catalog from the r3v3rs3-apps repository now and install it, instead of waiting for the daily refresh. Takes no arguments. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn refresh_store(
         &self,
@@ -3087,7 +3183,7 @@ impl McpServer {
 
     /// Install and deploy an application directly from the App Store.
     #[tool(
-        description = "Install and deploy an application directly from the App Store catalog. Needs the edit scope."
+        description = "Create an app from an App Store entry and start its first deployment in one step. `app_id` is the catalog id from `get_store`; `name` defaults to the catalog id, `target` to `local`; `domains` and `ports` (listener port names or ids) set the routing. A Compose app whose environment template needs values should instead be created, given its variables with `update_app_env` or `generate_app_env_secrets`, and then deployed. Returns the app and the queued deployment. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn install_store_app(
         &self,
@@ -3135,7 +3231,9 @@ impl McpServer {
     // ==========================================
 
     /// List all managed database applications.
-    #[tool(description = "List all managed database applications.")]
+    #[tool(
+        description = "List every managed database (a database server app of the `postgres`, `mariadb`, `mysql`, `mongodb` or `redis` engine) with its id, name, target, spec (engine image, host port, volume) and image update status. Use the ids with the other database and backup tools. Takes no arguments. Read-only; any account without a proxy list. The platform must be enabled in the settings."
+    )]
     async fn list_databases(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3151,7 +3249,9 @@ impl McpServer {
     }
 
     /// List available database engines.
-    #[tool(description = "List available database engines and version tags.")]
+    #[tool(
+        description = "List the database engines that `create_database` accepts (`postgres`, `mariadb`, `mysql`, `mongodb`, `redis` in the shipped catalog) with their label, container port, default user and database, and the version tags to choose from. Takes no arguments. Read-only; any account can call it."
+    )]
     async fn list_database_engines(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3163,7 +3263,7 @@ impl McpServer {
 
     /// Create and deploy a new managed database.
     #[tool(
-        description = "Create and deploy a new managed database with auto-generated credentials. Needs the edit scope."
+        description = "Create a managed database and deploy it at once: a container of the chosen engine with a data volume, a fixed host port and a generated password. `request` holds `name`, `engine` and `version` (from `list_database_engines`), an optional `host_port`, `limits`, and `project_id`/`environment_id`. Returns the app, the host port, the user, the database name and the password; the password appears only in this answer (later only `get_database_credentials` shows it). Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn create_database(
         &self,
@@ -3185,7 +3285,7 @@ impl McpServer {
 
     /// Read the passwords of the accounts of a database.
     #[tool(
-        description = "Return the root account and every tenant of a managed database with their user, password, database and connection string. Needs the Admin permission and the edit scope; every call is audited."
+        description = "Return the passwords of a managed database (`id`): the root account and every tenant, each with user, password and database name. The audit log records every call, without the passwords. Needs a token with the edit scope and an admin account."
     )]
     async fn get_database_credentials(
         &self,
@@ -3207,7 +3307,7 @@ impl McpServer {
 
     /// List the tenants of a shared database server.
     #[tool(
-        description = "List the tenants of a shared (projectless) database server: one database and user per project environment, with the apps that connect as each of them. No passwords."
+        description = "List the tenants of a shared database server (`id`; a database without a project): one database and user per project environment that uses the server, with the ids of the apps that connect as each tenant. Passwords are not returned. Read-only; any account without a proxy list."
     )]
     async fn list_database_tenants(
         &self,
@@ -3228,7 +3328,7 @@ impl McpServer {
 
     /// Give the root account or a tenant of a database a new password.
     #[tool(
-        description = "Give the root account (omit tenant) or a tenant of a managed database a new password, and redeploy the apps that connect with it. Returns the new password once. Needs the Admin permission and the edit scope."
+        description = "Give the root account (omit `tenant`) or one tenant of a managed database (`id`) a new random password, and start a new deployment of every app that connects with that account, so they get the new password. Returns the new password; it appears only in this answer. Needs a token with the edit scope and an admin account."
     )]
     async fn reset_database_password(
         &self,
@@ -3254,7 +3354,7 @@ impl McpServer {
 
     /// Remove a tenant of a shared database server with its data.
     #[tool(
-        description = "Remove a tenant of a shared database server with its user, its database and its data. A tenant that an app connects as is refused. Needs the Admin permission and the edit scope."
+        description = "Remove one tenant (`tenant`, as `list_database_tenants` names it) of a shared database server (`id`) with its user, its database and all its data. A tenant that an app still connects as is refused. This cannot be undone. Needs a token with the edit scope and an admin account."
     )]
     async fn delete_database_tenant(
         &self,
@@ -3275,7 +3375,9 @@ impl McpServer {
     }
 
     /// List database backup snapshots.
-    #[tool(description = "List backup snapshots for a managed database.")]
+    #[tool(
+        description = "List the backups of a managed database (`id`), newest first, with each backup id, engine, size, creation time and the result of its last restore test. Read-only; any account without a proxy list."
+    )]
     async fn list_database_backups(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3294,7 +3396,7 @@ impl McpServer {
 
     /// Take an immediate database backup snapshot.
     #[tool(
-        description = "Take an immediate backup snapshot of a managed database. Needs the edit scope."
+        description = "Take a backup of a managed database (`id`) now: a compressed dump made with the dump tool of its engine, copied to the configured S3, SFTP or rsync targets. Afterwards the oldest backups beyond the `keep` count are deleted. Returns the new backup entry. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn create_database_backup(
         &self,
@@ -3315,7 +3417,9 @@ impl McpServer {
     }
 
     /// Delete a database backup snapshot.
-    #[tool(description = "Delete a database backup snapshot. Needs the edit scope.")]
+    #[tool(
+        description = "Delete one backup (`backup_id` from `list_database_backups`) of a managed database (`db_id`). This cannot be undone. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn delete_database_backup(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3335,7 +3439,9 @@ impl McpServer {
     }
 
     /// Get database backup storage configuration.
-    #[tool(description = "Get database backup storage configuration (S3, SFTP, rsync).")]
+    #[tool(
+        description = "Show the backup settings of the managed databases: the daily backup time (`schedule`, `HH:MM`), how many backups to keep, the S3, SFTP and rsync copy targets, restore testing and the heartbeat URL. Secret keys and passwords come back empty. Takes no arguments. Read-only; any account without a proxy list."
+    )]
     async fn get_backup_config(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3361,7 +3467,9 @@ impl McpServer {
     }
 
     /// Update database backup storage settings.
-    #[tool(description = "Update database backup storage settings. Needs the edit scope.")]
+    #[tool(
+        description = "Replace the whole backup configuration with `config` (start from `get_backup_config`; omitted fields fall back to their defaults). An empty secret key or password keeps the stored one. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn update_backup_config(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3381,7 +3489,7 @@ impl McpServer {
 
     /// Test decompression and format integrity of a database backup snapshot.
     #[tool(
-        description = "Test decompression and format integrity of a database backup snapshot. Needs the edit scope."
+        description = "Check that one backup (`db_id`, `backup_id`) is usable: verify its SHA-256 checksum, decompress it and validate the dump format, without touching the running database. Returns the verification report and records the result on the backup; a failure also sends the `backup.verification_failed` notification. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn test_database_backup(
         &self,
@@ -3412,7 +3520,7 @@ impl McpServer {
 
     /// Get the point-in-time recovery (PITR) window and available WAL segments for a database.
     #[tool(
-        description = "Get the point-in-time recovery (PITR) window and available WAL segments for a database."
+        description = "Show the point-in-time recovery window of a managed database (`id`): the earliest and latest restorable time (Unix milliseconds), the number of base backups and archived WAL or binlog segments, and whether archiving is active. Pick `target_time` for `restore_database_pitr` inside this window. Read-only; any account without a proxy list."
     )]
     async fn get_database_pitr_range(
         &self,
@@ -3432,7 +3540,7 @@ impl McpServer {
 
     /// Restore a database to a specific point in time (PITR).
     #[tool(
-        description = "Restore a database to a specific point in time (PITR) with optional branch name. Needs the edit scope."
+        description = "Restore a managed database (`id`) to the state at `target_time` (Unix milliseconds, inside the window of `get_database_pitr_range`) from a base backup plus the archived WAL segments. Without `new_name` the running database is overwritten in place; with `new_name` (and optional `host_port`) a new database is created from that point and the original stays untouched. Returns the restored app, the base backup used and the number of segments replayed. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn restore_database_pitr(
         &self,
@@ -3475,7 +3583,7 @@ impl McpServer {
 
     /// Archive the current WAL or binary log segment from the running database container.
     #[tool(
-        description = "Archive the current WAL or binary log segment from the running database container. Needs the edit scope."
+        description = "Capture the current change log of a running managed database (`id`) and archive it now (PostgreSQL WAL, MySQL and MariaDB binary log, MongoDB oplog, Redis AOF), so the point-in-time recovery window reaches the present. Returns the archived segment. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn archive_database_wal_segment(
         &self,
@@ -3502,7 +3610,9 @@ impl McpServer {
     }
 
     /// List archived WAL and binary log segments for a database.
-    #[tool(description = "List archived WAL and binary log segments for a database.")]
+    #[tool(
+        description = "List the archived change log segments (WAL, binary log, oplog or AOF) of a managed database (`id`) with file name, size and the time range each one covers. Read-only; any account without a proxy list."
+    )]
     async fn list_database_wal_segments(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3524,7 +3634,9 @@ impl McpServer {
     // ==========================================
 
     /// List all Docker host targets and agent nodes.
-    #[tool(description = "List all Docker host targets and agent nodes.")]
+    #[tool(
+        description = "List the deployment targets: the `local` target (the Docker engine of this server) and every agent node, with id, name, kind, region, whether the agent enrolled and is online, last contact, agent version, drained flag and link quality (latency, jitter, packet loss). Use a target id as `target` of an app. Takes no arguments. Read-only; any account without a proxy list."
+    )]
     async fn list_targets(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3541,7 +3653,7 @@ impl McpServer {
 
     /// Add an agent target and generate enrollment token.
     #[tool(
-        description = "Add an agent target and generate enrollment token. Needs the edit scope."
+        description = "Add an agent target (another server that runs apps for this one). `request` holds `name` and an optional `region`. Returns the target, a one-time enrollment token and the agent host and port to dial; run the agent on the remote server with them (`r3-server agent`). The token appears only in this answer. Needs a token with the edit scope and an admin account."
     )]
     async fn add_target(
         &self,
@@ -3561,7 +3673,9 @@ impl McpServer {
     }
 
     /// Delete an agent target node.
-    #[tool(description = "Delete an agent target node. Needs the edit scope.")]
+    #[tool(
+        description = "Delete an agent target by its `id` and close the connection of its agent. A target that still has apps is refused; move or delete its apps first. Needs a token with the edit scope and an admin account."
+    )]
     async fn delete_target(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3582,7 +3696,7 @@ impl McpServer {
 
     /// Set or clear the geographical region of a target node.
     #[tool(
-        description = "Set or clear the geographical region of a target node. Needs the edit scope."
+        description = "Set the region label of a target (`id`, `region`, for example `eu`, `na`, `tr` or `apac`; null clears it). GeoIP steering sends clients to targets of their region. Returns the updated target. Needs a token with the edit scope and an admin account."
     )]
     async fn set_target_region(
         &self,
@@ -3606,7 +3720,9 @@ impl McpServer {
     }
 
     /// Drain a target node for maintenance.
-    #[tool(description = "Drain a target node for maintenance. Needs the edit scope.")]
+    #[tool(
+        description = "Drain a target (`id`) for maintenance: it leaves the load-balancing pools, so apps that run on several targets stop sending it new traffic. Its containers keep running. Undo it with `undrain_target`. Returns the updated target. Needs a token with the edit scope and an admin account."
+    )]
     async fn drain_target(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3627,7 +3743,7 @@ impl McpServer {
 
     /// Undrain a target node, restoring it to the active traffic pool.
     #[tool(
-        description = "Undrain a target node, restoring it to the active traffic pool. Needs the edit scope."
+        description = "Return a drained target (`id`) to the load-balancing pools, so it gets traffic again. Returns the updated target. Needs a token with the edit scope and an admin account."
     )]
     async fn undrain_target(
         &self,
@@ -3649,7 +3765,7 @@ impl McpServer {
 
     /// Generate a new enrollment token for an agent target node.
     #[tool(
-        description = "Generate a new enrollment token for an agent target node. Needs the edit scope."
+        description = "Replace the enrollment token of an agent target (`id`), for example when the old token leaked or a server is reinstalled. The enrolled agent keeps working until an agent enrolls with the new token. Returns the new token (shown only here) with the agent host and port. Needs a token with the edit scope and an admin account."
     )]
     async fn generate_target_token(
         &self,
@@ -3676,7 +3792,7 @@ impl McpServer {
 
     /// Upgrade target agent binary to match the server version.
     #[tool(
-        description = "Upgrade target agent binary on a remote node to match the server version. Needs the edit scope."
+        description = "Push the binary of this server to the agent of one target (`id`) so the agent runs the same version as the server. The agent must be online. Returns the updated target. Needs a token with the edit scope and an admin account."
     )]
     async fn upgrade_target(
         &self,
@@ -3704,7 +3820,7 @@ impl McpServer {
 
     /// Upgrade all agent target binaries to match the server version.
     #[tool(
-        description = "Upgrade all agent target binaries across all remote nodes to match the server version. Needs the edit scope."
+        description = "Push the binary of this server to every connected agent, so all agents run the server version. A failure on one agent is logged and does not stop the others. Returns the targets that were upgraded. Takes no arguments. Needs a token with the edit scope and an admin account."
     )]
     async fn upgrade_all_targets(
         &self,
@@ -3726,7 +3842,9 @@ impl McpServer {
     // ==========================================
 
     /// List all platform projects.
-    #[tool(description = "List all platform projects.")]
+    #[tool(
+        description = "List every project of the platform with its id, name, description, number of environments and number of apps; `list_project_environments` lists the environments of one project. A project groups apps; each of its environments (for example staging and production) holds its own variables and its own tenant on a shared database. Takes no arguments. Read-only; any account without a proxy list."
+    )]
     async fn list_projects(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3742,7 +3860,9 @@ impl McpServer {
     }
 
     /// Create a new project.
-    #[tool(description = "Create a new project. Needs the edit scope.")]
+    #[tool(
+        description = "Create a project from `spec`: `name`, an optional `description` and `default_environments` (names of environments to create with it; without them a `production` environment is created). Returns the new project with its id. Assign apps to it through `project_id` and `environment_id` in their spec. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn create_project(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3761,7 +3881,9 @@ impl McpServer {
     }
 
     /// Delete a project by id.
-    #[tool(description = "Delete a project by id. Needs the edit scope.")]
+    #[tool(
+        description = "Delete a project by its `id` with its environments and their variables. A project that apps still belong to is refused; move or delete those apps first. Returns the deleted project. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn delete_project(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3781,7 +3903,9 @@ impl McpServer {
     }
 
     /// List all shared environment variable groups.
-    #[tool(description = "List all shared environment variable groups.")]
+    #[tool(
+        description = "List every shared environment variable group with its id, name, description and number of variables (the variables themselves are not listed). An app that names a group in its `env_groups` gets all of its variables at deployment. Takes no arguments. Read-only; any account without a proxy list."
+    )]
     async fn list_env_groups(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3797,7 +3921,9 @@ impl McpServer {
     }
 
     /// Create a shared environment variable group.
-    #[tool(description = "Create a shared environment variable group. Needs the edit scope.")]
+    #[tool(
+        description = "Create a shared environment variable group from `group`: `name`, an optional `description` and `variables` ([{key, value, secret}]). Returns the new group with its id; add the id to the `env_groups` of an app to use it. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn create_env_group(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3816,7 +3942,9 @@ impl McpServer {
     }
 
     /// Delete an environment variable group by id.
-    #[tool(description = "Delete an environment variable group by id. Needs the edit scope.")]
+    #[tool(
+        description = "Delete a shared environment variable group by its `id`. A group that an app still lists in its `env_groups` is refused. Returns the deleted group. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn delete_env_group(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3837,7 +3965,7 @@ impl McpServer {
 
     /// List all environments belonging to a project.
     #[tool(
-        description = "List all environments belonging to a project with variable and app counts."
+        description = "List the environments of a project (`id`) with their id, name, description, number of variables and number of apps (the variables themselves are not listed). Use an environment id for `update_project_env`, `sync_project_env` or the `environment_id` of an app. Read-only; any account without a proxy list."
     )]
     async fn list_project_environments(
         &self,
@@ -3856,7 +3984,9 @@ impl McpServer {
     }
 
     /// Create a new environment within a project. Needs the edit scope.
-    #[tool(description = "Create a new environment within a project. Needs the edit scope.")]
+    #[tool(
+        description = "Create an environment in a project (`project_id`, `name` such as `staging` or `preview`, optional `description`). It starts without variables; set them with `update_project_env` or copy them with `sync_project_env`. Returns the new environment with its id. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
     async fn create_project_environment(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3890,7 +4020,7 @@ impl McpServer {
 
     /// Update environment variables for a project environment. Needs the edit scope.
     #[tool(
-        description = "Update environment variables for a project environment. Needs the edit scope."
+        description = "Replace the whole variable list of a project environment (`environment_id`) with `variables` ([{key, value, secret}]); a variable missing from the list is deleted. The apps of the environment get the new values at their next deployment. Returns the stored variables. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn update_project_env(
         &self,
@@ -3926,7 +4056,7 @@ impl McpServer {
 
     /// Synchronize environment variables from source to target environment. Needs the edit scope.
     #[tool(
-        description = "Synchronize environment variables from source to target environment. Needs the edit scope."
+        description = "Copy variables from one environment of a project to another (`project_id`, `source_env_id`, `target_env_id`). `mode`: `sync_missing` (default) adds only the keys the target lacks; `clone_all` replaces all target variables with the source ones; `selected_keys` copies only the keys in `keys`. Returns how many variables were synced and which keys were added or updated. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn sync_project_env(
         &self,
@@ -3982,7 +4112,9 @@ impl McpServer {
     // ==========================================
 
     /// List all full disaster recovery backup snapshots.
-    #[tool(description = "List all full disaster recovery backup snapshots.")]
+    #[tool(
+        description = "List the disaster recovery bundles stored on this server with their id, creation time, size, whether they are encrypted and the number of files they hold. Takes no arguments. Read-only; admin accounts only."
+    )]
     async fn list_dr_backups(
         &self,
         Extension(parts): Extension<Parts>,
@@ -3999,7 +4131,7 @@ impl McpServer {
 
     /// Create a full system disaster recovery backup snapshot.
     #[tool(
-        description = "Create a full system disaster recovery backup snapshot. Needs the edit scope."
+        description = "Pack the whole server state into one AES-256-GCM encrypted disaster recovery bundle: settings, ports, proxies, access lists, certificates, accounts, the platform database and the platform secrets key. `passphrase` encrypts it; keep it safe, because the bundle cannot be restored without it. `upload_s3` (default true) also copies the bundle to the S3 bucket of the backup settings. Returns the new bundle entry. Needs a token with the edit scope and an admin account."
     )]
     async fn create_dr_backup(
         &self,
@@ -4024,7 +4156,7 @@ impl McpServer {
 
     /// Restore a full system disaster recovery backup snapshot by ID.
     #[tool(
-        description = "Restore a full system disaster recovery backup snapshot by ID. Needs the edit scope."
+        description = "Overwrite the current server state with a disaster recovery bundle (`backup_id` from `list_dr_backups`), decrypted with its `passphrase`. Every setting, proxy, account and platform record made after the bundle is lost. The server must be restarted afterwards to load the restored state. Returns the number of restored files. Needs a token with the edit scope and an admin account."
     )]
     async fn restore_dr_backup(
         &self,
@@ -4053,7 +4185,7 @@ impl McpServer {
 
     /// Delete a full system disaster recovery backup snapshot by ID.
     #[tool(
-        description = "Delete a full system disaster recovery backup snapshot by ID. Needs the edit scope."
+        description = "Delete one disaster recovery bundle (`backup_id`) from this server. A copy in S3 is not deleted. Needs a token with the edit scope and an admin account."
     )]
     async fn delete_dr_backup(
         &self,
@@ -4076,7 +4208,7 @@ impl McpServer {
 
     /// Truncate (vacuum) container logs across the platform.
     #[tool(
-        description = "Truncate (vacuum) container logs across the platform exceeding the optional MB threshold. Needs the edit scope."
+        description = "Empty the container log files of every app on the platform to free disk space at once; with `threshold_mb` only files larger than that many megabytes are emptied. The removed log lines are lost. Returns the number of emptied files and the bytes freed. Needs a token with the edit scope and an admin account."
     )]
     async fn vacuum_all_logs(
         &self,
@@ -4106,7 +4238,7 @@ impl McpServer {
 
     /// Execute automated Docker disk hygiene prune immediately.
     #[tool(
-        description = "Execute Docker disk hygiene prune immediately to remove dangling images, stopped containers, build caches, and old logs according to the configured policy. Needs the edit scope."
+        description = "Run the Docker disk cleanup now, with the switches of the prune policy (`get_prune_policy`): unused images, stopped containers, build cache, unused volumes and large container logs. The newest builds of each app stay for rollback. Returns the bytes reclaimed. Takes no arguments. Needs a token with the edit scope and an admin account."
     )]
     async fn run_platform_prune(
         &self,
@@ -4132,7 +4264,7 @@ impl McpServer {
 
     /// Read the Docker disk hygiene and garbage collector prune policy.
     #[tool(
-        description = "Get the Docker disk hygiene and garbage collector prune policy including interval, disk pressure threshold, build cache retention, and image cleanup settings. Needs the read scope."
+        description = "Show the Docker disk cleanup policy: whether the scheduler runs and how often, the disk usage percentage that triggers an emergency cleanup, which kinds of data it prunes (images, volumes, build cache, containers, logs), the log size threshold, the build cache to keep, the number of builds kept per app and the container log rotation limits. Takes no arguments. Read-only; any account without a proxy list."
     )]
     async fn get_prune_policy(
         &self,
@@ -4150,7 +4282,7 @@ impl McpServer {
 
     /// Update the Docker disk hygiene and garbage collector prune policy.
     #[tool(
-        description = "Update the Docker disk hygiene and garbage collector prune policy: enabled, interval, disk_pressure_threshold, build_cache_keep_storage_mb, kept_builds_count, etc. Needs the edit scope."
+        description = "Change the Docker disk cleanup policy. Pass only the fields to change; every omitted field keeps its value. Pruning volumes (`prune_volumes`) deletes the data of unused volumes for good. Returns the new policy. Needs a token with the edit scope and an admin account."
     )]
     async fn update_prune_policy(
         &self,
@@ -4182,7 +4314,7 @@ impl McpServer {
 
     /// Read the host node resource threshold alert rules.
     #[tool(
-        description = "Get host node resource threshold alert rules (disk space, bandwidth spike, file descriptor exhaustion, and socket exhaustion). Needs the read scope."
+        description = "Show the host resource alert rules: whether they are on, and the thresholds for low free disk space (percent), bandwidth spikes (bytes per second), open file descriptors (percent of the limit) and TCP TIME_WAIT sockets. A crossed threshold sends a `system.*` notification. Takes no arguments. Read-only; any account without a proxy list."
     )]
     async fn get_node_alerts(
         &self,
@@ -4200,7 +4332,7 @@ impl McpServer {
 
     /// Update the host node resource threshold alert rules.
     #[tool(
-        description = "Update host node resource threshold alert rules (disk space, bandwidth spike, file descriptor exhaustion, and socket exhaustion). Needs the edit scope."
+        description = "Replace all host resource alert rules. `enabled` is required; each threshold you omit is cleared, which turns that alert off, so pass every threshold you want to keep (read them with `get_node_alerts`). Returns the stored rules. Needs a token with the edit scope and an admin account."
     )]
     async fn update_node_alerts(
         &self,
@@ -4238,7 +4370,7 @@ impl McpServer {
 
     /// List active long-lived connections and streams.
     #[tool(
-        description = "List all active long-lived connections and streams (WebSocket, TCP, SSE) with protocol, client IP, target, duration, transferred bytes, and instantaneous throughput."
+        description = "List the open long-lived connections with their connection id, protocol (`web_socket`, `tcp`, `sse` or `http_upgrade` for other HTTP upgrades and HTTP/2 CONNECT), client address, proxy id and name, upstream address, start time and uptime, bytes sent and received and current rate in bytes per second. `proxy_id` limits the list to one proxy. An account with a proxy list sees only the connections of its proxies. Read-only; any account can call it."
     )]
     async fn list_active_connections(
         &self,
@@ -4265,7 +4397,7 @@ impl McpServer {
 
     /// Terminate an active connection or stream by its unique ID.
     #[tool(
-        description = "Immediately terminate an active long-lived connection or stream by its connection ID. Needs the edit scope."
+        description = "Close one open long-lived connection now by its connection `id` from `list_active_connections`. The client may reconnect. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn terminate_active_connection(
         &self,
@@ -4295,7 +4427,7 @@ impl McpServer {
 
     /// Get the Certificate Transparency (CT) monitor configuration.
     #[tool(
-        description = "Get the Certificate Transparency (CT) log monitor configuration, including monitored domains, check interval, allowed CAs, and rogue alert settings."
+        description = "Show the settings of the Certificate Transparency monitor, which searches public CT logs for certificates issued for your domains: whether it runs, the check interval, the monitored domains, whether domains are discovered from your certificates and ACME requests, the trusted CA issuers, whether an unknown issuer raises an alert, and the CT search API URL. Takes no arguments. Read-only; any account can call it."
     )]
     async fn get_ct_monitor_config(
         &self,
@@ -4310,7 +4442,7 @@ impl McpServer {
 
     /// Update the Certificate Transparency (CT) monitor configuration.
     #[tool(
-        description = "Update the Certificate Transparency (CT) log monitor configuration. Needs the edit scope."
+        description = "Change the settings of the Certificate Transparency monitor. Pass only the fields to change; every omitted field keeps its value, and a list you pass replaces the whole list. Returns the stored settings. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn update_ct_monitor_config(
         &self,
@@ -4339,7 +4471,7 @@ impl McpServer {
 
     /// Get the Certificate Transparency (CT) monitor runtime status.
     #[tool(
-        description = "Get the runtime status of the Certificate Transparency monitor: last check time, next scheduled run, active rogue alerts count, and total entries tracked."
+        description = "Show the state of the Certificate Transparency monitor: the time of the last check, the next scheduled check, the number of open rogue certificate alerts and the number of log entries it tracks. Takes no arguments. Read-only; any account can call it."
     )]
     async fn get_ct_monitor_status(
         &self,
@@ -4354,7 +4486,7 @@ impl McpServer {
 
     /// List Certificate Transparency log entries and rogue certificate alerts.
     #[tool(
-        description = "List discovered Certificate Transparency log entries and rogue certificate alerts for monitored domains, with optional domain filter and rogue-only filter."
+        description = "List the certificates that the CT monitor found in public logs for your domains, with entry id, domain, issuer, common name, SAN, serial number, log time, validity, whether it is rogue and why, and its alert state. A certificate from an issuer outside the trusted list is flagged as rogue. `domain` filters by domain, `rogue_only` returns only flagged entries, `limit` caps the count (default 50). Read-only; any account can call it."
     )]
     async fn list_ct_log_entries(
         &self,
@@ -4375,7 +4507,7 @@ impl McpServer {
 
     /// Trigger an immediate on-demand check of Certificate Transparency logs.
     #[tool(
-        description = "Trigger an immediate on-demand query of public Certificate Transparency logs for a specific domain or all monitored domains. Needs the edit scope."
+        description = "Query the public Certificate Transparency logs now, for `domain` or, without it, for every monitored and discovered domain, and wait for the result. Returns the number of new rogue certificates found. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn check_ct_logs_now(
         &self,
@@ -4406,7 +4538,7 @@ impl McpServer {
 
     /// Dismiss or resolve a Certificate Transparency rogue certificate alert.
     #[tool(
-        description = "Dismiss or acknowledge a Certificate Transparency rogue certificate alert by its ID. Needs the edit scope."
+        description = "Set the alert state of one CT log entry (`id` from `list_ct_log_entries`): `dismissed` (default, a known and expected certificate), `investigating`, or `confirmed_rogue`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn dismiss_ct_alert(
         &self,
@@ -4445,7 +4577,9 @@ impl McpServer {
     // ==========================================
 
     /// List all configured outbound webhooks.
-    #[tool(description = "List all configured outbound notification webhooks.")]
+    #[tool(
+        description = "List every outbound notification webhook with its id, name, delivery URL, whether a signing secret is set (never the secret), enabled flag and subscribed events. r3v3rs3 POSTs a JSON payload to the URL when one of the events happens. Takes no arguments. Read-only; admin accounts only."
+    )]
     async fn list_webhooks(
         &self,
         Extension(parts): Extension<Parts>,
@@ -4461,7 +4595,9 @@ impl McpServer {
     }
 
     /// Get details of an outbound webhook by its id.
-    #[tool(description = "Get details of an outbound webhook by its id.")]
+    #[tool(
+        description = "Show one outbound notification webhook by its `id`: name, URL, whether a secret is set, enabled flag, events and times. Read-only; admin accounts only."
+    )]
     async fn get_webhook(
         &self,
         Extension(parts): Extension<Parts>,
@@ -4480,7 +4616,7 @@ impl McpServer {
 
     /// Create a new outbound notification webhook.
     #[tool(
-        description = "Create a new outbound notification webhook subscribing to platform events. Needs the edit scope."
+        description = "Create an outbound notification webhook: `name` (at most 100 characters), the delivery `url` (http or https; private, loopback and link-local addresses are refused), the `events` to send (at least one), `enabled` (default true) and an optional `secret` (at most 256 characters; each delivery then carries an `X-R3v3rs3-Signature: sha256=<hex HMAC-SHA256 of the body>` header). Event names (`_` may replace `.`): deploy.success, deploy.failure, deploy.pending_approval, app.crashed, app.cpu_throttled, backup.success, backup.failure, backup.upload_failed, backup.restored, backup.verification_failed, cert.expiring, cert.renewed, cert.renewal_failed, cert.rogue_detected, cert.ct_check_failed, security.ip_banned, security.threat_detected, target.offline, system.disk_pressure, system.disk_low, system.bandwidth_spike, system.high_latency, system.high_error_rate, system.traffic_spike, system.event_loop_lag, system.fd_exhaustion, system.socket_exhaustion, system.oom_kill, system.geoip_updated, system.geoip_update_failed. Returns the new webhook. Needs a token with the edit scope and an admin account."
     )]
     async fn add_webhook(
         &self,
@@ -4518,7 +4654,7 @@ impl McpServer {
 
     /// Update an existing outbound notification webhook.
     #[tool(
-        description = "Update an existing outbound notification webhook configuration. Needs the edit scope."
+        description = "Change an outbound notification webhook by its `id`. Pass only the fields to change: `name`, `url`, `secret` (an empty string removes the secret), `enabled`, or `events` (replaces the whole event list; names as in `add_webhook`). Returns the updated webhook. Needs a token with the edit scope and an admin account."
     )]
     async fn update_webhook(
         &self,
@@ -4560,7 +4696,7 @@ impl McpServer {
 
     /// Delete an outbound notification webhook by its id.
     #[tool(
-        description = "Delete an outbound notification webhook by its id. Needs the edit scope."
+        description = "Delete an outbound notification webhook by its `id`; it receives no more events. Needs a token with the edit scope and an admin account."
     )]
     async fn delete_webhook(
         &self,
@@ -4594,7 +4730,7 @@ impl McpServer {
 
     /// Send a test notification payload to an outbound webhook.
     #[tool(
-        description = "Send a test notification payload to an outbound webhook by id or target URL. Needs the edit scope."
+        description = "Send one test delivery and report whether the receiver accepted it, with its HTTP status code, a message and the elapsed time. Give `webhook_id` to test a saved webhook, or `url` (and optional `secret`) to test an address before saving it. `event` sets the sample event (default `test.ping`). Needs a token with the edit scope and an admin account."
     )]
     async fn test_webhook(
         &self,
@@ -4650,7 +4786,9 @@ impl McpServer {
     // ==========================================
 
     /// List all configured container registries for image pulls.
-    #[tool(description = "List all configured container registries for image pulls.")]
+    #[tool(
+        description = "List the stored container registry logins with their id, registry server, user name and times; passwords are never returned. The platform uses a matching login when it pulls a private image. Takes no arguments. Read-only; any account without a proxy list."
+    )]
     async fn list_registries(
         &self,
         Extension(parts): Extension<Parts>,
@@ -4667,7 +4805,7 @@ impl McpServer {
 
     /// Add container registry credentials for private image pulls.
     #[tool(
-        description = "Add container registry credentials for private image pulls. Needs the edit scope."
+        description = "Store a login for a private container registry: `server` (for example `ghcr.io` or `registry.gitlab.com`; one login per server), `username` and `password` (required: a password or an access token with pull rights). Deployments of images from that server use it. Returns the new entry without the password. Needs a token with the edit scope and an admin account."
     )]
     async fn add_registry(
         &self,
@@ -4697,7 +4835,9 @@ impl McpServer {
     }
 
     /// Update container registry credentials.
-    #[tool(description = "Update container registry credentials by id. Needs the edit scope.")]
+    #[tool(
+        description = "Change a stored registry login by its `id`: `server` and `username` are required; an omitted or empty `password` keeps the stored one. Returns the updated entry without the password. Needs a token with the edit scope and an admin account."
+    )]
     async fn update_registry(
         &self,
         Extension(parts): Extension<Parts>,
@@ -4730,7 +4870,9 @@ impl McpServer {
     }
 
     /// Delete container registry credentials by id.
-    #[tool(description = "Delete container registry credentials by id. Needs the edit scope.")]
+    #[tool(
+        description = "Delete a stored registry login by its `id`. Later pulls of private images from that server fail until a new login is stored. Needs a token with the edit scope and an admin account."
+    )]
     async fn delete_registry(
         &self,
         Extension(parts): Extension<Parts>,
@@ -4757,7 +4899,9 @@ impl McpServer {
     // ==========================================
 
     /// List all configured Git provider connections.
-    #[tool(description = "List all configured Git provider connections (GitHub, GitLab, Gitea).")]
+    #[tool(
+        description = "List the Git provider connections (GitHub App, GitLab and Gitea OAuth apps) with their id, name, provider, URL, client id, status (`not_connected`, `connected` or `expired`) and the connected account. Secrets and tokens are never returned. An app clones private repositories through its `connection`. Takes no arguments. Read-only, but it needs an admin account or an editor without a proxy list."
+    )]
     async fn list_git_connections(
         &self,
         Extension(parts): Extension<Parts>,
@@ -4773,7 +4917,9 @@ impl McpServer {
     }
 
     /// Get details of a Git provider connection by id.
-    #[tool(description = "Get details of a Git provider connection by id.")]
+    #[tool(
+        description = "Show one Git provider connection by its `id`: name, provider, URL, client id, status and connected account, without secrets or tokens. Read-only, but it needs an admin account or an editor without a proxy list."
+    )]
     async fn get_git_connection(
         &self,
         Extension(parts): Extension<Parts>,
@@ -4792,7 +4938,7 @@ impl McpServer {
 
     /// Add a new Git provider connection (GitHub, GitLab, Gitea). Needs the edit scope.
     #[tool(
-        description = "Add a new Git provider connection (GitHub, GitLab, Gitea). Needs the edit scope."
+        description = "Add a GitLab or Gitea connection from an OAuth application that you registered at the provider: `name`, `provider` (`gitlab` or `gitea`), `url` (required for Gitea and for a self-hosted GitLab; gitlab.com without it), `client_id` and `client_secret`. A GitHub connection cannot be added here; it is created as a GitHub App from the panel. The new connection has the status `not_connected` until an account authorizes it in the panel. Needs a token with the edit scope and an admin account."
     )]
     async fn add_git_connection(
         &self,
@@ -4838,7 +4984,7 @@ impl McpServer {
 
     /// Delete a Git provider connection with its saved tokens. Needs the edit scope.
     #[tool(
-        description = "Delete a Git provider connection with its saved tokens by id. Needs the edit scope."
+        description = "Delete a Git provider connection by its `id` with its stored secret and tokens. It is refused while an app clones through it (`git_connection_in_use`); move or delete those apps first. A GitHub App stays registered on GitHub. Needs a token with the edit scope and an admin account."
     )]
     async fn delete_git_connection(
         &self,
@@ -4867,7 +5013,9 @@ impl McpServer {
     }
 
     /// List repositories accessible via a Git provider connection.
-    #[tool(description = "List repositories accessible through a Git provider connection.")]
+    #[tool(
+        description = "List the repositories that a connected Git provider connection (`id`) can read, as the provider returns them. `search` filters by name, `page` (from 1) pages through long lists. Use a result as the repository of a Git app. Read-only, but it needs an admin account or an editor without a proxy list."
+    )]
     async fn list_git_repositories(
         &self,
         Extension(parts): Extension<Parts>,
@@ -4893,7 +5041,7 @@ impl McpServer {
 
     /// List branches of a repository accessible via a Git provider connection.
     #[tool(
-        description = "List branches of a repository accessible through a Git provider connection."
+        description = "List the branches of one repository (`repository` as `owner/name`) through a connected Git provider connection (`id`). Use a result as the `branch` of a Git app. Read-only, but it needs an admin account or an editor without a proxy list."
     )]
     async fn list_git_branches(
         &self,
@@ -4918,7 +5066,9 @@ impl McpServer {
     // ==========================================
 
     /// List all configured user accounts and their roles.
-    #[tool(description = "List all user accounts with their roles and assigned proxy scopes.")]
+    #[tool(
+        description = "List the accounts of the panel with their user name, role (`admin`, `editor` or `viewer`), proxy list (an editor or viewer limited to some proxies), whether two-factor sign-in is on, and the names of its passkeys and API tokens (never the token values). Takes no arguments. Read-only; admin accounts only."
+    )]
     async fn list_accounts(
         &self,
         Extension(parts): Extension<Parts>,
@@ -4934,7 +5084,7 @@ impl McpServer {
 
     /// Create a new user account. Needs the edit scope.
     #[tool(
-        description = "Create a new user account with role, password, and optional proxy scope. Needs the edit scope."
+        description = "Create a panel account: `username`, `password` (at least 8 characters), `role` (`admin`, `editor` or `viewer`; default `admin`), optional `proxies` (proxy ids that limit an editor or viewer to those proxies; not allowed for an admin) and `totp` (turn on two-factor sign-in). With `totp` the answer holds the TOTP secret for the authenticator app, shown only here. Needs a token with the edit scope and an admin account."
     )]
     async fn create_account(
         &self,
@@ -4970,7 +5120,7 @@ impl McpServer {
 
     /// Update an existing user account. Needs the edit scope.
     #[tool(
-        description = "Update an existing account's role, password, or proxy scope. Needs the edit scope."
+        description = "Change an account (`username`): `role` (`admin`, `editor` or `viewer`) is required, `password` sets a new password (omitted or empty keeps it), `proxies` replaces the proxy list (omitted removes the limit; not allowed for an admin). A change of the role, the proxy list or the password ends the sessions of the account and disables its existing API and MCP tokens. You cannot take the admin role from your own account, and at least one admin must remain. Needs a token with the edit scope and an admin account."
     )]
     async fn update_account(
         &self,
@@ -5009,7 +5159,7 @@ impl McpServer {
 
     /// Delete a user account. Needs the edit scope.
     #[tool(
-        description = "Delete a user account and end all its active sessions. Needs the edit scope."
+        description = "Delete an account (`username`) with its API tokens; its sessions stop working. You cannot delete your own account, and at least one admin must remain. Needs a token with the edit scope and an admin account."
     )]
     async fn delete_account(
         &self,
@@ -5028,7 +5178,7 @@ impl McpServer {
 
     /// List API tokens belonging to the current account.
     #[tool(
-        description = "List persistent API tokens belonging to the current authenticated account."
+        description = "List the API tokens of the account that this MCP session signed in as, with their id, name, scope (`read` or `edit`) and creation time; the token values are never returned. Takes no arguments. Read-only; any account can call it."
     )]
     async fn list_auth_tokens(
         &self,
@@ -5056,7 +5206,7 @@ impl McpServer {
 
     /// Create a persistent API token for the current account. Needs the edit scope.
     #[tool(
-        description = "Create a persistent API token for the current account. Needs the edit scope."
+        description = "Create an API token for the account of this session, for scripts and the `r3` command line client: `name` labels it, `scope` is `read` (default; the token acts as a viewer) or `edit` (the token gets the role of the account). A viewer account can create only `read` tokens. The token value is returned once, in this answer only. Needs a token with the edit scope; any account can call it."
     )]
     async fn create_auth_token(
         &self,
@@ -5091,7 +5241,7 @@ impl McpServer {
 
     /// Delete an API token belonging to the current account. Needs the edit scope.
     #[tool(
-        description = "Revoke and delete an API token belonging to the current account. Needs the edit scope."
+        description = "Revoke one API token (`id` from `list_auth_tokens`) of the account of this session; requests with it fail from now on. Needs a token with the edit scope; any account can call it."
     )]
     async fn delete_auth_token(
         &self,
