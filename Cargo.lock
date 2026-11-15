@@ -3151,7 +3151,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r3v3rs3"
-version = "3.4.1"
+version = "3.4.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3286,7 +3286,7 @@ dependencies = [
 
 [[package]]
 name = "r3v3rs3-cli"
-version = "3.4.1"
+version = "3.4.2"
 dependencies = [
  "anyhow",
  "base64 0.23.1",

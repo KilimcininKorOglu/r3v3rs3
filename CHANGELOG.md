@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.2] - 2026-11-15
+
+### Changed
+- The server is split into the crates `r3v3rs3-core`, `r3v3rs3-proxy`, `r3v3rs3-platform`, `r3v3rs3-server` and `r3v3rs3-admin`, which compile in parallel. The `r3v3rs3` crate keeps the `r3-server` binary, the embedded WebUI and the integration tests.
+- The RPC methods return plain `Send` futures instead of `#[async_trait]` boxes, which cut the type check of the server and admin crates and the release build time.
+- The library crates keep the fixed version `0.0.0` and read the release version at run time, so a version bump compiles only `r3v3rs3` and `r3v3rs3-cli`.
+- The release workflow restores the WebUI and the library crates that `release-cache.yml` built on `main`, and its test gate accepts a green run of the tag's code.
+- The daily cleanup also deletes caches that a newer cache of the same job replaced, and uses the Node 24 release of github-script.
+- The discovery documentation no longer names the removed Consul provider.
+
+### Fixed
+- A running release cache warm-up is no longer cancelled by the next push.
+- The WebUI cache key includes the WebUI build command, so a changed build command no longer reuses a stale WebUI.
+- Flaky tests: the MCP test waits for the background audit writes, the notification test waits for the webhook delivery, the traffic test reads only its own resource, and the platform network test keeps the shared network.
+
 ## [3.4.1] - 2026-11-15
 
 ### Changed
