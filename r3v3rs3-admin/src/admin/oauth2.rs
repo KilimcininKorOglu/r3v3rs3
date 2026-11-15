@@ -63,6 +63,9 @@ struct AuthorizationCode {
     code_challenge: String,
     scope: String,
     username: String,
+    /// When the account approved the consent, in Unix milliseconds. The tokens of the code keep
+    /// it, so a change of the account after the consent also ends them.
+    authorized_at: u64,
 }
 
 /// One signed-in MCP client. The access token is the key of the map.
@@ -75,6 +78,8 @@ pub struct AccessToken {
     username: String,
     pub scope: String,
     refresh_token: String,
+    /// When the account approved the consent of the token family, in Unix milliseconds (rows of
+    /// earlier releases hold seconds). A refresh keeps it.
     created_at: u64,
 }
 
@@ -84,7 +89,8 @@ impl AccessToken {
         &self.username
     }
 
-    /// The timestamp in seconds at which the grant was created.
+    /// When the account approved the consent of the token family, in Unix milliseconds, or in
+    /// seconds for a grant that an earlier release stored.
     pub fn created_at(&self) -> u64 {
         self.created_at
     }
@@ -358,7 +364,7 @@ impl McpAuthorizations {
                     client_name,
                     username: grant.username.clone(),
                     scope: grant.scope.clone(),
-                    created_at: grant.created_at,
+                    created_at: unix_secs_of(grant.created_at),
                     expires_at: grant.expires_at,
                     refresh_expires_at: grant.refresh_expires_at,
                 });
@@ -509,23 +515,32 @@ impl McpAuthorizations {
         }
         let username = grant.username.clone();
         let issued = self
-            .issue_tokens(&grant.client_id, &grant.scope, &grant.username)
+            .issue_tokens_with_session(
+                None,
+                &grant.client_id,
+                &grant.scope,
+                &grant.username,
+                grant.authorized_at,
+            )
             .await;
         Ok((username, issued))
     }
 
     /// Issues a fresh pair of tokens for the account and persists them.
+    #[cfg(test)]
     async fn issue_tokens(&mut self, client_id: &str, scope: &str, username: &str) -> IssuedTokens {
-        self.issue_tokens_with_session(None, client_id, scope, username)
+        self.issue_tokens_with_session(None, client_id, scope, username, crate::clock::unix_ms())
             .await
     }
 
+    /// Issues tokens for the consent that the account approved at `authorized_at` (Unix ms).
     async fn issue_tokens_with_session(
         &mut self,
         session_id: Option<&str>,
         client_id: &str,
         scope: &str,
         username: &str,
+        authorized_at: u64,
     ) -> IssuedTokens {
         let access_token = new_token();
         let refresh_token = new_token();
@@ -547,7 +562,7 @@ impl McpAuthorizations {
             username: username.to_string(),
             scope: scope.to_string(),
             refresh_token: refresh_hash.clone(),
-            created_at: now,
+            created_at: authorized_at,
         };
         if let Some(pool) = &self.pool
             && let Err(err) = db_save_token(pool, &grant, &access_hash).await
@@ -581,9 +596,14 @@ impl McpAuthorizations {
         Ok(())
     }
 
-    /// Rotates the tokens of a refresh token: both tokens get fresh values.
-    /// Revokes the entire token family if an already-rotated token is reused.
-    async fn refresh_tokens(&mut self, refresh_token: &str) -> Result<IssuedTokens, RefreshError> {
+    /// Rotates the tokens of a refresh token: both tokens get fresh values and keep the consent
+    /// time. Revokes the entire token family if an already-rotated token is reused, or if
+    /// `allowed(username, consent time)` says the account changed after the consent.
+    async fn refresh_tokens(
+        &mut self,
+        refresh_token: &str,
+        allowed: impl Fn(&str, u64) -> bool,
+    ) -> Result<IssuedTokens, RefreshError> {
         let ref_hash = hash_token(refresh_token);
         let now = unix_now();
         self.check_token_reuse(&ref_hash, now).await?;
@@ -598,7 +618,7 @@ impl McpAuthorizations {
         {
             tracing::warn!(err = %err, "failed to delete rotated MCP refresh token");
         }
-        if grant.refresh_expires_at <= now {
+        if grant.refresh_expires_at <= now || !allowed(&grant.username, grant.created_at) {
             return Err(RefreshError::Invalid);
         }
         let session_id = grant.id.clone();
@@ -613,6 +633,7 @@ impl McpAuthorizations {
                 &grant.client_id,
                 &grant.scope,
                 &grant.username,
+                grant.created_at,
             )
             .await)
     }
@@ -776,6 +797,16 @@ pub struct TokenForm {
 
 fn unix_now() -> u64 {
     crate::clock::unix_ms() / 1000
+}
+
+/// Unix seconds of a grant time, which is in milliseconds, or in seconds for a grant that an
+/// earlier release stored.
+fn unix_secs_of(timestamp: u64) -> u64 {
+    if timestamp >= 10_000_000_000 {
+        timestamp / 1000
+    } else {
+        timestamp
+    }
 }
 
 fn new_token() -> String {
@@ -1174,6 +1205,7 @@ pub async fn consent(
         code_challenge: form.code_challenge.clone(),
         scope: scope.clone(),
         username: caller.username.clone(),
+        authorized_at: crate::clock::unix_ms(),
     });
     state
         .record_audit(
@@ -1446,8 +1478,14 @@ pub async fn token(
             let Some(refresh_token) = form.refresh_token.as_deref() else {
                 return oauth_error("invalid_request", "the refresh request misses the token");
             };
+            let accounts = state.accounts.clone();
+            let allowed = |username: &str, authorized_at: u64| {
+                let mut record = crate::sessions::SessionRecord::new(username);
+                record.started_at = authorized_at;
+                accounts.borrow().caller(&record).is_some()
+            };
             let mut data = state.data.lock().await;
-            match data.mcp.refresh_tokens(refresh_token).await {
+            match data.mcp.refresh_tokens(refresh_token, allowed).await {
                 Ok(issued) => Json(issued).into_response(),
                 Err(RefreshError::Reused) => {
                     drop(data);
@@ -1861,7 +1899,7 @@ mod tests {
 
         // 2. Rotate R1 -> (A2, R2)
         let t2 = auth
-            .refresh_tokens(&t1.refresh_token)
+            .refresh_tokens(&t1.refresh_token, |_, _| true)
             .await
             .expect("rotation succeeds");
         assert_ne!(t1.access_token, t2.access_token);
@@ -1870,12 +1908,18 @@ mod tests {
         assert!(auth.verify(&t1.access_token).is_none());
 
         // 3. Attacker attempts to reuse rotated R1
-        let reuse_err = auth.refresh_tokens(&t1.refresh_token).await.unwrap_err();
+        let reuse_err = auth
+            .refresh_tokens(&t1.refresh_token, |_, _| true)
+            .await
+            .unwrap_err();
         assert_eq!(reuse_err, RefreshError::Reused);
 
         // 4. Verify the active token family (A2, R2) was completely revoked
         assert!(auth.verify(&t2.access_token).is_none());
-        let r2_err = auth.refresh_tokens(&t2.refresh_token).await.unwrap_err();
+        let r2_err = auth
+            .refresh_tokens(&t2.refresh_token, |_, _| true)
+            .await
+            .unwrap_err();
         assert_eq!(r2_err, RefreshError::Invalid);
 
         // 5. Verify database records for this session were purged

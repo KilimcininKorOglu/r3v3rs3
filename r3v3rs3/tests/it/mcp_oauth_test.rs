@@ -1256,6 +1256,95 @@ async fn obtain_tokens_in_flow(addr: SocketAddr) -> anyhow::Result<(String, Stri
     trade_code_for_tokens(&client, addr, &code, &verifier).await
 }
 
+/// Changes the password of the admin through the HTTP API.
+async fn change_admin_password(addr: SocketAddr, cookie: &str) -> anyhow::Result<()> {
+    let res = Client::new()
+        .put(format!("http://{addr}/api/accounts/admin"))
+        .header("Cookie", cookie)
+        .json(&json!({"role": "admin", "password": "new-password"}))
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    Ok(())
+}
+
+/// The HTTP status of a `tools/list` call with the access token.
+async fn tools_list_status(addr: SocketAddr, access: &str) -> anyhow::Result<StatusCode> {
+    Ok(Client::new()
+        .post(format!("http://{addr}/api/mcp"))
+        .header("Authorization", format!("Bearer {access}"))
+        .header("Accept", "application/json, text/event-stream")
+        .json(&json!({ "jsonrpc": "2.0", "method": "tools/list", "id": 1 }))
+        .send()
+        .await?
+        .status())
+}
+
+/// A refresh token of a consent that a password change ended must not issue new tokens, or the
+/// client keeps its access after the change.
+#[tokio::test]
+async fn a_password_change_ends_the_refresh_token() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-refresh-revoke")?;
+    with_admin(&dir.0, |addr| async move {
+        let (_, refresh) = obtain_tokens_in_flow(addr).await?;
+        let client = Client::new();
+        let cookie = session(&client, &addr).await?;
+        change_admin_password(addr, &cookie).await?;
+        let res = client
+            .post(format!("http://{addr}/oauth/token"))
+            .form(&[("grant_type", "refresh_token"), ("refresh_token", &refresh)])
+            .send()
+            .await?;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let body: Value = res.json().await?;
+        assert_eq!(body["error"], json!("invalid_grant"));
+        Ok(())
+    })
+    .await
+}
+
+/// An authorization code that the account approved before a password change gives no access when
+/// the client trades it after the change.
+#[tokio::test]
+async fn a_password_change_ends_an_unused_authorization_code() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-code-revoke")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let cookie = session(&client, &addr).await?;
+        let (verifier, challenge) = pkce();
+        let code = authorize_and_get_code(addr, &cookie, &challenge).await?;
+        change_admin_password(addr, &cookie).await?;
+        // The trade happens in a later second than the change, so a token time taken at the
+        // trade would pass the check.
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        let (access, _) = trade_code_for_tokens(&client, addr, &code, &verifier).await?;
+        assert_eq!(
+            tools_list_status(addr, &access).await?,
+            StatusCode::UNAUTHORIZED
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// A consent right after a change of the account, within the same second, gives a working token.
+#[tokio::test]
+async fn a_token_right_after_an_account_change_works() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-token-after-change")?;
+    with_admin(&dir.0, |addr| async move {
+        create_account_as_admin(addr, "fresh", "editor").await?;
+        let access = access_token_for(&addr, "fresh", "password").await?;
+        // A bare tools/list without a session gets 400 after the token check; only 401 means
+        // that the token was refused.
+        assert_ne!(
+            tools_list_status(addr, &access).await?,
+            StatusCode::UNAUTHORIZED
+        );
+        Ok(())
+    })
+    .await
+}
+
 async fn check_post_restart_flow(
     client: &Client,
     addr: SocketAddr,
@@ -1603,6 +1692,39 @@ async fn run_server_upgrade_rejects_non_admin() -> anyhow::Result<()> {
         Ok(())
     })
     .await
+}
+
+/// An MCP client that sends the access token.
+async fn mcp_client(
+    addr: SocketAddr,
+    token: &str,
+) -> anyhow::Result<rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>> {
+    use rmcp::service::serve_client;
+    use rmcp::transport::streamable_http_client::{
+        StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+    };
+    let transport = StreamableHttpClientTransport::from_config(
+        StreamableHttpClientTransportConfig::with_uri(format!("http://{addr}/api/mcp"))
+            .auth_header(token),
+    );
+    Ok(serve_client(TestClient, transport).await?)
+}
+
+/// Creates an account through the MCP tools of the admin.
+async fn create_account_as_admin(
+    addr: SocketAddr,
+    username: &str,
+    role: &str,
+) -> anyhow::Result<()> {
+    let admin = mcp_client(addr, &access_token(&addr).await?).await?;
+    mcp_call(
+        &admin,
+        "create_account",
+        json!({ "username": username, "password": "password", "role": role }),
+    )
+    .await?;
+    admin.cancel().await?;
+    Ok(())
 }
 
 /// The actions of the audit log, newest first.
