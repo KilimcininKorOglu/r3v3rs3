@@ -557,6 +557,7 @@
   "error.failed_to_generate_self_signed_certificate": "Failed to generate the self-signed certificate.",
   "error.failed_to_hash_password": "Failed to hash the password.",
   "error.failed_to_invoke_rpc": "Failed to invoke the RPC.",
+  "error.release_version_not_set": "The release version of the server binary is not set.",
   "error.failed_to_list_network_interfaces": "Failed to list the network interfaces.",
   "error.failed_to_load_accounts": "Failed to load the accounts.",
   "error.failed_to_read_certificate": "Failed to read the certificate.",

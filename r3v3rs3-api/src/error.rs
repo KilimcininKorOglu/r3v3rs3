@@ -465,6 +465,9 @@ pub enum Error {
     #[error("failed to invoke rpc")]
     FailedToInvokeRpc,
 
+    #[error("the release version of the binary is not set")]
+    ReleaseVersionNotSet,
+
     #[error("failed to list network interfaces")]
     FailedToListNetworkInterfaces,
 
@@ -632,6 +635,7 @@ impl Error {
             Self::FailedToFetchLog
             | Self::FailedToSaveConfig
             | Self::FailedToInvokeRpc
+            | Self::ReleaseVersionNotSet
             | Self::FailedToHashPassword
             | Self::FailedToLoadAccounts
             | Self::FailedToCreateCertificateArchive

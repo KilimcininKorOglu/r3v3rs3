@@ -1,6 +1,6 @@
 //! The link between a master and an agent over a loopback TCP connection.
 
-use super::client::{AgentClient, AgentIdentity, AgentTiming, VERSION};
+use super::client::{AgentClient, AgentIdentity, AgentTiming};
 use super::compose::AgentCompose;
 use super::executor::Executor;
 use super::listener::{AgentDirectory, AgentListener, LinkTiming};
@@ -195,7 +195,7 @@ async fn an_agent_enrolls_then_connects_with_its_certificate() -> anyhow::Result
     let running = tokio::spawn(async move { agent.run(&identity).await });
     master.wait_online(target(), true).await?;
     let status = master.registry.status(target()).context("status")?;
-    assert_eq!(status.version, VERSION);
+    assert_eq!(status.version, crate::release::TEST_VERSION);
     assert!(
         master
             .directory

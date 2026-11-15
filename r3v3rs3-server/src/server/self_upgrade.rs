@@ -15,7 +15,6 @@ use tracing::{info, warn};
 use super::ServerCommand;
 
 const RELEASES_API: &str = "https://api.github.com/repos/KilimcininKorOglu/r3v3rs3/releases/latest";
-const USER_AGENT: &str = concat!("r3v3rs3-self-upgrade/", env!("CARGO_PKG_VERSION"));
 /// The wait before the first check, so the startup of the server does not wait for GitHub.
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(10);
 /// The shortest check interval, so a mistyped setting cannot turn into a request loop.
@@ -117,7 +116,10 @@ pub async fn fetch_latest(
     let request = hyper::Request::builder()
         .method(hyper::Method::GET)
         .uri(RELEASES_API)
-        .header("User-Agent", USER_AGENT)
+        .header(
+            "User-Agent",
+            crate::release::user_agent("r3v3rs3-self-upgrade")?,
+        )
         .header("Accept", "application/vnd.github+json")
         .body(http_body_util::Full::new(hyper::body::Bytes::new()))?;
     let response = client.request(request).await?;
@@ -167,7 +169,7 @@ pub fn spawn_check_task(
 async fn newest_release() -> anyhow::Result<Option<String>> {
     let client = crate::cdn::fetch::build_client().await?;
     let json = fetch_latest(&client).await?;
-    let release = parse_release(&String::from_utf8_lossy(&json), env!("CARGO_PKG_VERSION"))?;
+    let release = parse_release(&String::from_utf8_lossy(&json), crate::release::version()?)?;
     Ok(release.map(|release| release.tag))
 }
 
@@ -182,7 +184,10 @@ pub async fn download(
         let request = hyper::Request::builder()
             .method(hyper::Method::GET)
             .uri(&next)
-            .header("User-Agent", USER_AGENT)
+            .header(
+                "User-Agent",
+                crate::release::user_agent("r3v3rs3-self-upgrade")?,
+            )
             .body(http_body_util::Full::new(hyper::body::Bytes::new()))?;
         let response = client.request(request).await?;
         let status = response.status();

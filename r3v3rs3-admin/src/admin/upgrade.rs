@@ -35,9 +35,10 @@ pub async fn upgrade(
     let json = self_upgrade::fetch_latest(&client)
         .await
         .map_err(|err| log_upgrade_failure(&err, "the release information could not be fetched"))?;
-    let Some(release) =
-        self_upgrade::parse_release(&String::from_utf8_lossy(&json), env!("CARGO_PKG_VERSION"))
-            .map_err(|err| log_upgrade_failure(&err, "the release information is not usable"))?
+    let current = crate::release::version()
+        .map_err(|err| log_upgrade_failure(&err, "the running version is unknown"))?;
+    let Some(release) = self_upgrade::parse_release(&String::from_utf8_lossy(&json), current)
+        .map_err(|err| log_upgrade_failure(&err, "the release information is not usable"))?
     else {
         set_stage(&state, None);
         return Err(Error::NoNewRelease.into());

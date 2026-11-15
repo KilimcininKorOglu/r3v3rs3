@@ -32,9 +32,6 @@ const CERTIFICATE_FILE: &str = "agent.pem";
 const CA_FILE: &str = "ca.pem";
 const TARGET_FILE: &str = "target";
 
-/// The version that the agent reports to the master.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
 /// The durations of the agent side of the link.
 #[derive(Debug, Clone, Copy)]
 pub struct AgentTiming {
@@ -154,7 +151,7 @@ impl AgentClient {
         let request = EnrollRequest {
             secret: token.secret.clone(),
             csr,
-            version: VERSION.to_string(),
+            version: crate::release::version()?.to_string(),
         };
         write_frame(&mut tls, &request).await?;
         match timeout(self.timing.connect, read_frame(&mut tls)).await?? {

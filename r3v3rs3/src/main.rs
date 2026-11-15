@@ -30,6 +30,8 @@ use tracing_subscriber::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Every subcommand (the agent and the worker too) reports and compares the release version.
+    r3v3rs3::init();
     // The provider pins the key exchange groups of every TLS config, including the post-quantum
     // X25519MLKEM768 hybrid.
     tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()

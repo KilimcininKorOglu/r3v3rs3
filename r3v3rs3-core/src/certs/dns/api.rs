@@ -235,7 +235,7 @@ impl ApiClient {
         let mut builder = Request::builder()
             .method(request.method.clone())
             .uri(self.url(&request.path))
-            .header(USER_AGENT, concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")));
+            .header(USER_AGENT, crate::release::user_agent("r3v3rs3")?);
         for (name, value) in &request.headers {
             builder = builder.header(*name, value.clone());
         }

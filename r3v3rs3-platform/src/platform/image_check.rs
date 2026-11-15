@@ -116,7 +116,7 @@ fn build_http_request(
     let mut builder = Request::builder()
         .uri(url)
         .method(method)
-        .header(USER_AGENT, concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")));
+        .header(USER_AGENT, crate::release::user_agent("r3v3rs3")?);
     if let Some(accept) = accept {
         builder = builder.header(ACCEPT, accept);
     }
@@ -135,7 +135,7 @@ async fn get_bearer_token(
     let url = build_token_url(realm, service, scope);
     let req = Request::builder()
         .uri(url)
-        .header(USER_AGENT, concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")))
+        .header(USER_AGENT, crate::release::user_agent("r3v3rs3")?)
         .body(Full::new(Bytes::new()))?;
     let (status, _, body) = execute_request(client, req).await?;
     if !status.is_success() {

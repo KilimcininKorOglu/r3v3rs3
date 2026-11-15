@@ -3692,9 +3692,10 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         let updated = platform.upgrade_target(id).await.map_err(any_error)?;
+        let version = crate::release::version().map_err(any_error)?;
         let record = AuditRecord::new(AuditAction::UpgradeTarget)
             .id(id)
-            .summary(format!("{} -> {}", updated.name, env!("CARGO_PKG_VERSION")));
+            .summary(format!("{} -> {version}", updated.name));
         self.state
             .record_audit(&caller.username, caller.client, record)
             .await;

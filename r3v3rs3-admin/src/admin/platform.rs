@@ -189,9 +189,10 @@ pub async fn upgrade_target(
 ) -> Result<Json<TargetEntry>, AppError> {
     let platform = state.platform(&caller, Permission::Admin).await?;
     let updated = platform.upgrade_target(id).await.map_err(platform_error)?;
+    let version = crate::release::version().map_err(platform_error)?;
     let record = AuditRecord::new(AuditAction::UpgradeTarget)
         .id(id)
-        .summary(format!("{} -> {}", updated.name, env!("CARGO_PKG_VERSION")));
+        .summary(format!("{} -> {version}", updated.name));
     state
         .record_audit(&caller.username, caller.client, record)
         .await;
@@ -301,10 +302,11 @@ pub async fn upgrade_all_targets(
         .upgrade_all_targets()
         .await
         .map_err(platform_error)?;
+    let version = crate::release::version().map_err(platform_error)?;
     for target in &upgraded {
         let record = AuditRecord::new(AuditAction::UpgradeTarget)
             .id(target.id)
-            .summary(format!("{} -> {}", target.name, env!("CARGO_PKG_VERSION")));
+            .summary(format!("{} -> {version}", target.name));
         state
             .record_audit(&caller.username, caller.client, record)
             .await;

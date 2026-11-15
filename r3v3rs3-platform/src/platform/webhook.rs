@@ -64,10 +64,7 @@ pub async fn deliver_webhook(
         .method(Method::POST)
         .uri(url)
         .header(CONTENT_TYPE, "application/json; charset=utf-8")
-        .header(
-            USER_AGENT,
-            concat!("r3v3rs3-webhook/", env!("CARGO_PKG_VERSION")),
-        )
+        .header(USER_AGENT, crate::release::user_agent("r3v3rs3-webhook")?)
         .header("X-R3v3rs3-Event", payload.event.as_str())
         .header("X-R3v3rs3-Delivery", &payload.id);
 
@@ -104,13 +101,24 @@ pub async fn test_webhook_url(
         }
     };
 
+    let version = match crate::release::version() {
+        Ok(version) => version,
+        Err(err) => {
+            return TestWebhookResponse {
+                success: false,
+                status_code: None,
+                message: format!("{err:#}"),
+                elapsed_ms: 0,
+            };
+        }
+    };
     let payload = build_payload(
         event,
         "This is a test notification from r3v3rs3 webhook center.",
         serde_json::json!({
             "test": true,
             "message": "Hello from r3v3rs3!",
-            "version": env!("CARGO_PKG_VERSION"),
+            "version": version,
         }),
     );
 

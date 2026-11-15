@@ -47,11 +47,10 @@ const VALIDATION_TIMEOUT: Duration = Duration::from_secs(180);
 const VALIDATION_MIN_INTERVAL: Duration = Duration::from_millis(500);
 /// Longest wait between two order refreshes.
 const VALIDATION_MAX_INTERVAL: Duration = Duration::from_secs(60);
-const ACME_USER_AGENT: &str = concat!("r3v3rs3/", env!("CARGO_PKG_VERSION"));
-
 /// Adds the User-Agent header that RFC 8555 section 6.1 requires on every ACME request.
 struct AcmeHttpClient<H> {
     inner: H,
+    agent: HeaderValue,
 }
 
 impl<H: HttpClient> HttpClient for AcmeHttpClient<H> {
@@ -64,8 +63,7 @@ impl<H: HttpClient> HttpClient for AcmeHttpClient<H> {
                 "ACME requests need an https URL",
             ))));
         }
-        req.headers_mut()
-            .insert(USER_AGENT, HeaderValue::from_static(ACME_USER_AGENT));
+        req.headers_mut().insert(USER_AGENT, self.agent.clone());
         self.inner.request(req)
     }
 }
@@ -100,6 +98,7 @@ impl HttpClient for HyperAcmeClient {
 async fn acme_http_client() -> anyhow::Result<Box<dyn HttpClient>> {
     Ok(Box::new(AcmeHttpClient {
         inner: HyperAcmeClient(build_client().await?),
+        agent: HeaderValue::from_str(&crate::release::user_agent("r3v3rs3")?)?,
     }))
 }
 
@@ -811,7 +810,10 @@ mod tests {
     async fn send(url: &str) -> (bool, Vec<HeaderMap>) {
         let inner = RecordingClient::default();
         let headers = inner.headers.clone();
-        let client = AcmeHttpClient { inner };
+        let client = AcmeHttpClient {
+            inner,
+            agent: HeaderValue::from_static("r3v3rs3/test"),
+        };
         let req = Request::get(url).body(BodyWrapper::default()).unwrap();
         let ok = client.request(req).await.is_ok();
         let seen = headers.lock().unwrap().clone();
@@ -823,7 +825,7 @@ mod tests {
         let (ok, headers) = send("https://acme.example/directory").await;
         assert!(ok);
         assert_eq!(headers.len(), 1);
-        assert_eq!(headers[0][USER_AGENT], ACME_USER_AGENT);
+        assert_eq!(headers[0][USER_AGENT], "r3v3rs3/test");
     }
 
     #[tokio::test]

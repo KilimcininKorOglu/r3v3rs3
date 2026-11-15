@@ -1172,7 +1172,7 @@ mod tests {
         let _ = crate::log::open_database(&temp_dir.join("log.db"))
             .await
             .unwrap();
-        let app_info = crate::config::new_appinfo(&temp_dir, &temp_dir);
+        let app_info = crate::config::app_info("0.0.0-test", &temp_dir, &temp_dir);
         let data = Arc::new(tokio::sync::Mutex::new(
             crate::admin::Data::new(app_info).await.unwrap(),
         ));
@@ -1224,7 +1224,7 @@ mod tests {
         let _ = crate::log::open_database(&temp_dir.join("log.db"))
             .await
             .unwrap();
-        let app_info = crate::config::new_appinfo(&temp_dir, &temp_dir);
+        let app_info = crate::config::app_info("0.0.0-test", &temp_dir, &temp_dir);
         let mut app_data = crate::admin::Data::new(app_info).await.unwrap();
         app_data.config.public_url = "https://panel.example.com".parse().ok();
         let data = Arc::new(tokio::sync::Mutex::new(app_data));

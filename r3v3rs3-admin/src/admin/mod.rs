@@ -90,7 +90,7 @@ mod ports;
 mod proxies;
 mod quarantine;
 mod security_headers;
-mod static_file;
+pub mod static_file;
 mod store;
 mod traffic;
 mod upgrade;
@@ -380,7 +380,7 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .routes(routes!(oauth2::consent).layer(verify.clone()))
         .routes(routes!(oauth2::token).layer(token_limit))
         .routes(routes!(oauth2::register).layer(register_limit));
-    let (api, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+    let (api, mut openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api", auth_routes(&mut pruners)?)
         .nest("/api", resource_routes().route_layer(verify.clone()))
         // The webhooks and the OAuth callback carry a signature or a one-time state instead of a
@@ -395,27 +395,12 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .merge(metrics_routes(&app_state))
         .merge(health_routes())
         .split_for_parts();
+    // utoipa fills in the package version of this crate, which is fixed; the document reports the
+    // release version instead.
+    openapi.info.version = crate::release::version()?.to_string();
     spawn_rate_limiter_pruner(pruners);
-    let docs: Router<AppState> =
-        Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi)).route_layer(verify);
-    let mcp_verify = middleware::from_fn_with_state(app_state.clone(), oauth2::verify_bearer);
-    let mcp_service = mcp::StreamableHttpService::new(
-        {
-            let state = app_state.clone();
-            move || Ok(mcp::McpServer::new(state.clone()))
-        },
-        mcp::LocalSessionManager::default().into(),
-        // The allowed host list of rmcp guards a local server against DNS rebinding, which
-        // rides on ambient browser credentials. The endpoint takes a bearer token only, and the
-        // panel answers under its public host, so the list would refuse every remote client.
-        mcp::StreamableHttpServerConfig::default().disable_allowed_hosts(),
-    );
-    let mcp_router: Router<AppState> = Router::new()
-        .nest_service("/api/mcp", mcp_service)
-        .route_layer(mcp_verify);
     Ok(api
-        .merge(mcp_router)
-        .merge(docs)
+        .merge(docs_and_mcp_routes(&app_state, openapi))
         // The rejection mapper reads the plain-text body, so it must run inside the compression
         // layer, and inside the request id layer, which adds the id to the JSON it produces.
         .layer(middleware::from_fn(map_extractor_rejections))
@@ -426,6 +411,31 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .layer(middleware::map_response(no_store))
         .fallback(static_file::fallback)
         .with_state(app_state))
+}
+
+/// The Swagger UI with the OpenAPI document, behind a session, and the MCP endpoint, behind a
+/// bearer token.
+fn docs_and_mcp_routes(
+    app_state: &AppState,
+    openapi: utoipa::openapi::OpenApi,
+) -> Router<AppState> {
+    let verify = middleware::from_fn_with_state(app_state.clone(), auth::verify);
+    let docs: Router<AppState> =
+        Router::from(SwaggerUi::new(DOCS_PATH).url(OPENAPI_PATH, openapi)).route_layer(verify);
+    let mcp_verify = middleware::from_fn_with_state(app_state.clone(), oauth2::verify_bearer);
+    let state = app_state.clone();
+    let mcp_service = mcp::StreamableHttpService::new(
+        move || Ok(mcp::McpServer::new(state.clone())),
+        mcp::LocalSessionManager::default().into(),
+        // The allowed host list of rmcp guards a local server against DNS rebinding, which
+        // rides on ambient browser credentials. The endpoint takes a bearer token only, and the
+        // panel answers under its public host, so the list would refuse every remote client.
+        mcp::StreamableHttpServerConfig::default().disable_allowed_hosts(),
+    );
+    let mcp_router: Router<AppState> = Router::new()
+        .nest_service("/api/mcp", mcp_service)
+        .route_layer(mcp_verify);
+    mcp_router.merge(docs)
 }
 
 pub const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
@@ -1560,7 +1570,7 @@ mod tests {
         let _ = crate::log::open_database(&temp_dir.join("log.db"))
             .await
             .unwrap();
-        let app_info = crate::config::new_appinfo(&temp_dir, &temp_dir);
+        let app_info = crate::config::app_info("0.0.0-test", &temp_dir, &temp_dir);
         let data = Arc::new(Mutex::new(Data::new(app_info).await.unwrap()));
         let (sender, _) = mpsc::channel(1);
         let (event, _) = broadcast::channel(1);

@@ -110,13 +110,10 @@ impl ApiClient {
         }
     }
 
-    /// Starts a request to a path of the API, with the `User-Agent` header. The request gets the
+    /// Starts a request to a path of the API. Sending it adds the `User-Agent` header and the
     /// `Host` header of the endpoint that it is sent to.
     pub fn builder(&self, method: Method, path: &str) -> Builder {
-        Request::builder()
-            .method(method)
-            .uri(path)
-            .header(USER_AGENT, concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")))
+        Request::builder().method(method).uri(path)
     }
 
     pub fn get(&self, path: &str) -> anyhow::Result<Request<Full<Bytes>>> {
@@ -147,35 +144,14 @@ impl ApiClient {
             method,
             path,
             host_header(endpoint),
-            concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")),
+            crate::release::user_agent("r3v3rs3")?,
             body.len(),
         );
         let mut wire = head.into_bytes();
         wire.extend_from_slice(&body);
         io.write_all(&wire).await?;
         io.flush().await?;
-
-        let mut buffered = Vec::new();
-        let mut chunk = [0u8; 1024];
-        loop {
-            if window_ends(&buffered) {
-                break;
-            }
-            let size = tokio::time::timeout(RESPONSE_TIMEOUT, io.read(&mut chunk)).await??;
-            if size == 0 {
-                bail!("the connection closed before the upgrade");
-            }
-            buffered.extend_from_slice(&chunk[..size]);
-            if buffered.len() > MAX_HEADER_SIZE {
-                bail!("the response headers are too large");
-            }
-        }
-        let split = window(&buffered).len();
-        let head = String::from_utf8_lossy(&buffered[..split]);
-        let status = head.lines().next().unwrap_or_default();
-        if !status.contains(" 101 ") {
-            bail!("the connection was not upgraded: {}", status.trim());
-        }
+        let (buffered, split) = read_upgrade_head(&mut io).await?;
         Ok(PrefixedIo {
             prefix: Bytes::copy_from_slice(&buffered[split..]),
             io,
@@ -191,8 +167,7 @@ impl ApiClient {
         allowed: &[StatusCode],
     ) -> anyhow::Result<Response<Incoming>> {
         let (io, endpoint) = self.connect().await?;
-        let host = HeaderValue::from_str(&host_header(endpoint))?;
-        request.headers_mut().insert(HOST, host);
+        add_request_headers(&mut request, endpoint)?;
         let (mut sender, connection) = http1::handshake(TokioIo::new(io)).await?;
         tokio::spawn(async move {
             if let Err(err) = connection.await {
@@ -248,6 +223,42 @@ impl ApiClient {
             }
         }
     }
+}
+
+/// Sets the `Host` header of `endpoint` and the `User-Agent` header of the release.
+fn add_request_headers(
+    request: &mut Request<Full<Bytes>>,
+    endpoint: &Endpoint,
+) -> anyhow::Result<()> {
+    let host = HeaderValue::from_str(&host_header(endpoint))?;
+    request.headers_mut().insert(HOST, host);
+    let agent = HeaderValue::from_str(&crate::release::user_agent("r3v3rs3")?)?;
+    request.headers_mut().insert(USER_AGENT, agent);
+    Ok(())
+}
+
+/// Reads the response headers of an upgrade request and fails unless the status is `101`.
+/// Returns the bytes read and the length of the headers in them; the rest belongs to the stream.
+async fn read_upgrade_head(io: &mut (impl AsyncRead + Unpin)) -> anyhow::Result<(Vec<u8>, usize)> {
+    let mut buffered = Vec::new();
+    let mut chunk = [0u8; 1024];
+    while !window_ends(&buffered) {
+        let size = tokio::time::timeout(RESPONSE_TIMEOUT, io.read(&mut chunk)).await??;
+        if size == 0 {
+            bail!("the connection closed before the upgrade");
+        }
+        buffered.extend_from_slice(&chunk[..size]);
+        if buffered.len() > MAX_HEADER_SIZE {
+            bail!("the response headers are too large");
+        }
+    }
+    let split = window(&buffered).len();
+    let head = String::from_utf8_lossy(&buffered[..split]);
+    let status = head.lines().next().unwrap_or_default();
+    if !status.contains(" 101 ") {
+        bail!("the connection was not upgraded: {}", status.trim());
+    }
+    Ok((buffered, split))
 }
 
 fn host_header(endpoint: &Endpoint) -> String {

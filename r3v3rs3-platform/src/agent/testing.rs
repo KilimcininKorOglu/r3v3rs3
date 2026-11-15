@@ -1,7 +1,6 @@
 //! An agent in memory for the unit tests: its link runs over a pipe, and its requests run on a
 //! fake runtime.
 
-use super::client::VERSION;
 use super::compose::AgentCompose;
 use super::executor::Executor;
 use super::link::{Link, serve};
@@ -26,7 +25,7 @@ pub struct TestAgent {
 impl TestAgent {
     /// Connects a new agent to `target` in `registry`.
     pub fn connect(registry: &AgentRegistry, target: ShortId) -> Self {
-        Self::connect_with_version(registry, target, VERSION)
+        Self::connect_with_version(registry, target, crate::release::TEST_VERSION)
     }
 
     /// Connects a new agent that reports `version` to `target` in `registry`.

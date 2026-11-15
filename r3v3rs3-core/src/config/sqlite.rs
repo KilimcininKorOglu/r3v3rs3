@@ -108,14 +108,12 @@ const SCHEMA: &[&str] = &[
     deserialize = "T: serde::de::DeserializeOwned"
 ))]
 struct Versioned<T> {
-    #[serde(default = "default_version")]
+    /// The version that wrote a legacy file. The migration reads only `data`, so a file without
+    /// it reads as an empty string.
+    #[serde(default)]
     pub version: String,
     #[serde(flatten, default)]
     pub data: T,
-}
-
-fn default_version() -> String {
-    crate::config::build_info::PKG_VERSION.to_owned()
 }
 
 pub struct SqliteStorage {

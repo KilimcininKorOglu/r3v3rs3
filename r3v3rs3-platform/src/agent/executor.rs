@@ -2,7 +2,6 @@
 //! checks every request itself, so a master reaches only the containers, the networks and the
 //! images of the platform.
 
-use super::client::VERSION;
 use super::compose::AgentCompose;
 use super::frame::{read_frame, read_payload, write_frame};
 use super::link::LinkStream;
@@ -91,7 +90,7 @@ impl Executor {
         let runtime = &*self.runtime;
         match request {
             AgentRequest::Ping => Ok(AgentOutput::Pong {
-                version: VERSION.to_string(),
+                version: crate::release::version()?.to_string(),
             }),
             AgentRequest::Version => runtime
                 .version()

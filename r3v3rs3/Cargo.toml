@@ -29,6 +29,7 @@ r3v3rs3-admin.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 directories.workspace = true
+include_dir.workspace = true
 r3v3rs3-api.workspace = true
 rpassword.workspace = true
 tokio.workspace = true

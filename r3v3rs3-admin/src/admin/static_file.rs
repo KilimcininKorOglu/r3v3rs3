@@ -13,22 +13,44 @@ use axum::{
 use axum_extra::extract::CookieJar;
 use flate2::read::GzDecoder;
 use fnv::FnvHasher;
-use include_dir::{Dir, include_dir};
+use include_dir::Dir;
 use percent_encoding::utf8_percent_encode;
-use std::{collections::HashMap, hash::Hasher, io::Read, path::Path, sync::LazyLock};
+use std::{
+    collections::HashMap,
+    hash::Hasher,
+    io::Read,
+    path::Path,
+    sync::{LazyLock, OnceLock},
+};
 
 use super::{AppError, AppState};
 
-/// The WebUI that trunk builds into `r3v3rs3/dist/webui`.
-static STATIC_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../r3v3rs3/dist");
+/// The WebUI that trunk builds into `r3v3rs3/dist/webui`. The `r3v3rs3` crate embeds it and sets
+/// it with [`set_webui`]: that crate compiles on every release, while this crate can come from
+/// a build cache that does not see a new WebUI.
+static STATIC_DIR: OnceLock<&'static Dir<'static>> = OnceLock::new();
+
+/// Sets the embedded WebUI. A second call keeps the first directory.
+pub fn set_webui(dir: &'static Dir<'static>) {
+    STATIC_DIR.get_or_init(|| dir);
+}
+
+/// The embedded WebUI. It fails when the binary did not set it, so the panel never answers with
+/// an empty file list.
+fn static_dir() -> anyhow::Result<&'static Dir<'static>> {
+    STATIC_DIR
+        .get()
+        .copied()
+        .ok_or_else(|| anyhow::anyhow!("the embedded WebUI is not set"))
+}
 
 const IMMUTABLE_FILE_PREFIXES: &[&str] = &["r3v3rs3-webui-", "tailwind-"];
 
 /// The content hash of every embedded file, computed once. The files are compiled into the binary,
-/// so a hash never changes while the process runs.
+/// so a hash never changes while the process runs. It is read only after [`static_dir`] succeeded.
 static ETAGS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     let mut etags = HashMap::new();
-    let mut dirs = vec![&STATIC_DIR];
+    let mut dirs: Vec<&Dir<'static>> = STATIC_DIR.get().copied().into_iter().collect();
     while let Some(dir) = dirs.pop() {
         for file in dir.files() {
             let mut hasher = FnvHasher::default();
@@ -96,7 +118,11 @@ struct SelectedFile<'a> {
     encoding: Option<StaticEncoding>,
 }
 
-fn find_client_encoding<'a>(file_name: &str, req_headers: &HeaderMap) -> Option<SelectedFile<'a>> {
+fn find_client_encoding(
+    dir: &'static Dir<'static>,
+    file_name: &str,
+    req_headers: &HeaderMap,
+) -> Option<SelectedFile<'static>> {
     let candidates = [
         (StaticEncoding::Zstd, accepts_encoding(req_headers, "zstd")),
         (StaticEncoding::Brotli, accepts_encoding(req_headers, "br")),
@@ -105,7 +131,7 @@ fn find_client_encoding<'a>(file_name: &str, req_headers: &HeaderMap) -> Option<
     for (enc, accepted) in candidates {
         if accepted {
             let path = Path::new("webui").join(format!("{file_name}.{}", enc.extension()));
-            if let Some(file) = STATIC_DIR.get_file(&path) {
+            if let Some(file) = dir.get_file(&path) {
                 return Some(SelectedFile {
                     file,
                     file_path: path,
@@ -117,9 +143,12 @@ fn find_client_encoding<'a>(file_name: &str, req_headers: &HeaderMap) -> Option<
     None
 }
 
-fn find_identity_fallback<'a>(file_name: &str) -> Option<SelectedFile<'a>> {
+fn find_identity_fallback(
+    dir: &'static Dir<'static>,
+    file_name: &str,
+) -> Option<SelectedFile<'static>> {
     let raw_path = Path::new("webui").join(file_name);
-    if let Some(file) = STATIC_DIR.get_file(&raw_path) {
+    if let Some(file) = dir.get_file(&raw_path) {
         return Some(SelectedFile {
             file,
             file_path: raw_path,
@@ -132,7 +161,7 @@ fn find_identity_fallback<'a>(file_name: &str) -> Option<SelectedFile<'a>> {
         StaticEncoding::Zstd,
     ] {
         let path = Path::new("webui").join(format!("{file_name}.{}", enc.extension()));
-        if let Some(file) = STATIC_DIR.get_file(&path) {
+        if let Some(file) = dir.get_file(&path) {
             return Some(SelectedFile {
                 file,
                 file_path: path,
@@ -143,8 +172,13 @@ fn find_identity_fallback<'a>(file_name: &str) -> Option<SelectedFile<'a>> {
     None
 }
 
-fn find_precompressed<'a>(file_name: &str, req_headers: &HeaderMap) -> Option<SelectedFile<'a>> {
-    find_client_encoding(file_name, req_headers).or_else(|| find_identity_fallback(file_name))
+fn find_precompressed(
+    dir: &'static Dir<'static>,
+    file_name: &str,
+    req_headers: &HeaderMap,
+) -> Option<SelectedFile<'static>> {
+    find_client_encoding(dir, file_name, req_headers)
+        .or_else(|| find_identity_fallback(dir, file_name))
 }
 
 /// Enforces anti-clickjacking frame protection headers on all administrative WebUI assets and SPA shells.
@@ -159,14 +193,22 @@ fn apply_frame_protection_headers(headers: &mut HeaderMap) {
     );
 }
 
-/// Answers a file of the embedded WebUI bundle.
-async fn serve_file(file_name: &str, req_headers: &HeaderMap) -> Result<Response, AppError> {
-    let selected = find_precompressed(file_name, req_headers).ok_or(AppError::NotFound)?;
-
+/// The embedded file that answers `file_name` for the encodings of the request, with its hash.
+fn select_file(
+    file_name: &str,
+    req_headers: &HeaderMap,
+) -> Result<(SelectedFile<'static>, &'static String), AppError> {
+    let selected =
+        find_precompressed(static_dir()?, file_name, req_headers).ok_or(AppError::NotFound)?;
     let hash = ETAGS
         .get(selected.file_path.to_string_lossy().as_ref())
         .ok_or(AppError::NotFound)?;
+    Ok((selected, hash))
+}
 
+/// Answers a file of the embedded WebUI bundle.
+async fn serve_file(file_name: &str, req_headers: &HeaderMap) -> Result<Response, AppError> {
+    let (selected, hash) = select_file(file_name, req_headers)?;
     let mut headers = HeaderMap::new();
     apply_frame_protection_headers(&mut headers);
     headers.insert(

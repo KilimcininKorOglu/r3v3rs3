@@ -28,34 +28,13 @@ const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Runs the worker until the master hangs up or orders it down.
 pub async fn run(ipc_fd: i32, config_dir: &Path, log_dir: &Path) -> anyhow::Result<()> {
-    let app_info = app_info(config_dir, log_dir);
+    let app_info = app_info(config_dir, log_dir)?;
     let mut ipc = UnixStream::from(unsafe { OwnedFd::from_raw_fd(ipc_fd) });
     // The frames of the handshake and of the commands are read on blocking threads.
     ipc.set_nonblocking(false)
         .context("failed to configure the IPC socket")?;
 
-    let handshake: Handshake = read_frame(&mut ipc)?;
-    if handshake.protocol != PROTOCOL_VERSION {
-        bail!(
-            "the master speaks protocol {} but this worker speaks {PROTOCOL_VERSION}",
-            handshake.protocol
-        );
-    }
-    let config: WorkerConfig = read_frame(&mut ipc)?;
-    let fds = recv_fds(&ipc, handshake.listeners.len())?;
-    if fds.len() != handshake.listeners.len() {
-        bail!(
-            "the master sent {} descriptors for {} listeners",
-            fds.len(),
-            handshake.listeners.len()
-        );
-    }
-    let listeners = handshake
-        .listeners
-        .iter()
-        .zip(fds)
-        .map(|(meta, fd)| ListenerFd::new(meta.proto, meta.addr, fd))
-        .collect::<Vec<_>>();
+    let (config, listeners) = receive_handover(&mut ipc)?;
     info!(
         listeners = listeners.len(),
         ports = config.ports.len(),
@@ -86,6 +65,33 @@ pub async fn run(ipc_fd: i32, config_dir: &Path, log_dir: &Path) -> anyhow::Resu
     channels.shutdown();
     let _ = server_task.await;
     result
+}
+
+/// Reads the handshake, the configuration and the listening sockets that the master hands over.
+fn receive_handover(ipc: &mut UnixStream) -> anyhow::Result<(WorkerConfig, Vec<ListenerFd>)> {
+    let handshake: Handshake = read_frame(ipc)?;
+    if handshake.protocol != PROTOCOL_VERSION {
+        bail!(
+            "the master speaks protocol {} but this worker speaks {PROTOCOL_VERSION}",
+            handshake.protocol
+        );
+    }
+    let config: WorkerConfig = read_frame(ipc)?;
+    let fds = recv_fds(ipc, handshake.listeners.len())?;
+    if fds.len() != handshake.listeners.len() {
+        bail!(
+            "the master sent {} descriptors for {} listeners",
+            fds.len(),
+            handshake.listeners.len()
+        );
+    }
+    let listeners = handshake
+        .listeners
+        .iter()
+        .zip(fds)
+        .map(|(meta, fd)| ListenerFd::new(meta.proto, meta.addr, fd))
+        .collect();
+    Ok((config, listeners))
 }
 
 /// The writing half of the IPC socket. The command loop and the quarantine reports share it, so
@@ -281,9 +287,9 @@ fn certs_of(certs: &[crate::ipc::WorkerCert]) -> anyhow::Result<Vec<Arc<crate::c
         .collect()
 }
 
-fn app_info(config_dir: &Path, log_dir: &Path) -> AppInfo {
-    AppInfo {
-        version: env!("CARGO_PKG_VERSION"),
+fn app_info(config_dir: &Path, log_dir: &Path) -> anyhow::Result<AppInfo> {
+    Ok(AppInfo {
+        version: crate::release::version()?,
         target: "worker",
         profile: "worker",
         features: &[],
@@ -292,7 +298,7 @@ fn app_info(config_dir: &Path, log_dir: &Path) -> AppInfo {
         log_path: log_dir.to_path_buf(),
         platform_enabled: false,
         update_available: None,
-    }
+    })
 }
 
 /// The directories of a worker. A worker writes no configuration, so only the log directory

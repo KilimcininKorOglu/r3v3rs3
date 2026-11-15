@@ -1,6 +1,6 @@
 [package]
 name = "r3v3rs3-proxy"
-version.workspace = true
+version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -64,3 +64,7 @@ tracing.workspace = true
 url.workspace = true
 x509-parser.workspace = true
 zstd.workspace = true
+
+[dev-dependencies]
+# The unit tests run without the binary that sets the release version.
+r3v3rs3-core = { workspace = true, features = ["test-util"] }

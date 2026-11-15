@@ -2203,22 +2203,28 @@ fn ping_heartbeat(url_opt: &Option<String>) {
     {
         let url = url.clone();
         tokio::spawn(async move {
-            if let Ok(client) = crate::cdn::fetch::build_client().await
-                && let Ok(req) = hyper::Request::builder()
-                    .method(hyper::Method::GET)
-                    .uri(&url)
-                    .header(
-                        hyper::header::USER_AGENT,
-                        concat!("r3v3rs3-heartbeat/", env!("CARGO_PKG_VERSION")),
-                    )
-                    .body(http_body_util::Full::new(hyper::body::Bytes::new()))
-            {
-                let _ =
-                    tokio::time::timeout(std::time::Duration::from_secs(10), client.request(req))
-                        .await;
+            // The URL often carries the token of the monitor, so the log leaves it out.
+            if let Err(err) = send_heartbeat(&url).await {
+                tracing::warn!("the backup heartbeat failed: {err:#}");
             }
         });
     }
+}
+
+async fn send_heartbeat(url: &str) -> anyhow::Result<()> {
+    let client = crate::cdn::fetch::build_client().await?;
+    let request = hyper::Request::builder()
+        .method(hyper::Method::GET)
+        .uri(url)
+        .header(
+            hyper::header::USER_AGENT,
+            crate::release::user_agent("r3v3rs3-heartbeat")?,
+        )
+        .body(http_body_util::Full::new(hyper::body::Bytes::new()))?;
+    tokio::time::timeout(std::time::Duration::from_secs(10), client.request(request))
+        .await
+        .map_err(|_| anyhow::anyhow!("the heartbeat timed out"))??;
+    Ok(())
 }
 
 /// Maximum consecutive retry attempts for a scheduled backup in the same window.

@@ -27,7 +27,7 @@ pub async fn fetch_catalog() -> anyhow::Result<StoreCatalog> {
     let client = build_client().await?;
     let request = Request::builder()
         .uri(CATALOG_URL)
-        .header(USER_AGENT, concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")))
+        .header(USER_AGENT, crate::release::user_agent("r3v3rs3")?)
         .body(Full::new(Bytes::new()))?;
     let response = tokio::time::timeout(REQUEST_TIMEOUT, client.request(request)).await??;
     if !response.status().is_success() {

@@ -22,6 +22,7 @@ pub mod keys;
 pub mod kv;
 pub mod log;
 pub mod notify;
+pub mod release;
 pub mod sessions;
 pub mod stats;
 pub mod system_metrics;

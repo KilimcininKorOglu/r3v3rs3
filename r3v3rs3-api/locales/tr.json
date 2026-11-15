@@ -557,6 +557,7 @@
   "error.failed_to_generate_self_signed_certificate": "Kendinden imzalı sertifika oluşturulamadı.",
   "error.failed_to_hash_password": "Parola hash'lenemedi.",
   "error.failed_to_invoke_rpc": "RPC çağrılamadı.",
+  "error.release_version_not_set": "Sunucu binary'sinin sürüm bilgisi ayarlanmamış.",
   "error.failed_to_list_network_interfaces": "Ağ arayüzleri listelenemedi.",
   "error.failed_to_load_accounts": "Hesaplar yüklenemedi.",
   "error.failed_to_read_certificate": "Sertifika okunamadı.",

@@ -375,6 +375,7 @@ mod tests {
             Error::FailedToFetchLog,
             Error::FailedToSaveConfig,
             Error::FailedToInvokeRpc,
+            Error::ReleaseVersionNotSet,
             Error::FailedToListNetworkInterfaces,
             Error::FailedToCreateCertificateArchive,
             Error::InvalidPasskey,

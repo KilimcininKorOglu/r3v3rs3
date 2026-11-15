@@ -176,7 +176,7 @@ impl Platform {
         let binary = tokio::fs::read(&current_exe)
             .await
             .context("failed to read executable binary")?;
-        let version = env!("CARGO_PKG_VERSION").to_string();
+        let version = crate::release::version()?.to_string();
 
         let output = link
             .request_with_payload(
@@ -197,15 +197,20 @@ impl Platform {
     /// Pushes the current r3v3rs3 binary to all online agent targets that have a different version.
     pub async fn upgrade_all_targets(&self) -> anyhow::Result<Vec<TargetEntry>> {
         let targets = self.targets().await?;
-        let current_version = env!("CARGO_PKG_VERSION");
+        let current_version = crate::release::version()?;
         let mut upgraded = Vec::new();
         for target in targets {
-            if target.kind == TargetKind::Agent
-                && target.online
-                && target.version.as_deref() != Some(current_version)
-                && let Ok(entry) = self.upgrade_target(target.id).await
+            if target.kind != TargetKind::Agent
+                || !target.online
+                || target.version.as_deref() == Some(current_version)
             {
-                upgraded.push(entry);
+                continue;
+            }
+            match self.upgrade_target(target.id).await {
+                Ok(entry) => upgraded.push(entry),
+                Err(err) => {
+                    tracing::warn!(target = %target.id, "the agent upgrade failed: {err:#}");
+                }
             }
         }
         Ok(upgraded)
@@ -215,7 +220,13 @@ impl Platform {
         let Some(status) = self.agents.status(target) else {
             return;
         };
-        let current_version = env!("CARGO_PKG_VERSION");
+        let current_version = match crate::release::version() {
+            Ok(version) => version,
+            Err(err) => {
+                tracing::error!(%target, "the agent version check failed: {err:#}");
+                return;
+            }
+        };
         if status.version == current_version {
             return;
         }

@@ -1812,7 +1812,9 @@ impl ServerState {
     pub async fn export_config_backup(
         &self,
     ) -> Result<r3v3rs3_api::config_backup::ConfigBackup, Error> {
-        let version = env!("CARGO_PKG_VERSION").to_string();
+        let version = crate::release::version()
+            .map_err(|_| Error::ReleaseVersionNotSet)?
+            .to_string();
         let created_at = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()

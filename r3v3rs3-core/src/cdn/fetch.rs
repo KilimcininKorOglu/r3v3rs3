@@ -249,7 +249,7 @@ pub async fn build_client() -> anyhow::Result<HttpClient> {
 fn build_request(source: &Source) -> anyhow::Result<Request<Full<Bytes>>> {
     let builder = Request::builder()
         .uri(source.url)
-        .header(USER_AGENT, concat!("r3v3rs3/", env!("CARGO_PKG_VERSION")));
+        .header(USER_AGENT, crate::release::user_agent("r3v3rs3")?);
     let request = match source.form {
         Some(form) => builder
             .method(Method::POST)

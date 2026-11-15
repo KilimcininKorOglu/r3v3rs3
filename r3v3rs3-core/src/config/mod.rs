@@ -28,9 +28,11 @@ pub fn version_of(version: &str) -> Vec<u64> {
         .collect()
 }
 
-pub fn new_appinfo(config_path: &Path, log_path: &Path) -> AppInfo {
+/// The app info of the binary with the release `version`. The `r3v3rs3` crate passes its own
+/// package version, because the library crates have a fixed one (see [`crate::release`]).
+pub fn app_info(version: &'static str, config_path: &Path, log_path: &Path) -> AppInfo {
     AppInfo {
-        version: build_info::PKG_VERSION,
+        version,
         target: build_info::TARGET,
         profile: build_info::PROFILE,
         features: &build_info::FEATURES[..],

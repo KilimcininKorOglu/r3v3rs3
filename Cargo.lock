@@ -3175,6 +3175,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "include_dir",
  "ipnet",
  "libc",
  "log",
@@ -3211,7 +3212,7 @@ dependencies = [
 
 [[package]]
 name = "r3v3rs3-admin"
-version = "3.4.1"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -3234,6 +3235,7 @@ dependencies = [
  "mime_guess",
  "percent-encoding",
  "r3v3rs3-api",
+ "r3v3rs3-core",
  "r3v3rs3-server",
  "rand 0.10.2",
  "reqwest",
@@ -3309,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "r3v3rs3-core"
-version = "3.4.1"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3367,7 +3369,7 @@ dependencies = [
 
 [[package]]
 name = "r3v3rs3-platform"
-version = "3.4.1"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3411,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "r3v3rs3-proxy"
-version = "3.4.1"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3468,7 +3470,7 @@ dependencies = [
 
 [[package]]
 name = "r3v3rs3-server"
-version = "3.4.1"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3486,6 +3488,7 @@ dependencies = [
  "network-interface",
  "quinn",
  "r3v3rs3-api",
+ "r3v3rs3-core",
  "r3v3rs3-platform",
  "r3v3rs3-proxy",
  "rand 0.10.2",
