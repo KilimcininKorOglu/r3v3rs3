@@ -67,6 +67,7 @@ mod cdn;
 mod certs;
 mod config;
 pub mod control;
+pub(crate) mod ct;
 mod dashboard;
 pub(crate) mod databases;
 mod disaster_recovery;
@@ -215,7 +216,7 @@ async fn build_admin(
     let config_dir = app_state.data.lock().await.app_info.config_path.clone();
     control::spawn(app_state.clone(), &config_dir);
     anomaly::ensure_anomaly_monitor_running(app_state.clone(), config_dir.clone());
-    crate::certs::ct::ensure_ct_monitor_running(app_state.clone(), config_dir);
+    ct::ensure_ct_monitor_running(app_state.clone(), config_dir);
     admin_router(app_state)
 }
 

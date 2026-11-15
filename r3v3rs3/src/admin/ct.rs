@@ -1,6 +1,6 @@
 //! Certificate Transparency (CT) log monitor and rogue certificate detection engine.
 
-use crate::admin::AppState;
+use super::AppState;
 use crate::server::rpc::acme::GetAcmeList;
 use crate::server::rpc::certs::GetCertList;
 use r3v3rs3_api::auth::Role;

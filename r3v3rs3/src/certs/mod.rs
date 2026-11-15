@@ -26,7 +26,6 @@ pub mod alpn;
 pub mod cert_list;
 pub mod challenges;
 pub mod cname;
-pub mod ct;
 pub mod dns;
 
 #[derive(Clone)]

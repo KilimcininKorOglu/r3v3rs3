@@ -299,7 +299,7 @@ pub async fn get_ct_config(
 ) -> Result<Json<CtMonitorConfig>, AppError> {
     caller.authorize(Permission::Read)?;
     let config_dir = state.data.lock().await.app_info.config_path.clone();
-    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    let monitor = super::ct::get_or_init_state(&config_dir);
     Ok(Json(monitor.get_config()))
 }
 
@@ -319,7 +319,7 @@ pub async fn put_ct_config(
 ) -> Result<Json<CtMonitorConfig>, AppError> {
     caller.authorize(Permission::Edit)?;
     let config_dir = state.data.lock().await.app_info.config_path.clone();
-    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    let monitor = super::ct::get_or_init_state(&config_dir);
     monitor.save_config(body.config.clone())?;
     let record = crate::audit::AuditRecord::new(AuditAction::UpdateCtMonitorConfig)
         .summary("Updated Certificate Transparency monitor configuration");
@@ -343,7 +343,7 @@ pub async fn get_ct_status(
 ) -> Result<Json<CtMonitorStatus>, AppError> {
     caller.authorize(Permission::Read)?;
     let config_dir = state.data.lock().await.app_info.config_path.clone();
-    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    let monitor = super::ct::get_or_init_state(&config_dir);
     Ok(Json(monitor.get_status()))
 }
 
@@ -363,7 +363,7 @@ pub async fn list_ct_entries(
 ) -> Result<Json<Vec<CtLogEntry>>, AppError> {
     caller.authorize(Permission::Read)?;
     let config_dir = state.data.lock().await.app_info.config_path.clone();
-    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    let monitor = super::ct::get_or_init_state(&config_dir);
     Ok(Json(monitor.list_entries(query)))
 }
 
@@ -383,7 +383,7 @@ pub async fn check_ct_now(
 ) -> Result<Json<usize>, AppError> {
     caller.authorize(Permission::Edit)?;
     let config_dir = state.data.lock().await.app_info.config_path.clone();
-    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    let monitor = super::ct::get_or_init_state(&config_dir);
     let count = monitor.run_check(&state, query.domain.as_deref()).await?;
     let record = crate::audit::AuditRecord::new(AuditAction::CheckCtLogs).summary(format!(
         "Triggered Certificate Transparency check, {} new rogue certs found",
@@ -411,7 +411,7 @@ pub async fn dismiss_ct_alert(
 ) -> Result<Json<bool>, AppError> {
     caller.authorize(Permission::Edit)?;
     let config_dir = state.data.lock().await.app_info.config_path.clone();
-    let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+    let monitor = super::ct::get_or_init_state(&config_dir);
     monitor.dismiss_alert(&body.id, body.status)?;
     let record = crate::audit::AuditRecord::new(AuditAction::DismissCtAlert).summary(format!(
         "Dismissed Certificate Transparency alert for entry {}",

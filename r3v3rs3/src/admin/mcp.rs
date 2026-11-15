@@ -4303,7 +4303,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         caller.authorize(Permission::Read).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
-        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        let monitor = super::ct::get_or_init_state(&config_dir);
         json_result(monitor.get_config())
     }
 
@@ -4320,7 +4320,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         caller.authorize(Permission::Edit).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
-        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        let monitor = super::ct::get_or_init_state(&config_dir);
         let mut config = monitor.get_config();
         apply_ct_config_overrides(&mut config, params);
 
@@ -4347,7 +4347,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         caller.authorize(Permission::Read).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
-        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        let monitor = super::ct::get_or_init_state(&config_dir);
         json_result(monitor.get_status())
     }
 
@@ -4363,7 +4363,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         caller.authorize(Permission::Read).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
-        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        let monitor = super::ct::get_or_init_state(&config_dir);
         let query = r3v3rs3_api::ct::CtEntriesQuery {
             domain: params.domain,
             rogue_only: params.rogue_only,
@@ -4385,7 +4385,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         caller.authorize(Permission::Edit).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
-        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        let monitor = super::ct::get_or_init_state(&config_dir);
         let count = monitor
             .run_check(&self.state, params.domain.as_deref())
             .await
@@ -4416,7 +4416,7 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         caller.authorize(Permission::Edit).map_err(tool_error)?;
         let config_dir = self.state.data.lock().await.app_info.config_path.clone();
-        let monitor = crate::certs::ct::get_or_init_state(&config_dir);
+        let monitor = super::ct::get_or_init_state(&config_dir);
         let status = match params.status.as_deref() {
             Some("investigating") => Some(r3v3rs3_api::ct::CtAlertStatus::Investigating),
             Some("confirmed_rogue") => Some(r3v3rs3_api::ct::CtAlertStatus::ConfirmedRogue),
