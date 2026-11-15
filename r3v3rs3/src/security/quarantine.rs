@@ -221,6 +221,13 @@ impl AutoQuarantineTracker {
         now: Instant,
     ) -> QuarantinedIpEntry {
         let result = self.insert_ban(ip, reason, duration_seconds, violations, now);
+        tracing::warn!(
+            %ip,
+            reason = %result.reason,
+            violations,
+            seconds = result.remaining_seconds,
+            "quarantined an address"
+        );
         self.notify_quarantine(&result);
         result
     }
