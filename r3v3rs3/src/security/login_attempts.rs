@@ -118,23 +118,20 @@ impl LoginAttempts {
         reset: Duration,
         now: Instant,
     ) -> &mut LoginAttempt {
-        if self.entries.contains_key(&key) {
-            let attempt = self.entries.get_mut(&key).unwrap();
-            if !attempt.is_active(reset, now) {
-                *attempt = LoginAttempt::new(now);
-            }
-            return self.entries.get_mut(&key).unwrap();
-        }
-
-        if self.entries.len() >= MAX_LOGIN_ATTEMPTS_ENTRIES {
+        if !self.entries.contains_key(&key) && self.entries.len() >= MAX_LOGIN_ATTEMPTS_ENTRIES {
             self.prune_expired(reset, now);
             if self.entries.len() >= MAX_LOGIN_ATTEMPTS_ENTRIES {
                 self.prune_oldest();
             }
         }
-        self.entries
+        let attempt = self
+            .entries
             .entry(key)
-            .or_insert_with(|| LoginAttempt::new(now))
+            .or_insert_with(|| LoginAttempt::new(now));
+        if !attempt.is_active(reset, now) {
+            *attempt = LoginAttempt::new(now);
+        }
+        attempt
     }
 }
 
