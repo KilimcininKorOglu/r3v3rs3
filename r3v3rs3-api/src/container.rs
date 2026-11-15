@@ -396,9 +396,14 @@ pub struct ContainerSpec {
     /// port, so the address survives a new deployment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_port: Option<u16>,
-    /// Extra entries of `/etc/hosts` of the container, as `host` and `ip` pairs.
+    /// Host names of the container on `network`, which the other containers of the network
+    /// resolve to it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub extra_hosts: Vec<(String, String)>,
+    pub aliases: Vec<String>,
+    /// Networks that the container joins besides `network`, such as the network of the
+    /// database that the app uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_networks: Vec<NetworkName>,
     /// Docker log-opt max-size (default: "50m").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_max_size: Option<String>,
@@ -422,8 +427,19 @@ impl ContainerSpec {
         for (key, value) in &self.labels {
             check_label(key, value)?;
         }
+        if let Some(alias) = self.aliases.iter().find(|alias| !is_host_name(alias)) {
+            return Err(invalid(format!("invalid alias: {alias}")));
+        }
         Ok(())
     }
+}
+
+/// A DNS label of letters, digits and inner hyphens.
+fn is_host_name(name: &str) -> bool {
+    (1..=63).contains(&name.len())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && !name.starts_with('-')
+        && !name.ends_with('-')
 }
 
 fn check_label(key: &str, value: &str) -> Result<(), Error> {
@@ -668,7 +684,8 @@ mod tests {
             limits: ResourceLimits::default(),
             publish: None,
             host_port: None,
-            extra_hosts: Vec::new(),
+            aliases: vec!["r3v3rs3-abc-def".into()],
+            extra_networks: Vec::new(),
             log_max_size: None,
             log_max_file: None,
             command: None,
@@ -679,5 +696,32 @@ mod tests {
         spec.env.clear();
         spec.labels.insert("Bad Key".into(), "x".into());
         assert!(spec.validate().is_err());
+    }
+
+    #[test]
+    fn a_spec_rejects_an_alias_that_is_no_host_name() {
+        let mut spec = ContainerSpec {
+            name: "web".parse().unwrap(),
+            image: "nginx".parse().unwrap(),
+            env: Vec::new(),
+            labels: BTreeMap::new(),
+            network: None,
+            volumes: Vec::new(),
+            restart: RestartPolicy::default(),
+            limits: ResourceLimits::default(),
+            publish: None,
+            host_port: None,
+            aliases: Vec::new(),
+            extra_networks: Vec::new(),
+            log_max_size: None,
+            log_max_file: None,
+            command: None,
+        };
+        for bad in ["", "-db", "db-", "db.local", "db host", &"a".repeat(64)] {
+            spec.aliases = vec![bad.to_string()];
+            assert!(spec.validate().is_err(), "{bad:?}");
+        }
+        spec.aliases = vec!["r3v3rs3-abc-def".to_string()];
+        assert!(spec.validate().is_ok());
     }
 }

@@ -130,7 +130,8 @@ fn spec(names: &Names, image: ImageRef) -> anyhow::Result<ContainerSpec> {
         },
         publish: Some(80),
         host_port: None,
-        extra_hosts: Vec::new(),
+        aliases: Vec::new(),
+        extra_networks: Vec::new(),
         log_max_size: None,
         log_max_file: None,
         command: None,
@@ -438,7 +439,8 @@ fn redis_spec(names: &Names, image: ImageRef) -> ContainerSpec {
         },
         publish: None,
         host_port: None,
-        extra_hosts: Vec::new(),
+        aliases: Vec::new(),
+        extra_networks: Vec::new(),
         log_max_size: None,
         log_max_file: None,
         command: None,
@@ -454,6 +456,79 @@ async fn start_redis(runtime: &DockerRuntime, names: &Names) -> anyhow::Result<(
     runtime.create_container(&spec).await?;
     runtime.start_container(&names.container).await?;
     Ok(())
+}
+
+/// A container that joins the network of another app reaches it by its alias, the way an
+/// app reaches the database that it uses.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_container_reaches_another_network_by_its_alias() -> anyhow::Result<()> {
+    let runtime = runtime()?;
+    let (database, app) = (Names::new()?, Names::new()?);
+    let result = reach_by_alias(&runtime, &database, &app).await;
+    let removed = [
+        runtime.remove_container(&app.container).await,
+        runtime.remove_container(&database.container).await,
+        runtime.remove_network(&app.network).await,
+        runtime.remove_network(&database.network).await,
+    ];
+    result?;
+    removed.into_iter().collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(())
+}
+
+/// Starts a Redis "database" with an alias on its own network and a Redis "app" on another
+/// network that joins the first, then pings the database by its alias from the app.
+async fn reach_by_alias(
+    runtime: &DockerRuntime,
+    database: &Names,
+    app: &Names,
+) -> anyhow::Result<()> {
+    let image: ImageRef = "redis:8-alpine".parse()?;
+    runtime.pull_image(&image).await?;
+    let mut db_spec = redis_spec(database, image.clone());
+    db_spec.aliases = vec![database.app.to_string()];
+    start_on_network(runtime, database, &db_spec).await?;
+    let mut app_spec = redis_spec(app, image);
+    app_spec.extra_networks = vec![database.network.clone()];
+    start_on_network(runtime, app, &app_spec).await?;
+    ping_alias(runtime, database, app).await
+}
+
+/// Creates the network of the names and starts the container of the spec on it.
+async fn start_on_network(
+    runtime: &DockerRuntime,
+    names: &Names,
+    spec: &ContainerSpec,
+) -> anyhow::Result<()> {
+    runtime.ensure_network(&names.network, &names.app).await?;
+    runtime.create_container(spec).await?;
+    runtime.start_container(&names.container).await
+}
+
+/// Pings the alias of the database from the app until Redis answers, for up to 30 seconds.
+async fn ping_alias(runtime: &DockerRuntime, database: &Names, app: &Names) -> anyhow::Result<()> {
+    let ping = vec![
+        "redis-cli".to_string(),
+        "-h".to_string(),
+        database.app.to_string(),
+        "ping".to_string(),
+    ];
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let output = runtime
+            .exec_capture(&app.container, ping.clone(), Vec::new())
+            .await?;
+        if String::from_utf8_lossy(&output).contains("PONG") {
+            return Ok(());
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "no answer from the alias: {}",
+            String::from_utf8_lossy(&output)
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 /// Redis stays up and carries a shell, so the exec session can run a command in it.

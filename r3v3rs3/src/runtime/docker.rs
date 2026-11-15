@@ -9,7 +9,7 @@ use super::ContainerRuntime;
 use crate::kv::http::{
     ApiClient, Lines, RESPONSE_TIMEOUT, read_body, read_body_limited, read_json,
 };
-use anyhow::{anyhow, bail};
+use anyhow::{Context as _, anyhow, bail};
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::body::Incoming;
@@ -269,6 +269,18 @@ impl DockerRuntime {
             .get_optional::<InspectNetwork>(&format!("/networks/{name}"))
             .await?;
         Ok(found.filter(|network| network.name == name.as_str()))
+    }
+
+    /// Connects a created container to further networks before it starts.
+    async fn join_networks(&self, id: &str, networks: &[NetworkName]) -> anyhow::Result<()> {
+        for network in networks {
+            let path = format!("/networks/{network}/connect");
+            let body = json!({ "Container": id });
+            self.call(Method::POST, &path, Some(&body), &[])
+                .await
+                .with_context(|| format!("joining the network {network}"))?;
+        }
+        Ok(())
     }
 
     async fn prune_docker_containers(&self) -> anyhow::Result<(u64, u64)> {
@@ -929,6 +941,11 @@ impl ContainerRuntime for DockerRuntime {
             )
             .await?;
         let created: CreateResponse = read_json(response).await?;
+        if let Err(err) = self.join_networks(&created.id, &spec.extra_networks).await {
+            // A container that misses a network cannot reach its database; do not leave it.
+            let _ = self.remove_container(&spec.name).await;
+            return Err(err);
+        }
         Ok(created.id)
     }
 
@@ -1387,16 +1404,13 @@ fn create_body(spec: &ContainerSpec) -> Value {
         "HostConfig": host_config,
     });
     if let Some(network) = &spec.network {
+        let endpoint = if spec.aliases.is_empty() {
+            json!({})
+        } else {
+            json!({ "Aliases": spec.aliases })
+        };
         body["HostConfig"]["NetworkMode"] = json!(network.as_str());
-        body["NetworkingConfig"] = json!({ "EndpointsConfig": { network.as_str(): {} } });
-    }
-    if !spec.extra_hosts.is_empty() {
-        let hosts = spec
-            .extra_hosts
-            .iter()
-            .map(|(host, ip)| format!("{host}:{ip}"))
-            .collect::<Vec<_>>();
-        body["HostConfig"]["ExtraHosts"] = json!(hosts);
+        body["NetworkingConfig"] = json!({ "EndpointsConfig": { network.as_str(): endpoint } });
     }
     if let Some(cmd) = &spec.command {
         body["Cmd"] = json!(cmd);
@@ -1963,10 +1977,8 @@ mod tests {
             },
             publish: Some(8080),
             host_port: Some(18080),
-            extra_hosts: vec![(
-                "host.docker.internal".to_string(),
-                "host-gateway".to_string(),
-            )],
+            aliases: vec!["r3v3rs3-shop".to_string()],
+            extra_networks: vec!["r3v3rs3-db".parse().unwrap()],
             log_max_size: None,
             log_max_file: None,
             command: None,
@@ -1995,10 +2007,12 @@ mod tests {
                 "Memory": 268435456,
                 "PidsLimit": 1024,
                 "NetworkMode": "r3v3rs3-shop",
-                "ExtraHosts": ["host.docker.internal:host-gateway"],
                 "PortBindings": { "8080/tcp": [{ "HostIp": "127.0.0.1", "HostPort": "18080" }] },
             },
-            "NetworkingConfig": { "EndpointsConfig": { "r3v3rs3-shop": {} } },
+            // The extra networks join after the creation, so the body names only `network`.
+            "NetworkingConfig": { "EndpointsConfig": {
+                "r3v3rs3-shop": { "Aliases": ["r3v3rs3-shop"] },
+            } },
             "ExposedPorts": { "8080/tcp": {} },
         });
         assert_eq!(create_body(&spec), expected);

@@ -361,9 +361,9 @@ Opening the details of a managed database (`/apps/{id}`) displays a dedicated da
 
 ### Connect an App
 
-The **Database** field of the app form connects an app to a database of this server. The next deployment of the app injects the connection into the environment of its container: `DATABASE_URL` with the user, the generated password and the port, plus the variables of the engine, for example `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DATABASE` for PostgreSQL, and `MYSQL_*` for MariaDB and MySQL, `MONGO_*` for MongoDB and `REDIS_URL` for Redis. The container resolves `host.docker.internal` to the host of r3v3rs3, so the address works from every app network.
+The **Database** field of the app form connects an app to a database of this server. The next deployment of the app injects the connection into the environment of its container: `DATABASE_URL` with the user, the generated password and the port, plus the variables of the engine, for example `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DATABASE` for PostgreSQL, and `MYSQL_*` for MariaDB and MySQL, `MONGO_*` for MongoDB and `REDIS_URL` for Redis. The container of the app joins the Docker network of the database and reaches it by its host name `r3v3rs3-<database id>` on the container port of the engine, for example `5432` for PostgreSQL. The port that the database publishes on `127.0.0.1` serves only r3v3rs3 and the host itself; no container reaches it. The app and the database must run on the same target, or the deployment fails with the reason.
 
-The injected user is the root user of the database, because r3v3rs3 creates no per-app users. While the database does not run, the deployment of a connected app fails with the reason, and the old container keeps serving. A database that an app uses cannot be deleted: the deletion answers `409 database_in_use` until the apps disconnect from it, and the databases page shows the apps that use each database.
+On a database without a project, a shared server, every project environment and every app without a project connects as its own user and database, which r3v3rs3 creates on the first deployment. An app of the project environment of a database connects as its root user. While the database does not run, the deployment of a connected app fails with the reason, and the old container keeps serving. A database that an app uses cannot be deleted: the deletion answers `409 database_in_use` until the apps disconnect from it, and the databases page shows the apps that use each database.
 
 A database needs the local target, and only an account with the Edit permission sees the page. Every creation and deletion goes into the audit log.
 
@@ -397,7 +397,7 @@ For visual inspection, querying, and schema management, r3v3rs3 provides officia
 - **Adminer**: Lightweight, single-container multi-engine database manager (PostgreSQL, MySQL, SQLite, MongoDB).
 - **Mongo Express**: Interactive document and collection manager for MongoDB.
 
-On the **Databases** page, each database row includes a direct **Web UI** action that opens the corresponding App Store template pre-configured for the database engine.
+On the **Databases** page, each database row includes a direct **Web UI** action that opens the corresponding App Store template pre-configured for the database engine. To reach a database from such a UI, pick the database in the **Database** field of the UI app, so that its container joins the network of the database, and give the UI the host name `r3v3rs3-<database id>` and the container port of the engine, for example `PMA_HOST` and `PMA_PORT` for phpMyAdmin.
 
 ### Backups
 

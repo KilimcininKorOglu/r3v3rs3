@@ -908,15 +908,8 @@ impl Platform {
         network: &NetworkName,
     ) -> anyhow::Result<ContainerSpec> {
         let mut env = self.effective_env(job).await?;
-        let extra_hosts = if job.spec.uses_database.is_some() {
-            env.extend(self.database_env(job, runtime).await?);
-            vec![(
-                "host.docker.internal".to_string(),
-                "host-gateway".to_string(),
-            )]
-        } else {
-            Vec::new()
-        };
+        let (database_env, extra_networks) = self.database_env(job, runtime).await?;
+        env.extend(database_env);
         Ok(ContainerSpec {
             name: name.clone(),
             image: digest.parse()?,
@@ -931,7 +924,8 @@ impl Platform {
             limits: job.spec.limits,
             publish: Some(job.spec.port),
             host_port: job.spec.host_port,
-            extra_hosts,
+            aliases: vec![app_host(job.app)],
+            extra_networks,
             log_max_size: None,
             log_max_file: None,
             command: database_command(job.spec.database.as_deref()),
@@ -1070,15 +1064,17 @@ fn merge_env_vars(target: &mut Vec<EnvVar>, new_vars: Vec<EnvVar>) {
 }
 
 impl Platform {
-    /// The connection of the database that the app uses, as the environment of the container.
-    /// The container reaches the published port of the database over the host gateway.
+    /// The connection of the database that the app uses, as the environment of the container,
+    /// and the networks of the database and its running replicas. The container joins those
+    /// networks and reaches each database by its host name and container port, because a
+    /// database publishes its port only on `127.0.0.1` of the host.
     async fn database_env(
         &self,
         job: &Job,
         runtime: &dyn ContainerRuntime,
-    ) -> anyhow::Result<Vec<EnvVar>> {
+    ) -> anyhow::Result<(Vec<EnvVar>, Vec<NetworkName>)> {
         let Some(db_id) = job.spec.uses_database else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         };
         let db = self.app(db_id).await?;
         let Some(engine) = db.spec.database.clone() else {
@@ -1086,20 +1082,18 @@ impl Platform {
         };
         let info = r3v3rs3_api::platform::engine_info(&engine)
             .ok_or_else(|| anyhow!("the engine {} is not in the database catalog", engine))?;
-        let Some(host_port) = db.spec.host_port else {
-            bail!("the database {} has no host port", db.name);
-        };
+        if db.target != job.app_target {
+            bail!(
+                "the database {} runs on another target than the app",
+                db.name
+            );
+        }
         ensure_database_running(runtime, db_id, &db.name).await?;
         let credentials = self.database_credentials(&db, job, &info).await?;
-        let replicas = self.running_replica_ports(db_id, runtime).await;
-        let mut env = Vec::new();
-        for (key, value) in connection_values(&info, host_port, &credentials, &replicas) {
-            env.push(EnvVar {
-                key: key.parse()?,
-                value,
-            });
-        }
-        Ok(env)
+        let replicas = self.running_replicas(db_id, runtime).await;
+        let primary = (app_host(db_id), db.spec.port);
+        let env = connection_env(connection_values(&info, &primary, &credentials, &replicas))?;
+        Ok((env, database_networks(db_id, &replicas)?))
     }
 
     /// The account that the app connects with: its tenant on a shared server, or the root
@@ -1148,27 +1142,26 @@ impl Platform {
         }
     }
 
-    /// Finds the published ports of all running read replicas of the database.
-    async fn running_replica_ports(
+    /// The running read replicas of the database, with the container port of each.
+    async fn running_replicas(
         &self,
         db_id: ShortId,
         runtime: &dyn ContainerRuntime,
-    ) -> Vec<u16> {
+    ) -> Vec<(ShortId, u16)> {
         let Ok(apps) = self.store.apps().await else {
             return Vec::new();
         };
-        let mut ports = Vec::new();
+        let mut replicas = Vec::new();
         for app in apps {
             if app.spec.replica_of == Some(db_id)
-                && let Some(port) = app.spec.host_port
                 && ensure_database_running(runtime, app.id, &app.name)
                     .await
                     .is_ok()
             {
-                ports.push(port);
+                replicas.push((app.id, app.spec.port));
             }
         }
-        ports
+        replicas
     }
 
     async fn run_pre_deploy_hook(&self, job: &Job, digest: &str) -> anyhow::Result<()> {
@@ -1191,6 +1184,8 @@ impl Platform {
             .await?;
         spec.publish = None;
         spec.host_port = None;
+        // The hook container must not answer for the app on the network of the app.
+        spec.aliases.clear();
         spec.restart = RestartPolicy::No;
         spec.command = Some(vec![
             "/bin/sh".to_string(),
@@ -1437,7 +1432,37 @@ fn app_label(app: ShortId) -> anyhow::Result<AppName> {
 
 /// The network of an app, so that the containers of different apps do not reach each other.
 fn app_network(app: ShortId) -> anyhow::Result<NetworkName> {
-    Ok(format!("{RESOURCE_PREFIX}{app}").parse()?)
+    Ok(app_host(app).parse()?)
+}
+
+/// The host name of the containers of an app on the network of the app. An app that uses a
+/// database joins the network of the database and connects to this name.
+fn app_host(app: ShortId) -> String {
+    format!("{RESOURCE_PREFIX}{app}")
+}
+
+/// The networks of a database and of its replicas, which a connected app joins.
+fn database_networks(
+    db_id: ShortId,
+    replicas: &[(ShortId, u16)],
+) -> anyhow::Result<Vec<NetworkName>> {
+    let mut networks = vec![app_network(db_id)?];
+    for (replica, _) in replicas {
+        networks.push(app_network(*replica)?);
+    }
+    Ok(networks)
+}
+
+/// The connection values as container environment variables.
+fn connection_env(values: Vec<(String, String)>) -> anyhow::Result<Vec<EnvVar>> {
+    let mut env = Vec::with_capacity(values.len());
+    for (key, value) in values {
+        env.push(EnvVar {
+            key: key.parse()?,
+            value,
+        });
+    }
+    Ok(env)
 }
 
 /// Checks a published port once. With a path, the app must answer the HTTP request with 2xx or
@@ -1529,17 +1554,17 @@ pub(crate) fn database_command(engine: Option<&str>) -> Option<Vec<String>> {
 }
 
 /// The environment entries of a database connection: the variables of the engine,
-/// DATABASE_URL, and read replica URLs, for `host.docker.internal` on the host.
+/// DATABASE_URL, and read replica URLs, for the host name and the container port of the
+/// database on its network.
 fn connection_values(
     info: &r3v3rs3_api::platform::EngineInfo,
-    host_port: u16,
+    (host, port): &(String, u16),
     credentials: &super::tenant::Credentials,
-    replicas: &[u16],
+    replicas: &[(ShortId, u16)],
 ) -> Vec<(String, String)> {
-    let host = "host.docker.internal";
     let mut values = vec![
-        (format!("{}_HOST", info.env_prefix), host.to_string()),
-        (format!("{}_PORT", info.env_prefix), host_port.to_string()),
+        (format!("{}_HOST", info.env_prefix), host.clone()),
+        (format!("{}_PORT", info.env_prefix), port.to_string()),
         (
             format!("{}_USER", info.env_prefix),
             credentials.user.clone(),
@@ -1558,26 +1583,39 @@ fn connection_values(
     if let Some(prefix) = &credentials.key_prefix {
         values.push((format!("{}_PREFIX", info.env_prefix), prefix.clone()));
     }
-    let url = format_url(info, host, host_port, credentials);
+    let url = format_url(info, host, *port, credentials);
     values.push(("DATABASE_URL".to_string(), url));
-    if !replicas.is_empty() {
-        let read_port = replicas[0];
-        let read_url = format_url(info, host, read_port, credentials);
-        values.push(("DATABASE_READ_URL".to_string(), read_url.clone()));
-        values.push(("DATABASE_REPLICA_URL".to_string(), read_url));
-        values.push((format!("{}_READ_HOST", info.env_prefix), host.to_string()));
-        values.push((
+    values.extend(replica_values(info, credentials, replicas));
+    values
+}
+
+/// The read replica entries of a database connection: the first replica as the read
+/// address, and every replica in `DATABASE_READ_URLS`.
+fn replica_values(
+    info: &r3v3rs3_api::platform::EngineInfo,
+    credentials: &super::tenant::Credentials,
+    replicas: &[(ShortId, u16)],
+) -> Vec<(String, String)> {
+    let Some(&(first, read_port)) = replicas.first() else {
+        return Vec::new();
+    };
+    let read_host = app_host(first);
+    let read_url = format_url(info, &read_host, read_port, credentials);
+    let all_urls = replicas
+        .iter()
+        .map(|&(replica, port)| format_url(info, &app_host(replica), port, credentials))
+        .collect::<Vec<_>>()
+        .join(",");
+    vec![
+        ("DATABASE_READ_URL".to_string(), read_url.clone()),
+        ("DATABASE_REPLICA_URL".to_string(), read_url),
+        (format!("{}_READ_HOST", info.env_prefix), read_host),
+        (
             format!("{}_READ_PORT", info.env_prefix),
             read_port.to_string(),
-        ));
-        let all_urls = replicas
-            .iter()
-            .map(|&port| format_url(info, host, port, credentials))
-            .collect::<Vec<_>>()
-            .join(",");
-        values.push(("DATABASE_READ_URLS".to_string(), all_urls));
-    }
-    values
+        ),
+        ("DATABASE_READ_URLS".to_string(), all_urls),
+    ]
 }
 
 pub(crate) fn format_url(
@@ -2322,7 +2360,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_deployment_injects_the_connection_of_its_database() -> anyhow::Result<()> {
-        let (platform, runtime, linked, _dir, host_port) = setup_with_database(true).await?;
+        let (platform, runtime, linked, _dir, _host_port) = setup_with_database(true).await?;
         let db_id = linked.spec.uses_database.context("the database")?;
         let entry = platform
             .deploy(linked.id, "alice", DeploymentTrigger::Manual)
@@ -2336,13 +2374,20 @@ mod tests {
             .last()
             .cloned()
             .context("the created container")?;
-        assert_eq!(
-            created.extra_hosts,
-            vec![(
-                "host.docker.internal".to_string(),
-                "host-gateway".to_string()
-            )]
-        );
+        // The app joins the network of the database, and the database answers to its host
+        // name on its own network: the published port of the host is not reachable from a
+        // container.
+        assert_eq!(created.extra_networks, vec![app_network(db_id)?]);
+        assert_eq!(created.aliases, vec![app_host(linked.id)]);
+        let db_spec = runtime
+            .state()
+            .specs
+            .iter()
+            .find(|spec| spec.labels.get(APP_LABEL) == Some(&db_id.to_string()))
+            .cloned()
+            .context("the database container")?;
+        assert_eq!(db_spec.aliases, vec![app_host(db_id)]);
+        let db_host = app_host(db_id);
         let env = |key: &str| {
             created
                 .env
@@ -2353,17 +2398,11 @@ mod tests {
         assert_eq!(
             env("DATABASE_URL").as_deref(),
             Some(&*format!(
-                "postgres://postgres:s3cret@host.docker.internal:{host_port}/postgres"
+                "postgres://postgres:s3cret@{db_host}:5432/postgres"
             ))
         );
-        assert_eq!(
-            env("POSTGRES_HOST").as_deref(),
-            Some("host.docker.internal")
-        );
-        assert_eq!(
-            env("POSTGRES_PORT").as_deref(),
-            Some(&*host_port.to_string())
-        );
+        assert_eq!(env("POSTGRES_HOST").as_deref(), Some(db_host.as_str()));
+        assert_eq!(env("POSTGRES_PORT").as_deref(), Some("5432"));
         assert_eq!(env("POSTGRES_USER").as_deref(), Some("postgres"));
         assert_eq!(env("POSTGRES_PASSWORD").as_deref(), Some("s3cret"));
         assert_eq!(env("POSTGRES_DATABASE").as_deref(), Some("postgres"));
@@ -2400,7 +2439,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_app_on_a_shared_database_connects_as_its_own_tenant() -> anyhow::Result<()> {
-        let (platform, runtime, linked, _dir, host_port) = setup_with_database(false).await?;
+        let (platform, runtime, linked, _dir, _host_port) = setup_with_database(false).await?;
         let db_id = linked.spec.uses_database.context("the database")?;
         deploy_running(&platform, linked.id, db_id).await?;
 
@@ -2410,9 +2449,10 @@ mod tests {
             .await?
             .context("the stored tenant password")?;
         // The app gets its own user and database, never the root account of the server.
+        let db_host = app_host(db_id);
         assert_eq!(
             last_database_url(&runtime)?,
-            format!("postgres://{tenant}:{password}@host.docker.internal:{host_port}/{tenant}")
+            format!("postgres://{tenant}:{password}@{db_host}:5432/{tenant}")
         );
         assert_tenant_script_ran(&runtime)
     }
@@ -2529,7 +2569,7 @@ mod tests {
     #[tokio::test]
     async fn a_new_tenant_password_reaches_the_database_and_redeploys_its_apps()
     -> anyhow::Result<()> {
-        let (platform, runtime, linked, _dir, _host_port) = deployed_with_database(false).await?;
+        let (platform, runtime, linked, _dir, host_port) = deployed_with_database(false).await?;
         let db_id = linked.spec.uses_database.context("the database")?;
         let tenant = super::super::tenant::tenant_name(linked.id, None, None);
         let old = platform.tenant_password(db_id, &tenant).await?;
@@ -2545,17 +2585,18 @@ mod tests {
 
         // The new deployment of the app connects with the new password.
         idle(&platform, &[db_id, linked.id]).await?;
-        let url = reset
-            .account
-            .url
-            .replace("127.0.0.1", "host.docker.internal");
+        // The account names the published port of the host; the app the database network.
+        let url = reset.account.url.replace(
+            &format!("127.0.0.1:{host_port}"),
+            &format!("{}:5432", app_host(db_id)),
+        );
         assert_eq!(last_database_url(&runtime)?, url);
         Ok(())
     }
 
     #[tokio::test]
     async fn a_new_root_password_reaches_the_apps_of_the_project() -> anyhow::Result<()> {
-        let (platform, runtime, linked, _dir, host_port) = deployed_with_database(true).await?;
+        let (platform, runtime, linked, _dir, _host_port) = deployed_with_database(true).await?;
         let db_id = linked.spec.uses_database.context("the database")?;
         let reset = platform
             .reset_database_password(db_id, None, "alice")
@@ -2571,7 +2612,10 @@ mod tests {
         idle(&platform, &[db_id, linked.id]).await?;
         assert_eq!(
             last_database_url(&runtime)?,
-            format!("postgres://postgres:{new}@host.docker.internal:{host_port}/postgres")
+            format!(
+                "postgres://postgres:{new}@{}:5432/postgres",
+                app_host(db_id)
+            )
         );
         Ok(())
     }
@@ -2648,9 +2692,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_deployment_injects_read_replicas_connection_urls() -> anyhow::Result<()> {
-        let (platform, runtime, linked, _dir, host_port) = setup_with_database(true).await?;
+        let (platform, runtime, linked, _dir, _host_port) = setup_with_database(true).await?;
         let db_id = linked.spec.uses_database.context("the database")?;
-        let (rep_id, replica_port) = add_and_deploy_replica(&platform, db_id).await?;
+        let (rep_id, _replica_host_port) = add_and_deploy_replica(&platform, db_id).await?;
+        let replica_port = platform.app(rep_id).await?.spec.port;
 
         let entry = platform
             .deploy(linked.id, "alice", DeploymentTrigger::Manual)
@@ -2673,27 +2718,31 @@ mod tests {
                 .map(|var| var.value.clone())
         };
 
+        let (db_host, replica_host) = (app_host(db_id), app_host(rep_id));
         assert_eq!(
             env("DATABASE_URL").as_deref(),
             Some(&*format!(
-                "postgres://postgres:s3cret@host.docker.internal:{host_port}/postgres"
+                "postgres://postgres:s3cret@{db_host}:5432/postgres"
             ))
         );
-        assert_eq!(
-            env("DATABASE_READ_URL").as_deref(),
-            Some(&*format!(
-                "postgres://postgres:s3cret@host.docker.internal:{replica_port}/postgres"
-            ))
-        );
+        let read_url = format!("postgres://postgres:s3cret@{replica_host}:{replica_port}/postgres");
+        assert_eq!(env("DATABASE_READ_URL").as_deref(), Some(read_url.as_str()));
         assert_eq!(
             env("DATABASE_READ_URLS").as_deref(),
-            Some(&*format!(
-                "postgres://postgres:s3cret@host.docker.internal:{replica_port}/postgres"
-            ))
+            Some(read_url.as_str())
+        );
+        assert_eq!(
+            env("POSTGRES_READ_HOST").as_deref(),
+            Some(replica_host.as_str())
         );
         assert_eq!(
             env("POSTGRES_READ_PORT").as_deref(),
             Some(&*replica_port.to_string())
+        );
+        // The app joins the network of the replica too.
+        assert_eq!(
+            created.extra_networks,
+            vec![app_network(db_id)?, app_network(rep_id)?]
         );
         Ok(())
     }

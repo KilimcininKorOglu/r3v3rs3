@@ -361,9 +361,9 @@ Yönetilen bir veritabanının detayları açıldığında (`/apps/{id}`), verit
 
 ### Bir uygulamayı bağlamak
 
-App formundaki **Veritabanı** alanı, bir uygulamayı bu sunucudaki bir veritabanına bağlar. Uygulamanın sonraki deployment'ı bağlantıyı container'ının ortamına ekler: kullanıcıyı, üretilmiş parolayı ve portu taşıyan `DATABASE_URL`, artı motorun değişkenleri; örneğin PostgreSQL için `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` ve `POSTGRES_DATABASE`, MariaDB ve MySQL için `MYSQL_*`, MongoDB için `MONGO_*`, Redis için `REDIS_URL`. Container, `host.docker.internal` adresini r3v3rs3'ün hostuna çözer; adres her app ağında çalışır.
+App formundaki **Veritabanı** alanı, bir uygulamayı bu sunucudaki bir veritabanına bağlar. Uygulamanın sonraki deployment'ı bağlantıyı container'ının ortamına ekler: kullanıcıyı, üretilmiş parolayı ve portu taşıyan `DATABASE_URL`, artı motorun değişkenleri; örneğin PostgreSQL için `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` ve `POSTGRES_DATABASE`, MariaDB ve MySQL için `MYSQL_*`, MongoDB için `MONGO_*`, Redis için `REDIS_URL`. Uygulamanın container'ı veritabanının Docker network'üne katılır ve veritabanına `r3v3rs3-<veritabanı id>` host adıyla, motorun container port'undan ulaşır; örneğin PostgreSQL için `5432`. Veritabanının `127.0.0.1` üzerinde yayınladığı port yalnız r3v3rs3'e ve hostun kendisine hizmet eder; hiçbir container ona ulaşamaz. Uygulama ve veritabanı aynı target'ta çalışmalıdır, aksi hâlde deployment nedeniyle başarısız olur.
 
-Enjekte edilen kullanıcı veritabanının root kullanıcısıdır; r3v3rs3 app başına kullanıcı yaratmaz. Veritabanı çalışmadığı sürece bağlı bir uygulamanın deployment'ı nedeniyle başarısız olur ve eski container karşılamaya devam eder. Bir uygulamanın kullandığı veritabanı silinemez: silme, uygulamalar bağlantılarını kesene kadar `409 database_in_use` yanıtını alır ve veritabanları sayfası her veritabanını kullanan uygulamaları gösterir.
+Projesi olmayan bir veritabanında, yani paylaşılan bir sunucuda, her proje ortamı ve projesi olmayan her uygulama kendi kullanıcısı ve veritabanıyla bağlanır; r3v3rs3 bunları ilk deployment'ta oluşturur. Veritabanıyla aynı proje ortamındaki bir uygulama root kullanıcısıyla bağlanır. Veritabanı çalışmadığı sürece bağlı bir uygulamanın deployment'ı nedeniyle başarısız olur ve eski container karşılamaya devam eder. Bir uygulamanın kullandığı veritabanı silinemez: silme, uygulamalar bağlantılarını kesene kadar `409 database_in_use` yanıtını alır ve veritabanları sayfası her veritabanını kullanan uygulamaları gösterir.
 
 Veritabanı local target ister ve sayfayı yalnız Edit izni olan bir hesap görür. Her oluşturma ve silme audit log'una geçer.
 
@@ -397,7 +397,7 @@ Görsel veri inceleme, sorgulama ve şema yönetimi için r3v3rs3, **App Store**
 - **Adminer**: Tek container'da çoklu motor destekleyen (PostgreSQL, MySQL, SQLite, MongoDB) hafif veritabanı yöneticisi.
 - **Mongo Express**: MongoDB için etkileşimli döküman ve koleksiyon yönetim paneli.
 
-**Veritabanları** sayfasında her veritabanı satırı, ilgili veritabanı motoruna uygun App Store şablonunu doğrudan açan bir **Web Arayüzü** kısayol bağlantısı içerir.
+**Veritabanları** sayfasında her veritabanı satırı, ilgili veritabanı motoruna uygun App Store şablonunu doğrudan açan bir **Web Arayüzü** kısayol bağlantısı içerir. Böyle bir arayüzden veritabanına ulaşmak için arayüz uygulamasının **Veritabanı** alanında veritabanını seçin; container'ı böylece veritabanının network'üne katılır. Sonra arayüze `r3v3rs3-<veritabanı id>` host adını ve motorun container port'unu verin; phpMyAdmin için bunlar `PMA_HOST` ve `PMA_PORT` değişkenleridir.
 
 ### Yedekler
 
