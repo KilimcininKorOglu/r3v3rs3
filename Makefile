@@ -44,7 +44,7 @@ test-acme-pebble:
 		SSL_CERT_FILE=$(CURDIR)/$(PEBBLE_CA) CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3 --test it -- --ignored acme_pebble_test::; \
 		status=$$?; docker compose -f $(PEBBLE_COMPOSE) down; exit $$status
 
-# Runs the service discovery end-to-end tests against Consul and etcd in Docker and against
+# Runs the service discovery end-to-end tests against etcd in Docker and against
 # the local Docker engine, then removes the containers.
 test-discovery-e2e:
 	$(DISCOVERY_COMPOSE) up -d --wait && \
