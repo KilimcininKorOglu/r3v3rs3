@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.6] - 2026-11-15
+
+### Changed
+- The 3.3.5 release was not published, because the formatting check failed on its commit. 3.3.6 carries every change of 3.3.5 with the formatting fixed.
+
 ## [3.3.5] - 2026-11-15
 
 ### Added
