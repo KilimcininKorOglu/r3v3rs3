@@ -3165,19 +3165,14 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let catalog = crate::appstore::fetch::fetch_catalog()
-            .await
-            .map_err(any_error)?;
-        self.state
-            .sender
-            .send(crate::command::ServerCommand::SetAppStore { catalog })
-            .await
-            .map_err(|_| ErrorData::internal_error("failed to update catalog", None))?;
-        let record =
-            crate::audit::AuditRecord::new(r3v3rs3_api::audit::AuditAction::RefreshAppStore);
-        self.state
-            .record_audit(&caller.username, caller.client, record)
-            .await;
+        // The admin handler checks the role and writes the audit record; the tool answers with a
+        // short confirmation instead of the whole catalog.
+        let _catalog = super::store::refresh(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
         json_result(json!({ "refreshed": true }))
     }
 

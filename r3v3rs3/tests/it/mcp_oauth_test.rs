@@ -1662,6 +1662,29 @@ async fn token_rate_limit_throttles_rapid_requests() -> anyhow::Result<()> {
     .await
 }
 
+/// The app store refresh changes the catalog of every account, so a viewer with a token of the
+/// edit scope must not run it, the same as through the HTTP API.
+#[tokio::test]
+async fn refresh_store_rejects_a_viewer() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-store-refresh-auth")?;
+    with_admin(&dir.0, |addr| async move {
+        create_account_as_admin(addr, "viewer", "viewer").await?;
+        let token = access_token_for(&addr, "viewer", "password").await?;
+        let client = mcp_client(addr, &token).await?;
+        let err = mcp_call(&client, "refresh_store", json!({}))
+            .await
+            .expect_err("a viewer refreshed the app store");
+        assert!(
+            err.to_string()
+                .contains("the role of the account does not allow this action"),
+            "{err}"
+        );
+        client.cancel().await?;
+        Ok(())
+    })
+    .await
+}
+
 #[tokio::test]
 async fn run_server_upgrade_rejects_non_admin() -> anyhow::Result<()> {
     use rmcp::model::CallToolRequestParams;
