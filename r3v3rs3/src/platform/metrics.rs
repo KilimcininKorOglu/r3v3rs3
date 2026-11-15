@@ -245,7 +245,7 @@ fn evaluate_resource_health(
 /// Records one sample for every running local app, then trims the old samples.
 async fn collect_round(platform: &Arc<Platform>, previous: &Previous) -> anyhow::Result<()> {
     let now = crate::clock::unix_ms();
-    let requests = crate::proxy::stats::snapshot_resources();
+    let requests = crate::stats::snapshot_resources();
     let mut total_rx: u64 = 0;
     let mut total_tx: u64 = 0;
     for app in platform.apps().await? {

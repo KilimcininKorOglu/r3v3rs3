@@ -192,7 +192,7 @@ fn status(started_at: std::time::Instant) -> WorkerStatus {
     WorkerStatus {
         pid: std::process::id(),
         uptime_secs: started_at.elapsed().as_secs(),
-        open_connections: crate::proxy::open_connections() as u64,
+        open_connections: crate::stats::open_connections() as u64,
     }
 }
 

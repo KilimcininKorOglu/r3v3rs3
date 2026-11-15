@@ -1960,10 +1960,10 @@ impl ServerState {
         let platform_drain = self.platform.shutdown(timeout);
         let network_drain = async {
             let started = std::time::Instant::now();
-            while crate::proxy::open_connections() > 0 {
+            while crate::stats::open_connections() > 0 {
                 if started.elapsed() >= timeout {
                     warn!(
-                        connections = crate::proxy::open_connections(),
+                        connections = crate::stats::open_connections(),
                         ?timeout,
                         "graceful drain timed out with open connections"
                     );

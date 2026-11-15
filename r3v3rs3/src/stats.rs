@@ -2,9 +2,34 @@
 //! one process: with worker mode, the worker serves the ports and keeps its own counters.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// The number of the client connection tasks that are still running. The graceful drain waits
+/// for this count to reach zero.
+static OPEN_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
+
+/// Holds one open client connection. The count drops when the lease drops.
+pub struct ConnectionLease;
+
+impl ConnectionLease {
+    pub fn acquire() -> Self {
+        OPEN_CONNECTIONS.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for ConnectionLease {
+    fn drop(&mut self) {
+        OPEN_CONNECTIONS.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// The number of the client connections whose tasks still run.
+pub fn open_connections() -> usize {
+    OPEN_CONNECTIONS.load(Ordering::Relaxed)
+}
 
 pub const HISTOGRAM_BUCKETS: [f64; 11] = [
     0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
@@ -436,7 +461,7 @@ pub(crate) fn snapshot() -> Vec<(&'static str, u64)> {
             "r3v3rs3_cache_bypasses_total",
             load(&COUNTERS.cache_bypasses),
         ),
-        ("r3v3rs3_open_connections", super::open_connections() as u64),
+        ("r3v3rs3_open_connections", open_connections() as u64),
         (
             "r3v3rs3_tls_handshakes_total",
             load(&COUNTERS.tls_handshakes),

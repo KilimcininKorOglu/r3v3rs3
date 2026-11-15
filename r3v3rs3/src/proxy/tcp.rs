@@ -294,12 +294,12 @@ async fn tcp_tls_handshake(
     let start = std::time::Instant::now();
     match tls.accept(stream).await {
         Ok(Handshake::Established(accepted)) => {
-            super::stats::record_tls_handshake(start.elapsed());
+            crate::stats::record_tls_handshake(start.elapsed());
             Ok(Some(accepted))
         }
         Ok(Handshake::ChallengeServed) => Ok(None),
         Err(err) => {
-            super::stats::count_tls_handshake_error();
+            crate::stats::count_tls_handshake_error();
             Err(anyhow::Error::from(err)).context("tls handshake")
         }
     }
@@ -353,8 +353,8 @@ async fn start(
             let rx = bytes_received.load(std::sync::atomic::Ordering::Relaxed);
             let tx = bytes_sent.load(std::sync::atomic::Ordering::Relaxed);
             guard.record_bytes(rx + tx);
-            super::stats::record_rx_bytes(rx);
-            super::stats::record_tx_bytes(tx);
+            crate::stats::record_rx_bytes(rx);
+            crate::stats::record_tx_bytes(tx);
         }
         Err(err) => {
             if super::is_client_io_error(&err) {

@@ -3,7 +3,7 @@
 use super::{AppError, AppState};
 use crate::accounts::{Caller, Permission};
 use crate::audit::AuditRecord;
-use crate::proxy::stats;
+use crate::stats;
 use axum::{Extension, extract::State, response::Json};
 use r3v3rs3_api::anomaly::{
     AnomalyAlert, AnomalyAlertRules, AnomalyKind, AnomalySeverity, SystemAnomaliesSnapshot,

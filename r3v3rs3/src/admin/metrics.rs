@@ -3,7 +3,7 @@
 
 use super::{AppError, AppState};
 use crate::accounts::Caller;
-use crate::proxy::stats;
+use crate::stats;
 use axum::{
     Extension,
     extract::State,

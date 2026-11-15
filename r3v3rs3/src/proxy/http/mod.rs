@@ -371,7 +371,7 @@ impl HttpPortContext {
 
         tokio::spawn(
             async move {
-                let _lease = crate::proxy::ConnectionLease::acquire();
+                let _lease = crate::stats::ConnectionLease::acquire();
                 match Self::accept_quic(conn, server_config).await {
                     Ok(conn) => {
                         let local = conn.local_ip();
@@ -662,7 +662,7 @@ async fn proxied_response(
         route_request(shared, req, info).await
     };
     let proxy_id = resource_id.map(|id| id.to_string());
-    crate::proxy::stats::count_http_request(proxy_id.as_deref(), route_path.as_deref());
+    crate::stats::count_http_request(proxy_id.as_deref(), route_path.as_deref());
     if shared.quarantine.is_quarantined(&client_ip) {
         return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
     }
@@ -670,11 +670,7 @@ async fn proxied_response(
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
     let duration = start.elapsed();
-    crate::proxy::stats::record_request_duration(
-        duration,
-        proxy_id.as_deref(),
-        route_path.as_deref(),
-    );
+    crate::stats::record_request_duration(duration, proxy_id.as_deref(), route_path.as_deref());
 
     let country = shared.geoip.lookup_country(client_ip);
     check_and_record_quarantine(&shared.quarantine, client_ip, &uri, own_response, &mapped);
@@ -898,7 +894,7 @@ fn record_access_log<B>(
         }
         Err(err) => (502, Some(err.to_string()), Vec::new(), 0),
     };
-    crate::proxy::stats::record_http_response(status);
+    crate::stats::record_http_response(status);
     let latency_ms = duration.as_secs_f64() * 1000.0;
     emit_completed_access_log(&meta, status, latency_ms, bytes_sent, error.as_deref());
 
@@ -992,12 +988,12 @@ async fn handshake(
     let start = std::time::Instant::now();
     let mut accepted = match tls.accept(stream).await {
         Ok(Handshake::Established(accepted)) => {
-            super::stats::record_tls_handshake(start.elapsed());
+            crate::stats::record_tls_handshake(start.elapsed());
             accepted
         }
         Ok(Handshake::ChallengeServed) => return Ok(None),
         Err(err) => {
-            super::stats::count_tls_handshake_error();
+            crate::stats::count_tls_handshake_error();
             return Err(err.into());
         }
     };
@@ -1309,7 +1305,7 @@ where
     let resource_id = route.resource_id;
     let route_path = route.route_path.clone();
     if let Some(key) = &route.metric_key {
-        crate::proxy::stats::count_resource_request(key);
+        crate::stats::count_resource_request(key);
     }
     let client = route
         .client_ip
@@ -1665,7 +1661,7 @@ where
         .as_ref()
         .and_then(|cache| CacheRequest::new(cache, &mut req, cache_key, authorized));
     if route.cache.is_some() && cache_request.as_ref().is_none_or(|c| c.is_unsafe()) {
-        super::stats::count_cache_bypass();
+        crate::stats::count_cache_bypass();
     }
     (
         ProxiedRequest::Ok(Box::new(UpstreamCall {
@@ -1942,7 +1938,7 @@ where
     let (req, response_rewriter, resource_id, route_path, client_ip) =
         route_request(shared, req.map(|()| body), &info).await;
     let proxy_id = resource_id.map(|id| id.to_string());
-    crate::proxy::stats::count_h3_request(proxy_id.as_deref(), route_path.as_deref());
+    crate::stats::count_h3_request(proxy_id.as_deref(), route_path.as_deref());
     if shared.quarantine.is_quarantined(&client_ip) {
         return Err(anyhow::anyhow!("Quarantined IP connection dropped"));
     }
@@ -1952,11 +1948,7 @@ where
     let mapped = response_rewriter.build().map_response(res);
     let mapped = mapped.map(|res| res.map(|b| BoxBody::new(ByteCountBody::tx(b))));
     let duration = start.elapsed();
-    crate::proxy::stats::record_request_duration(
-        duration,
-        proxy_id.as_deref(),
-        route_path.as_deref(),
-    );
+    crate::stats::record_request_duration(duration, proxy_id.as_deref(), route_path.as_deref());
     let country = shared.geoip.lookup_country(client_ip);
     check_and_record_quarantine(&shared.quarantine, client_ip, &uri, own_response, &mapped);
     record_access_log(
@@ -2074,14 +2066,14 @@ where
         }
         ProxiedRequest::Respond(resp) => Ok(resp.map(|b| BoxBody::new(b.map_err(Into::into)))),
         ProxiedRequest::Err(err) => {
-            crate::proxy::stats::count_upstream_error_kind(classify_proxy_error(&err));
+            crate::stats::count_upstream_error_kind(classify_proxy_error(&err));
             Err(err.into())
         }
     }
 }
 
-fn classify_proxy_error(err: &ProxyError) -> crate::proxy::stats::UpstreamErrorKind {
-    use crate::proxy::stats::UpstreamErrorKind;
+fn classify_proxy_error(err: &ProxyError) -> crate::stats::UpstreamErrorKind {
+    use crate::stats::UpstreamErrorKind;
     match err {
         ProxyError::UpstreamTimeout => UpstreamErrorKind::Timeout,
         ProxyError::NoUpstreamAvailable => UpstreamErrorKind::CircuitOpen,

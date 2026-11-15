@@ -867,7 +867,7 @@ fn finish(
     let result = result.map_err(|err| err.error);
     if let Err(err) = &result {
         error!("{err:#}");
-        crate::proxy::stats::count_upstream_error_with_kind(
+        crate::stats::count_upstream_error_with_kind(
             proxy,
             route,
             classify_upstream_error(err.as_ref()),
@@ -878,8 +878,8 @@ fn finish(
 
 fn classify_upstream_error(
     err: &(dyn std::error::Error + 'static),
-) -> crate::proxy::stats::UpstreamErrorKind {
-    use crate::proxy::stats::UpstreamErrorKind;
+) -> crate::stats::UpstreamErrorKind {
+    use crate::stats::UpstreamErrorKind;
     if err
         .downcast_ref::<ProxyError>()
         .is_some_and(|e| matches!(e, ProxyError::UpstreamTimeout))

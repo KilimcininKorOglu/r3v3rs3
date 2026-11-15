@@ -538,7 +538,7 @@ impl CacheRequest {
             .insert(AGE, HeaderValue::from(entry.age().as_secs()));
         res.headers_mut()
             .insert(X_CACHE, HeaderValue::from_static("HIT"));
-        super::super::stats::count_cache_hit();
+        crate::stats::count_cache_hit();
         res
     }
 
@@ -618,7 +618,7 @@ impl CacheRequest {
         let head = self.storable_head(&res);
         res.headers_mut()
             .insert(X_CACHE, HeaderValue::from_static("MISS"));
-        super::super::stats::count_cache_miss();
+        crate::stats::count_cache_miss();
         let Some(head) = head else {
             if let Some(guard) = guard.take() {
                 guard.finish();

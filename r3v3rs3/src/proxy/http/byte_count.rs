@@ -55,8 +55,8 @@ where
             let len = data.len() as u64;
             if len > 0 {
                 match this.direction {
-                    ByteDirection::Rx => crate::proxy::stats::record_rx_bytes(len),
-                    ByteDirection::Tx => crate::proxy::stats::record_tx_bytes(len),
+                    ByteDirection::Rx => crate::stats::record_rx_bytes(len),
+                    ByteDirection::Tx => crate::stats::record_tx_bytes(len),
                 }
             }
         }
@@ -79,12 +79,12 @@ mod tests {
 
     #[tokio::test]
     async fn rx_and_tx_bodies_record_exact_bytes() {
-        let initial_rx = crate::proxy::stats::snapshot()
+        let initial_rx = crate::stats::snapshot()
             .into_iter()
             .find(|(k, _)| *k == "r3v3rs3_rx_bytes_total")
             .map(|(_, v)| v)
             .unwrap_or(0);
-        let initial_tx = crate::proxy::stats::snapshot()
+        let initial_tx = crate::stats::snapshot()
             .into_iter()
             .find(|(k, _)| *k == "r3v3rs3_tx_bytes_total")
             .map(|(_, v)| v)
@@ -99,12 +99,12 @@ mod tests {
         let collected_tx = tx_body.collect().await.unwrap().to_bytes();
         assert_eq!(collected_tx, data);
 
-        let final_rx = crate::proxy::stats::snapshot()
+        let final_rx = crate::stats::snapshot()
             .into_iter()
             .find(|(k, _)| *k == "r3v3rs3_rx_bytes_total")
             .map(|(_, v)| v)
             .unwrap_or(0);
-        let final_tx = crate::proxy::stats::snapshot()
+        let final_tx = crate::stats::snapshot()
             .into_iter()
             .find(|(k, _)| *k == "r3v3rs3_tx_bytes_total")
             .map(|(_, v)| v)

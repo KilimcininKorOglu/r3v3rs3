@@ -38,7 +38,7 @@ pub fn accept<F>(
         return;
     }
     let challenges = challenges.clone();
-    let lease = crate::proxy::ConnectionLease::acquire();
+    let lease = crate::stats::ConnectionLease::acquire();
     tokio::spawn(async move {
         let _lease = lease;
         match challenge_body(&challenges, &mut stream).await {
@@ -100,7 +100,7 @@ pub fn serve_reserved(
     };
     let peer_addr = stream.get_ref().peer_addr().ok();
     let local_addr = stream.get_ref().local_addr().ok();
-    let lease = crate::proxy::ConnectionLease::acquire();
+    let lease = crate::stats::ConnectionLease::acquire();
     tokio::spawn(async move {
         let _lease = lease;
         if let Err(err) = serve_tls_alpn(stream, config).await {

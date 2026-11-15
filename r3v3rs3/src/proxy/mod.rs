@@ -16,7 +16,6 @@ use r3v3rs3_api::{
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::{io::BufStream, net::TcpStream};
 use tokio_rustls::rustls::ServerConfig;
 use tracing::{Instrument, Span, debug, error};
@@ -30,7 +29,6 @@ pub mod http;
 pub mod proxy_protocol;
 pub mod registry;
 pub mod srv;
-pub mod stats;
 pub mod tcp;
 pub mod tls;
 pub mod udp;
@@ -62,31 +60,6 @@ pub struct ProxyRegistries {
     pub quarantine: Arc<crate::security::AutoQuarantineTracker>,
     pub error_page_themes:
         Arc<arc_swap::ArcSwap<Vec<r3v3rs3_api::error_page_theme::ErrorPageTheme>>>,
-}
-
-/// The number of the client connection tasks that are still running. The graceful drain waits
-/// for this count to reach zero.
-static OPEN_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
-
-/// Holds one open client connection. The count drops when the lease drops.
-pub(crate) struct ConnectionLease;
-
-impl ConnectionLease {
-    pub(crate) fn acquire() -> Self {
-        OPEN_CONNECTIONS.fetch_add(1, Ordering::Relaxed);
-        Self
-    }
-}
-
-impl Drop for ConnectionLease {
-    fn drop(&mut self) {
-        OPEN_CONNECTIONS.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
-/// The number of the client connections whose tasks still run.
-pub(crate) fn open_connections() -> usize {
-    OPEN_CONNECTIONS.load(Ordering::Relaxed)
 }
 
 pub(crate) fn is_client_io_error(err: &std::io::Error) -> bool {
@@ -133,7 +106,7 @@ pub(crate) fn spawn_connection<F>(span: Span, peer: Option<SocketAddr>, task: F)
 where
     F: Future<Output = anyhow::Result<()>> + Send + 'static,
 {
-    let lease = ConnectionLease::acquire();
+    let lease = crate::stats::ConnectionLease::acquire();
     tokio::spawn(
         async move {
             let _lease = lease;
