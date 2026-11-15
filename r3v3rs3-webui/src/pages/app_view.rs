@@ -222,7 +222,10 @@ fn edit_extras(
 ) -> Html {
     // The saved source decides the token section, not the unsaved input of the form.
     let uses_git = AppForm::edit(&entry).uses_git();
-    let is_image = matches!(entry.spec.source, AppSource::Image { .. });
+    // The engine catalog decides the version of a database server, so it gets no image
+    // update section: its Deploy button would only redeploy the same tag.
+    let is_image =
+        matches!(entry.spec.source, AppSource::Image { .. }) && entry.spec.database.is_none();
     let app = app.clone();
     let onchanged = Callback::from(move |updated: AppEntry| app.set(Some(updated)));
     let navigator = navigator.clone();

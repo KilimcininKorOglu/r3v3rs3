@@ -3145,14 +3145,8 @@ impl McpServer {
             .platform(&caller, Permission::Read)
             .await
             .map_err(any_error)?;
-        let dbs: Vec<_> = platform
-            .apps()
-            .await
-            .map_err(any_error)?
-            .into_iter()
-            .filter(|app| app.spec.database.is_some())
-            .collect();
-        json_result(dbs)
+        let apps = platform.apps().await.map_err(any_error)?;
+        json_result(super::databases::databases_of(apps))
     }
 
     /// List available database engines.

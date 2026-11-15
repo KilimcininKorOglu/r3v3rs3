@@ -558,15 +558,20 @@ fn catalog_update_badge(locale: Locale, update: Option<&CatalogUpdateStatus>) ->
     }
 }
 
-fn update_badge(locale: Locale, update: Option<&ImageUpdateStatus>) -> Html {
+/// The "Update available" badge, with the current and the newer version as its tooltip.
+pub(super) fn update_badge(locale: Locale, update: Option<&ImageUpdateStatus>) -> Html {
     let Some(update) = update else {
         return html! {};
     };
     if !update.update_available {
         return html! {};
     }
+    let title = match (&update.current_tag, &update.latest_tag) {
+        (Some(current), Some(latest)) => format!("{current} \u{2192} {latest}"),
+        _ => String::new(),
+    };
     html! {
-        <span class="inline-flex items-center px-1.5 py-0.5 ml-2 rounded text-[10px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+        <span class="inline-flex items-center px-1.5 py-0.5 ml-2 rounded text-[10px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200" {title}>
             {locale.t("apps.update_available")}
         </span>
     }

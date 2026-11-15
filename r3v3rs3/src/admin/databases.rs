@@ -22,7 +22,7 @@ use r3v3rs3_api::{
         AppEntry, AppRequest, AppSource, AppSpec, DatabaseCloneRequest, DatabaseCreated,
         DatabaseCredentials, DatabasePasswordRequest, DatabasePasswordReset,
         DatabaseReplicaRequest, DatabaseRequest, DatabaseTenant, DeploymentTrigger, EngineInfo,
-        LOCAL_TARGET, MAX_REPLICAS_PER_PRIMARY,
+        ImageUpdateStatus, LOCAL_TARGET, MAX_REPLICAS_PER_PRIMARY,
     },
 };
 use std::sync::Arc;
@@ -87,14 +87,37 @@ pub async fn list(
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<Vec<AppEntry>>, AppError> {
     let platform = state.platform(&caller, Permission::Read).await?;
-    let databases = platform
-        .apps()
-        .await
-        .map_err(platform_error)?
-        .into_iter()
+    let apps = platform.apps().await.map_err(platform_error)?;
+    Ok(Json(databases_of(apps)))
+}
+
+/// The database apps among `apps`. The update of each is the newer version of the engine
+/// catalog; the registry check of image apps does not apply to a database.
+pub(super) fn databases_of(apps: Vec<AppEntry>) -> Vec<AppEntry> {
+    apps.into_iter()
         .filter(|app| app.spec.database.is_some())
-        .collect();
-    Ok(Json(databases))
+        .map(|mut app| {
+            app.update = engine_update(&app.spec);
+            app
+        })
+        .collect()
+}
+
+/// The newer version that the engine catalog offers for the image of a database.
+fn engine_update(spec: &AppSpec) -> Option<ImageUpdateStatus> {
+    let AppSource::Image { image } = &spec.source else {
+        return None;
+    };
+    let info = r3v3rs3_api::platform::engine_info(spec.database.as_deref()?)?;
+    let newer = info.newer_version(image.as_str())?;
+    Some(ImageUpdateStatus {
+        update_available: true,
+        current_tag: Some(image.as_str().to_string()),
+        latest_tag: Some(newer.to_string()),
+        current_digest: None,
+        latest_digest: None,
+        checked_at: unix_ms(),
+    })
 }
 
 /// Creates a database: an image app with a volume, a fixed host port and a generated

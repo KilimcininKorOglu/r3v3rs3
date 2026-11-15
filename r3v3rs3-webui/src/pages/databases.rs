@@ -2,6 +2,7 @@
 
 use super::Route;
 use super::accounts::{INPUT_CLASS, LABEL_CLASS};
+use super::app_list::update_badge;
 use super::database_credentials::CredentialsPanel;
 use super::resource_page::{Notice, add_button, delete_on_click, notice_view};
 use super::settings::{fetch_json, post_json, success_box};
@@ -499,6 +500,7 @@ fn name_cell(locale: Locale, app: &AppEntry) -> Html {
     html! {
         <>
             {app.name.to_string()}
+            { update_badge(locale, app.update.as_ref()) }
             if is_replica {
                 <span class={classes!(BADGE, "bg-neutral-100", "text-neutral-700", "border-neutral-300", "dark:bg-neutral-700", "dark:text-neutral-300", "dark:border-neutral-600")}>
                     {locale.t("databases.read_replica")}

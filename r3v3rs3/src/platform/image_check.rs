@@ -319,6 +319,12 @@ pub async fn check_image_update(
 
 pub async fn check_app(platform: &Platform, app_id: ShortId) -> anyhow::Result<ImageUpdateStatus> {
     let app = platform.app(app_id).await?;
+    if app.spec.database.is_some() {
+        anyhow::bail!(
+            "app {} is a database server; the engine catalog of the Databases page decides its version",
+            app.id
+        );
+    }
     let AppSource::Image { image } = &app.spec.source else {
         anyhow::bail!("app {} does not have an image source", app.id);
     };
@@ -376,6 +382,10 @@ async fn check_all_apps(platform: &Arc<Platform>) {
         return;
     };
     for app in apps {
+        if app.spec.database.is_some() {
+            clear_database_update(platform, &app).await;
+            continue;
+        }
         if !matches!(app.spec.source, AppSource::Image { .. }) {
             continue;
         }
@@ -389,6 +399,17 @@ async fn check_all_apps(platform: &Arc<Platform>) {
                 warn!(app = %app.name, err = format!("{err:#}"), "image update check failed");
             }
         }
+    }
+}
+
+/// Removes the registry result that an earlier check stored for a database server, because the
+/// engine catalog, not the registry, decides the version of a database.
+async fn clear_database_update(platform: &Platform, app: &AppEntry) {
+    if app.update.is_none() {
+        return;
+    }
+    if let Err(err) = platform.store.clear_image_update(app.id).await {
+        warn!(app = %app.name, err = format!("{err:#}"), "failed to clear the image update of a database");
     }
 }
 

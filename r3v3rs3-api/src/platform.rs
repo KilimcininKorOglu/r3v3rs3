@@ -72,6 +72,13 @@ impl EngineInfo {
         self.data_path = self.data_path_for(image).to_string();
         self
     }
+
+    /// The newest version of the catalog that comes after `image`. `None` when `image` is the
+    /// newest version, or when the catalog does not offer it.
+    pub fn newer_version(&self, image: &str) -> Option<&str> {
+        let index = self.versions.iter().position(|version| version == image)?;
+        self.versions[index + 1..].last().map(String::as_str)
+    }
 }
 
 /// The document of the `engines.json` catalog.
@@ -2674,6 +2681,33 @@ mod tests {
             updated_at: 1,
             engines: vec![info],
         });
+    }
+
+    #[test]
+    fn the_engine_catalog_names_the_newer_version_of_a_database() {
+        let info = EngineInfo {
+            engine: "postgres".to_string(),
+            label: "PostgreSQL".to_string(),
+            versions: vec![
+                "postgres:17-alpine".to_string(),
+                "postgres:18-alpine".to_string(),
+            ],
+            container_port: 5432,
+            password_env: String::new(),
+            user: String::new(),
+            default_db: String::new(),
+            url_scheme: String::new(),
+            env_prefix: String::new(),
+            url_database: false,
+            data_path: String::new(),
+            version_data_paths: BTreeMap::new(),
+        };
+        assert_eq!(
+            info.newer_version("postgres:17-alpine"),
+            Some("postgres:18-alpine")
+        );
+        assert_eq!(info.newer_version("postgres:18-alpine"), None);
+        assert_eq!(info.newer_version("postgres:16-alpine"), None);
     }
 
     fn database_spec(image: &str) -> AppSpec {
