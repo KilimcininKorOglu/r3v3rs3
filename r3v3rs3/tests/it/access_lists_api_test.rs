@@ -80,8 +80,30 @@ async fn manage_the_access_lists(addr: SocketAddr) -> anyhow::Result<()> {
     check_create_is_limited(addr, &editor, &scoped, &viewer).await?;
     let id = check_create_and_masked_read(addr, &editor, &viewer).await?;
     let item = format!("{PATH}/{id}");
+    check_others_cannot_change(addr, &[&scoped, &viewer], &item).await?;
     check_update_keeps_the_password(addr, &editor, &item).await?;
     check_missing_and_delete(addr, &editor, &scoped, &item).await
+}
+
+/// Checks that an editor with a proxy list and a viewer can neither change nor delete a list
+/// (docs/content/accounts.md: only an account that changes the access lists changes their
+/// content), and that the list stays unchanged.
+async fn check_others_cannot_change(
+    addr: SocketAddr,
+    cookies: &[&str],
+    item: &str,
+) -> anyhow::Result<()> {
+    for cookie in cookies {
+        let mut renamed = office(Some("mallory-secret"));
+        renamed["name"] = json!("Taken");
+        let (status, _) = send(addr, Method::PUT, item, cookie, Some(renamed)).await?;
+        assert_eq!(status, 403);
+        let (status, _) = send(addr, Method::DELETE, item, cookie, None).await?;
+        assert_eq!(status, 403);
+    }
+    let listed = lists(addr, cookies[0]).await?;
+    assert_eq!(listed[0]["name"], "Office");
+    Ok(())
 }
 
 /// Checks that only an editor without a proxy scope creates lists, and that invalid lists fail.
