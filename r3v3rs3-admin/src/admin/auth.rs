@@ -134,7 +134,27 @@ async fn record_successful_login(
     state.record_audit(username, Some(*peer_ip), record).await;
 }
 
-pub(crate) fn header_ip(headers: &axum::http::HeaderMap, name: &'static str) -> Option<IpAddr> {
+/// The client address that a trusted proxy of the admin API reported: the rightmost
+/// `X-Forwarded-For` entry that is not a trusted proxy itself. The entries left of it come from
+/// the client, which can write any address there. `X-Real-IP` counts only without
+/// `X-Forwarded-For`.
+pub(crate) fn forwarded_client_ip(
+    trusted_proxies: &[ipnet::IpNet],
+    headers: &axum::http::HeaderMap,
+) -> Option<IpAddr> {
+    let chain = crate::proxy::http::client_ip::x_forwarded_for_ips(headers);
+    if chain.is_empty() {
+        return header_ip(headers, "x-real-ip");
+    }
+    chain
+        .iter()
+        .rev()
+        .find(|ip| !trusted_proxies.iter().any(|net| net.contains(*ip)))
+        .or(chain.first())
+        .copied()
+}
+
+fn header_ip(headers: &axum::http::HeaderMap, name: &'static str) -> Option<IpAddr> {
     headers
         .get(name)
         .and_then(|v| v.to_str().ok())
@@ -162,9 +182,7 @@ pub(crate) async fn resolve_client_ip(
     if !trusted.iter().any(|net| net.contains(&peer.ip())) {
         return peer.ip();
     }
-    header_ip(headers, "x-forwarded-for")
-        .or_else(|| header_ip(headers, "x-real-ip"))
-        .unwrap_or_else(|| peer.ip())
+    forwarded_client_ip(&trusted, headers).unwrap_or_else(|| peer.ip())
 }
 
 /// Whether the client reached the panel over TLS. A request that the proxy of this process handed
@@ -1122,6 +1140,29 @@ mod tests {
         // Sec-fetch-site same-origin -> allowed
         headers.insert("sec-fetch-site", "same-origin".parse().unwrap());
         assert!(verify_origin(&headers, None).is_ok());
+    }
+
+    #[test]
+    fn the_forwarded_client_is_the_rightmost_untrusted_address() {
+        let trusted: Vec<ipnet::IpNet> = vec!["10.0.0.0/8".parse().unwrap()];
+        let mut headers = axum::http::HeaderMap::new();
+        // The client wrote 1.2.3.4 itself; the trusted proxy appended the real client.
+        headers.insert("x-forwarded-for", "1.2.3.4, 203.0.113.9".parse().unwrap());
+        assert_eq!(
+            forwarded_client_ip(&trusted, &headers),
+            Some("203.0.113.9".parse().unwrap())
+        );
+        headers.insert("x-forwarded-for", "203.0.113.9, 10.0.0.7".parse().unwrap());
+        assert_eq!(
+            forwarded_client_ip(&trusted, &headers),
+            Some("203.0.113.9".parse().unwrap())
+        );
+        headers.remove("x-forwarded-for");
+        headers.insert("x-real-ip", "198.51.100.4".parse().unwrap());
+        assert_eq!(
+            forwarded_client_ip(&trusted, &headers),
+            Some("198.51.100.4".parse().unwrap())
+        );
     }
 
     #[test]

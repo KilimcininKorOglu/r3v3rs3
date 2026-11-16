@@ -122,6 +122,7 @@ async fn ip_filter_allows_and_denies_clients() -> anyhow::Result<()> {
         ClientIpConfig {
             trust_cdn: true,
             trusted_proxies: loopback(),
+            ..ClientIpConfig::default()
         },
     );
 

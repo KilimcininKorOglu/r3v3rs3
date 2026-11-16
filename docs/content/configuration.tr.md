@@ -653,7 +653,7 @@ CDN veya yük dengeleyici arkasında r3v3rs3'ün TCP peer'ı ziyaretçi değil, 
 Peer güvenilirse r3v3rs3 istemci IP adresini şu sırayla okur:
 
 1. Sağlayıcı header'ı: Cloudflare için `CF-Connecting-IP`, Bunny CDN için `X-Real-IP`, Amazon CloudFront için `CloudFront-Viewer-Address`.
-2. `X-Forwarded-For` ve RFC 7239 `Forwarded` header'ı içinde güvenilen bir proxy'ye veya bilinen bir CDN edge'ine ait olmayan en sağdaki adres. `Forwarded` içindeki `for=` elemanları, portlu ve tırnaklı IPv6 adresleri dahil, aynı zincire katılır.
+2. Güvenilen proxy'lerin yazdığı header içinde güvenilen bir proxy'ye veya bilinen bir CDN edge'ine ait olmayan en sağdaki adres. Header'ı "Güvenilen Proxy'lerin Yazdığı Header" (`forwarded_header`) ayarı seçer: `x_forwarded_for` (varsayılan; nginx, HAProxy, Caddy ve Traefik bunu yazar) veya `forwarded` (RFC 7239 `Forwarded` header'ı; `for=` elemanları portlu ve tırnaklı IPv6 adresi içerebilir). r3v3rs3 diğer header'ı hiç okumaz. Çünkü o header'ı yazmayan güvenilen bir proxy, istemcinin gönderdiği değeri olduğu gibi iletir ve istemci böylece istediği adresi yazabilir.
 
 r3v3rs3 bulduğu adresi upstream sunucuya `X-Real-IP` header'ında gönderir. Gelen `X-Forwarded-For` ve `Forwarded` zincirlerine dokunmaz. Peer güvenilir değilse r3v3rs3 `Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP`, `CloudFront-Viewer-Address`, `Fastly-Client-IP` ve `Incap-Client-IP` header'larını siler, çünkü istemci bu header'lara sahte değer yazabilir.
 
@@ -664,7 +664,7 @@ Akamai edge IP aralıklarını yayınlamaz. Akamai kullanıyorsanız Site Shield
 ```toml
 [my-app]
 protocol = "http"
-client_ip = { trust_cdn = true, trusted_proxies = ["10.0.0.0/8"] }
+client_ip = { trust_cdn = true, trusted_proxies = ["10.0.0.0/8"], forwarded_header = "x_forwarded_for" }
 ```
 
 ## IP filtresi
@@ -958,7 +958,7 @@ Yalnız proxy'yi görebilen hesaplar giriş yapar. Proxy listesi olan bir hesap 
 
 Route'u yönetim adresine giden bir r3v3rs3 proxy'si isteği TCP bağlantısı açmadan, process içinde panele verir. Panel istemci adresini, HTTPS durumunu ve `Host` değerini proxy'nin çözdüğü hâliyle alır. Proxy'nin [istemci IP adresi](#istemci-ip-adresi) ayarları da buna dahildir ve hiçbir istemci bu değerleri sahte gönderemez. Bu proxy için aşağıdaki ayar gerekmez.
 
-`[admin]` bölümündeki `trusted_proxies` ayarı (**Ayarlar** sayfasında **Güvenilen Proxy'ler**) panelin önündeki diğer reverse proxy'lerin adreslerini veya CIDR bloklarını listeler. Örnek: yönetim adresine TCP ile bağlanan bir nginx veya bir tünel. Panel, audit log'un, rate limit'lerin ve MCP token ban'ının istemci adresini `X-Forwarded-For` header'ından, oturum cookie'sinin HTTPS durumunu `X-Forwarded-Proto` header'ından yalnız istek bu adreslerden birinden gelirse alır. Aksi hâlde bağlantının adresini kaydeder. Bir loopback adresine kendiliğinden güvenilmez, çünkü host'taki her process oradan bağlanabilir. Worker modu (`worker_mode = "workers"`) port'ları ayrı bir process'te çalıştırır, bu yüzden oradaki proxy panele TCP ile bağlanır. Bu modda `127.0.0.1/32` girin. CDN adres blokları listesi her proxy'nin ayrı bir ayarıdır ve panele uygulanmaz.
+`[admin]` bölümündeki `trusted_proxies` ayarı (**Ayarlar** sayfasında **Güvenilen Proxy'ler**) panelin önündeki diğer reverse proxy'lerin adreslerini veya CIDR bloklarını listeler. Örnek: yönetim adresine TCP ile bağlanan bir nginx veya bir tünel. Panel, audit log'un, rate limit'lerin ve MCP token ban'ının istemci adresini `X-Forwarded-For` içinde bu adreslere ait olmayan en sağdaki girişten alır (soldaki girişleri istemci yazar). `X-Forwarded-For` yoksa `X-Real-IP` header'ından alır. Oturum cookie'sinin HTTPS durumunu `X-Forwarded-Proto` header'ından alır. Panel bu değerleri yalnız istek bu adreslerden birinden gelirse okur. Aksi hâlde bağlantının adresini kaydeder. Bir loopback adresine kendiliğinden güvenilmez, çünkü host'taki her process oradan bağlanabilir. Worker modu (`worker_mode = "workers"`) port'ları ayrı bir process'te çalıştırır, bu yüzden oradaki proxy panele TCP ile bağlanır. Bu modda `127.0.0.1/32` girin. CDN adres blokları listesi her proxy'nin ayrı bir ayarıdır ve panele uygulanmaz.
 
 r3v3rs3 oturumları bellekte tutar. Sunucu yeniden başladığında bütün oturumlar sona erer. Uygulamanıza çıkış butonu eklemek için şu formu kullanabilirsiniz:
 

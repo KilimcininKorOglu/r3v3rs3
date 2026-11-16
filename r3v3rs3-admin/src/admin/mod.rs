@@ -632,20 +632,15 @@ struct ResolvedClientIpKeyExtractor {
 }
 
 impl ResolvedClientIpKeyExtractor {
-    /// Whether the peer is a trusted proxy of the admin API. A loopback peer is not trusted on
-    /// its own, because any process of the host can send forged headers from there.
-    fn is_peer_trusted(&self, peer_ip: &IpAddr) -> bool {
-        self.state
-            .data
-            .try_lock()
-            .map(|d| {
-                d.config
-                    .admin
-                    .trusted_proxies
-                    .iter()
-                    .any(|net| net.contains(peer_ip))
-            })
-            .unwrap_or(false)
+    /// The trusted proxies of the admin API when the peer is one of them. A loopback peer is not
+    /// trusted on its own, because any process of the host can send forged headers from there.
+    fn trusted_proxies_of(&self, peer_ip: &IpAddr) -> Option<Vec<ipnet::IpNet>> {
+        let data = self.state.data.try_lock().ok()?;
+        let trusted = &data.config.admin.trusted_proxies;
+        trusted
+            .iter()
+            .any(|net| net.contains(peer_ip))
+            .then(|| trusted.clone())
     }
 }
 
@@ -660,14 +655,10 @@ impl tower_governor::key_extractor::KeyExtractor for ResolvedClientIpKeyExtracto
             return Ok(r3v3rs3_api::client_ip::canonical_client_ip(client.ip));
         }
         let peer_ip = tower_governor::key_extractor::PeerIpKeyExtractor.extract(req)?;
-        let trusted = self.is_peer_trusted(&peer_ip);
-        let ip = if trusted {
-            auth::header_ip(req.headers(), "x-forwarded-for")
-                .or_else(|| auth::header_ip(req.headers(), "x-real-ip"))
-                .unwrap_or(peer_ip)
-        } else {
-            peer_ip
-        };
+        let ip = self
+            .trusted_proxies_of(&peer_ip)
+            .and_then(|trusted| auth::forwarded_client_ip(&trusted, req.headers()))
+            .unwrap_or(peer_ip);
         Ok(r3v3rs3_api::client_ip::canonical_client_ip(ip))
     }
 }

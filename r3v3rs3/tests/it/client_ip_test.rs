@@ -45,6 +45,7 @@ async fn client_ip_from_trusted_proxy() -> anyhow::Result<()> {
     let trusted = ClientIpConfig {
         trust_cdn: true,
         trusted_proxies: vec!["127.0.0.0/8".parse()?, "::1/128".parse()?],
+        ..ClientIpConfig::default()
     };
 
     let config = TestStorage::builder()
@@ -111,6 +112,7 @@ async fn quarantine_enforces_against_resolved_client_ip() -> anyhow::Result<()> 
     let trusted = ClientIpConfig {
         trust_cdn: true,
         trusted_proxies: vec!["127.0.0.0/8".parse()?, "::1/128".parse()?],
+        ..ClientIpConfig::default()
     };
 
     let config = TestStorage::builder()

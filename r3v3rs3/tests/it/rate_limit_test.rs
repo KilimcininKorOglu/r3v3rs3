@@ -95,6 +95,7 @@ fn forwarded_proxy(upstream: &str) -> anyhow::Result<HttpProxy> {
         client_ip: ClientIpConfig {
             trust_cdn: true,
             trusted_proxies: vec!["127.0.0.0/8".parse()?, "::1/128".parse()?],
+            ..ClientIpConfig::default()
         },
         rate_limit: per_minute(1),
         ..Default::default()

@@ -4,7 +4,7 @@ use super::grpc_tester::GrpcTester;
 use super::proxy_dry_run::ProxyDryRun;
 use crate::i18n::use_locale;
 use r3v3rs3_api::cidr::{format_cidr_list, parse_cidr_list};
-use r3v3rs3_api::client_ip::ClientIpConfig;
+use r3v3rs3_api::client_ip::{ClientIpConfig, ForwardedHeader};
 use r3v3rs3_api::header_rules::{format_header_rules, parse_header_rules};
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
@@ -34,6 +34,7 @@ pub struct ProxyForm {
     pub upgrade_insecure: bool,
     pub trust_cdn: bool,
     pub trusted_proxies: String,
+    pub forwarded_header: ForwardedHeader,
     pub allow: String,
     pub deny: String,
     pub allow_countries: String,
@@ -76,6 +77,7 @@ impl ProxyForm {
             upgrade_insecure: proxy.upgrade_insecure,
             trust_cdn: proxy.client_ip.trust_cdn,
             trusted_proxies: format_cidr_list(&proxy.client_ip.trusted_proxies),
+            forwarded_header: proxy.client_ip.forwarded_header,
             allow: format_cidr_list(&proxy.ip_filter.allow),
             deny: format_cidr_list(&proxy.ip_filter.deny),
             allow_countries: proxy.ip_filter.allow_countries.join(", "),
@@ -211,6 +213,13 @@ pub fn http_proxy_config(props: &Props) -> Html {
             <input type="text" autocapitalize="off" value={form.trusted_proxies.clone()} onchange={state_input(&form, text, |form, value| form.trusted_proxies = value)} class={INPUT_CLASS} placeholder="10.0.0.0/8, 192.168.1.10" />
             { error_view(errors.get("trusted_proxies")) }
             <p class={HINT_CLASS}>{locale.t("http_form.trusted_proxies_hint")}</p>
+
+            <label class={LABEL_CLASS}>{locale.t("http_form.forwarded_header")}</label>
+            <select onchange={state_input(&form, select_value, |form, value| form.forwarded_header = forwarded_header_of(&value))} class={INPUT_CLASS}>
+                <option key="x_forwarded_for" value="x_forwarded_for" selected={form.forwarded_header == ForwardedHeader::XForwardedFor}>{"X-Forwarded-For"}</option>
+                <option key="forwarded" value="forwarded" selected={form.forwarded_header == ForwardedHeader::Forwarded}>{"Forwarded (RFC 7239)"}</option>
+            </select>
+            <p class={HINT_CLASS}>{locale.t("http_form.forwarded_header_hint")}</p>
 
             { access_list_view(
                 locale,
@@ -378,6 +387,15 @@ pub fn http_proxy_config(props: &Props) -> Html {
     }
 }
 
+/// The header of a select value; the select offers only the two values of `ForwardedHeader`.
+fn forwarded_header_of(value: &str) -> ForwardedHeader {
+    if value == "forwarded" {
+        ForwardedHeader::Forwarded
+    } else {
+        ForwardedHeader::XForwardedFor
+    }
+}
+
 pub fn default_grpc_target(proxy: &Option<HttpProxy>) -> Option<String> {
     proxy.as_ref().and_then(|p| {
         p.routes
@@ -453,6 +471,7 @@ pub fn get_proxy(
         client_ip: ClientIpConfig {
             trust_cdn: form.trust_cdn,
             trusted_proxies,
+            forwarded_header: form.forwarded_header,
         },
         ip_filter,
         rate_limit,
