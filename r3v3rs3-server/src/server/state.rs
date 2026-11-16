@@ -1193,8 +1193,9 @@ impl ServerState {
         let port = self.ports.as_slice().get(config_index);
         if let Some(PortContextKind::Udp(udp)) = port.map(PortContext::kind) {
             let udp = udp.clone();
+            let quarantine = self.registries.quarantine.clone();
             tokio::spawn(async move {
-                udp.forward(addr, &data, &listener).await;
+                udp.forward(addr, &data, &listener, &quarantine).await;
             });
         }
     }

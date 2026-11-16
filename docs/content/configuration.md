@@ -1778,8 +1778,9 @@ r3v3rs3 monitors incoming live HTTP and TCP traffic to detect scanner probes, pa
   - Instantly quarantines offending client IPs when violations reach the threshold (default: 5 violations).
 - **Allowed Addresses**:
   - The addresses and CIDR networks in `allowed_ips` are never quarantined, for example the network of the administrators. Adding an address that is in quarantine lifts its quarantine at once, and a manual quarantine of an allowed address fails with `quarantine_allowed_ip`.
-- **TCP Drop Enforcement**:
+- **Drop Enforcement on Every Port**:
   - Quarantined IP connections are immediately dropped at the TCP listener level before HTTP request parsing or TLS handshakes, consuming near-zero server CPU and memory.
+  - On a UDP port, the packets of a quarantined IP are dropped and its open session closes, so the upstream server neither gets them nor answers.
 - **Webhook Alerting**:
   - Automatically triggers `security.threat_detected` webhook notifications upon IP quarantine.
 - **Management & WebUI Controls**:

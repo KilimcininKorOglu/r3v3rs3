@@ -1,6 +1,7 @@
 use super::dns::DnsResolver;
 use super::health::{self, GroupRegistry, Probe, UpstreamGroup};
 use super::{PortContextEvent, PortStatus, SocketState};
+use crate::security::AutoQuarantineTracker;
 use dashmap::DashMap;
 use r3v3rs3_api::upstream::{HealthCheck, LoadBalancing};
 use r3v3rs3_api::{error::Error, multiaddr::Multiaddr, proxy::ProxyKind};
@@ -101,8 +102,22 @@ impl UdpPortContext {
     }
 
     /// Sends a packet of a client to the upstream server of its session. The replies of the
-    /// server go back to the client through `listener`.
-    pub async fn forward(&self, client: SocketAddr, data: &[u8], listener: &Arc<UdpSocket>) {
+    /// server go back to the client through `listener`. A packet of a quarantined client is
+    /// dropped and closes its open session, so the server neither gets nor answers it.
+    pub async fn forward(
+        &self,
+        client: SocketAddr,
+        data: &[u8],
+        listener: &Arc<UdpSocket>,
+        quarantine: &AutoQuarantineTracker,
+    ) {
+        if quarantine.is_quarantined(&client.ip()) {
+            self.sessions.remove(&client);
+            self.span.in_scope(|| {
+                debug!(%client, "dropping a packet of a quarantined client");
+            });
+            return;
+        }
         // A truncated datagram would reach the server as corrupt data, so it is dropped.
         if data.len() > self.upstream.max_datagram_size {
             self.span.in_scope(|| {
@@ -542,7 +557,8 @@ mod tests {
         ctx.setup(vec![proxy_entry("udpses", &[5353])], &groups)
             .await
             .unwrap();
-        ctx.forward(client, b"ping", &listener).await;
+        let quarantine = AutoQuarantineTracker::default();
+        ctx.forward(client, b"ping", &listener, &quarantine).await;
         assert_eq!(ctx.sessions.len(), 1);
 
         ctx.setup(vec![proxy_entry("udpses", &[5353])], &groups)
@@ -554,6 +570,47 @@ mod tests {
             .await
             .unwrap();
         assert!(ctx.sessions.is_empty());
+    }
+
+    /// Reads one datagram of the upstream as text, for up to two seconds.
+    async fn recv_text(upstream: &UdpSocket) -> String {
+        let mut buf = [0u8; 64];
+        let wait = tokio::time::timeout(Duration::from_secs(2), upstream.recv(&mut buf));
+        let len = wait.await.expect("no datagram").unwrap();
+        String::from_utf8_lossy(&buf[..len]).into_owned()
+    }
+
+    /// The server quarantines a client on every port, so the upstream gets no datagram of a
+    /// quarantined client, even on the session that the client opened before its quarantine.
+    /// Another client keeps its service. The clients use documentation addresses (RFC 5737),
+    /// because loopback is never quarantined.
+    #[tokio::test]
+    async fn a_quarantined_client_reaches_no_upstream_server() {
+        let upstream = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let listener = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let attacker: SocketAddr = "203.0.113.5:4000".parse().unwrap();
+        let other: SocketAddr = "198.51.100.6:4000".parse().unwrap();
+        let quarantine = AutoQuarantineTracker::default();
+        let mut ctx = UdpPortContext::new(&port_entry()).unwrap();
+        let upstream_port = upstream.local_addr().unwrap().port();
+        ctx.setup(
+            vec![proxy_entry("udpquar", &[upstream_port])],
+            &GroupRegistry::default(),
+        )
+        .await
+        .unwrap();
+
+        ctx.forward(attacker, b"open", &listener, &quarantine).await;
+        assert_eq!(recv_text(&upstream).await, "open");
+
+        quarantine.quarantine(attacker.ip(), "test".into(), 60);
+        ctx.forward(attacker, b"attack", &listener, &quarantine)
+            .await;
+        ctx.forward(other, b"other", &listener, &quarantine).await;
+        // The datagrams leave in this order, so the first one that arrives shows whether the
+        // quarantined packet went through.
+        assert_eq!(recv_text(&upstream).await, "other");
+        assert!(!ctx.sessions.contains_key(&attacker));
     }
 
     #[test]
