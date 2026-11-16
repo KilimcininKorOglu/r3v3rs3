@@ -1,7 +1,7 @@
 use r3v3rs3_api::port::Port;
 use r3v3rs3_api::port::PortEntry;
 use r3v3rs3_api::priority::{
-    GLOBAL_STREAM_CONTROLLER, MimePriorityRule, StreamPriority, StreamPriorityConfig,
+    AdaptiveStreamController, MimePriorityRule, StreamPriority, StreamPriorityConfig,
     parse_rfc9218_priority, resolve_stream_priority,
 };
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route, Server};
@@ -95,32 +95,39 @@ async fn test_mime_heuristics_and_custom_rules() {
     assert!(client_override.incremental);
 }
 
+/// Uses its own controller: the global one also counts the proxy requests of the other tests
+/// that run in this process.
 #[tokio::test]
 async fn test_controller_backpressure_and_counters() {
-    let initial_stats = GLOBAL_STREAM_CONTROLLER.stats();
-
+    let controller = std::sync::Arc::new(AdaptiveStreamController::new());
     let crit = StreamPriority::new(0, false);
+    let normal = StreamPriority::new(3, false);
     let bg = StreamPriority::new(6, true);
 
-    GLOBAL_STREAM_CONTROLLER.record_request(&crit);
-    GLOBAL_STREAM_CONTROLLER.record_request(&bg);
+    controller.record_request(&crit);
+    controller.record_request(&normal);
+    controller.record_request(&bg);
+    let stats = controller.stats();
+    assert_eq!(stats.total_requests, 3);
+    assert_eq!(stats.critical_requests, 1);
+    assert_eq!(stats.normal_requests, 1);
+    assert_eq!(stats.background_requests, 1);
 
-    let stats = GLOBAL_STREAM_CONTROLLER.stats();
-    assert!(stats.total_requests >= initial_stats.total_requests + 2);
-    assert!(stats.critical_requests > initial_stats.critical_requests);
-    assert!(stats.background_requests > initial_stats.background_requests);
+    // A critical stream is no background stream, so it does not count toward the limit.
+    let crit_permit = controller.acquire_permit(crit);
+    assert!(!controller.should_throttle_background(1));
+    let bg_permit = controller.acquire_permit(bg);
+    assert_eq!(controller.stats().active_streams, 2);
 
-    let permit = GLOBAL_STREAM_CONTROLLER.acquire_permit(bg);
-    assert!(GLOBAL_STREAM_CONTROLLER.stats().active_streams > 0);
+    // The limit is reached when the background streams equal it.
+    assert!(controller.should_throttle_background(1));
+    assert!(!controller.should_throttle_background(2));
+    assert_eq!(controller.stats().throttled_background, 1);
 
-    // Throttle when max background concurrency is reached
-    assert!(GLOBAL_STREAM_CONTROLLER.should_throttle_background(1));
-    assert!(
-        GLOBAL_STREAM_CONTROLLER.stats().throttled_background > initial_stats.throttled_background
-    );
-
-    drop(permit);
-    assert!(!GLOBAL_STREAM_CONTROLLER.should_throttle_background(1));
+    drop(bg_permit);
+    drop(crit_permit);
+    assert!(!controller.should_throttle_background(1));
+    assert_eq!(controller.stats().active_streams, 0);
 }
 
 #[tokio::test]
