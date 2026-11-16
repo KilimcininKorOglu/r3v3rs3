@@ -90,7 +90,7 @@ async fn test_mime_heuristics_and_custom_rules() {
         "{css:?} {js:?} {font:?}"
     );
     assert!(font.urgency < img.urgency, "{font:?} {img:?}");
-    assert!(img.urgency <= video.urgency, "{img:?} {video:?}");
+    assert!(img.urgency < video.urgency, "{img:?} {video:?}");
     assert!(img.incremental && video.incremental, "{img:?} {video:?}");
     assert!(!html.incremental, "{html:?}");
 
