@@ -1879,8 +1879,7 @@ async fn run_server_upgrade_rejects_non_admin() -> anyhow::Result<()> {
             .unwrap_err();
         assert!(
             err.to_string()
-                .contains("the role of the account does not allow this action")
-                || err.to_string().contains("-32603"),
+                .contains("the role of the account does not allow this action"),
             "{err}"
         );
         client.cancel().await?;
@@ -2031,10 +2030,7 @@ async fn mcp_mutation_tools_enforce_edit_scope() -> anyhow::Result<()> {
         .await
         .unwrap_err();
         let err_str = err.to_string();
-        assert!(
-            err_str.contains("edit scope") || err_str.contains("-32602"),
-            "{err_str}"
-        );
+        assert!(err_str.contains("edit scope"), "{err_str}");
         client.cancel().await?;
         Ok(())
     })
