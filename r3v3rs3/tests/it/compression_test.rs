@@ -299,8 +299,8 @@ fn check_dcz_body(body: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Requests that must not get `dcz`: another dictionary, a path outside the dictionary
-/// pattern, and a client that does not accept `dcz`. Each gets plain `zstd`.
+/// Requests that must not get `dcz`: plain HTTP, another dictionary, a path outside the
+/// dictionary pattern, and a client that does not accept `dcz`. Each gets plain `zstd`.
 async fn check_no_dictionary_use(
     client: &reqwest::Client,
     plain: &TestPort,
@@ -308,8 +308,8 @@ async fn check_no_dictionary_use(
     dict_hash: &str,
 ) -> anyhow::Result<()> {
     let other_hash = ":AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:";
-    let _ = plain;
     let cases = [
+        (plain.http_url("/api/users"), "dcz, zstd", dict_hash),
         (secure.https_url("/api/users"), "dcz, zstd", other_hash),
         (secure.https_url("/static/users"), "dcz, zstd", dict_hash),
         (secure.https_url("/api/users"), "zstd", dict_hash),

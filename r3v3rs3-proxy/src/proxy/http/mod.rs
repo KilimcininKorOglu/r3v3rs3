@@ -1341,7 +1341,8 @@ where
     let Some((res, route)) = shared.router.get_route(&req, request_host.as_deref()) else {
         return no_route_fallback(shared, info, request_host, response_rewriter, req.headers());
     };
-    let response_rewriter = configure_response_rewriter(response_rewriter, route, &req);
+    let secure = info.proto != "http";
+    let response_rewriter = configure_response_rewriter(response_rewriter, route, &req, secure);
 
     let resource_id = route.resource_id;
     let route_path = route.route_path.clone();
@@ -2149,6 +2150,7 @@ fn configure_response_rewriter<B>(
     builder: ResponseRewriterBuilder,
     route: &FilteredRoute,
     req: &Request<B>,
+    secure: bool,
 ) -> ResponseRewriterBuilder {
     builder
         .https_port(route.https_port)
@@ -2156,7 +2158,8 @@ fn configure_response_rewriter<B>(
         .error_pages(route.error_pages.clone())
         .hide_branding(route.hide_branding)
         .compression(route.compression.clone().map(|config| {
-            ResponseCompression::new(config, req.method(), req.uri().path(), req.headers())
+            let path = req.uri().path();
+            ResponseCompression::new(config, req.method(), path, req.headers(), secure)
         }))
 }
 

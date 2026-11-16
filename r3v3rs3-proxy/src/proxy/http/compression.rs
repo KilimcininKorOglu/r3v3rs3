@@ -37,8 +37,17 @@ pub struct ResponseCompression {
 }
 
 impl ResponseCompression {
-    pub fn new(config: Arc<Compression>, method: &Method, path: &str, headers: &HeaderMap) -> Self {
-        let (algorithm, matched_dictionary) = match_dictionary_or_standard(&config, path, headers);
+    /// `secure` tells whether the client connection is HTTPS or HTTP/3, because RFC 9842
+    /// section 8 allows dictionary compression only in a secure context.
+    pub fn new(
+        config: Arc<Compression>,
+        method: &Method,
+        path: &str,
+        headers: &HeaderMap,
+        secure: bool,
+    ) -> Self {
+        let (algorithm, matched_dictionary) =
+            match_dictionary_or_standard(&config, path, headers, secure);
         Self {
             config,
             algorithm,
@@ -81,11 +90,13 @@ fn match_dictionary_or_standard(
     config: &Compression,
     path: &str,
     headers: &HeaderMap,
+    secure: bool,
 ) -> (
     Option<CompressionAlgorithm>,
     Option<Arc<CompressionDictionary>>,
 ) {
-    if !config.dictionaries.is_empty()
+    if secure
+        && !config.dictionaries.is_empty()
         && let Some((dict, algo)) = negotiate_dictionary(config, path, headers)
     {
         return (Some(algo), Some(dict));
@@ -600,6 +611,7 @@ mod tests {
             &Method::GET,
             "/",
             &headers(&[("accept-encoding", "gzip")]),
+            false,
         );
         let res = compression.apply(response(
             &body,
@@ -631,7 +643,8 @@ mod tests {
 
     #[test]
     fn unsupported_client_gets_vary_only() {
-        let compression = ResponseCompression::new(config(), &Method::GET, "/", &HeaderMap::new());
+        let compression =
+            ResponseCompression::new(config(), &Method::GET, "/", &HeaderMap::new(), false);
         let res = compression.apply(response(
             "plain text body",
             &[("content-type", "text/plain")],
@@ -671,6 +684,7 @@ mod tests {
                 ("accept-encoding", "dcz, zstd, gzip"),
                 ("available-dictionary", &dict_hash),
             ]),
+            true,
         );
         let res = compression.apply(response(
             &body,
