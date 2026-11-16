@@ -382,7 +382,12 @@ fn admin_router(app_state: AppState) -> anyhow::Result<Router> {
         .routes(routes!(oauth2::register).layer(register_limit));
     let (api, mut openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api", auth_routes(&mut pruners)?)
-        .nest("/api", resource_routes().route_layer(verify.clone()))
+        .nest(
+            "/api",
+            resource_routes()
+                .route_layer(middleware::from_fn(viewer_read_only))
+                .route_layer(verify.clone()),
+        )
         // The webhooks and the OAuth callback carry a signature or a one-time state instead of a
         // session.
         .merge(public_routes(&app_state, &mut pruners)?)
@@ -489,6 +494,42 @@ async fn inject_error_request_id(
     let mut res = Response::from_parts(parts, axum::body::Body::from(new_body));
     res.headers_mut().remove(CONTENT_LENGTH);
     res
+}
+
+/// The routes besides GET that a viewer may call: its own passkeys and API tokens, and the POST
+/// routes that only compute a result from the request and the stored configuration.
+const VIEWER_WRITE_ROUTES: [&str; 9] = [
+    "/api/auth/passkey/register",
+    "/api/auth/passkey/{id}",
+    "/api/auth/tokens",
+    "/api/auth/tokens/{id}",
+    "/api/proxies/dry-run",
+    "/api/proxies/{id}/grpc/reflect",
+    "/api/proxies/{id}/grpc/health",
+    "/api/certs/coverage",
+    "/api/security/headers/analyze",
+];
+
+/// Refuses every request of a viewer that can change state with `403 forbidden`, before the body
+/// is read. Each handler checks the role as well; this layer makes the refusal of a viewer
+/// independent of the order in which a handler parses its body and checks the role.
+async fn viewer_read_only(
+    Extension(caller): Extension<Caller>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let read = matches!(
+        *req.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    );
+    let allowed = req
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .is_some_and(|path| VIEWER_WRITE_ROUTES.contains(&path.as_str()));
+    if caller.role == r3v3rs3_api::auth::Role::Viewer && !read && !allowed {
+        return AppError::R3v3rs3(Error::Forbidden).into_response();
+    }
+    next.run(req).await
 }
 
 async fn map_extractor_rejections(

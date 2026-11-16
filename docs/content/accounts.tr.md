@@ -28,6 +28,7 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 - Proxy listesi olmayan hesap bütün proxy'leri görür. Admin her zaman bütün proxy'leri görür. Bu yüzden admin hesabının proxy listesi olamaz.
 - Hesabın listesinde olmayan proxy, bu hesap için yoktur. Yönetim API'si `404 id_not_found` döndürür.
 - Rolün izin vermediği işlem `403 forbidden` alır.
+- Viewer, admin API'ye gönderdiği GET dışındaki her istek için, istek gövdesi okunmadan `403 forbidden` alır. İstisnalar şunlardır: kendi passkey'leri ve API token'ları ile yalnız sonuç hesaplayan istekler. Bu istekler proxy dry run'ı, bir proxy'nin gRPC reflection ve sağlık kontrolü, sertifika kapsam kontrolü ve güvenlik header analizidir.
 - WebUI, rolün açamadığı sayfaları gizler.
 - Proxy listesi olan editör, kendi proxy'leri için bir erişim listesi seçebilir. Erişim listesinin içeriğini yalnız erişim listelerini değiştirebilen hesap değiştirir.
 - Bir hesap proxy'yi silince r3v3rs3 proxy'yi her hesabın proxy listesinden kaldırır.

@@ -28,6 +28,7 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 - An account without a proxy list sees every proxy. An admin always sees every proxy, so an admin cannot have a proxy list.
 - A proxy that is not in the list of an account does not exist for the account. The admin API answers `404 id_not_found`.
 - An action that the role does not allow gets `403 forbidden`.
+- A viewer gets `403 forbidden` for every admin API request other than GET before the request body is read. The exceptions are its own passkeys and API tokens and the requests that only compute a result: the proxy dry run, the gRPC reflection and health check of a proxy, the certificate coverage check and the security header analysis.
 - The WebUI hides the pages that the role cannot open.
 - An editor with a proxy list can select an access list for its proxies. Only an account that changes the access lists can change the content of an access list.
 - When an account deletes a proxy, r3v3rs3 removes the proxy from the proxy list of each account.

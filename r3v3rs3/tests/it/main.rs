@@ -70,6 +70,7 @@ mod proxy_protocol_test;
 mod proxy_secrets_test;
 mod quarantine_test;
 mod rate_limit_test;
+mod role_matrix_test;
 mod roles_test;
 mod routing_test;
 mod runtime_docker_test;
