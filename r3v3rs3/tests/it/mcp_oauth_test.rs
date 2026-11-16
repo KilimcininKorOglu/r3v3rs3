@@ -325,7 +325,7 @@ async fn the_authorization_code_flow_issues_tokens() -> anyhow::Result<()> {
 
         let code = authorize_and_get_code(addr, &cookie, &challenge).await?;
         let (access, refresh) = trade_code_for_tokens(&client, addr, &code, &verifier).await?;
-        assert_code_replay_and_bad_verifier(&client, addr, &code).await?;
+        assert_code_replay(&client, addr, &code).await?;
         assert_refresh_token_rotation(&client, addr, &refresh, &access).await?;
 
         Ok(())
@@ -406,11 +406,7 @@ async fn trade_code_for_tokens(
     Ok((access, refresh))
 }
 
-async fn assert_code_replay_and_bad_verifier(
-    client: &Client,
-    addr: SocketAddr,
-    code: &str,
-) -> anyhow::Result<()> {
+async fn assert_code_replay(client: &Client, addr: SocketAddr, code: &str) -> anyhow::Result<()> {
     let replay: Value = client
         .post(format!("http://{addr}/oauth/token"))
         .form(&[
@@ -425,23 +421,67 @@ async fn assert_code_replay_and_bad_verifier(
         .json()
         .await?;
     assert_eq!(replay["error"], json!("invalid_grant"));
+    Ok(())
+}
 
-    let bad = client
+/// Exchanges a fresh, valid code with one changed parameter and returns the status and body.
+async fn exchange_altered_code(
+    addr: SocketAddr,
+    cookie: &str,
+    field: &str,
+    value: &str,
+) -> anyhow::Result<(StatusCode, Value)> {
+    let (verifier, challenge) = pkce();
+    let code = authorize_and_get_code(addr, cookie, &challenge).await?;
+    let mut form = vec![
+        ("grant_type", "authorization_code".to_string()),
+        ("code", code),
+        ("redirect_uri", REDIRECT_URI.to_string()),
+        ("client_id", CLIENT_ID.to_string()),
+        ("code_verifier", verifier),
+    ];
+    for entry in &mut form {
+        if entry.0 == field {
+            entry.1 = value.to_string();
+        }
+    }
+    let response = Client::new()
         .post(format!("http://{addr}/oauth/token"))
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", "unused"),
-            ("redirect_uri", REDIRECT_URI),
-            ("client_id", CLIENT_ID),
-            (
-                "code_verifier",
-                "wrong-verifier-wrong-verifier-wrong-verifier",
-            ),
-        ])
+        .form(&form)
         .send()
         .await?;
-    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
-    Ok(())
+    Ok((response.status(), response.json().await?))
+}
+
+/// A valid code gives no token with another verifier (RFC 7636 section 4.6), another redirect
+/// URI (RFC 6749 section 4.1.3) or another client (RFC 6749 section 5.2).
+#[tokio::test]
+async fn a_code_works_only_with_its_verifier_redirect_and_client() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-code-binding")?;
+    // A second registered client with the same redirect URI, so only the binding of the code to
+    // its client can refuse the exchange.
+    let mut config = mcp_config();
+    config.mcp.clients.push(McpClientConfig {
+        id: "another-client".to_string(),
+        name: "another MCP client".to_string(),
+        redirect_uris: vec![REDIRECT_URI.to_string()],
+    });
+    with_admin_config(&dir.0, config, |addr| async move {
+        let cookie = session(&Client::new(), &addr).await?;
+        let wrong_verifier = URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
+        let altered = [
+            ("code_verifier", wrong_verifier.as_str()),
+            ("redirect_uri", "http://127.0.0.1:49153/callback"),
+            ("client_id", "another-client"),
+        ];
+        for (field, value) in altered {
+            let (status, body) = exchange_altered_code(addr, &cookie, field, value).await?;
+            assert!(status.is_client_error(), "{field}: {status} {body}");
+            assert!(body.get("access_token").is_none(), "{field}: {body}");
+        }
+        Ok(())
+    })
+    .await
 }
 
 async fn assert_refresh_token_rotation(
