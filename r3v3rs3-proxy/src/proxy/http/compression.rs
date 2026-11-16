@@ -25,7 +25,6 @@ const BROTLI_QUALITY: i32 = 4;
 
 const AVAILABLE_DICTIONARY: HeaderName = HeaderName::from_static("available-dictionary");
 const SEC_AVAILABLE_DICTIONARY: HeaderName = HeaderName::from_static("sec-available-dictionary");
-const CONTENT_DICTIONARY: HeaderName = HeaderName::from_static("content-dictionary");
 
 /// The compression settings of a route and the encoding that the client accepts.
 #[derive(Debug)]
@@ -68,11 +67,7 @@ impl ResponseCompression {
             return res;
         };
         let level = resolve_level(&self.config, algorithm, res.headers());
-        set_encoded_headers(
-            res.headers_mut(),
-            algorithm,
-            self.matched_dictionary.as_deref(),
-        );
+        set_encoded_headers(res.headers_mut(), algorithm);
         if self.head {
             return res;
         }
@@ -379,27 +374,15 @@ fn append_vary(headers: &mut HeaderMap, has_dictionary: bool) {
     }
 }
 
-fn set_encoded_headers(
-    headers: &mut HeaderMap,
-    algorithm: CompressionAlgorithm,
-    dict: Option<&CompressionDictionary>,
-) {
+/// RFC 9842 defines no response field that names the dictionary: the body of `dcz` and `dcb`
+/// carries its digest.
+fn set_encoded_headers(headers: &mut HeaderMap, algorithm: CompressionAlgorithm) {
     headers.remove(CONTENT_LENGTH);
     headers.remove(ACCEPT_RANGES);
     headers.insert(
         CONTENT_ENCODING,
         HeaderValue::from_static(algorithm.as_str()),
     );
-    if let Some(d) = dict {
-        let hash_sf = if d.sha256_sf.is_empty() {
-            CompressionDictionary::calculate_sha256_sf(d.raw_data.as_bytes())
-        } else {
-            d.sha256_sf.clone()
-        };
-        if let Ok(val) = HeaderValue::from_str(&hash_sf) {
-            headers.insert(CONTENT_DICTIONARY, val);
-        }
-    }
     weaken_etag(headers);
 }
 
@@ -697,7 +680,7 @@ mod tests {
 
         let headers = res.headers();
         assert_eq!(headers[CONTENT_ENCODING], "dcz");
-        assert_eq!(headers[CONTENT_DICTIONARY], dict_hash);
+        assert!(!headers.contains_key("content-dictionary"));
         assert_eq!(headers[ETAG], "W/\"v1\"");
         let vary_items = headers
             .get_all(VARY)
