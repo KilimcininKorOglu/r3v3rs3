@@ -337,6 +337,7 @@ mod tests {
             Error::InvalidHeaderRule { rule: text() },
             Error::InvalidMimeType { mime: text() },
             Error::DuplicateCompressionAlgorithm { algorithm: text() },
+            Error::InvalidPriorityUrgency { urgency: 0 },
             Error::InvalidCacheSize,
             Error::InvalidTimeout,
             Error::InvalidDatagramSize,

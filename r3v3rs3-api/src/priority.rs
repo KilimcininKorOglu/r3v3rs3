@@ -170,6 +170,17 @@ impl StreamPriorityConfig {
     pub fn is_disabled(&self) -> bool {
         !self.enabled
     }
+
+    /// RFC 9218 section 4.1: an urgency lies from 0 to 7, so a rule outside it is refused
+    /// instead of being moved to the nearest level.
+    pub fn validate(&self) -> Result<(), crate::error::Error> {
+        match self.custom_rules.iter().find(|rule| rule.urgency > 7) {
+            Some(rule) => Err(crate::error::Error::InvalidPriorityUrgency {
+                urgency: rule.urgency,
+            }),
+            None => Ok(()),
+        }
+    }
 }
 
 /// Parses an RFC 9218 `Priority` header string (`u=0..7`, `i`, `i=?1`, `i=?0`).
@@ -633,6 +644,28 @@ mod tests {
         drop(permit2);
 
         assert_eq!(controller.stats().active_streams, 0);
+    }
+
+    /// RFC 9218 section 4.1: urgency 7 is the lowest level, so a rule with 8 is refused.
+    #[test]
+    fn a_rule_outside_the_urgency_range_is_refused() {
+        let rule = |urgency| MimePriorityRule {
+            pattern: "/api/*".into(),
+            urgency,
+            incremental: false,
+        };
+        let config = |urgency| StreamPriorityConfig {
+            enabled: true,
+            custom_rules: vec![rule(0), rule(urgency)],
+            ..Default::default()
+        };
+        assert!(config(7).validate().is_ok());
+        for urgency in [8, 255] {
+            assert!(matches!(
+                config(urgency).validate(),
+                Err(crate::error::Error::InvalidPriorityUrgency { urgency: u }) if u == urgency
+            ));
+        }
     }
 
     /// One client that holds its background streams must not block the background streams of

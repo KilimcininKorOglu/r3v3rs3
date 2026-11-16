@@ -550,6 +550,7 @@
   "error.certificate_read_only": "The certificate comes from service discovery and cannot be deleted here: {id}",
   "error.client_ca_certs_missing": "Client authentication needs at least one root certificate.",
   "error.duplicate_compression_algorithm": "Compression algorithm is listed more than once: {algorithm}",
+  "error.invalid_priority_urgency": "Stream priority urgency must be from 0 to 7: {urgency}",
   "error.failed_to_build_dns_resolver": "failed to build the DNS resolver: {reason}",
   "error.failed_to_create_account": "Failed to create the account.",
   "error.failed_to_create_certificate_archive": "Failed to create the certificate archive.",

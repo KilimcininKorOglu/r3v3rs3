@@ -550,6 +550,7 @@
   "error.certificate_read_only": "Bu sertifika servis keşfinden geliyor ve burada silinemez: {id}",
   "error.client_ca_certs_missing": "İstemci kimlik doğrulaması için en az bir kök sertifika seçilmelidir.",
   "error.duplicate_compression_algorithm": "Sıkıştırma algoritması birden fazla kez seçildi: {algorithm}",
+  "error.invalid_priority_urgency": "Akış önceliğinin aciliyeti 0 ile 7 arasında olmalıdır: {urgency}",
   "error.failed_to_build_dns_resolver": "DNS çözümleyici oluşturulamadı: {reason}",
   "error.failed_to_create_account": "Hesap oluşturulamadı.",
   "error.failed_to_create_certificate_archive": "Sertifika arşivi oluşturulamadı.",

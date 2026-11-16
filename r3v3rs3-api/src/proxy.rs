@@ -116,6 +116,7 @@ fn validate_http_features(http: &HttpProxy) -> Result<(), Error> {
     http.maintenance.validate()?;
     http.compression.validate()?;
     http.cache.validate()?;
+    http.stream_priority.validate()?;
     http.headers.validate()
 }
 

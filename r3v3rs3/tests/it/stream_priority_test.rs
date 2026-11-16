@@ -441,3 +441,41 @@ async fn check_forged_clients(
     assert_eq!(refused, 429);
     finish(tasks, release).await
 }
+
+/// RFC 9218 section 4.1: a custom rule with an urgency above 7 is refused and the stored
+/// configuration stays unchanged.
+#[tokio::test]
+async fn a_custom_rule_outside_the_urgency_range_is_refused() -> anyhow::Result<()> {
+    use r3v3rs3::server::rpc::proxies::{
+        GetProxy, StreamPriorityMutation, UpdateProxyStreamPriority,
+    };
+    use r3v3rs3_api::error::Error;
+    let port = alloc_tcp_port().await?;
+    let config = priority_storage(&port, "http://127.0.0.1:9")?;
+    with_server(config, |mut channels| async move {
+        let id = "proxy1".parse()?;
+        let update = StreamPriorityConfig {
+            enabled: true,
+            custom_rules: vec![MimePriorityRule {
+                pattern: "/api/*".into(),
+                urgency: 8,
+                incremental: false,
+            }],
+            ..Default::default()
+        };
+        let mutation = StreamPriorityMutation::Replace(update);
+        let result =
+            common::call(&mut channels, UpdateProxyStreamPriority { id, mutation }).await?;
+        assert!(
+            matches!(result, Err(Error::InvalidPriorityUrgency { urgency: 8 })),
+            "{result:?}"
+        );
+        let entry = common::call(&mut channels, GetProxy { id }).await??;
+        let ProxyKind::Http(http) = entry.proxy.kind else {
+            panic!("proxy1 is no HTTP proxy");
+        };
+        assert!(http.stream_priority.custom_rules.is_empty());
+        Ok(())
+    })
+    .await
+}

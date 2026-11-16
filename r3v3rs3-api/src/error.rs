@@ -369,6 +369,9 @@ pub enum Error {
     #[error("compression algorithm is listed more than once: {algorithm}")]
     DuplicateCompressionAlgorithm { algorithm: String },
 
+    #[error("stream priority urgency must be from 0 to 7: {urgency}")]
+    InvalidPriorityUrgency { urgency: u8 },
+
     #[error("maximum response size must be from 1 byte to the memory limit")]
     InvalidCacheSize,
 
