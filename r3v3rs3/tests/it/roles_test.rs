@@ -740,20 +740,17 @@ async fn assert_editor_grpc_target_restricted(
         "method": "TestMethod",
         "payload": {}
     });
+    // A target outside the upstream servers of the proxy is a request the account may not make
+    // (an SSRF guard), not a failed upstream: 403 Forbidden (RFC 9110 section 15.5.4).
     let res = client
         .post(format!("http://{addr}/api/proxies/px1/grpc/invoke"))
         .header(COOKIE, cookie)
         .json(&malicious_payload)
         .send()
         .await?;
-    assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let err_json: serde_json::Value = res.json().await?;
-    assert!(
-        err_json["message"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("target_url must match an upstream server configured for this proxy")
-    );
+    assert_eq!(err_json["error"]["message"], "forbidden", "{err_json}");
     Ok(())
 }
 

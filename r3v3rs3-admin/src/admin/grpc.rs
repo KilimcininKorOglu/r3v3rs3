@@ -45,13 +45,12 @@ fn resolve_proxy_grpc_target(
         let matches = servers
             .iter()
             .any(|s| s == &target || s.trim_end_matches('/') == target.trim_end_matches('/'));
+        // A target outside the upstream servers of the proxy is refused as a request the account
+        // may not make, so the admin API cannot be used to reach any other address.
         if matches {
             Ok(target)
         } else {
-            Err(Error::GrpcError {
-                reason: "target_url must match an upstream server configured for this proxy"
-                    .to_string(),
-            })
+            Err(Error::Forbidden)
         }
     } else {
         Ok(servers.into_iter().next().unwrap())

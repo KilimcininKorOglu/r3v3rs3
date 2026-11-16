@@ -804,6 +804,7 @@ r3v3rs3 includes built-in support for **gRPC Server Reflection** (`grpc.reflecti
 #### Admin API Endpoints
 - `POST /api/proxies/{id}/grpc/reflect`: Discovers services from the upstream server of the given proxy ID.
 - `POST /api/proxies/{id}/grpc/invoke`: Executes a unary RPC on the upstream server of the given proxy ID.
+- A `target_url` in a proxy request must be one of the upstream servers of that proxy. Any other address is refused with `403 forbidden`, so these endpoints cannot reach an address outside the proxy.
 - `POST /api/grpc/reflect`: Standalone service reflection targeting any reachable gRPC server (`{"target_url": "http://127.0.0.1:50051"}`).
 - `POST /api/grpc/invoke`: Standalone RPC invocation with target URL, service, method, payload, and metadata.
 

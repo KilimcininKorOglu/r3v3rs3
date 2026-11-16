@@ -804,6 +804,7 @@ r3v3rs3, upstream servisler için dahili **gRPC Server Reflection** (`grpc.refle
 #### Admin API Uç Noktaları
 - `POST /api/proxies/{id}/grpc/reflect`: Belirtilen proxy'nin upstream sunucusundan gRPC servislerini keşfeder.
 - `POST /api/proxies/{id}/grpc/invoke`: Belirtilen proxy'nin upstream sunucusunda unary bir RPC çağrısı gerçekleştirir.
+- Proxy isteğindeki `target_url`, o proxy'nin upstream sunucularından biri olmalıdır. Başka bir adres `403 forbidden` ile reddedilir. Bu yüzden bu endpoint'ler proxy dışındaki bir adrese ulaşamaz.
 - `POST /api/grpc/reflect`: Herhangi bir hedef gRPC sunucusunda bağımsız servis keşfi yapar (`{"target_url": "http://127.0.0.1:50051"}`).
 - `POST /api/grpc/invoke`: Hedef URL, servis, metot, JSON yükü ve metadata ile bağımsız unary çağrı yürütür.
 
