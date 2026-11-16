@@ -103,6 +103,7 @@ async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> 
     let exe = env!("CARGO_BIN_EXE_r3-server");
     let first = start_server(exe, &dir)?;
     check_handover(first, proxy_port.socket_addr()).await?;
+    check_new_process_serves(proxy_port.socket_addr()).await?;
 
     // Stop the new process, which the old one left running on its own.
     let _ = std::process::Command::new("pkill")
@@ -154,6 +155,12 @@ async fn check_handover(
     let status = tokio::task::spawn_blocking(move || first.wait()).await??;
     assert!(status.success(), "{status}");
     Ok(())
+}
+
+/// The old process is gone, so only the new process can answer this connection.
+async fn check_new_process_serves(proxy_addr: SocketAddr) -> anyhow::Result<()> {
+    let mut after_exit = tokio::net::TcpStream::connect(proxy_addr).await?;
+    expect_echo(&mut after_exit, b"third").await
 }
 
 /// Connects to the proxy until a process listens.
