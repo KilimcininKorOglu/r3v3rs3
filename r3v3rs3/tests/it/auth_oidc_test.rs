@@ -149,7 +149,7 @@ async fn oidc_auth_flow_success_and_logout() -> anyhow::Result<()> {
         .match_header("x-forwarded-user", "alice@example.com")
         .match_header("x-forwarded-email", "alice@example.com")
         .with_body("upstream response ok")
-        .expect(1)
+        .expect(2)
         .create_async()
         .await;
 
@@ -195,18 +195,38 @@ async fn verify_oidc_flow_and_logout(
         .await?;
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(resp.text().await?, "upstream response ok");
-    mock_upstream.assert_async().await;
 
+    // The identity headers come from the session only: the upstream mock matches only when
+    // every value is alice, so a forged value that reaches it fails the request.
+    let resp = client
+        .get(port.http_url("/protected"))
+        .header(COOKIE, &session_cookie)
+        .header("x-forwarded-user", "mallory@evil.test")
+        .header("x-forwarded-email", "mallory@evil.test")
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    mock_upstream.assert_async().await;
+    check_logout(client, port, &session_cookie).await
+}
+
+/// Checks that logout needs a same-site POST and ends the session: the old cookie no longer
+/// reaches the upstream (OWASP Session Management, session termination).
+async fn check_logout(
+    client: &reqwest::Client,
+    port: &common::TestPort,
+    session_cookie: &str,
+) -> anyhow::Result<()> {
     let resp = client
         .get(port.http_url("/.r3v3rs3/auth/oidc/logout"))
-        .header(COOKIE, &session_cookie)
+        .header(COOKIE, session_cookie)
         .send()
         .await?;
     assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
 
     let resp_cross = client
         .post(port.http_url("/.r3v3rs3/auth/oidc/logout"))
-        .header(COOKIE, &session_cookie)
+        .header(COOKIE, session_cookie)
         .header("sec-fetch-site", "cross-site")
         .send()
         .await?;
@@ -214,10 +234,21 @@ async fn verify_oidc_flow_and_logout(
 
     let resp_ok = client
         .post(port.http_url("/.r3v3rs3/auth/oidc/logout"))
-        .header(COOKIE, &session_cookie)
+        .header(COOKIE, session_cookie)
         .send()
         .await?;
     assert_eq!(resp_ok.status(), StatusCode::FOUND);
+
+    let resp = client
+        .get(port.http_url("/protected"))
+        .header(COOKIE, session_cookie)
+        .send()
+        .await?;
+    assert_eq!(
+        resp.status(),
+        StatusCode::FOUND,
+        "the old session still works"
+    );
     Ok(())
 }
 
@@ -317,66 +348,142 @@ async fn oidc_auth_flow_disallows_unauthorized_email() -> anyhow::Result<()> {
     .await
 }
 
-#[tokio::test]
-async fn oidc_auth_flow_rejects_forged_or_expired_tokens() -> anyhow::Result<()> {
-    let port = alloc_tcp_port().await?;
-    let mut oidc_server = mockito::Server::new_async().await;
-    let upstream = mockito::Server::new_async().await;
-
-    let auth_endpoint = format!("{}/oauth/authorize", oidc_server.url());
-    let token_endpoint = format!("{}/oauth/token", oidc_server.url());
-
-    let forged_token = make_test_jwt(
-        r#"{"email":"alice@example.com","sub":"sub123","aud":"test-client-id","exp":9999999999}"#,
-        "attacker-secret",
-    );
-    let token_body = serde_json::json!({
-        "access_token": "mock_access_token_3",
-        "id_token": forged_token,
+/// A mock identity provider whose token endpoint answers `expected` times with an id_token of
+/// `claims` signed with `secret`. Returns the server, the token mock and the authorization and
+/// token URLs.
+async fn token_server(
+    claims: &str,
+    secret: &str,
+    expected: usize,
+) -> (mockito::ServerGuard, mockito::Mock, String, String) {
+    let mut server = mockito::Server::new_async().await;
+    let body = serde_json::json!({
+        "access_token": "mock_access_token",
+        "id_token": make_test_jwt(claims, secret),
         "token_type": "Bearer"
     })
     .to_string();
-
-    let _mock_token = oidc_server
+    let mock = server
         .mock("POST", "/oauth/token")
         .with_status(200)
         .with_header("content-type", "application/json")
-        .with_body(token_body)
-        .expect(1)
+        .with_body(body)
+        .expect(expected)
         .create_async()
         .await;
+    let auth = format!("{}/oauth/authorize", server.url());
+    let token = format!("{}/oauth/token", server.url());
+    (server, mock, auth, token)
+}
 
-    let storage = TestStorage::builder()
-        .ports(vec![http_port_entry("oidc3", &port)])
+/// A storage with one OIDC proxy on the port that admits alice@example.com.
+fn oidc_storage(port: &common::TestPort, auth: String, token: String) -> TestStorage {
+    TestStorage::builder()
+        .ports(vec![http_port_entry("oidc3", port)])
         .proxies(vec![http_proxy_entry(
             "oidc3",
             "oidc3",
             oidc_proxy(
-                &upstream.url(),
-                auth_endpoint,
-                token_endpoint,
+                "http://127.0.0.1:1",
+                auth,
+                token,
                 vec!["alice@example.com".into()],
             ),
         )])
-        .build();
+        .build()
+}
 
-    with_server(storage, |_| async move {
+/// Whether the response sets a session cookie of the proxy.
+fn sets_session(resp: &reqwest::Response) -> bool {
+    resp.headers().get_all(SET_COOKIE).iter().any(|value| {
+        value
+            .to_str()
+            .is_ok_and(|s| s.starts_with("r3v3rs3_oidc=") && !s.contains("Max-Age=0"))
+    })
+}
+
+/// Runs the login and the callback with an id_token of `claims` signed with `secret`, and checks
+/// that the proxy refuses it: an error status and no session cookie (OIDC Core 3.1.3.7).
+async fn assert_token_refused(claims: &str, secret: &str) -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let (_server, _mock, auth, token) = token_server(claims, secret, 1).await;
+    let claims = claims.to_string();
+    with_server(oidc_storage(&port, auth, token), |_| async move {
         let client = reqwest::Client::builder()
             .redirect(Policy::none())
             .build()?;
-
-        let (state_val, state_token) = do_oidc_login(&client, port.http_url("").as_str()).await?;
-
-        let callback_url = format!(
-            "{}/.r3v3rs3/auth/oidc/callback?code=mock_code_123&state={state_token}",
-            port.http_url("")
-        );
+        let base = port.http_url("");
+        let (state_val, state_token) = do_oidc_login(&client, base.as_str()).await?;
         let resp = client
-            .get(&callback_url)
+            .get(format!(
+                "{base}/.r3v3rs3/auth/oidc/callback?code=mock_code_123&state={state_token}"
+            ))
             .header(COOKIE, format!("r3v3rs3_oidc_state={state_val}"))
             .send()
             .await?;
-        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+        let status = resp.status();
+        assert!(
+            status.is_client_error() || status.is_server_error(),
+            "{status}"
+        );
+        assert!(!sets_session(&resp), "{claims} got a session");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn oidc_auth_flow_rejects_forged_or_expired_tokens() -> anyhow::Result<()> {
+    let claims = |exp: u64| {
+        format!(
+            r#"{{"email":"alice@example.com","sub":"sub123","aud":"test-client-id","exp":{exp}}}"#
+        )
+    };
+    assert_token_refused(&claims(9_999_999_999), "attacker-secret").await?;
+    // Expired in 2001, signed with the right secret.
+    assert_token_refused(&claims(1_000_000_000), "test-client-secret").await
+}
+
+/// OIDC Core 3.1.3.7 item 3: an id_token issued to another client is refused, even when its
+/// signature is valid.
+#[tokio::test]
+async fn oidc_auth_flow_rejects_a_token_for_another_client() -> anyhow::Result<()> {
+    assert_token_refused(
+        r#"{"email":"alice@example.com","sub":"sub123","aud":"other-client","exp":9999999999}"#,
+        "test-client-secret",
+    )
+    .await
+}
+
+/// OIDC Core 3.1.2.7 and RFC 6749 10.12: a callback whose state does not match the state cookie
+/// of the browser, or that comes without the cookie, is refused before the code is exchanged.
+#[tokio::test]
+async fn oidc_callback_rejects_a_wrong_or_missing_state() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let claims =
+        r#"{"email":"alice@example.com","sub":"sub123","aud":"test-client-id","exp":9999999999}"#;
+    let (_server, token_mock, auth, token) = token_server(claims, "test-client-secret", 0).await;
+    with_server(oidc_storage(&port, auth, token), |_| async move {
+        let client = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .build()?;
+        let base = port.http_url("");
+        let (state_val, state_token) = do_oidc_login(&client, base.as_str()).await?;
+        let callback = format!("{base}/.r3v3rs3/auth/oidc/callback?code=mock_code_123&state=");
+        let attempts = [
+            (format!("{callback}attacker-state"), Some(state_val.clone())),
+            (format!("{callback}{state_token}"), None),
+        ];
+        for (url, cookie) in attempts {
+            let mut request = client.get(&url);
+            if let Some(cookie) = cookie {
+                request = request.header(COOKIE, format!("r3v3rs3_oidc_state={cookie}"));
+            }
+            let resp = request.send().await?;
+            assert!(resp.status().is_client_error(), "{url}: {}", resp.status());
+            assert!(!sets_session(&resp), "{url} got a session");
+        }
+        token_mock.assert_async().await;
         Ok(())
     })
     .await
