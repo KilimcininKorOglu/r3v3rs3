@@ -445,6 +445,7 @@ async fn dot_segments_in_path_match_protected_route() -> anyhow::Result<()> {
         .mock("GET", "/admin_upstream")
         .with_status(200)
         .with_body("admin_protected")
+        .expect(4)
         .create_async()
         .await;
 
@@ -488,16 +489,35 @@ async fn dot_segments_in_path_match_protected_route() -> anyhow::Result<()> {
         }])
         .build();
 
+    // RFC 3986 section 5.2.4 removes the dot segments, and section 6.2.2.2 makes `%2E` equal to
+    // `.`; every form names /admin, so none of them may reach the route of `/`.
+    let paths = [
+        "/./admin",
+        "/public/../admin",
+        "/%2e/admin",
+        "/public/%2e%2e/admin",
+    ];
     with_server(config, |_| async move {
-        let client = reqwest::Client::builder().build()?;
-        let resp = client.get(proxy_port.http_url("/./admin")).send().await?;
-        assert_eq!(resp.status(), 200);
-        let text = resp.text().await?;
-        assert_eq!(text, "admin_protected");
-        mock_admin.assert_async().await;
+        for path in paths {
+            let response = raw_get(proxy_port.socket_addr(), path).await?;
+            assert!(response.starts_with("HTTP/1.1 200"), "{path}: {response}");
+            assert!(response.contains("admin_protected"), "{path}: {response}");
+        }
         Ok(())
     })
     .await?;
-
+    mock_admin.assert_async().await;
     Ok(())
+}
+
+/// Sends a GET request with the path exactly as written, because an HTTP client library removes
+/// the dot segments before it sends the request. Returns the whole response.
+async fn raw_get(addr: std::net::SocketAddr, path: &str) -> anyhow::Result<String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = tokio::net::TcpStream::connect(addr).await?;
+    let request = format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).await?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await?;
+    Ok(response)
 }
