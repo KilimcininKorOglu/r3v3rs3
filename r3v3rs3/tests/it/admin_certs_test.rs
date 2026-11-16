@@ -1,4 +1,4 @@
-use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
+use r3v3rs3::{admin::start_admin, certs::Cert, config::new_appinfo, log::DatabaseLayer};
 use r3v3rs3_api::cert::{CertInfo, CertKind, SelfSignedCertKind, SelfSignedCertRequest};
 use reqwest::header::COOKIE;
 use std::{collections::HashMap, net::SocketAddr};
@@ -117,40 +117,68 @@ async fn upload_cert_enforces_size_limit_and_rejects_empty() -> anyhow::Result<(
         ));
         wait_for_listener(addr).await?;
         let cookie = admin_session_cookie(addr).await?;
-        let client = reqwest::Client::new();
-
-        let boundary = "---------------------------1234567890";
-        let content_type = format!("multipart/form-data; boundary={boundary}");
-
-        let body_empty = format!("--{boundary}--\r\n");
-        let res_empty = client
-            .post(format!("http://{addr}/api/certs/upload?kind=server"))
-            .header(COOKIE, &cookie)
-            .header("Content-Type", &content_type)
-            .body(body_empty)
-            .send()
-            .await?;
-        assert_eq!(res_empty.status(), reqwest::StatusCode::BAD_REQUEST);
-
-        let mut body_oversized =
-            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"chain\"\r\n\r\n")
-                .into_bytes();
-        body_oversized.extend(vec![b'a'; 1024 * 1024 + 10]);
-        body_oversized.extend(format!("\r\n--{boundary}--\r\n").into_bytes());
-
-        let res_oversized = client
-            .post(format!("http://{addr}/api/certs/upload?kind=server"))
-            .header(COOKIE, &cookie)
-            .header("Content-Type", &content_type)
-            .body(body_oversized)
-            .send()
-            .await?;
-        assert_eq!(res_oversized.status(), reqwest::StatusCode::BAD_REQUEST);
-
-        Ok(())
+        check_upload_limits(addr, &cookie).await
     })
     .await?;
 
     std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+const BOUNDARY: &str = "---------------------------1234567890";
+
+/// Posts a multipart body to the root certificate upload and returns the status.
+async fn upload_root(
+    addr: SocketAddr,
+    cookie: &str,
+    body: Vec<u8>,
+) -> anyhow::Result<reqwest::StatusCode> {
+    Ok(reqwest::Client::new()
+        .post(format!("http://{addr}/api/certs/upload?kind=root"))
+        .header(COOKIE, cookie)
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={BOUNDARY}"),
+        )
+        .body(body)
+        .send()
+        .await?
+        .status())
+}
+
+/// A multipart body with one `chain` field.
+fn chain_body(chain: &[u8]) -> Vec<u8> {
+    let mut body =
+        format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"chain\"\r\n\r\n")
+            .into_bytes();
+    body.extend_from_slice(chain);
+    body.extend(format!("\r\n--{BOUNDARY}--\r\n").into_bytes());
+    body
+}
+
+/// Checks that an empty upload fails, and that a valid certificate is refused only because its
+/// field is larger than 1 MiB: the same certificate with trailing whitespace is a valid PEM
+/// document, so only the size limit can refuse it.
+async fn check_upload_limits(addr: SocketAddr, cookie: &str) -> anyhow::Result<()> {
+    let empty = format!("--{BOUNDARY}--\r\n").into_bytes();
+    assert_eq!(
+        upload_root(addr, cookie, empty).await?,
+        reqwest::StatusCode::BAD_REQUEST
+    );
+
+    let accepted = Cert::new_ca()?;
+    let status = upload_root(addr, cookie, chain_body(&accepted.pem_chain)).await?;
+    assert_eq!(status, reqwest::StatusCode::OK);
+
+    let oversized = Cert::new_ca()?;
+    let mut chain = oversized.pem_chain.clone();
+    chain.extend(vec![b'\n'; 1024 * 1024 + 10]);
+    let status = upload_root(addr, cookie, chain_body(&chain)).await?;
+    assert!(status.is_client_error(), "{status}");
+
+    let certs = list_certs(&reqwest::Client::new(), addr, cookie).await?;
+    let ids = certs.iter().map(|cert| cert.id).collect::<Vec<_>>();
+    assert!(ids.contains(&accepted.id()), "{ids:?}");
+    assert!(!ids.contains(&oversized.id()), "{ids:?}");
     Ok(())
 }
