@@ -41,23 +41,34 @@ fn random_id() -> ShortId {
     ShortId::from(rand::random::<[u8; 7]>())
 }
 
-async fn with_admin<F, O>(dir: &Path, func: F) -> anyhow::Result<()>
-where
-    F: FnOnce(SocketAddr) -> O,
-    O: Future<Output = anyhow::Result<()>>,
-{
-    // `scoped` sees only a proxy that no entry of the tests belongs to; `editor` sees every proxy
-    // but is no admin.
-    let storage = TestStorage::builder()
+/// The accounts of the tests. `scoped` sees only a proxy that no entry of the tests belongs to;
+/// `editor` sees every proxy but is no admin; `viewer` only reads.
+fn accounts() -> common::TestStorageBuilder {
+    TestStorage::builder()
         .account("admin", "password", Role::Admin, None)
         .account("editor", "password", Role::Editor, None)
+        .account("viewer", "password", Role::Viewer, None)
         .account(
             "scoped",
             "password",
             Role::Editor,
             Some(std::collections::BTreeSet::from([random_id()])),
         )
-        .build();
+}
+
+async fn with_admin<F, O>(dir: &Path, func: F) -> anyhow::Result<()>
+where
+    F: FnOnce(SocketAddr) -> O,
+    O: Future<Output = anyhow::Result<()>>,
+{
+    with_admin_storage(dir, accounts().build(), func).await
+}
+
+async fn with_admin_storage<F, O>(dir: &Path, storage: TestStorage, func: F) -> anyhow::Result<()>
+where
+    F: FnOnce(SocketAddr) -> O,
+    O: Future<Output = anyhow::Result<()>>,
+{
     DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
     let addr = alloc_tcp_port().await?.socket_addr();
     let (server, channels) = Server::new(new_appinfo(dir, dir), storage).await;
@@ -467,4 +478,92 @@ async fn verify_active_connections(
     assert_eq!(not_found_resp.status(), StatusCode::NOT_FOUND);
 
     Ok(())
+}
+
+/// Every value below is a secret of a client; each carries `s3cr3t`, so one search finds a leak.
+const SECRET_QUERY: &str = "/search?q=public&token=s3cr3t-query&pass%77ord=s3cr3t-encoded";
+const SECRET_JSON: &str = r#"{"user":"alice","password":"s3cr3t-json"}"#;
+const SECRET_FORM: &str = "user=alice&pass%77ord=s3cr3t-form";
+
+/// Sends requests whose query string, headers and bodies carry secrets through the proxy.
+async fn send_secrets(client: &Client, base: &url::Url) -> anyhow::Result<()> {
+    client
+        .get(base.join(SECRET_QUERY)?)
+        .header("authorization", "Bearer s3cr3t-auth")
+        .header(COOKIE, "session=s3cr3t-cookie")
+        .header("x-upstream-token", "s3cr3t-header")
+        .send()
+        .await?;
+    client
+        .post(base.join("/login")?)
+        .header("content-type", "application/json")
+        .body(SECRET_JSON)
+        .send()
+        .await?;
+    client
+        .post(base.join("/form")?)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(SECRET_FORM)
+        .send()
+        .await?;
+    Ok(())
+}
+
+/// The access log entries of the proxy `secrets`, read by an account with only Read permission.
+async fn viewer_entries(client: &Client, addr: SocketAddr) -> anyhow::Result<String> {
+    let viewer = login_when_allowed(addr, "viewer", "password").await?;
+    let mut entries = String::new();
+    for _ in 0..50 {
+        let items: Vec<AccessLogEntry> = client
+            .get(format!("http://{addr}/api/traffic?resource_id=secrets"))
+            .header(COOKIE, &viewer)
+            .send()
+            .await?
+            .json()
+            .await?;
+        entries = serde_json::to_string(&items)?;
+        if items.len() == 3 {
+            return Ok(entries);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("the access log did not get the 3 requests: {entries}")
+}
+
+/// Every account with Read permission reads the access log, so a secret of a client must not
+/// reach it: not in the query string, not in a header, not in a JSON or form body, also when the
+/// name of the field is percent-encoded. The other values stay readable.
+#[tokio::test]
+async fn the_access_log_hides_the_secrets_of_a_request() -> anyhow::Result<()> {
+    let dir = TempDir::new("traffic-secrets")?;
+    let mut upstream = mockito::Server::new_async().await;
+    for method in ["GET", "POST"] {
+        upstream
+            .mock(method, mockito::Matcher::Any)
+            .expect_at_least(0)
+            .create_async()
+            .await;
+    }
+    let port = alloc_tcp_port().await?;
+    let proxy = r3v3rs3_api::proxy::HttpProxy {
+        routes: vec![common::http_route("/", &upstream.url(), None)],
+        upgrade_insecure: false,
+        ..Default::default()
+    };
+    let storage = accounts()
+        .ports(vec![common::http_port_entry("p", &port)])
+        .proxies(vec![common::http_proxy_entry("secrets", "p", proxy)])
+        .build();
+
+    with_admin_storage(&dir.0, storage, |addr| async move {
+        let client = Client::new();
+        send_secrets(&client, &port.http_url("/")).await?;
+        let entries = viewer_entries(&client, addr).await?;
+        assert!(!entries.contains("s3cr3t"), "{entries}");
+        for kept in ["q=public", "alice", "/search"] {
+            assert!(entries.contains(kept), "{kept} is missing: {entries}");
+        }
+        Ok(())
+    })
+    .await
 }

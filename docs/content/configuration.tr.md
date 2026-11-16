@@ -2293,6 +2293,7 @@ Yönetim paneli üzerinde `/traffic` adresinden ve proxy detay sayfalarından er
   - **Genel Bakış (Overview)**: İstemci IP adresi, GeoIP ülkesi, HTTP protokolü, yanıt gecikmesi, zaman damgası, durum kodu ve eşleşen proxy rotası gibi temel istek meta verileri.
   - **Başlıklar (Headers)**: Gelen istemci istek başlıklarının ve giden sunucu yanıt başlıklarının yapılandırılmış anahtar-değer tablosu.
   - **Yük/Gövde (Payload)**: Arabelleğe alınan istek gövdelerini (16 KB'a kadar) biçimlendirilmiş JSON ve ham metin görünümleri arasında tek tıkla geçiş yaparak inceleme.
+  - **Gizlenen secret değerleri**: Access log'u Read yetkisi olan her hesap görür. Bu yüzden r3v3rs3 bir secret yerine `[REDACTED]` saklar. Bu kural `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-API-Key`, `API-Key` header'larının ve adında `password`, `secret`, `token`, `apikey`, `api_key` veya `credential` geçen her header'ın değerine uygulanır. Sorgu dizgisinde, form gövdesinde veya JSON gövdesinde bu adları taşıyan her alanın değeri de gizlenir. Alan adı denetlenmeden önce percent-decode edilir.
   - **Tekrarlama & cURL Konsolu (Replay)**: Uç birim için güvenli kaçış karakterleriyle oluşturulmuş **cURL Olarak Kopyala** butonu ve yakalanan istekleri doğrudan kaynak sunuculara veya özel bir URL'ye yeniden gönderen, yanıt durumunu ve gidiş-dönüş gecikme süresini anında ölçen **İsteği Tekrarla** konsolu.
 
 ## Yönetim API'si (Admin API)

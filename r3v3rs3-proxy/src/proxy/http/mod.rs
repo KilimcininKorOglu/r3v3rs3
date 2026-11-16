@@ -729,25 +729,28 @@ const SENSITIVE_KEYWORDS: &[&str] = &[
     "credential",
 ];
 
+/// The headers that carry credentials, by name or because the name holds a sensitive word such
+/// as `token` (`X-Upstream-Token`) or `secret`.
 fn is_sensitive_header_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     matches!(
         lower.as_str(),
-        "authorization"
-            | "proxy-authorization"
-            | "cookie"
-            | "set-cookie"
-            | "x-api-key"
-            | "api-key"
-            | "x-auth-token"
-            | "x-csrf-token"
-            | "x-xsrf-token"
-    )
+        "authorization" | "proxy-authorization" | "cookie" | "set-cookie" | "x-api-key" | "api-key"
+    ) || is_sensitive_field_name(&lower)
 }
 
 fn is_sensitive_field_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     SENSITIVE_KEYWORDS.iter().any(|&k| lower.contains(k))
+}
+
+/// The query string of the URI with the value of each sensitive field replaced. Every account
+/// with Read permission reads the access log, so a token in a URL must not reach it.
+fn redact_uri(uri: &str) -> String {
+    match uri.split_once('?') {
+        Some((path, query)) => format!("{path}?{}", redact_form_data(query)),
+        None => uri.to_string(),
+    }
 }
 
 fn redact_json_value(val: &mut serde_json::Value) {
@@ -777,7 +780,11 @@ fn redact_form_data(body: &str) -> String {
     let mut parts = Vec::new();
     for pair in body.split('&') {
         if let Some((k, _)) = pair.split_once('=') {
-            if is_sensitive_field_name(k) {
+            // The name is percent-decoded first, so `pass%77ord` counts as `password`.
+            let name = url::form_urlencoded::parse(k.as_bytes())
+                .next()
+                .map_or_else(|| k.to_string(), |(name, _)| name.into_owned());
+            if is_sensitive_field_name(&name) {
                 parts.push(format!("{k}=[REDACTED]"));
             } else {
                 parts.push(pair.to_string());
@@ -903,6 +910,10 @@ fn record_access_log<B>(
     duration: std::time::Duration,
     mapped: &Result<Response<B>, anyhow::Error>,
 ) {
+    let meta = AccessLogMeta {
+        uri: redact_uri(&meta.uri),
+        ..meta
+    };
     let (status, error, response_headers, bytes_sent) = match mapped {
         Ok(res) => {
             let bytes = res
@@ -2429,6 +2440,18 @@ mod tests {
         let form_body = "username=admin&password=my_password&action=login";
         let sanitized = sanitize_body_preview(Some(form_body.to_string())).unwrap();
         assert_eq!(sanitized, "username=admin&password=[REDACTED]&action=login");
+    }
+
+    /// The query string reaches the access log too, and a field name can be percent-encoded.
+    #[test]
+    fn the_uri_and_an_encoded_field_name_are_redacted() {
+        assert_eq!(
+            redact_uri("/a?q=1&access_token=t&pass%77ord=p"),
+            "/a?q=1&access_token=[REDACTED]&pass%77ord=[REDACTED]"
+        );
+        assert_eq!(redact_uri("/plain"), "/plain");
+        assert!(is_sensitive_header_name("X-Upstream-Token"));
+        assert!(!is_sensitive_header_name("Accept"));
     }
 
     #[test]

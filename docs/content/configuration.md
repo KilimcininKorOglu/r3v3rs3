@@ -2293,6 +2293,7 @@ The panel provides an interactive live traffic dashboard accessible at `/traffic
   - **Overview**: Core request metadata including client IP, GeoIP country, HTTP protocol, latency, timestamp, status, and matched proxy route.
   - **Headers**: Structured key-value table of both incoming client request headers and outgoing upstream response headers.
   - **Payload**: Inspect buffered request bodies (up to 16 KB) with a one-click toggle between syntax-formatted JSON and raw text view.
+  - **Hidden secrets**: Every account with Read permission sees the access log, so r3v3rs3 stores `[REDACTED]` instead of a secret: the value of `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-API-Key`, `API-Key` and of every header whose name contains `password`, `secret`, `token`, `apikey`, `api_key` or `credential`, and the value of every field with such a name in the query string, a form body or a JSON body. A field name is percent-decoded before the check.
   - **Replay & cURL Console**: One-click **Copy as cURL** button generating fully escaped, production-accurate CLI commands, and a live **Replay Request** trigger to re-dispatch captured requests directly to upstream endpoints or custom URLs with live status and round-trip latency measurements.
 
 ## Admin API
