@@ -36,13 +36,27 @@ impl Drop for TempDir {
     }
 }
 
+/// A random id. `ShortId::new()` is the zero id, the same in every test.
+fn random_id() -> ShortId {
+    ShortId::from(rand::random::<[u8; 7]>())
+}
+
 async fn with_admin<F, O>(dir: &Path, func: F) -> anyhow::Result<()>
 where
     F: FnOnce(SocketAddr) -> O,
     O: Future<Output = anyhow::Result<()>>,
 {
+    // `scoped` sees only a proxy that no entry of the tests belongs to; `editor` sees every proxy
+    // but is no admin.
     let storage = TestStorage::builder()
         .account("admin", "password", Role::Admin, None)
+        .account("editor", "password", Role::Editor, None)
+        .account(
+            "scoped",
+            "password",
+            Role::Editor,
+            Some(std::collections::BTreeSet::from([random_id()])),
+        )
         .build();
     DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
     let addr = alloc_tcp_port().await?.socket_addr();
@@ -248,7 +262,7 @@ async fn verify_get_entry_and_replay(
 async fn traffic_api_lists_and_filters_logs() -> anyhow::Result<()> {
     let dir = TempDir::new("traffic-test")?;
     with_admin(&dir.0, |addr| async move {
-        let resource = ShortId::new();
+        let resource = random_id();
         record(sample_log(
             resource,
             200,
@@ -266,14 +280,123 @@ async fn traffic_api_lists_and_filters_logs() -> anyhow::Result<()> {
         record(sample_log(resource, 500, "/api/v1/crash", "POST", None));
 
         let client = Client::new();
-        let cookie = login_when_allowed(addr, "admin", "password").await?;
-        verify_list(&client, addr, &cookie, resource).await?;
-        verify_filters_and_sse(&client, addr, &cookie, resource).await?;
-        verify_geo(&client, addr, &cookie, resource).await?;
-        verify_get_entry_and_replay(&client, addr, &cookie, resource).await?;
-        verify_active_connections(&client, addr, &cookie).await
+        verify_as_admin(&client, addr, resource).await?;
+        verify_other_accounts(&client, addr, resource).await
     })
     .await
+}
+
+/// Runs the checks of the admin, who sees every entry.
+async fn verify_as_admin(
+    client: &Client,
+    addr: SocketAddr,
+    resource: ShortId,
+) -> anyhow::Result<()> {
+    let cookie = login_when_allowed(addr, "admin", "password").await?;
+    verify_list(client, addr, &cookie, resource).await?;
+    verify_filters_and_sse(client, addr, &cookie, resource).await?;
+    verify_geo(client, addr, &cookie, resource).await?;
+    verify_get_entry_and_replay(client, addr, &cookie, resource).await?;
+    verify_active_connections(client, addr, &cookie).await
+}
+
+/// Runs the checks of the accounts that are no admin.
+async fn verify_other_accounts(
+    client: &Client,
+    addr: SocketAddr,
+    resource: ShortId,
+) -> anyhow::Result<()> {
+    let scoped = login_when_allowed(addr, "scoped", "password").await?;
+    verify_scoped_account(client, addr, &scoped, resource).await?;
+    let editor = login_when_allowed(addr, "editor", "password").await?;
+    verify_editor_cannot_replay(client, addr, &editor).await
+}
+
+/// docs/content/accounts.md: a proxy outside the list of an account does not exist for it. The
+/// entries of `resource` stay hidden from `scoped`.
+async fn verify_scoped_account(
+    client: &Client,
+    addr: SocketAddr,
+    scoped: &str,
+    resource: ShortId,
+) -> anyhow::Result<()> {
+    let get = |path: String| {
+        client
+            .get(format!("http://{addr}{path}"))
+            .header(COOKIE, scoped)
+    };
+    let items: Vec<AccessLogEntry> = get(format!("/api/traffic?resource_id={resource}"))
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert!(items.is_empty(), "{items:?}");
+
+    let query = r3v3rs3_api::traffic::AccessLogQuery {
+        resource_id: Some(resource),
+        ..Default::default()
+    };
+    let entry = r3v3rs3::proxy::access_log::recent(&query)
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no entry of {resource}"))?;
+    let status = get(format!("/api/traffic/{}", entry.id))
+        .send()
+        .await?
+        .status();
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let status = get(format!("/api/traffic/geo?resource_id={resource}"))
+        .send()
+        .await?
+        .status();
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    Ok(())
+}
+
+/// Only an admin replays a request: the replay reaches internal addresses with the headers that
+/// the caller chooses. An editor without a proxy list holds every other edit right.
+async fn verify_editor_cannot_replay(
+    client: &Client,
+    addr: SocketAddr,
+    editor: &str,
+) -> anyhow::Result<()> {
+    let replay = r3v3rs3_api::traffic::RequestReplayRequest {
+        method: "GET".to_string(),
+        url: format!("http://{addr}/healthz"),
+        headers: Vec::new(),
+        body: None,
+        timeout_ms: Some(5000),
+        allow_internal: true,
+        insecure_skip_verify: false,
+    };
+    let status = client
+        .post(format!("http://{addr}/api/traffic/replay"))
+        .header(COOKIE, editor)
+        .json(&replay)
+        .send()
+        .await?
+        .status();
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+/// Lists the active connections, of one proxy when `proxy_id` is set.
+async fn connections(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    proxy_id: Option<ShortId>,
+) -> anyhow::Result<Vec<r3v3rs3_api::traffic::ActiveConnectionInfo>> {
+    let query = proxy_id
+        .map(|id| format!("?proxy_id={id}"))
+        .unwrap_or_default();
+    let resp = client
+        .get(format!("http://{addr}/api/traffic/connections{query}"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    Ok(resp.json().await?)
 }
 
 async fn verify_active_connections(
@@ -282,7 +405,7 @@ async fn verify_active_connections(
     cookie: &str,
 ) -> anyhow::Result<()> {
     use r3v3rs3::proxy::connection_tracker;
-    use r3v3rs3_api::traffic::{ActiveConnectionInfo, ConnectionProtocol};
+    use r3v3rs3_api::traffic::ConnectionProtocol;
 
     let unauth = client
         .get(format!("http://{addr}/api/traffic/connections"))
@@ -292,17 +415,12 @@ async fn verify_active_connections(
 
     // The connection tracker is also one store for the whole process, so the checks filter
     // on the proxy id of this test.
-    let proxy_id = ShortId::new();
-    let resp = client
-        .get(format!(
-            "http://{addr}/api/traffic/connections?proxy_id={proxy_id}"
-        ))
-        .header(COOKIE, cookie)
-        .send()
-        .await?;
-    assert_eq!(resp.status(), StatusCode::OK);
-    let items: Vec<ActiveConnectionInfo> = resp.json().await?;
-    assert!(items.is_empty());
+    let proxy_id = random_id();
+    assert!(
+        connections(client, addr, cookie, Some(proxy_id))
+            .await?
+            .is_empty()
+    );
 
     let (conn_id, guard, cancel_rx, sent, recv) = connection_tracker::register(
         Some(proxy_id),
@@ -314,30 +432,22 @@ async fn verify_active_connections(
     sent.fetch_add(2048, std::sync::atomic::Ordering::Relaxed);
     recv.fetch_add(1024, std::sync::atomic::Ordering::Relaxed);
 
-    let resp = client
-        .get(format!("http://{addr}/api/traffic/connections"))
-        .header(COOKIE, cookie)
-        .send()
-        .await?;
-    assert_eq!(resp.status(), StatusCode::OK);
-    let items: Vec<ActiveConnectionInfo> = resp.json().await?;
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].id, conn_id);
-    assert_eq!(items[0].protocol, ConnectionProtocol::WebSocket);
-    assert_eq!(items[0].proxy_name, "test-ws");
-    assert_eq!(items[0].bytes_sent, 2048);
-    assert_eq!(items[0].bytes_received, 1024);
-
-    let resp = client
-        .get(format!(
-            "http://{addr}/api/traffic/connections?proxy_id={proxy_id}"
-        ))
-        .header(COOKIE, cookie)
-        .send()
-        .await?;
-    assert_eq!(resp.status(), StatusCode::OK);
-    let items: Vec<ActiveConnectionInfo> = resp.json().await?;
-    assert_eq!(items.len(), 1);
+    // The list without a filter holds the connections of every test, so find this one by id.
+    let items = connections(client, addr, cookie, None).await?;
+    let item = items
+        .iter()
+        .find(|item| item.id == conn_id)
+        .ok_or_else(|| anyhow::anyhow!("connection {conn_id} is not listed"))?;
+    assert_eq!(item.protocol, ConnectionProtocol::WebSocket);
+    assert_eq!(item.proxy_name, "test-ws");
+    assert_eq!(item.bytes_sent, 2048);
+    assert_eq!(item.bytes_received, 1024);
+    assert_eq!(
+        connections(client, addr, cookie, Some(proxy_id))
+            .await?
+            .len(),
+        1
+    );
 
     assert!(!*cancel_rx.borrow());
     let del_resp = client
