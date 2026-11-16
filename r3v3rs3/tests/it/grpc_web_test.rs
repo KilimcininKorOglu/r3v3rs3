@@ -199,6 +199,21 @@ async fn test_grpc_web_route_override() -> anyhow::Result<()> {
         assert_eq!(res.status(), StatusCode::NO_CONTENT);
         assert!(res.headers().contains_key("access-control-allow-origin"));
 
+        // /disabled turns gRPC-Web off, so the proxy answers no preflight and grants no origin;
+        // the request goes to the closed upstream instead.
+        let res = client
+            .request(
+                reqwest::Method::OPTIONS,
+                port.http_url("/disabled/helloworld.Greeter/SayHello"),
+            )
+            .header("Host", "localhost")
+            .header("Origin", "http://localhost:3000")
+            .header("x-grpc-web", "1")
+            .send()
+            .await?;
+        assert_ne!(res.status(), StatusCode::NO_CONTENT);
+        assert!(!res.headers().contains_key("access-control-allow-origin"));
+
         Ok(())
     })
     .await
