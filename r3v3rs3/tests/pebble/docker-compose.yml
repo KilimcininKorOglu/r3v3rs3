@@ -12,6 +12,8 @@ services:
       PEBBLE_WFE_NONCEREJECT: "0"
     ports:
       - "127.0.0.1:8470:14000"
+      # The management API serves the root certificate that the test verifies the chain with.
+      - "127.0.0.1:8473:15000"
     depends_on:
       - challtestsrv
 

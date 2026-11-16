@@ -3,6 +3,7 @@
 //! The test needs the containers of `tests/pebble/docker-compose.yml`, and `SSL_CERT_FILE`
 //! must name the Pebble test CA. `make test-acme-pebble` does both.
 
+use anyhow::Context as _;
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -28,6 +29,11 @@ use r3v3rs3_api::{
     port::PortEntry,
     proxy::{HttpProxy, ProxyKind},
 };
+use rustls::RootCertStore;
+use rustls::client::WebPkiServerVerifier;
+use rustls::client::danger::ServerCertVerifier as _;
+use rustls::pki_types::pem::PemObject as _;
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -42,6 +48,7 @@ use common::{
 };
 
 const PEBBLE_DIRECTORY: &str = "https://localhost:8470/dir";
+const PEBBLE_ROOTS: &str = "https://localhost:8473/roots/0";
 const CHALLTESTSRV_DNS: &str = "127.0.0.1:8471";
 const CHALLTESTSRV_MANAGEMENT: &str = "http://127.0.0.1:8472";
 const CERT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -109,7 +116,50 @@ async fn start_provider() -> anyhow::Result<(String, Arc<Provider>)> {
     Ok((url.as_str().trim_end_matches('/').to_string(), provider))
 }
 
-/// Waits for a stored certificate whose sorted subject names are `san`.
+/// The root certificate of Pebble, from its management API. Pebble makes a new root at each
+/// start, so the test cannot keep a copy.
+async fn pebble_root() -> anyhow::Result<CertificateDer<'static>> {
+    let ca = std::fs::read(std::env::var("SSL_CERT_FILE")?)?;
+    let client = reqwest::Client::builder()
+        .add_root_certificate(reqwest::Certificate::from_pem(&ca)?)
+        .build()?;
+    let pem = client
+        .get(PEBBLE_ROOTS)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+    Ok(CertificateDer::from_pem_slice(&pem)?)
+}
+
+/// Checks that the ACME server issued the stored certificate: the chain leads to the root of
+/// Pebble for a name of the certificate, and the stored key belongs to the leaf.
+async fn check_issued_by_pebble(cert: &Cert) -> anyhow::Result<()> {
+    let mut roots = RootCertStore::empty();
+    roots.add(pebble_root().await?)?;
+    let verifier = WebPkiServerVerifier::builder(Arc::new(roots)).build()?;
+    let chain = cert.certificates()?;
+    let (leaf, intermediates) = chain.split_first().context("an empty chain")?;
+    let name = cert
+        .san
+        .iter()
+        .map(ToString::to_string)
+        .find(|name| !name.starts_with('*'))
+        .context("no plain name")?;
+    verifier.verify_server_cert(
+        leaf,
+        intermediates,
+        &ServerName::try_from(name)?,
+        &[],
+        UnixTime::now(),
+    )?;
+    cert.certified_key()?;
+    Ok(())
+}
+
+/// Waits for a stored certificate whose sorted subject names are `san`, and checks that Pebble
+/// issued it.
 async fn wait_for_cert(storage: &TestStorage, san: &[&str]) -> anyhow::Result<Arc<Cert>> {
     let deadline = tokio::time::Instant::now() + CERT_TIMEOUT;
     while tokio::time::Instant::now() < deadline {
@@ -119,6 +169,7 @@ async fn wait_for_cert(storage: &TestStorage, san: &[&str]) -> anyhow::Result<Ar
             names == san
         });
         if let Some(cert) = found {
+            check_issued_by_pebble(&cert).await?;
             return Ok(cert);
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
