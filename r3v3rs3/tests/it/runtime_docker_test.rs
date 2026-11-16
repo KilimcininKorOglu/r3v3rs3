@@ -100,10 +100,13 @@ async fn pull(runtime: &DockerRuntime) -> anyhow::Result<ImageRef> {
         .inspect_image(&image)
         .await?
         .context("pulled image")?;
+    // The engine records a digest for the repository that it pulled from, and the platform
+    // pins a deployment to this digest.
+    let prefix = format!("{}@sha256:", image.repository());
     ensure!(
         info.repo_digests
             .iter()
-            .any(|digest| digest.starts_with("traefik/whoami@sha256:")),
+            .any(|digest| digest.starts_with(&prefix)),
         "{:?}",
         info.repo_digests
     );
@@ -616,18 +619,23 @@ async fn remove_and_list(runtime: &DockerRuntime, names: &Names) -> anyhow::Resu
     Ok(())
 }
 
+/// The answer of the shell to [`EXEC_COMMAND`]. The TTY echoes the typed line back, so the
+/// answer must not appear in the typed line: only a shell that runs the command prints it.
+const EXEC_ANSWER: &[u8] = b"r3v3rs3-exec-42";
+const EXEC_COMMAND: &[u8] = b"echo r3v3rs3-exec-$((40+2))\n";
+
 /// Opens a terminal in the container, runs `echo` through it and reads the answer back.
 async fn exec_echo(runtime: &DockerRuntime, names: &Names) -> anyhow::Result<()> {
     use tokio::io::{AsyncRead, AsyncWrite};
     let mut handle = runtime.exec(&names.container, 80, 24, &[]).await?;
-    handle.stream.write_all(b"echo r3v3rs3-exec-ok\n").await?;
+    handle.stream.write_all(EXEC_COMMAND).await?;
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 512];
     let read = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let size = handle.stream.read(&mut chunk).await?;
             buffer.extend_from_slice(&chunk[..size]);
-            if window_contains(&buffer, b"r3v3rs3-exec-ok") {
+            if window_contains(&buffer, EXEC_ANSWER) {
                 return Ok::<_, std::io::Error>(());
             }
         }
@@ -640,7 +648,7 @@ async fn exec_echo(runtime: &DockerRuntime, names: &Names) -> anyhow::Result<()>
     fn bounds<T: AsyncRead + AsyncWrite + Unpin + Send>(_: &T) {}
     bounds(&handle.stream);
     ensure!(
-        window_contains(&buffer, b"r3v3rs3-exec-ok"),
+        window_contains(&buffer, EXEC_ANSWER),
         "the exec output has no answer: {:?}",
         String::from_utf8_lossy(&buffer)
     );
