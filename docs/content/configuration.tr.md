@@ -272,7 +272,7 @@ routes = [{ path = "/", servers = [{ url = "http+srv://_http._tcp.api.service.co
 
 `_http._tcp.api.service.consul. 30 IN SRV 0 5 8080 api-1.node.consul.` ve `... 0 1 8080 api-2.node.consul.` kayıtlarıyla route, istekleri `http://api-1.node.consul:8080/v1` ve `http://api-2.node.consul:8080/v1` sunucularına `5` ve `1` ağırlıklarıyla gönderir.
 
-- Yalnız en düşük öncelik değerine sahip kayıtlar kullanılır. Daha yüksek değerli kayıtlar DNS'te yedektir ve r3v3rs3 bunları kullanmaz.
+- İstekleri en düşük öncelik değerine sahip kayıtlar alır. RFC 2782'nin istediği gibi daha yüksek değerli kayıt yedektir: Yalnız daha düşük değerli bütün sunucular sağlıksızsa ya da isteği karşılayamadıysa istek alır.
 - Kaydın SRV ağırlığı, sunucunun `weight` değeri olur. `0` ağırlığı `1` olur, çünkü r3v3rs3'te ağırlığı `0` olan sunucu yeni istek almaz. SRV sunucusunun kendisine `weight` verilemez.
 - r3v3rs3, yanıtın TTL süresi bitince adı yeniden çözer. En erken 5 saniye sonra çözer. Hedefler değişince route yeni sunucuları yeniden başlatmadan alır. Kalan sunucuların sağlık durumu korunur. Başarısız bir sorgu son hedefleri korur ve 5 saniye sonra yeniden denenir.
 - SRV adının hedefi olmayan route 502 döner. Route'un başka sunucuları varsa istekleri onlar alır.

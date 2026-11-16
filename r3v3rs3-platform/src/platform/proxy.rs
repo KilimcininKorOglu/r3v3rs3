@@ -81,6 +81,7 @@ pub fn app_proxy(
                 weight: host.weight,
                 region: host.region.clone(),
                 countries: Vec::new(),
+                srv_priority: 0,
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;

@@ -1,12 +1,8 @@
 //! HTTP routes whose servers come from DNS SRV records.
 
-use r3v3rs3::{
-    accounts::Caller,
-    command::ServerCommand,
-    server::{
-        ServerChannels,
-        rpc::{ErasedRpcMethod, RpcWrapper, config::SetConfig, proxies::GetProxyStatus},
-    },
+use r3v3rs3::server::{
+    ServerChannels,
+    rpc::{config::SetConfig, proxies::GetProxyStatus},
 };
 use r3v3rs3_api::{
     app::AppConfig,
@@ -158,23 +154,112 @@ async fn changing_the_upstream_dns_resolver_resolves_at_once() -> anyhow::Result
             upstream_dns_resolver: Some(dns.addr),
             ..Default::default()
         };
-        let arg = Box::new(RpcWrapper::new(SetConfig { config })) as Box<dyn ErasedRpcMethod>;
-        channels
-            .command
-            .send(ServerCommand::CallMethod {
-                id: 1,
-                arg,
-                caller: Caller::system(),
-            })
-            .await?;
-        let callback = channels
-            .callback
-            .recv()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("callback channel closed"))?;
-        assert!(callback.result.is_ok());
+        call(&mut channels, SetConfig { config }).await??;
 
         wait_for_body(&url, "from-srv", Duration::from_secs(3)).await?;
+        Ok(())
+    })
+    .await
+}
+
+/// RFC 2782: "A client MUST attempt to contact the target host with the lowest-numbered priority
+/// it can reach", so a reachable target with priority 0 gets every request and the target with
+/// priority 1 gets none. The status lists both, the lower priority first.
+#[tokio::test]
+async fn srv_uses_the_lowest_priority_it_can_reach() -> anyhow::Result<()> {
+    let dns = MockDns::start().await?;
+    let (_primary, primary) = upstream("primary").await?;
+    let (_backup, mut backup) = upstream("backup").await?;
+    backup.priority = 1;
+    let targets = [&primary, &backup].map(|record| format!("{}:{}", record.target, record.port));
+    dns.set(NAME, 60, vec![backup, primary]);
+    let port = alloc_tcp_port().await?;
+
+    with_server(storage(&port, Some(dns.addr)), |mut channels| async move {
+        let url = port.http_url("/").to_string();
+        wait_for_body(&url, "primary", Duration::from_secs(5)).await?;
+        let client = reqwest::Client::new();
+        for _ in 0..10 {
+            assert_eq!(client.get(&url).send().await?.text().await?, "primary");
+        }
+        assert_eq!(srv_status(&mut channels).await?[0].targets, targets);
+        Ok(())
+    })
+    .await
+}
+
+/// RFC 2782: when no target of the lowest-numbered priority can be reached, the client uses the
+/// next priority that it can reach.
+#[tokio::test]
+async fn srv_falls_back_to_the_next_priority_when_the_lowest_is_unreachable() -> anyhow::Result<()>
+{
+    let dns = MockDns::start().await?;
+    // Port 1 on loopback refuses the connection.
+    let unreachable = SrvRecord::new(1, "127.0.0.1");
+    let (_backup, mut backup) = upstream("backup").await?;
+    backup.priority = 1;
+    dns.set(NAME, 60, vec![unreachable, backup]);
+    let port = alloc_tcp_port().await?;
+
+    with_server(storage(&port, Some(dns.addr)), |_| async move {
+        let url = port.http_url("/").to_string();
+        wait_for_body(&url, "backup", Duration::from_secs(10)).await
+    })
+    .await
+}
+
+/// Waits until the SRV status of `NAME` satisfies `done`, for at most 15 seconds: the shortest
+/// refresh after a TTL of 1 second is 5 seconds.
+async fn wait_for_srv(
+    channels: &mut ServerChannels,
+    done: impl Fn(&SrvStatus) -> bool,
+) -> anyhow::Result<SrvStatus> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let srv = srv_status(channels).await?.remove(0);
+        if done(&srv) {
+            return Ok(srv);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            anyhow::bail!("the SRV status did not change: {srv:?}");
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// RFC 8767 section 4: an answer with another rcode than NOERROR or NXDOMAIN is a failure to
+/// refresh, and the last data may still be used. The error is reported.
+#[tokio::test]
+async fn a_server_failure_keeps_the_last_targets() -> anyhow::Result<()> {
+    let dns = MockDns::start().await?;
+    let (_upstream, record) = upstream("kept").await?;
+    let target = format!("{}:{}", record.target, record.port);
+    dns.set(NAME, 1, vec![record]);
+    let port = alloc_tcp_port().await?;
+
+    with_server(storage(&port, Some(dns.addr)), |mut channels| async move {
+        let url = port.http_url("/").to_string();
+        wait_for_body(&url, "kept", Duration::from_secs(5)).await?;
+        dns.fail(NAME);
+        let failed = wait_for_srv(&mut channels, |srv| srv.error.is_some()).await?;
+        assert_eq!(failed.targets, [target]);
+        wait_for_body(&url, "kept", Duration::from_secs(1)).await
+    })
+    .await
+}
+
+/// RFC 2782: one SRV record with the target "." means that the service is decidedly not
+/// available, so the route answers 502.
+#[tokio::test]
+async fn a_root_target_means_no_service() -> anyhow::Result<()> {
+    let dns = MockDns::start().await?;
+    dns.set(NAME, 60, vec![SrvRecord::new(80, ".")]);
+    let port = alloc_tcp_port().await?;
+
+    with_server(storage(&port, Some(dns.addr)), |mut channels| async move {
+        wait_for_status(port.http_url("/").as_ref(), 502).await?;
+        let srv = srv_status(&mut channels).await?;
+        assert!(srv[0].targets.is_empty(), "{srv:?}");
         Ok(())
     })
     .await

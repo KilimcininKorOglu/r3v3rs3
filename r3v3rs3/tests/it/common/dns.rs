@@ -33,7 +33,16 @@ impl SrvRecord {
     }
 }
 
-type Table = Arc<Mutex<HashMap<String, (u32, Vec<SrvRecord>)>>>;
+/// The answer for one name.
+#[derive(Debug, Clone)]
+enum Answer {
+    /// The SRV records with their TTL.
+    Records(u32, Vec<SrvRecord>),
+    /// SERVFAIL, a failed lookup.
+    ServerFailure,
+}
+
+type Table = Arc<Mutex<HashMap<String, Answer>>>;
 
 pub struct MockDns {
     pub addr: SocketAddr,
@@ -64,7 +73,15 @@ impl MockDns {
         self.table
             .lock()
             .unwrap()
-            .insert(name.to_lowercase(), (ttl, records));
+            .insert(name.to_lowercase(), Answer::Records(ttl, records));
+    }
+
+    /// Answers the queries of a name with SERVFAIL.
+    pub fn fail(&self, name: &str) {
+        self.table
+            .lock()
+            .unwrap()
+            .insert(name.to_lowercase(), Answer::ServerFailure);
     }
 }
 
@@ -85,17 +102,25 @@ fn answer(table: &Table, query: &[u8]) -> Option<Vec<u8>> {
     response.metadata.recursion_desired = request.metadata.recursion_desired;
     response.metadata.recursion_available = true;
     response.queries.push(question.clone());
-    match table.lock().unwrap().get(&name) {
-        Some((ttl, records)) => {
+    let answer = table.lock().unwrap().get(&name).cloned();
+    match answer {
+        Some(Answer::Records(ttl, records)) => {
             for record in records {
-                let target = Name::from_str(&format!("{}.", record.target)).ok()?;
+                // "." is the root name, the target of a service that is not available.
+                let target = match record.target.as_str() {
+                    "." => Name::root(),
+                    host => Name::from_str(&format!("{host}.")).ok()?,
+                };
                 let srv = SRV::new(record.priority, record.weight, record.port, target);
                 response.answers.push(Record::from_rdata(
                     question.name().clone(),
-                    *ttl,
+                    ttl,
                     RData::SRV(srv),
                 ));
             }
+        }
+        Some(Answer::ServerFailure) => {
+            response.metadata.response_code = ResponseCode::ServFail;
         }
         None => {
             response.metadata.response_code = ResponseCode::NXDomain;

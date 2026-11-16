@@ -409,6 +409,7 @@ pub fn parse_server_line(locale: Locale, line: &str) -> Result<Server, String> {
         weight,
         region,
         countries,
+        srv_priority: 0,
     })
 }
 

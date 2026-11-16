@@ -680,6 +680,13 @@ pub struct Server {
     /// Optional ISO 3166-1 alpha-2 country codes assigned to this server for geo-steering.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub countries: Vec<String>,
+    /// The SRV priority of a server that an `http+srv` or `https+srv` URL resolved to; `0` for
+    /// every other server. Only the lowest value with a healthy server gets traffic (RFC 2782).
+    /// The proxy sets it at run time, so it is never read from or written to the configuration.
+    #[serde(skip)]
+    #[schema(ignore)]
+    #[schemars(skip)]
+    pub srv_priority: u16,
 }
 
 impl Server {
@@ -689,6 +696,7 @@ impl Server {
             weight: DEFAULT_WEIGHT,
             region: None,
             countries: Vec::new(),
+            srv_priority: 0,
         }
     }
 }

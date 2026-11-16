@@ -21,10 +21,12 @@ use tracing::{debug, info, warn};
 /// Shortest wait between two lookups of a name, also when the TTL is shorter or a lookup failed.
 pub const MIN_TTL: Duration = Duration::from_secs(5);
 
-/// One target of an SRV name. The order sorts the targets by host and port, so the same set of
-/// records gives the same list.
+/// One target of an SRV name. The order sorts the targets by priority, host and port, so the same
+/// set of records gives the same list.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SrvTarget {
+    /// The SRV priority: a lower value is preferred (RFC 2782).
+    pub priority: u16,
     pub host: String,
     pub port: u16,
     pub weight: u16,
@@ -194,6 +196,7 @@ fn targets_to_servers(server: &Server, targets: &[SrvTarget]) -> Vec<Server> {
                 weight: target.weight,
                 region: server.region.clone(),
                 countries: server.countries.clone(),
+                srv_priority: target.priority,
             })
         })
         .collect()
@@ -252,31 +255,30 @@ async fn resolve(
     let ttl = lookup
         .valid_until()
         .saturating_duration_since(Instant::now());
-    let targets = lowest_priority(lookup.answers().iter().filter_map(
-        |record| match &record.data {
-            RData::SRV(srv) => Some(srv),
-            _ => None,
-        },
-    ));
+    let targets = srv_targets(
+        lookup
+            .answers()
+            .iter()
+            .filter_map(|record| match &record.data {
+                RData::SRV(srv) => Some(srv),
+                _ => None,
+            }),
+    );
     debug!(name, targets = ?targets, ttl = ?ttl, "SRV lookup finished");
     Ok((targets, ttl))
 }
 
-/// The targets of the records with the lowest priority value, sorted by host and port. A weight
-/// of `0` becomes `1`, because a server with weight `0` gets no traffic in r3v3rs3. A record
-/// whose target is `.` names no server.
-fn lowest_priority<'a>(records: impl Iterator<Item = &'a SRV>) -> Vec<SrvTarget> {
-    let records = records.collect::<Vec<_>>();
-    let Some(priority) = records.iter().map(|record| record.priority).min() else {
-        return Vec::new();
-    };
+/// The targets of every priority, sorted by priority, host and port. RFC 2782: a client uses the
+/// lowest-numbered priority it can reach, so the higher priorities are kept as the backups of the
+/// route. A weight of `0` becomes `1`, because a server with weight `0` gets no traffic in
+/// r3v3rs3. A record whose target is `.` names no server.
+fn srv_targets<'a>(records: impl Iterator<Item = &'a SRV>) -> Vec<SrvTarget> {
     let mut targets = records
-        .iter()
-        .filter(|record| record.priority == priority)
         .filter_map(|record| {
             let host = record.target.to_utf8();
             let host = host.trim_end_matches('.');
             (!host.is_empty()).then(|| SrvTarget {
+                priority: record.priority,
                 host: host.to_string(),
                 port: record.port,
                 weight: record.weight.max(1),
@@ -298,8 +300,19 @@ mod tests {
         SRV::new(priority, weight, port, Name::from_str(target).unwrap())
     }
 
+    fn target(priority: u16, host: &str, port: u16, weight: u16) -> SrvTarget {
+        SrvTarget {
+            priority,
+            host: host.into(),
+            port,
+            weight,
+        }
+    }
+
+    /// RFC 2782: a record with a higher priority value is a backup, not a record to drop, and a
+    /// target of "." names no server.
     #[test]
-    fn lowest_priority_keeps_one_priority_and_sorts_the_targets() {
+    fn srv_targets_keep_every_priority_in_order() {
         let records = [
             record(20, 5, 9000, "backup.example.com."),
             record(10, 0, 8080, "b.example.com."),
@@ -307,23 +320,15 @@ mod tests {
             record(10, 3, 8080, "a.example.com."),
             record(10, 1, 1, "."),
         ];
-        let targets = lowest_priority(records.iter());
         assert_eq!(
-            targets,
+            srv_targets(records.iter()),
             [
-                SrvTarget {
-                    host: "a.example.com".into(),
-                    port: 8080,
-                    weight: 3,
-                },
-                SrvTarget {
-                    host: "b.example.com".into(),
-                    port: 8080,
-                    weight: 1,
-                },
+                target(10, "a.example.com", 8080, 3),
+                target(10, "b.example.com", 8080, 1),
+                target(20, "backup.example.com", 9000, 5),
             ]
         );
-        assert!(lowest_priority([].iter()).is_empty());
+        assert!(srv_targets([].iter()).is_empty());
     }
 
     #[test]
@@ -333,11 +338,7 @@ mod tests {
         {
             let mut inner = lock(&registry.inner);
             let mut entry = SrvEntry::new();
-            entry.targets = vec![SrvTarget {
-                host: "10.0.0.1".into(),
-                port: 8080,
-                weight: 2,
-            }];
+            entry.targets = vec![target(0, "10.0.0.1", 8080, 2)];
             inner.names.insert(name.into(), entry);
         }
         let servers = [
@@ -366,11 +367,7 @@ mod tests {
     #[test]
     fn a_failed_lookup_keeps_the_targets_and_a_changed_answer_reports_it() {
         let mut entry = SrvEntry::new();
-        let target = SrvTarget {
-            host: "a".into(),
-            port: 1,
-            weight: 1,
-        };
+        let target = target(0, "a", 1, 1);
         assert!(entry.apply("n", Ok((vec![target.clone()], Duration::from_secs(1)))));
         assert!(entry.expires_at >= Instant::now() + Duration::from_secs(4));
         assert!(!entry.apply("n", Ok((vec![target.clone()], Duration::from_secs(60)))));

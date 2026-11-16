@@ -31,6 +31,8 @@ pub struct GroupServer {
     pub weight: u16,
     pub region: Option<String>,
     pub countries: Vec<String>,
+    /// The SRV priority of the server: the servers of the lowest value come first (RFC 2782).
+    pub priority: u16,
 }
 
 /// The upstream servers of a proxy or an HTTP route, with the load balancing policy and the
@@ -480,6 +482,7 @@ pub fn members(servers: &[UpstreamServer]) -> Vec<GroupServer> {
             weight: server.weight,
             region: server.region.clone(),
             countries: server.countries.clone(),
+            priority: 0,
         })
         .collect()
 }
@@ -681,10 +684,27 @@ impl UpstreamGroup {
             .filter(|&index| self.weight(index) > 0 && !self.blocked(index, now))
             .partition(|&index| self.health(index).is_some_and(|h| h.is_healthy(now)));
         if healthy.is_empty() {
-            return self.order(unhealthy, client);
+            return self.order_by_priority(unhealthy, client);
         }
-        let mut ordered = self.order(healthy, client);
+        let mut ordered = self.order_by_priority(healthy, client);
         ordered.extend(unhealthy);
+        ordered
+    }
+
+    /// RFC 2782: a client uses the lowest-numbered SRV priority it can reach. The servers of the
+    /// lowest priority use the policy; the servers of higher priorities follow in priority order,
+    /// so they get a request only when every server before them failed it.
+    fn order_by_priority(&self, servers: Vec<usize>, client: IpAddr) -> Vec<usize> {
+        let priority = |index: usize| self.members.get(index).map_or(0, |m| m.priority);
+        let Some(lowest) = servers.iter().map(|&index| priority(index)).min() else {
+            return servers;
+        };
+        let (first, mut backups): (Vec<_>, Vec<_>) = servers
+            .into_iter()
+            .partition(|&index| priority(index) == lowest);
+        backups.sort_by_key(|&index| (priority(index), index));
+        let mut ordered = self.order(first, client);
+        ordered.extend(backups);
         ordered
     }
 
@@ -1133,6 +1153,7 @@ mod tests {
                 weight,
                 region: None,
                 countries: Vec::new(),
+                priority: 0,
             })
             .collect()
     }
@@ -1214,6 +1235,33 @@ mod tests {
 
         let _p1 = weighted.acquire(1).unwrap();
         assert_eq!(weighted.candidates(CLIENT), [0, 1]);
+    }
+
+    /// RFC 2782: the lowest-numbered SRV priority that can be reached gets the traffic. A higher
+    /// priority comes only after it, for every policy, and takes the lead when the lower
+    /// priority is unhealthy.
+    #[test]
+    fn a_higher_srv_priority_is_only_a_backup() {
+        let tiered = || {
+            let mut servers = members(&[1, 1, 1]);
+            servers[0].priority = 20;
+            servers[1].priority = 10;
+            servers[2].priority = 10;
+            servers
+        };
+        for policy in LoadBalancing::ALL {
+            let group = UpstreamGroup::new(tiered(), policy, no_passive_check());
+            for _ in 0..20 {
+                let candidates = group.candidates(CLIENT);
+                assert_eq!(candidates.len(), 3, "{policy:?}");
+                assert_eq!(candidates[2], 0, "{policy:?}");
+            }
+        }
+
+        let group = UpstreamGroup::new(tiered(), LoadBalancing::RoundRobin, HealthCheck::default());
+        group.report_failure(1, "refused");
+        group.report_failure(2, "refused");
+        assert_eq!(group.candidates(CLIENT)[0], 0);
     }
 
     #[test]
@@ -1549,18 +1597,21 @@ mod tests {
             weight: 1,
             region: Some("eu".into()),
             countries: vec!["DE".into(), "FR".into()],
+            priority: 0,
         };
         let server_us = GroupServer {
             addr: "us".into(),
             weight: 1,
             region: Some("na".into()),
             countries: vec!["US".into()],
+            priority: 0,
         };
         let server_fallback = GroupServer {
             addr: "fallback".into(),
             weight: 1,
             region: None,
             countries: Vec::new(),
+            priority: 0,
         };
         let group = UpstreamGroup::new(
             vec![server_eu, server_us, server_fallback],

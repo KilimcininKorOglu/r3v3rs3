@@ -271,6 +271,7 @@ impl ProxyUpstream {
                 weight: server.weight,
                 region: server.region.clone(),
                 countries: server.countries.clone(),
+                priority: server.srv_priority,
             })
             .collect();
         let probe = http_probe(servers, &self.health_check, &pool);

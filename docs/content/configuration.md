@@ -272,7 +272,7 @@ routes = [{ path = "/", servers = [{ url = "http+srv://_http._tcp.api.service.co
 
 With the SRV records `_http._tcp.api.service.consul. 30 IN SRV 0 5 8080 api-1.node.consul.` and `... 0 1 8080 api-2.node.consul.`, the route sends the requests to `http://api-1.node.consul:8080/v1` and `http://api-2.node.consul:8080/v1` with the weights `5` and `1`.
 
-- Only the records with the lowest priority value are used. The records with a higher value are backups in DNS, and r3v3rs3 does not use them.
+- The records with the lowest priority value get the requests. As RFC 2782 requires, a record with a higher value is a backup: it gets requests only when every server with a lower value is unhealthy or failed the request.
 - The SRV weight of a record is the `weight` of its server. A weight of `0` becomes `1`, because a server with weight `0` gets no traffic in r3v3rs3. A `weight` on the SRV server itself is not allowed.
 - r3v3rs3 resolves the name again when the TTL of the answer expires, at the earliest after 5 seconds. When the targets change, the route gets the new servers without a restart. The health of the servers that stay is kept. A failed lookup keeps the last targets and is retried after 5 seconds.
 - A route whose SRV name has no target answers with 502. The other servers of the route, if any, still get the requests.
