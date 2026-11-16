@@ -102,6 +102,22 @@ async fn verify_login_rate_limiting(addr: SocketAddr) -> anyhow::Result<()> {
     tokio::time::sleep(GOVERNOR_REPLENISH).await;
     assert_eq!(login(addr, "admin", "secret").await?, 429);
 
+    // Without a trusted proxy, a forged X-Forwarded-For does not name another client.
+    tokio::time::sleep(GOVERNOR_REPLENISH).await;
+    let forged = reqwest::Client::new()
+        .post(format!("http://{addr}/api/login"))
+        .header("x-forwarded-for", "198.51.100.77")
+        .json(&LoginRequest {
+            username: "admin".to_string(),
+            method: LoginMethod::Password {
+                password: "secret".to_string(),
+            },
+            insecure: true,
+        })
+        .send()
+        .await?;
+    assert_eq!(forged.status().as_u16(), 429);
+
     // Another username from the same client IP is not blocked.
     tokio::time::sleep(GOVERNOR_REPLENISH).await;
     assert_eq!(login(addr, "other", "secret").await?, 200);
@@ -137,6 +153,13 @@ async fn the_session_cookie_covers_the_whole_panel() -> anyhow::Result<()> {
         assert!(
             cookie.contains("Path=/"),
             "the session cookie has no path: {cookie}"
+        );
+        // Scripts must not read the session, and other sites must not send it (OWASP Session
+        // Management).
+        assert!(cookie.contains("HttpOnly"), "{cookie}");
+        assert!(
+            cookie.contains("SameSite=Lax") || cookie.contains("SameSite=Strict"),
+            "{cookie}"
         );
         Ok(())
     })
