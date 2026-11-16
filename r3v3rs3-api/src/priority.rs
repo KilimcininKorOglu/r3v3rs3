@@ -602,7 +602,7 @@ mod tests {
             css.urgency.max(api.urgency) < image.urgency,
             "{css:?} {api:?} {image:?}"
         );
-        assert!(image.urgency <= video.urgency, "{image:?} {video:?}");
+        assert!(image.urgency < video.urgency, "{image:?} {video:?}");
         assert!(!html.incremental && image.incremental && video.incremental);
     }
 
