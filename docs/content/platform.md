@@ -410,6 +410,8 @@ Centralized backup settings (managed under the **Backups** console or via the di
 - **rsync**: Transfers dumps using `rsync` over SSH to a remote target directory.
 - **Dead Man's Snitch / Heartbeat Monitoring**: An optional heartbeat ping URL (e.g., Healthchecks.io, Dead Man's Snitch, or Better Stack). Upon successful execution of daily scheduled backups, r3v3rs3 sends an HTTP GET ping with the `r3v3rs3-heartbeat` User-Agent to this endpoint. If any scheduled backup fails, the ping is skipped and a `backup.failure` outbound webhook is dispatched instead, alerting external monitoring services to silent backup failures.
 
+The S3 endpoint and the heartbeat URL may point at any address, including private and loopback addresses, so that a MinIO server or a monitor on the local network works. r3v3rs3 sends these requests from the server, and an S3 download returns the body of the answer. An account that can change the backup settings (an admin account or an editor without a proxy list) can therefore make the server reach addresses of its own network; this adds no access beyond what such an account has already, because it can run any Compose file on the host.
+
 Every new backup uploads to the configured remote targets; a failed upload only goes into the server log, because the local copy exists. Remote credentials are encrypted with `r3v3rs3.key`.
 
 #### Restore & Periodic Verification Test

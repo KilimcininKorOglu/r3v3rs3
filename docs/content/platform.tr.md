@@ -410,6 +410,8 @@ Merkezi yedekleme ayarları (**Yedekler** konsolunda veya doğrudan depolama ba�
 - **rsync**: SSH üzerinden uzak hedef dizine `rsync` ile yedek aktarımı.
 - **Dead Man's Snitch / Heartbeat İzleme**: İsteğe bağlı bir sinyal (ping) URL'si (örn. Healthchecks.io, Dead Man's Snitch veya Better Stack). Günlük planlı yedekler başarıyla tamamlandığında r3v3rs3 bu adrese `r3v3rs3-heartbeat` User-Agent başlığıyla bir HTTP GET çağrısı yapar. Herhangi bir planlı yedekleme başarısız olursa bu ping atlanarak yerine `backup.failure` giden webhook bildirimi gönderilir; böylece harici servisler sessiz yedekleme arızalarını anında fark eder.
 
+S3 endpoint'i ve heartbeat URL'si private ve loopback adresler dahil herhangi bir adresi gösterebilir. Böylece yerel ağdaki bir MinIO sunucusu veya izleme servisi de çalışır. r3v3rs3 bu istekleri sunucudan gönderir ve S3 indirmesi yanıtın gövdesini döndürür. Bu yüzden yedek ayarlarını değiştirebilen bir hesap (admin hesabı veya proxy listesi olmayan editör) sunucunun kendi ağındaki adreslere istek göndermesini sağlayabilir. Bu, böyle bir hesabın zaten sahip olduğu erişimin ötesine geçmez, çünkü bu hesap sunucuda herhangi bir Compose dosyasını çalıştırabilir.
+
 Her yeni yedek yapılandırılan uzak hedeflere aktarılır; başarısız bir yükleme yalnız sunucu log'una geçer, çünkü yerel kopya vardır. Uzak kimlik bilgileri `r3v3rs3.key` ile şifrelenir.
 
 #### Geri Yükleme & Periyodik Doğrulama Testi
