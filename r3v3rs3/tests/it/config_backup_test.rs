@@ -160,10 +160,11 @@ fn check_exported_backup(backup: &ConfigBackup) {
     assert_eq!(backup.acme.len(), 1);
     assert_eq!(backup.config.admin.max_login_attempts, 5);
 
-    if let AuthPolicy::Basic(basic) = &backup.access_lists[0].list.auth {
-        assert!(basic.users[0].password_hash.is_empty());
-        assert!(basic.users[0].password_set);
-    }
+    let AuthPolicy::Basic(basic) = &backup.access_lists[0].list.auth else {
+        panic!("the exported access list lost its Basic auth");
+    };
+    assert!(basic.users[0].password_hash.is_empty());
+    assert!(basic.users[0].password_set);
 
     assert!(backup.files.contains_key("config.toml"));
     assert!(backup.files.contains_key("ports.toml"));
@@ -202,9 +203,10 @@ async fn check_restored_storage(target_storage: &TestStorage) {
     assert_eq!(target_storage.load_access_lists().await.len(), 1);
     assert_eq!(target_storage.load_acmes().await.len(), 1);
     let restored_lists = target_storage.load_access_lists().await;
-    if let AuthPolicy::Basic(basic) = &restored_lists[0].list.auth {
-        assert_eq!(basic.users[0].password_hash, "$argon2id$mockedhash");
-    }
+    let AuthPolicy::Basic(basic) = &restored_lists[0].list.auth else {
+        panic!("the restored access list lost its Basic auth");
+    };
+    assert_eq!(basic.users[0].password_hash, "$argon2id$mockedhash");
     assert_eq!(
         target_storage
             .load_app_config()
@@ -244,32 +246,52 @@ async fn config_restore_accepts_payload_larger_than_default_limit() -> anyhow::R
     wait_for_listener(addr).await?;
 
     let cookie = login_when_allowed(addr, "admin", "password").await?;
+    restore_large_backup(addr, &cookie).await?;
+    event.send(r3v3rs3_api::event::ServerEvent::Shutdown)?;
+    task.await??;
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+/// A backup with a setting and a file larger than the default body limit of 2 MiB.
+fn large_backup() -> ConfigBackup {
     let mut files = std::collections::BTreeMap::new();
     let large_comment = "# ".to_string() + &"x".repeat(2_500_000) + "\n";
     files.insert("proxies.toml".to_string(), large_comment);
-
-    let backup = ConfigBackup {
+    let mut config = AppConfig::default();
+    config.admin.max_login_attempts = 7;
+    ConfigBackup {
         version: "3.0.1".to_string(),
         created_at: 0,
-        config: AppConfig::default(),
+        config,
         ports: Vec::new(),
         proxies: Vec::new(),
         access_lists: Vec::new(),
         acme: Vec::new(),
         files,
-    };
+    }
+}
 
+/// Restores the large backup and checks that its setting is in effect.
+async fn restore_large_backup(addr: std::net::SocketAddr, cookie: &str) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("http://{addr}/api/config/restore"))
-        .header("cookie", &cookie)
-        .json(&backup)
+        .header("cookie", cookie)
+        .json(&large_backup())
         .send()
         .await?;
+    let status = res.status();
+    assert_eq!(status, reqwest::StatusCode::OK, "{}", res.text().await?);
 
-    assert_ne!(res.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
-    event.send(r3v3rs3_api::event::ServerEvent::Shutdown)?;
-    task.await??;
-    let _ = std::fs::remove_dir_all(&dir);
+    let restored: serde_json::Value = client
+        .get(format!("http://{addr}/api/config"))
+        .header("cookie", cookie)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(restored["admin"]["max_login_attempts"], 7, "{restored}");
     Ok(())
 }
