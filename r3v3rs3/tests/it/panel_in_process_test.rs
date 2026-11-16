@@ -13,7 +13,7 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use hyper::Uri;
-use r3v3rs3::proxy::panel;
+use r3v3rs3::proxy::{http::client_ip::ProxiedClient, panel};
 use r3v3rs3_api::proxy::HttpProxy;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -22,13 +22,22 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use crate::common;
 use common::{TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, http_route};
 
-/// Answers with the peer address and the `Host` that the panel sees.
-async fn whoami(ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap) -> String {
+/// Answers with the peer address, the `Host`, and the client that the proxy resolved: the panel
+/// takes its client address for bans, rate limits and audit records from the last one.
+async fn whoami(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    proxied: Option<axum::Extension<ProxiedClient>>,
+    headers: HeaderMap,
+) -> String {
     let host = headers
         .get("host")
         .and_then(|host| host.to_str().ok())
         .unwrap_or_default();
-    format!("{} {host}", peer.ip())
+    let client = proxied.map_or_else(
+        || "none".to_string(),
+        |axum::Extension(client)| format!("{} secure={}", client.ip, client.secure),
+    );
+    format!("{} {host} {client}", peer.ip())
 }
 
 async fn echo(ws: WebSocketUpgrade) -> impl IntoResponse {
@@ -82,14 +91,24 @@ async fn the_proxy_serves_a_registered_panel_in_process() -> anyhow::Result<()> 
     result
 }
 
-/// Checks that the panel sees the loopback peer and the `Host` of the client.
+/// Checks that the panel gets the `Host` of the client and the client that the proxy resolved,
+/// also when the client forges the client address headers: the proxy trusts no peer here, so
+/// the client is the address of the connection, and the plain HTTP connection is not secure.
 async fn check_whoami(port: u16) -> anyhow::Result<()> {
-    let whoami = reqwest::get(format!("http://localhost:{port}/whoami"))
+    let whoami = reqwest::Client::new()
+        .get(format!("http://localhost:{port}/whoami"))
+        .header("x-forwarded-for", "203.0.113.9")
+        .header("forwarded", "for=203.0.113.9;proto=https")
+        .header("x-forwarded-proto", "https")
+        .send()
         .await?
         .error_for_status()?
         .text()
         .await?;
-    assert_eq!(whoami, format!("127.0.0.1 localhost:{port}"));
+    assert_eq!(
+        whoami,
+        format!("127.0.0.1 localhost:{port} 127.0.0.1 secure=false")
+    );
     Ok(())
 }
 
