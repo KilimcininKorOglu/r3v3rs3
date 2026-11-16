@@ -706,8 +706,6 @@
   "error_page.502": "Bad Gateway",
   "error_page.503": "Service Unavailable",
   "error_page.504": "Gateway Timeout",
-  "error_page.523": "Origin Is Unreachable",
-  "error_page.525": "SSL Handshake Failed",
   "footer.documentation": "Documentation",
   "http_form.access_list": "Access List",
   "http_form.access_list_hint": "The IP filter and the authentication of the selected access list replace those of the proxy.",

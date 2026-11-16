@@ -98,17 +98,11 @@ pub fn error_headers(err: &anyhow::Error) -> HeaderMap {
     headers
 }
 
-/// An upstream certificate that the proxy does not trust is an invalid upstream answer:
-/// 502 Bad Gateway (RFC 9110 §15.6.3). Every other TLS failure is 525.
+/// A failed TLS connection to the upstream, an untrusted certificate included, is an invalid
+/// upstream answer: 502 Bad Gateway (RFC 9110 §15.6.3).
 fn check_rustls_error(err: &(dyn std::error::Error + 'static)) -> Option<StatusCode> {
-    if let Some(err) = err.downcast_ref::<rustls::Error>() {
-        return Some(if matches!(err, rustls::Error::InvalidCertificate(_)) {
-            StatusCode::BAD_GATEWAY
-        } else {
-            status_code(525)
-        });
-    }
-    None
+    err.downcast_ref::<rustls::Error>()
+        .map(|_| StatusCode::BAD_GATEWAY)
 }
 
 fn classify_tls_error(err: &anyhow::Error) -> Option<StatusCode> {
@@ -136,19 +130,21 @@ fn is_unreachable_io_error(err: &std::io::Error) -> bool {
     )
 }
 
+/// An unreachable upstream is 502 Bad Gateway and an upstream that does not answer in time is
+/// 504 Gateway Timeout (RFC 9110 §15.6.3, §15.6.5).
 fn classify_connect_error(err: &anyhow::Error) -> Option<StatusCode> {
     for cause in err.chain() {
         if let Some(err) = cause.downcast_ref::<hyper_util::client::legacy::Error>()
             && err.is_connect()
         {
-            return Some(status_code(523));
+            return Some(StatusCode::BAD_GATEWAY);
         }
         if let Some(err) = cause.downcast_ref::<std::io::Error>() {
             if err.kind() == std::io::ErrorKind::TimedOut {
                 return Some(StatusCode::GATEWAY_TIMEOUT);
             }
             if is_unreachable_io_error(err) {
-                return Some(status_code(523));
+                return Some(StatusCode::BAD_GATEWAY);
             }
         }
     }
@@ -173,13 +169,8 @@ pub fn map_error(err: anyhow::Error) -> StatusCode {
     StatusCode::BAD_GATEWAY
 }
 
-/// Builds a non-standard status code. Every value passed here is in the valid 100..=999 range.
-fn status_code(code: u16) -> StatusCode {
-    StatusCode::from_u16(code).unwrap_or(StatusCode::BAD_GATEWAY)
-}
-
 /// The `error_page.<code>` key of every status code that [`map_error`] returns.
-const ERROR_PAGE_KEYS: [(u16, &str); 10] = [
+const ERROR_PAGE_KEYS: [(u16, &str); 8] = [
     (401, "error_page.401"),
     (403, "error_page.403"),
     (413, "error_page.413"),
@@ -188,8 +179,6 @@ const ERROR_PAGE_KEYS: [(u16, &str); 10] = [
     (502, "error_page.502"),
     (503, "error_page.503"),
     (504, "error_page.504"),
-    (523, "error_page.523"),
-    (525, "error_page.525"),
 ];
 
 /// Returns the reason phrase that the error page shows for the status code. A status code
@@ -229,15 +218,13 @@ mod tests {
         assert_eq!(text(StatusCode::MISDIRECTED_REQUEST), "Misdirected Request");
         assert_eq!(text(StatusCode::BAD_GATEWAY), "Bad Gateway");
         assert_eq!(text(StatusCode::SERVICE_UNAVAILABLE), "Service Unavailable");
-        assert_eq!(text(status_code(523)), "Origin Is Unreachable");
-        assert_eq!(text(status_code(525)), "SSL Handshake Failed");
         assert_eq!(text(StatusCode::NOT_FOUND), "Not Found");
     }
 
     #[test]
     fn status_text_uses_the_selected_language() {
         for (code, key) in ERROR_PAGE_KEYS {
-            let code = status_code(code);
+            let code = StatusCode::from_u16(code).unwrap();
             assert_eq!(status_text(code, Locale::Tr), Locale::Tr.t(key));
             assert_ne!(status_text(code, Locale::Tr), key);
         }
@@ -258,11 +245,11 @@ mod tests {
 
         let handshake_err = rustls::Error::General("handshake failed".into());
         let wrapped_handshake = anyhow::Error::new(io::Error::other(handshake_err));
-        assert_eq!(map_error(wrapped_handshake), status_code(525));
+        assert_eq!(map_error(wrapped_handshake), StatusCode::BAD_GATEWAY);
 
         let refused = io::Error::new(io::ErrorKind::ConnectionRefused, "connection refused");
         let wrapped_refused = anyhow::Error::new(refused).context("client connect error");
-        assert_eq!(map_error(wrapped_refused), status_code(523));
+        assert_eq!(map_error(wrapped_refused), StatusCode::BAD_GATEWAY);
 
         let timed_out = io::Error::new(io::ErrorKind::TimedOut, "operation timed out");
         let wrapped_timeout = anyhow::Error::new(timed_out);

@@ -32,7 +32,6 @@ fn proxy_with_error_pages(routes: Vec<Route>, error_pages: Vec<CustomErrorPage>)
 async fn create_test_fixture(
     custom_404: &str,
     custom_502: &str,
-    custom_523: &str,
 ) -> anyhow::Result<(TestPort, TestStorage)> {
     let not_found_upstream =
         serve_http_upstream(axum::Router::new().fallback(|| async { StatusCode::NOT_FOUND }))
@@ -58,10 +57,6 @@ async fn create_test_fixture(
                 status: 502,
                 body: custom_502.to_string(),
             },
-            CustomErrorPage {
-                status: 523,
-                body: custom_523.to_string(),
-            },
         ],
     );
 
@@ -77,13 +72,14 @@ async fn create_test_fixture(
 async fn test_custom_error_pages_for_404_and_502() -> anyhow::Result<()> {
     let custom_404 = "<html><body>Custom 404 Not Found</body></html>";
     let custom_502 = "<html><body>Custom 502 Bad Gateway</body></html>";
-    let custom_523 = "<html><body>Custom 523 Origin Unreachable</body></html>";
-    let (port, storage) = create_test_fixture(custom_404, custom_502, custom_523).await?;
+    let (port, storage) = create_test_fixture(custom_404, custom_502).await?;
 
+    // An unreachable upstream and a missing route are both 502 Bad Gateway (RFC 9110 §15.6.3),
+    // so both show the custom 502 page.
     with_server(storage, |_| async move {
         let client = reqwest::Client::new();
         assert_custom_rewritten(&client, port.http_url("/missing"), 404, custom_404).await?;
-        assert_custom_rewritten(&client, port.http_url("/broken"), 523, custom_523).await?;
+        assert_custom_rewritten(&client, port.http_url("/broken"), 502, custom_502).await?;
 
         let res_200 = client.get(port.http_url("/ok")).send().await?;
         assert_eq!(res_200.status(), 200);
@@ -154,14 +150,14 @@ async fn test_upstream_error_page_uses_request_preferences() -> anyhow::Result<(
             )
             .send()
             .await?;
-        assert_eq!(resp.status(), 523);
+        assert_eq!(resp.status(), 502);
         let body = resp.text().await?;
         assert!(
             body.contains(r#"<html lang="tr" data-theme="dark">"#),
             "{body}"
         );
         assert!(
-            body.contains(r3v3rs3_api::i18n::Locale::Tr.t("error_page.523")),
+            body.contains(r3v3rs3_api::i18n::Locale::Tr.t("error_page.502")),
             "{body}"
         );
         Ok(())
@@ -195,13 +191,13 @@ async fn test_error_page_hides_software_branding_when_enabled() -> anyhow::Resul
         let client = reqwest::Client::new();
 
         let resp_branded = client.get(port.http_url("/branded")).send().await?;
-        assert_eq!(resp_branded.status(), 523);
+        assert_eq!(resp_branded.status(), 502);
         let body_branded = resp_branded.text().await?;
         assert!(body_branded.contains("Powered by r3v3rs3"));
         assert!(body_branded.contains("https://github.com/KilimcininKorOglu/r3v3rs3"));
 
         let resp_unbranded = client.get(port.http_url("/unbranded")).send().await?;
-        assert_eq!(resp_unbranded.status(), 523);
+        assert_eq!(resp_unbranded.status(), 502);
         let body_unbranded = resp_unbranded.text().await?;
         assert!(!body_unbranded.contains("Powered by r3v3rs3"));
         assert!(!body_unbranded.contains("https://github.com/KilimcininKorOglu/r3v3rs3"));

@@ -342,7 +342,7 @@ async fn check_retry_without_body(port: &TestPort) -> anyhow::Result<()> {
         .body("data")
         .send()
         .await?;
-    assert_eq!(resp.status(), 523);
+    assert_eq!(resp.status(), 502);
     Ok(())
 }
 
@@ -832,7 +832,7 @@ async fn http_replays_a_body_up_to_the_limit() -> anyhow::Result<()> {
             .body("123456789")
             .send()
             .await?;
-        assert_eq!(large.status(), 523);
+        assert_eq!(large.status(), 502);
         Ok(())
     })
     .await
@@ -1005,7 +1005,7 @@ async fn http_one_attempt_disables_retries() -> anyhow::Result<()> {
 
     with_server(config, |_| async move {
         let resp = reqwest::get(proxy_port.http_url("/")).await?;
-        assert_eq!(resp.status(), 523);
+        assert_eq!(resp.status(), 502);
         Ok(())
     })
     .await

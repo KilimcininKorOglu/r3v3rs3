@@ -240,10 +240,12 @@ async fn http_upstream_client_cert() -> anyhow::Result<()> {
     with_server(storage, |_| async move {
         let client = reqwest::Client::new();
         let get = |vhost: &'static str| client.get(url.clone()).header(HOST, vhost).send();
+        // The upstream refuses the TLS handshake without a client certificate: 502 Bad Gateway
+        // (RFC 9110 §15.6.3).
         for (vhost, status) in [
-            ("nocert.localhost", StatusCode::from_u16(525).unwrap()),
+            ("nocert.localhost", StatusCode::BAD_GATEWAY),
             ("withcert.localhost", StatusCode::OK),
-            ("nocert.localhost", StatusCode::from_u16(525).unwrap()),
+            ("nocert.localhost", StatusCode::BAD_GATEWAY),
             ("badcert.localhost", StatusCode::BAD_GATEWAY),
         ] {
             assert_eq!(get(vhost).await?.status(), status, "{vhost}");
