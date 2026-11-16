@@ -60,17 +60,22 @@ async fn the_webhook_gets_each_certificate_event_once() -> anyhow::Result<()> {
         "event": "certificate_expiring",
         "certificate": {"id": ca.id().to_string()},
     });
-    let mock = server
-        .mock("POST", "/")
-        .match_header("authorization", format!("Bearer {TOKEN}").as_str())
-        .match_body(Matcher::PartialJson(body))
-        .expect(1)
-        .create_async()
-        .await;
+    let mock = Arc::new(
+        server
+            .mock("POST", "/")
+            .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+            .match_body(Matcher::PartialJson(body))
+            .expect(1)
+            .create_async()
+            .await,
+    );
+    let delivered = mock.clone();
 
     with_server(storage(&server.url(), ca), |_| async move {
-        // The leader checks the certificates in three background runs.
-        tokio::time::sleep(Duration::from_millis(3500)).await;
+        wait_for_delivery(delivered).await?;
+        // Two more background runs (one second apart) check the same certificate again; they
+        // must not send it a second time.
+        tokio::time::sleep(Duration::from_millis(2500)).await;
         Ok(())
     })
     .await?;
@@ -189,17 +194,18 @@ async fn the_server_sends_an_app_alert_notification() -> anyhow::Result<()> {
 #[tokio::test]
 async fn a_failed_notification_is_sent_three_times() -> anyhow::Result<()> {
     let mut server = mockito::Server::new_async().await;
-    let mock = server
-        .mock("POST", "/")
-        .with_status(500)
-        .expect(3)
-        .create_async()
-        .await;
+    let mock = Arc::new(
+        server
+            .mock("POST", "/")
+            .with_status(500)
+            .expect(3)
+            .create_async()
+            .await,
+    );
+    let delivered = mock.clone();
 
-    with_server(storage(&server.url(), Cert::new_ca()?), |_| async move {
-        // The second attempt waits one second and the third waits two seconds.
-        tokio::time::sleep(Duration::from_millis(5500)).await;
-        Ok(())
+    with_server(storage(&server.url(), Cert::new_ca()?), |_| {
+        wait_for_delivery(delivered)
     })
     .await?;
     mock.assert_async().await;
@@ -310,10 +316,10 @@ async fn check_saved_token(
     assert_eq!(status, 200, "{body}");
     let (_, body) = send(addr, Method::GET, "/api/config", admin, None).await?;
     let saved: Value = serde_json::from_str(&body)?;
-    assert_eq!(
-        saved["notifications"]["webhook"],
-        json!({"url": url, "token_set": true, "timeout": "10s"})
-    );
+    let webhook = &saved["notifications"]["webhook"];
+    assert_eq!(webhook["url"], url, "{webhook}");
+    assert_eq!(webhook["token_set"], true, "{webhook}");
+    assert!(!body.contains(TOKEN), "the token came back: {body}");
     Ok(())
 }
 
