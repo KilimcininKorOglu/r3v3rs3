@@ -50,13 +50,53 @@ async fn manage_the_accounts(addr: SocketAddr) -> anyhow::Result<()> {
     let viewer = session_cookie(addr, "viewer", "viewer-secret").await?;
 
     check_session_and_viewer_access(addr, &admin, &viewer).await?;
-    check_invalid_accounts(addr, &admin).await?;
-    check_malformed_json(addr, &admin).await?;
-    check_invalid_field_type(addr, &admin).await?;
+    check_rejected_requests(addr, &admin).await?;
     check_create_editor(addr, &admin).await?;
     check_account_list(addr, &admin).await?;
     check_own_account_rules(addr, &admin).await?;
+    check_editor_cannot_manage_accounts(addr, &admin).await?;
+    check_new_role_ends_sessions(addr, &admin).await?;
     check_new_password_ends_sessions(addr, &admin, &viewer).await
+}
+
+/// Checks the invalid accounts, the malformed JSON and the wrong field types.
+async fn check_rejected_requests(addr: SocketAddr, admin: &str) -> anyhow::Result<()> {
+    check_invalid_accounts(addr, admin).await?;
+    check_malformed_json(addr, admin).await?;
+    check_invalid_field_type(addr, admin).await
+}
+
+/// The path of the editor without TOTP that the role checks sign in as.
+const PLAIN_EDITOR_PATH: &str = "/api/accounts/plain-editor";
+
+/// Checks that an editor, which has no right to the accounts, can neither read nor change them.
+async fn check_editor_cannot_manage_accounts(addr: SocketAddr, admin: &str) -> anyhow::Result<()> {
+    let plain =
+        Some(json!({"username": "plain-editor", "password": "plain-secret", "role": "editor"}));
+    let (status, body) = send(addr, Method::POST, ACCOUNTS_PATH, admin, plain).await?;
+    assert_eq!(status, 200, "{body}");
+    let editor = login_when_allowed(addr, "plain-editor", "plain-secret").await?;
+    let (status, _) = send(addr, Method::GET, ACCOUNTS_PATH, &editor, None).await?;
+    assert_eq!(status, 403);
+    let rogue = Some(json!({"username": "rogue", "password": "rogue-secret", "role": "admin"}));
+    let (status, _) = send(addr, Method::POST, ACCOUNTS_PATH, &editor, rogue).await?;
+    assert_eq!(status, 403);
+    let raise = Some(json!({"role": "admin"}));
+    let (status, _) = send(addr, Method::PUT, PLAIN_EDITOR_PATH, &editor, raise).await?;
+    assert_eq!(status, 403);
+    Ok(())
+}
+
+/// Checks that a new role ends the sessions that started before it.
+async fn check_new_role_ends_sessions(addr: SocketAddr, admin: &str) -> anyhow::Result<()> {
+    let editor = login_when_allowed(addr, "plain-editor", "plain-secret").await?;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let lower = Some(json!({"role": "viewer"}));
+    let (status, body) = send(addr, Method::PUT, PLAIN_EDITOR_PATH, admin, lower).await?;
+    assert_eq!(status, 200, "{body}");
+    let (status, _) = send(addr, Method::GET, "/api/session", &editor, None).await?;
+    assert_eq!(status, 401);
+    Ok(())
 }
 
 /// Checks the session of the admin and that a viewer cannot read the accounts.
@@ -89,6 +129,27 @@ async fn check_invalid_accounts(addr: SocketAddr, admin: &str) -> anyhow::Result
         ),
         (
             json!({"username": "bad:name", "password": "long-enough"}),
+            "invalid_username",
+        ),
+        // docs/content/accounts.md: 1 to 64 characters, no `:`, `/`, space or control character.
+        (
+            json!({"username": "", "password": "long-enough"}),
+            "invalid_username",
+        ),
+        (
+            json!({"username": "a".repeat(65), "password": "long-enough"}),
+            "invalid_username",
+        ),
+        (
+            json!({"username": "bad/name", "password": "long-enough"}),
+            "invalid_username",
+        ),
+        (
+            json!({"username": "bad name", "password": "long-enough"}),
+            "invalid_username",
+        ),
+        (
+            json!({"username": "bad\u{1}name", "password": "long-enough"}),
             "invalid_username",
         ),
     ];
