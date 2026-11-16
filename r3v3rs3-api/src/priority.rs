@@ -1,11 +1,14 @@
 //! HTTP/2 and HTTP/3 Adaptive Stream Priority (RFC 9218 - Extensible Prioritization Scheme).
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use utoipa::ToSchema;
 
-/// Default limit for concurrent low-priority background streams when adaptive concurrency is enabled.
+/// Default limit for the concurrent low-priority background streams of one client when adaptive
+/// concurrency is enabled.
 pub const DEFAULT_MAX_BACKGROUND_CONCURRENCY: usize = 32;
 
 /// Global singleton tracking stream priority metrics and adaptive backpressure.
@@ -367,7 +370,9 @@ pub struct AdaptiveStreamController {
     background_requests: AtomicU64,
     throttled_background: AtomicU64,
     active_streams: AtomicUsize,
-    active_background_streams: AtomicUsize,
+    /// Active background streams per client, so one client cannot use up the limit of all.
+    /// An entry is removed when its count reaches 0.
+    background_per_client: Mutex<HashMap<IpAddr, usize>>,
 }
 
 impl AdaptiveStreamController {
@@ -387,28 +392,66 @@ impl AdaptiveStreamController {
         }
     }
 
-    /// Checks if a background stream should experience adaptive backpressure.
-    pub fn should_throttle_background(&self, max_background_concurrency: usize) -> bool {
-        let active_bg = self.active_background_streams.load(Ordering::Relaxed);
-        if active_bg >= max_background_concurrency {
-            self.throttled_background.fetch_add(1, Ordering::Relaxed);
-            true
+    /// Acquires a permit for a stream of `client`. A background stream is refused (`None`) when
+    /// `client` already holds `max_background` background streams; `None` as the limit means no
+    /// limit. Other streams always get a permit.
+    pub fn try_acquire(
+        self: &Arc<Self>,
+        priority: StreamPriority,
+        client: IpAddr,
+        max_background: Option<usize>,
+    ) -> Option<StreamPermit> {
+        let background_client = if priority.is_background() {
+            let client = client.to_canonical();
+            if !self.take_background_slot(client, max_background) {
+                self.throttled_background.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
+            Some(client)
         } else {
-            false
+            None
+        };
+        self.active_streams.fetch_add(1, Ordering::Relaxed);
+        Some(StreamPermit {
+            controller: self.clone(),
+            background_client,
+        })
+    }
+
+    /// Counts one more background stream of `client` unless it reached the limit.
+    fn take_background_slot(&self, client: IpAddr, max_background: Option<usize>) -> bool {
+        let mut counts = self
+            .background_per_client
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let count = counts.get(&client).copied().unwrap_or(0);
+        if max_background.is_some_and(|max| count >= max) {
+            return false;
+        }
+        counts.insert(client, count + 1);
+        true
+    }
+
+    /// Releases one background stream of `client`.
+    fn release_background_slot(&self, client: IpAddr) {
+        let mut counts = self
+            .background_per_client
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = counts.get_mut(&client) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                counts.remove(&client);
+            }
         }
     }
 
-    /// Acquires a stream permit tracking active multiplexed streams.
-    pub fn acquire_permit(self: &Arc<Self>, priority: StreamPriority) -> StreamPermit {
-        self.active_streams.fetch_add(1, Ordering::Relaxed);
-        if priority.is_background() {
-            self.active_background_streams
-                .fetch_add(1, Ordering::Relaxed);
-        }
-        StreamPermit {
-            controller: self.clone(),
-            is_background: priority.is_background(),
-        }
+    /// The number of clients that hold a background stream.
+    pub fn background_clients(&self) -> usize {
+        self.background_per_client
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
     }
 
     /// Returns a snapshot of priority statistics.
@@ -427,7 +470,7 @@ impl AdaptiveStreamController {
 /// RAII guard releasing active stream counts on drop.
 pub struct StreamPermit {
     controller: Arc<AdaptiveStreamController>,
-    is_background: bool,
+    background_client: Option<IpAddr>,
 }
 
 impl Drop for StreamPermit {
@@ -435,10 +478,8 @@ impl Drop for StreamPermit {
         self.controller
             .active_streams
             .fetch_sub(1, Ordering::Relaxed);
-        if self.is_background {
-            self.controller
-                .active_background_streams
-                .fetch_sub(1, Ordering::Relaxed);
+        if let Some(client) = self.background_client {
+            self.controller.release_background_slot(client);
         }
     }
 }
@@ -578,8 +619,9 @@ mod tests {
         controller.record_request(&crit);
         controller.record_request(&bg);
 
-        let permit1 = controller.acquire_permit(crit);
-        let permit2 = controller.acquire_permit(bg);
+        let client = IpAddr::from([192, 0, 2, 1]);
+        let permit1 = controller.try_acquire(crit, client, Some(1)).unwrap();
+        let permit2 = controller.try_acquire(bg, client, Some(1)).unwrap();
 
         let stats = controller.stats();
         assert_eq!(stats.total_requests, 2);
@@ -591,5 +633,32 @@ mod tests {
         drop(permit2);
 
         assert_eq!(controller.stats().active_streams, 0);
+    }
+
+    /// One client that holds its background streams must not block the background streams of
+    /// another client, and a released client leaves no entry behind.
+    #[test]
+    fn background_limit_counts_each_client() {
+        let controller = Arc::new(AdaptiveStreamController::new());
+        let bg = StreamPriority::new(7, false);
+        let attacker = IpAddr::from([192, 0, 2, 1]);
+        let other = IpAddr::from([198, 51, 100, 7]);
+
+        let held: Vec<_> = (0..2)
+            .map(|_| controller.try_acquire(bg, attacker, Some(2)).unwrap())
+            .collect();
+        assert!(controller.try_acquire(bg, attacker, Some(2)).is_none());
+        assert_eq!(controller.stats().throttled_background, 1);
+        let other_permit = controller.try_acquire(bg, other, Some(2));
+        assert!(other_permit.is_some());
+        // An IPv4-mapped IPv6 address is the same client.
+        let mapped = IpAddr::from(std::net::Ipv4Addr::new(192, 0, 2, 1).to_ipv6_mapped());
+        assert!(controller.try_acquire(bg, mapped, Some(2)).is_none());
+
+        drop(held);
+        drop(other_permit);
+        assert_eq!(controller.background_clients(), 0);
+        assert!(controller.try_acquire(bg, attacker, Some(2)).is_some());
+        assert!(controller.try_acquire(bg, attacker, None).is_some());
     }
 }

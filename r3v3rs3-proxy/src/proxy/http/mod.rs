@@ -1669,7 +1669,7 @@ where
     info!(target: "r3v3rs3::access_log", remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
     let span: Span = span!(Level::INFO, "http", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, target = %req.uri());
 
-    let stream_permit = match apply_stream_priority(route, &mut req) {
+    let stream_permit = match apply_stream_priority(route, &mut req, client.ip) {
         Ok(permit) => permit,
         Err(err) => {
             info!(target: "r3v3rs3::access_log", %resource_id, remote = %info.remote, peer = %info.peer, client = %client.ip, local = %info.local, action, error = %err);
@@ -1721,9 +1721,12 @@ where
     )
 }
 
+/// `client` is the resolved client address, so the clients behind a trusted proxy each get
+/// their own background stream limit.
 fn apply_stream_priority<B>(
     route: &FilteredRoute,
     req: &mut Request<B>,
+    client: std::net::IpAddr,
 ) -> Result<Option<r3v3rs3_api::priority::StreamPermit>, ProxyError> {
     if !route.stream_priority.enabled {
         return Ok(None);
@@ -1740,15 +1743,15 @@ fn apply_stream_priority<B>(
         content_type,
         &route.stream_priority,
     );
-    r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER.record_request(&priority);
-
-    if route.stream_priority.adaptive_concurrency
-        && priority.is_background()
-        && r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER
-            .should_throttle_background(r3v3rs3_api::priority::DEFAULT_MAX_BACKGROUND_CONCURRENCY)
-    {
-        return Err(ProxyError::TooManyConcurrentRequests);
-    }
+    let controller = &r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER;
+    controller.record_request(&priority);
+    let limit = route
+        .stream_priority
+        .adaptive_concurrency
+        .then_some(r3v3rs3_api::priority::DEFAULT_MAX_BACKGROUND_CONCURRENCY);
+    let permit = controller
+        .try_acquire(priority, client, limit)
+        .ok_or(ProxyError::TooManyConcurrentRequests)?;
 
     if route.stream_priority.inject_header
         && let (Ok(hname), Ok(hval)) = (
@@ -1758,9 +1761,7 @@ fn apply_stream_priority<B>(
     {
         req.headers_mut().insert(hname, hval);
     }
-    Ok(Some(
-        r3v3rs3_api::priority::GLOBAL_STREAM_CONTROLLER.acquire_permit(priority),
-    ))
+    Ok(Some(permit))
 }
 
 /// Applies the request header rules of the route and hands the response header rules to the

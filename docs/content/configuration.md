@@ -1662,7 +1662,7 @@ RFC 9218 signals priority using the `Priority` HTTP header with urgency (`u=0..7
 Stream prioritization can be toggled on each HTTP proxy and overridden per port:
 
 - **Inject Priority Header (`inject_header`)**: Forwards normalized `Priority: u=..., i` headers to upstream HTTP/2 & HTTP/3 servers so upstream schedulers can schedule multiplexed frames efficiently.
-- **Adaptive Concurrency (`adaptive_concurrency`)**: Automatically tracks active streams and paces background streams (`u >= 5`) during high connection congestion to prevent bufferbloat.
+- **Adaptive Concurrency (`adaptive_concurrency`)**: Limits each client to 32 concurrent background streams (`u >= 5`). A further background request of that client gets `429 Too Many Requests` with `Retry-After: 1`; other clients are not affected. Behind a trusted proxy the client is the address that the client IP settings resolve.
 - **Custom MIME and Path Rules (`custom_rules`)**: Custom glob patterns (e.g. `/api/critical/*`, `image/svg+xml`) that map specific endpoints to designated urgency levels.
 
 CLI commands:

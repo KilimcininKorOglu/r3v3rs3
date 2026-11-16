@@ -1662,7 +1662,7 @@ RFC 9218, önceliği `Priority` HTTP header'ı ile aciliyet (`u=0..7`) ve artım
 Akış önceliklendirmesi her HTTP proxy'sinde etkinleştirilebilir ve port başına geçersiz kılınabilir:
 
 - **Priority Header Enjeksiyonu (`inject_header`)**: Upstream HTTP/2 ve HTTP/3 sunucularının multiplexed çerçeveleri verimli bir şekilde zamanlayabilmesi için normalize edilmiş `Priority: u=..., i` header'larını iletir.
-- **Uyarlamalı Eşzamanlılık (`adaptive_concurrency`)**: Aktif akışları izler ve tampon şişkinliğini (bufferbloat) önlemek için yüksek bağlantı yükünde arka plan akışlarını (`u >= 5`) hız sınırlar.
+- **Uyarlamalı Eşzamanlılık (`adaptive_concurrency`)**: Her istemci aynı anda en fazla 32 arka plan akışı (`u >= 5`) açabilir. O istemcinin bundan sonraki arka plan isteği `Retry-After: 1` ile `429 Too Many Requests` yanıtı alır. Diğer istemciler bundan etkilenmez. Güvenilir bir proxy arkasında istemci, istemci IP ayarlarının çözdüğü adrestir.
 - **Özel MIME ve Yol Kuralları (`custom_rules`)**: Belirli route'ları belirlenmiş aciliyet seviyelerine eşleyen özel kalıp kuralları (örn. `/api/critical/*`, `image/svg+xml`).
 
 CLI komutları:

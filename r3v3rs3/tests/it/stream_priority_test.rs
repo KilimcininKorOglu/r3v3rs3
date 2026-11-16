@@ -1,10 +1,14 @@
+use r3v3rs3_api::client_ip::ClientIpConfig;
 use r3v3rs3_api::port::Port;
 use r3v3rs3_api::port::PortEntry;
+use r3v3rs3_api::priority::DEFAULT_MAX_BACKGROUND_CONCURRENCY;
 use r3v3rs3_api::priority::{
     AdaptiveStreamController, MimePriorityRule, StreamPriority, StreamPriorityConfig,
     parse_rfc9218_priority, resolve_stream_priority,
 };
 use r3v3rs3_api::proxy::{HttpProxy, Proxy, ProxyEntry, ProxyKind, Route, Server};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::common;
 use common::{TestStorage, alloc_tcp_port, wait_for_listener, with_server};
@@ -114,19 +118,21 @@ async fn test_controller_backpressure_and_counters() {
     assert_eq!(stats.background_requests, 1);
 
     // A critical stream is no background stream, so it does not count toward the limit.
-    let crit_permit = controller.acquire_permit(crit);
-    assert!(!controller.should_throttle_background(1));
-    let bg_permit = controller.acquire_permit(bg);
+    let client: std::net::IpAddr = [192, 0, 2, 1].into();
+    let crit_permit = controller.try_acquire(crit, client, Some(1));
+    assert!(crit_permit.is_some());
+    let bg_permit = controller.try_acquire(bg, client, Some(1));
+    assert!(bg_permit.is_some());
     assert_eq!(controller.stats().active_streams, 2);
 
-    // The limit is reached when the background streams equal it.
-    assert!(controller.should_throttle_background(1));
-    assert!(!controller.should_throttle_background(2));
+    // The limit is reached when the background streams of the client equal it.
+    assert!(controller.try_acquire(bg, client, Some(1)).is_none());
     assert_eq!(controller.stats().throttled_background, 1);
+    assert_eq!(controller.stats().active_streams, 2);
 
     drop(bg_permit);
     drop(crit_permit);
-    assert!(!controller.should_throttle_background(1));
+    assert!(controller.try_acquire(bg, client, Some(1)).is_some());
     assert_eq!(controller.stats().active_streams, 0);
 }
 
@@ -249,10 +255,12 @@ fn priority_storage(proxy_port: &common::TestPort, upstream: &str) -> anyhow::Re
                         servers: vec![Server::new(upstream.parse()?)],
                         ..Default::default()
                     }],
+                    // Without the background limit, so the limit test of this file, which also
+                    // runs from 127.0.0.1, cannot refuse these requests.
                     stream_priority: StreamPriorityConfig {
                         enabled: true,
                         inject_header: true,
-                        adaptive_concurrency: true,
+                        adaptive_concurrency: false,
                         custom_rules: vec![],
                     },
                     ..Default::default()
@@ -260,4 +268,176 @@ fn priority_storage(proxy_port: &common::TestPort, upstream: &str) -> anyhow::Re
             },
         }])
         .build())
+}
+
+/// An upstream whose `/hold.webp` answers only after `release` gets permits and whose
+/// `/ok.webp` answers at once. `held` counts the requests that reached `/hold.webp`.
+async fn holding_upstream(
+    release: Arc<tokio::sync::Semaphore>,
+    held: Arc<AtomicUsize>,
+) -> anyhow::Result<url::Url> {
+    let app = axum::Router::new()
+        .route(
+            "/hold.webp",
+            axum::routing::get(move || {
+                let (release, held) = (release.clone(), held.clone());
+                async move {
+                    held.fetch_add(1, Ordering::SeqCst);
+                    // Each release permit answers one request, so it is used up, not returned.
+                    if let Ok(permit) = release.acquire().await {
+                        permit.forget();
+                    }
+                    "held"
+                }
+            }),
+        )
+        .route("/ok.webp", axum::routing::get(|| async { "ok" }));
+    common::serve_http_upstream(app).await
+}
+
+/// One port behind a trusted proxy on 127.0.0.1 and one port that trusts nobody, both with the
+/// background stream limit.
+fn limit_storage(
+    trusted: &common::TestPort,
+    direct: &common::TestPort,
+    upstream: &str,
+) -> TestStorage {
+    let proxy = |client_ip| HttpProxy {
+        vhosts: vec!["localhost".parse().unwrap()],
+        routes: vec![common::http_route("/", upstream, None)],
+        upgrade_insecure: false,
+        client_ip,
+        stream_priority: StreamPriorityConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let trusting = ClientIpConfig {
+        trust_cdn: false,
+        trusted_proxies: vec!["127.0.0.0/8".parse().unwrap(), "::1/128".parse().unwrap()],
+    };
+    TestStorage::builder()
+        .ports(vec![
+            common::http_port_entry("trusted", trusted),
+            common::http_port_entry("direct", direct),
+        ])
+        .proxies(vec![
+            common::http_proxy_entry("behind", "trusted", proxy(trusting)),
+            common::http_proxy_entry("open", "direct", proxy(ClientIpConfig::default())),
+        ])
+        .build()
+}
+
+/// Sends `Priority: u=7` with the `X-Forwarded-For` value and returns the status.
+async fn background_get(
+    client: &reqwest::Client,
+    url: url::Url,
+    forwarded_for: &str,
+) -> anyhow::Result<u16> {
+    let resp = client
+        .get(url)
+        .header("priority", "u=7")
+        .header("x-forwarded-for", forwarded_for)
+        .send()
+        .await?;
+    Ok(resp.status().as_u16())
+}
+
+/// Starts `count` background requests to `/hold.webp` and waits until the upstream holds them
+/// all.
+async fn hold_requests(
+    client: &reqwest::Client,
+    port: &common::TestPort,
+    forwarded_for: impl Fn(usize) -> String,
+    count: usize,
+    held: &AtomicUsize,
+) -> anyhow::Result<Vec<tokio::task::JoinHandle<anyhow::Result<u16>>>> {
+    let start = held.load(Ordering::SeqCst);
+    let tasks = (0..count)
+        .map(|i| {
+            let (client, url, xff) = (
+                client.clone(),
+                port.http_url("/hold.webp"),
+                forwarded_for(i),
+            );
+            tokio::spawn(async move { background_get(&client, url, &xff).await })
+        })
+        .collect();
+    let all_held = || async { Ok(held.load(Ordering::SeqCst) == start + count) };
+    common::wait_until(all_held, "the upstream did not get every held request").await?;
+    Ok(tasks)
+}
+
+/// Releases the held requests and asserts that each was answered.
+async fn finish(
+    tasks: Vec<tokio::task::JoinHandle<anyhow::Result<u16>>>,
+    release: &tokio::sync::Semaphore,
+) -> anyhow::Result<()> {
+    release.add_permits(tasks.len());
+    for task in tasks {
+        assert_eq!(task.await??, 200);
+    }
+    Ok(())
+}
+
+/// docs/content/configuration.md: the background stream limit counts each client. One client
+/// that holds its limit gets 429, while another client is still served; a client that forges
+/// `X-Forwarded-For` on a port that trusts nobody stays one client.
+#[tokio::test]
+async fn background_limit_is_counted_per_client() -> anyhow::Result<()> {
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let held = Arc::new(AtomicUsize::new(0));
+    let upstream = holding_upstream(release.clone(), held.clone()).await?;
+    let trusted = alloc_tcp_port().await?;
+    let direct = alloc_tcp_port().await?;
+    let config = limit_storage(&trusted, &direct, upstream.as_str());
+
+    with_server(config, |_| async move {
+        let client = reqwest::Client::new();
+        check_trusted_clients(&client, &trusted, &release, &held).await?;
+        check_forged_clients(&client, &direct, &release, &held).await
+    })
+    .await
+}
+
+/// Behind the trusted proxy, the client that holds its limit gets 429 and another client 200.
+async fn check_trusted_clients(
+    client: &reqwest::Client,
+    port: &common::TestPort,
+    release: &tokio::sync::Semaphore,
+    held: &AtomicUsize,
+) -> anyhow::Result<()> {
+    let limit = DEFAULT_MAX_BACKGROUND_CONCURRENCY;
+    let attacker = "203.0.113.50";
+    let tasks = hold_requests(client, port, |_| attacker.into(), limit, held).await?;
+    let refused = background_get(client, port.http_url("/ok.webp"), attacker).await?;
+    assert_eq!(refused, 429);
+    let other = background_get(client, port.http_url("/ok.webp"), "198.51.100.8").await?;
+    assert_eq!(other, 200);
+    finish(tasks, release).await?;
+    let again = background_get(client, port.http_url("/ok.webp"), attacker).await?;
+    assert_eq!(again, 200);
+    Ok(())
+}
+
+/// On the port that trusts nobody every request comes from 127.0.0.1, whatever it forges.
+async fn check_forged_clients(
+    client: &reqwest::Client,
+    port: &common::TestPort,
+    release: &tokio::sync::Semaphore,
+    held: &AtomicUsize,
+) -> anyhow::Result<()> {
+    let forged = |i| format!("203.0.113.{i}");
+    let tasks = hold_requests(
+        client,
+        port,
+        forged,
+        DEFAULT_MAX_BACKGROUND_CONCURRENCY,
+        held,
+    )
+    .await?;
+    let refused = background_get(client, port.http_url("/ok.webp"), "198.51.100.9").await?;
+    assert_eq!(refused, 429);
+    finish(tasks, release).await
 }
