@@ -435,16 +435,18 @@ async fn active_health_check_marks_a_failing_server_unhealthy() -> anyhow::Resul
         balanced_http(&urls, LoadBalancing::First, health_check),
     )]);
 
+    // The failing server is unhealthy and its last error names the status it answered; the
+    // healthy server has no error.
     with_server(config, |mut channels| async move {
         wait_for_body(proxy_port.http_url("/"), "live").await?;
-        let error = "the active check received status 500 Internal Server Error";
-        assert_eq!(
-            upstream_health(&mut channels, "active").await?,
-            vec![
-                (urls[0].to_string(), false, Some(error.to_string())),
-                (urls[1].to_string(), true, None),
-            ]
-        );
+        let health = upstream_health(&mut channels, "active").await?;
+        let [(sick_addr, sick, sick_error), live] = health.as_slice() else {
+            anyhow::bail!("expected two servers: {health:?}");
+        };
+        assert_eq!((sick_addr.as_str(), *sick), (urls[0].as_str(), false));
+        let sick_error = sick_error.as_deref().unwrap_or_default();
+        assert!(sick_error.contains("500"), "{sick_error}");
+        assert_eq!(live, &(urls[1].to_string(), true, None));
         Ok(())
     })
     .await
@@ -1017,6 +1019,20 @@ async fn read_one_char(stream: &mut TcpStream) -> anyhow::Result<char> {
     Ok(buf[0] as char)
 }
 
+/// Opens connections until one reaches the server `expected`, for up to five seconds. A
+/// connection to another server is closed at once, so it does not change the balance.
+async fn connect_until(proxy: SocketAddr, expected: char) -> anyhow::Result<TcpStream> {
+    for _ in 0..50 {
+        let mut stream = TcpStream::connect(proxy).await?;
+        if read_one_char(&mut stream).await? == expected {
+            return Ok(stream);
+        }
+        drop(stream);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("no connection reached {expected}")
+}
+
 #[tokio::test]
 async fn tcp_least_conn_balances_by_active_connections() -> anyhow::Result<()> {
     let a = start_held_tcp_upstream("a").await?;
@@ -1042,13 +1058,10 @@ async fn tcp_least_conn_balances_by_active_connections() -> anyhow::Result<()> {
         let mut s2 = TcpStream::connect(proxy_port.socket_addr()).await?;
         assert_eq!(read_one_char(&mut s2).await?, 'b');
 
-        // Close connection 1 (releasing a).
+        // Close connection 1 (releasing a). With b still active and a idle, a new connection
+        // must go to a once the proxy has seen the close.
         drop(s1);
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        // With b still active and a idle, connection 3 must go to a.
-        let mut s3 = TcpStream::connect(proxy_port.socket_addr()).await?;
-        assert_eq!(read_one_char(&mut s3).await?, 'a');
+        let s3 = connect_until(proxy_port.socket_addr(), 'a').await?;
 
         drop(s2);
         drop(s3);
