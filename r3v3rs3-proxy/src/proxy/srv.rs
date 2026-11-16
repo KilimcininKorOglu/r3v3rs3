@@ -8,6 +8,7 @@ use crate::certs::dns::build_resolver;
 use crate::command::ServerCommand;
 use hickory_proto::rr::RData;
 use hickory_proto::rr::rdata::SRV;
+use hickory_resolver::net::{DnsError, NetError};
 use r3v3rs3_api::{proxy::Server, upstream::SrvStatus};
 use std::{
     collections::{BTreeSet, HashMap},
@@ -248,10 +249,10 @@ async fn resolve(
     name: &str,
 ) -> Result<(Vec<SrvTarget>, Duration), String> {
     let resolver = build_resolver(nameserver).map_err(|err| err.to_string())?;
-    let lookup = resolver
-        .srv_lookup(format!("{name}."))
-        .await
-        .map_err(|err| err.to_string())?;
+    let lookup = match resolver.srv_lookup(format!("{name}.")).await {
+        Ok(lookup) => lookup,
+        Err(err) => return no_records(&err).ok_or_else(|| err.to_string()),
+    };
     let ttl = lookup
         .valid_until()
         .saturating_duration_since(Instant::now());
@@ -266,6 +267,19 @@ async fn resolve(
     );
     debug!(name, targets = ?targets, ttl = ?ttl, "SRV lookup finished");
     Ok((targets, ttl))
+}
+
+/// An answer that the name does not exist (NXDOMAIN) or has no SRV records (NODATA) is a lookup
+/// that succeeded with no target: RFC 8767 section 4 counts it as a refresh, so the old targets
+/// are dropped. The negative TTL of RFC 2308 sets the next lookup. Other errors return `None`.
+fn no_records(err: &NetError) -> Option<(Vec<SrvTarget>, Duration)> {
+    match err {
+        NetError::Dns(DnsError::NoRecordsFound(records)) => {
+            let ttl = records.negative_ttl.unwrap_or_default();
+            Some((Vec::new(), Duration::from_secs(u64::from(ttl))))
+        }
+        _ => None,
+    }
 }
 
 /// The targets of every priority, sorted by priority, host and port. RFC 2782: a client uses the

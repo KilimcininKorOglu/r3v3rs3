@@ -120,6 +120,8 @@ async fn srv_targets_change_when_the_ttl_expires() -> anyhow::Result<()> {
     .await
 }
 
+/// A name that does not exist (NXDOMAIN) has no target, so the route answers 502. RFC 8767
+/// section 4 counts the NXDOMAIN answer as a successful lookup, so no error is reported.
 #[tokio::test]
 async fn srv_without_an_answer_answers_502() -> anyhow::Result<()> {
     let dns = MockDns::start().await?;
@@ -131,8 +133,8 @@ async fn srv_without_an_answer_answers_502() -> anyhow::Result<()> {
         let srv = srv_status(&mut channels).await?;
         assert_eq!(srv.len(), 1);
         assert!(srv[0].targets.is_empty());
-        assert!(srv[0].error.is_some(), "{srv:?}");
-        assert_eq!(srv[0].refreshed_at, None);
+        assert_eq!(srv[0].error, None, "{srv:?}");
+        assert!(srv[0].refreshed_at.is_some(), "{srv:?}");
         Ok(())
     })
     .await
@@ -244,6 +246,26 @@ async fn a_server_failure_keeps_the_last_targets() -> anyhow::Result<()> {
         let failed = wait_for_srv(&mut channels, |srv| srv.error.is_some()).await?;
         assert_eq!(failed.targets, [target]);
         wait_for_body(&url, "kept", Duration::from_secs(1)).await
+    })
+    .await
+}
+
+/// RFC 8767 section 4: an authoritative NXDOMAIN refreshes the data, and RFC 2308 says the name
+/// does not exist. The old targets are no longer used, so the route answers 502.
+#[tokio::test]
+async fn nxdomain_removes_the_targets() -> anyhow::Result<()> {
+    let dns = MockDns::start().await?;
+    let (_upstream, record) = upstream("gone").await?;
+    dns.set(NAME, 1, vec![record]);
+    let port = alloc_tcp_port().await?;
+
+    with_server(storage(&port, Some(dns.addr)), |mut channels| async move {
+        let url = port.http_url("/").to_string();
+        wait_for_body(&url, "gone", Duration::from_secs(5)).await?;
+        dns.remove(NAME);
+        wait_for_srv(&mut channels, |srv| srv.targets.is_empty()).await?;
+        wait_for_status(&url, 502).await?;
+        Ok(())
     })
     .await
 }

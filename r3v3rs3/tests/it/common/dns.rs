@@ -76,6 +76,11 @@ impl MockDns {
             .insert(name.to_lowercase(), Answer::Records(ttl, records));
     }
 
+    /// Answers the queries of a name with NXDOMAIN.
+    pub fn remove(&self, name: &str) {
+        self.table.lock().unwrap().remove(&name.to_lowercase());
+    }
+
     /// Answers the queries of a name with SERVFAIL.
     pub fn fail(&self, name: &str) {
         self.table

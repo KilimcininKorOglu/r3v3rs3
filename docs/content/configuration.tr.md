@@ -274,7 +274,7 @@ routes = [{ path = "/", servers = [{ url = "http+srv://_http._tcp.api.service.co
 
 - İstekleri en düşük öncelik değerine sahip kayıtlar alır. RFC 2782'nin istediği gibi daha yüksek değerli kayıt yedektir: Yalnız daha düşük değerli bütün sunucular sağlıksızsa ya da isteği karşılayamadıysa istek alır.
 - Kaydın SRV ağırlığı, sunucunun `weight` değeri olur. `0` ağırlığı `1` olur, çünkü r3v3rs3'te ağırlığı `0` olan sunucu yeni istek almaz. SRV sunucusunun kendisine `weight` verilemez.
-- r3v3rs3, yanıtın TTL süresi bitince adı yeniden çözer. En erken 5 saniye sonra çözer. Hedefler değişince route yeni sunucuları yeniden başlatmadan alır. Kalan sunucuların sağlık durumu korunur. Başarısız bir sorgu son hedefleri korur ve 5 saniye sonra yeniden denenir.
+- r3v3rs3, yanıtın TTL süresi bitince adı yeniden çözer. En erken 5 saniye sonra çözer. Hedefler değişince route yeni sunucuları yeniden başlatmadan alır. Kalan sunucuların sağlık durumu korunur. Başarısız bir sorgu (örneğin SERVFAIL yanıtı ya da `timeout`) son hedefleri korur ve 5 saniye sonra yeniden denenir. Adın olmadığını (NXDOMAIN) ya da SRV kaydı bulunmadığını bildiren yanıt geçerli bir yanıttır (RFC 8767), bu yüzden hedefleri kaldırır. Sonraki sorgu yanıtın negatif TTL süresine göre, en erken 5 saniye sonra yapılır.
 - SRV adının hedefi olmayan route 502 döner. Route'un başka sunucuları varsa istekleri onlar alır.
 - "Upstream DNS Çözümleyicisi" ayarı ([Ayarlar](#ayarlar) bölümüne bakın) SRV sorgularının DNS sunucusunu seçer, örneğin Consul DNS için `127.0.0.1:8600`. Ayar boşsa r3v3rs3 sistemin çözümleyicisini kullanır. Hedeflerin host adlarını bağlantı sırasında sistemin çözümleyicisi çözer.
 
