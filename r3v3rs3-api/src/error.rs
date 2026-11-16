@@ -436,6 +436,9 @@ pub enum Error {
     #[error("fixed response body cannot be longer than {max} bytes")]
     FixedBodyTooLarge { max: usize },
 
+    #[error("an uploaded certificate field cannot be larger than {max} bytes")]
+    CertFieldTooLarge { max: usize },
+
     #[error("custom error page status must be an HTTP error code from 400 to 599: {status}")]
     InvalidErrorPageStatus { status: u16 },
 
@@ -613,6 +616,7 @@ impl Error {
             | Self::CertificateReadOnly { .. }
             | Self::TargetReadOnly { .. } => 403,
             Self::TooManyLoginAttempts | Self::IpBanned { .. } => 429,
+            Self::CertFieldTooLarge { .. } => 413,
             Self::AccountExists { .. }
             | Self::AppNameExists { .. }
             | Self::AppBusy { .. }

@@ -165,10 +165,9 @@ async fn read_field_with_limit(
         .await
         .map_err(|e| AppError::BadRequest(format!("error reading multipart field: {e}")))?
     {
+        // RFC 9110 section 15.5.14: content larger than the server accepts is 413.
         if buf.len() + chunk.len() > limit {
-            return Err(AppError::BadRequest(format!(
-                "field exceeds maximum size limit of {limit} bytes"
-            )));
+            return Err(Error::CertFieldTooLarge { max: limit }.into());
         }
         buf.extend_from_slice(&chunk);
     }

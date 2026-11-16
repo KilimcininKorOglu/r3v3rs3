@@ -172,9 +172,10 @@ async fn check_upload_limits(addr: SocketAddr, cookie: &str) -> anyhow::Result<(
 
     let oversized = Cert::new_ca()?;
     let mut chain = oversized.pem_chain.clone();
-    chain.extend(vec![b'\n'; 1024 * 1024 + 10]);
+    chain.extend(vec![b'\n'; 3 * 1024 * 1024]);
+    // RFC 9110 section 15.5.14: content larger than the server accepts is 413.
     let status = upload_root(addr, cookie, chain_body(&chain)).await?;
-    assert!(status.is_client_error(), "{status}");
+    assert_eq!(status, reqwest::StatusCode::PAYLOAD_TOO_LARGE);
 
     let certs = list_certs(&reqwest::Client::new(), addr, cookie).await?;
     let ids = certs.iter().map(|cert| cert.id).collect::<Vec<_>>();

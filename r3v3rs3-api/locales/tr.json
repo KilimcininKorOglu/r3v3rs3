@@ -586,6 +586,7 @@
   "error.upgrade_failed": "Sunucu yükseltmesi kurulamadı. Çalışan sunucu değişmedi.",
   "error.failed_to_save_config": "Yapılandırma kaydedilemedi. Değişiklik uygulanmadı.",
   "error.fixed_body_too_large": "Sabit yanıtın gövdesi {max} byte'tan uzun olamaz.",
+  "error.cert_field_too_large": "Yüklenen sertifika veya key {max} byte'tan büyük olamaz.",
   "error.invalid_error_page_status": "Özel hata sayfası durum kodu 400 ile 599 arasında bir HTTP hata kodu olmalıdır: {status}",
   "error.error_page_body_too_large": "Özel hata sayfası gövdesi {max} byte'tan uzun olamaz.",
   "error.forbidden": "Hesabınızın rolü bu işleme izin vermiyor.",

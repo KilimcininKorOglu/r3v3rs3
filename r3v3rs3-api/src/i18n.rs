@@ -362,6 +362,7 @@ mod tests {
             Error::RouteResponseConflict,
             Error::InvalidFixedStatus { status: 418 },
             Error::FixedBodyTooLarge { max: 4096 },
+            Error::CertFieldTooLarge { max: 1024 },
             Error::InvalidErrorPageStatus { status: 418 },
             Error::ErrorPageBodyTooLarge { max: 4096 },
             Error::AccessListNameRequired,
