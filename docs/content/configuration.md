@@ -453,7 +453,7 @@ A UDP proxy opens one session for each client address. The session has its own s
 
 A session closes when no packet passes in either direction for `session_idle_timeout` (default `60s`). It also closes when the upstream socket reports an error, or when the upstream servers or the idle timeout of the port change. The next packet of the client opens a new session. A port keeps at most 10,000 sessions. When the limit is reached, r3v3rs3 drops the packets of new clients.
 
-`max_datagram_size` sets the maximum payload size in bytes for UDP packets (between 512 and 65527, default `65527`). Packets exceeding this size are truncated.
+`max_datagram_size` sets the maximum payload size in bytes for UDP packets (between 512 and 65527, default `65527`). A packet above this size is dropped in both directions, because a truncated packet would reach the other side as corrupt data.
 
 ## Upstream Timeouts
 

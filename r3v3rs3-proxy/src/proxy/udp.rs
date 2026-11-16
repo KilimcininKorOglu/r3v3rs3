@@ -103,6 +103,13 @@ impl UdpPortContext {
     /// Sends a packet of a client to the upstream server of its session. The replies of the
     /// server go back to the client through `listener`.
     pub async fn forward(&self, client: SocketAddr, data: &[u8], listener: &Arc<UdpSocket>) {
+        // A truncated datagram would reach the server as corrupt data, so it is dropped.
+        if data.len() > self.upstream.max_datagram_size {
+            self.span.in_scope(|| {
+                debug!(%client, size = data.len(), "dropping a packet above max_datagram_size");
+            });
+            return;
+        }
         let is_open = self
             .sessions
             .get(&client)
@@ -121,12 +128,7 @@ impl UdpPortContext {
             }
             None => return,
         };
-        let payload = if data.len() > self.upstream.max_datagram_size {
-            &data[..self.upstream.max_datagram_size]
-        } else {
-            data
-        };
-        if let Err(err) = socket.send(payload).await {
+        if let Err(err) = socket.send(data).await {
             context.report_failure(&err.to_string());
             self.span.in_scope(|| {
                 debug!(%client, %err, "failed to send the packet to the upstream server");
@@ -403,7 +405,9 @@ impl Activity {
 /// error, such as an ICMP port unreachable message, counts as a failure.
 async fn relay_replies(socket: Arc<UdpSocket>, context: Arc<SessionContext>) {
     let client = context.client;
-    let mut buf = vec![0; context.max_datagram_size];
+    // One byte more than the limit, so a longer reply shows as one and is dropped instead of
+    // being cut by the receive call.
+    let mut buf = vec![0; context.max_datagram_size + 1];
     loop {
         let remaining = context.activity.remaining();
         if remaining.is_zero() {
@@ -422,6 +426,12 @@ async fn relay_replies(socket: Arc<UdpSocket>, context: Arc<SessionContext>) {
         };
         context.activity.touch();
         context.group.report_success(context.index);
+        if size > context.max_datagram_size {
+            context.span.in_scope(|| {
+                debug!(%client, "dropping a reply above max_datagram_size");
+            });
+            continue;
+        }
         if let Err(err) = context.listener.send_to(&buf[..size], client).await {
             context
                 .span

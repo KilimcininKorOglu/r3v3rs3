@@ -1124,7 +1124,7 @@
   "proxy_form.session_idle_timeout_hint": "Each client address has its own session. A session closes when no packet passes in either direction for this time.",
   "proxy_form.session_idle_timeout_name": "Session idle timeout",
   "proxy_form.max_datagram_size": "Maximum Datagram Size (Bytes)",
-  "proxy_form.max_datagram_size_hint": "The largest UDP packet payload size in bytes (between 512 and 65527). Packets exceeding this size are truncated.",
+  "proxy_form.max_datagram_size_hint": "The largest UDP packet payload size in bytes (between 512 and 65527). A larger packet is dropped in both directions.",
   "proxy_form.datagram_size_range": "Maximum datagram size must be a whole number of bytes from {min} to {max}",
   "proxy_form.srv_weight": "An SRV server URL has no weight. The SRV records give the weights.",
   "proxy_form.tls": "Connect with TLS",

@@ -132,42 +132,54 @@ async fn check_idle_session_closes(
     Ok(())
 }
 
-/// docs/content/configuration.md: packets above `max_datagram_size` are truncated, also the
-/// ones that the upstream sends back.
+/// How long a test waits to be sure that a dropped packet does not arrive.
+const NO_PACKET_WAIT: Duration = Duration::from_millis(500);
+
+/// A packet of the client above `max_datagram_size` is dropped, not truncated: a truncated
+/// packet would reach the upstream as corrupt data that it cannot detect. A packet of exactly
+/// the limit passes.
 #[tokio::test]
-async fn udp_datagram_size_limits_the_reply_of_the_upstream() -> anyhow::Result<()> {
+async fn udp_drops_a_client_packet_above_the_size_limit() -> anyhow::Result<()> {
     let upstream_port = alloc_udp_port().await?;
     let proxy_port = alloc_udp_port().await?;
-    let _sources = start_upstream(&upstream_port, |_| vec![0x24; 1000]).await?;
+    let mut sources = start_echo_upstream(&upstream_port).await?;
     let config = udp_storage_with_size(&proxy_port, &upstream_port, SHORT_IDLE, 512);
 
     with_server(config, |_| async move {
         let proxy = proxy_port.socket_addr();
         let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
-        client.send_to(b"small", proxy).await?;
-        assert_eq!(recv_reply(&client, proxy).await?, vec![0x24; 512]);
-        Ok(())
+        client.send_to(&[0x42; 513], proxy).await?;
+        let reached = timeout(NO_PACKET_WAIT, sources.recv()).await;
+        assert!(
+            reached.is_err(),
+            "the oversized packet reached the upstream"
+        );
+        send_and_expect_echo(&client, proxy, &[0x42; 512]).await
     })
     .await
 }
 
+/// A reply of the upstream above `max_datagram_size` is dropped, not truncated, and the session
+/// still carries the next reply.
 #[tokio::test]
-async fn udp_datagram_size_limits_payload() -> anyhow::Result<()> {
+async fn udp_drops_an_upstream_reply_above_the_size_limit() -> anyhow::Result<()> {
     let upstream_port = alloc_udp_port().await?;
     let proxy_port = alloc_udp_port().await?;
-    let _sources = start_echo_upstream(&upstream_port).await?;
+    let reply = |packet: &[u8]| match packet {
+        b"big" => vec![0x24; 513],
+        other => other.to_vec(),
+    };
+    let _sources = start_upstream(&upstream_port, reply).await?;
     let config = udp_storage_with_size(&proxy_port, &upstream_port, SHORT_IDLE, 512);
 
     with_server(config, |_| async move {
         let proxy = proxy_port.socket_addr();
         let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
-
-        let large_packet = vec![0x42; 1000];
-        client.send_to(&large_packet, proxy).await?;
-        let reply = recv_reply(&client, proxy).await?;
-        assert_eq!(reply.len(), 512);
-        assert_eq!(reply, vec![0x42; 512]);
-        Ok(())
+        client.send_to(b"big", proxy).await?;
+        let mut buf = [0; 1024];
+        let reply = timeout(NO_PACKET_WAIT, client.recv_from(&mut buf)).await;
+        assert!(reply.is_err(), "the oversized reply reached the client");
+        send_and_expect_echo(&client, proxy, b"small").await
     })
     .await
 }

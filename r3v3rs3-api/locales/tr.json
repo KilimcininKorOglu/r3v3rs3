@@ -1124,7 +1124,7 @@
   "proxy_form.session_idle_timeout_hint": "Her istemci adresinin kendi oturumu vardır. Bu süre boyunca iki yönde de paket geçmezse oturum kapanır.",
   "proxy_form.session_idle_timeout_name": "Oturum boşta kalma timeout'u",
   "proxy_form.max_datagram_size": "Maksimum Datagram Boyutu (Bayt)",
-  "proxy_form.max_datagram_size_hint": "Bayt cinsinden en büyük UDP paket yükü boyutu (512 ile 65527 arasında). Bu boyutu aşan paketler kırpılır.",
+  "proxy_form.max_datagram_size_hint": "Bayt cinsinden en büyük UDP paket yükü boyutu (512 ile 65527 arasında). Daha büyük paket iki yönde de atılır.",
   "proxy_form.datagram_size_range": "Maksimum datagram boyutu {min} ile {max} bayt arasında bir tam sayı olmalıdır",
   "proxy_form.srv_weight": "SRV sunucu URL'ine ağırlık verilemez. Ağırlıkları SRV kayıtları verir.",
   "proxy_form.tls": "TLS ile Bağlan",
