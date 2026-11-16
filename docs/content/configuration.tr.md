@@ -1222,7 +1222,7 @@ r3v3rs3, cache'i kullanabilecek isteklerdeki `Accept-Encoding` header'ını sile
 Cache'teki yanıtları temizlemek için:
 - `DELETE /api/proxies/{id}/cache` (veya belirli bir yol ön ekiyle eşleşen kayıtları silmek için `DELETE /api/proxies/{id}/cache?path=/api/v1/`).
 - `POST /api/proxies/{id}/cache/purge` isteği (isteğe bağlı JSON gövdesi `{"path": "/on-ek"}`).
-- Doğrudan proxy adresine HTTP `PURGE` metodu ile istek (ör. `curl -X PURGE https://app.example.com/data.json`).
+- Doğrudan proxy adresine HTTP `PURGE` metodu ile istek (ör. `curl -X PURGE https://app.example.com/data.json`). Proxy bu isteği yalnız iki durumda kabul eder: route'ta bir kimlik doğrulama vardır ve istek bunu geçmiştir ya da istemci adresi bir loopback adresidir. Güvenilen bir proxy veya CDN üzerinden gelen istek güvenilir sayılmaz, çünkü güvenilen proxy internetteki her istemcinin isteğini iletir. Diğer istemciler `403 Forbidden` alır.
 - Veya WebUI proxy listesindeki "Temizle" linkine tıklayın.
 
 Saklanan yanıtlar, cache ayarları değişene veya sunucu yeniden başlatılana kadar bellekte kalır.

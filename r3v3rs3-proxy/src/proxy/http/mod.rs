@@ -2199,8 +2199,10 @@ fn dictionary_response(
     res
 }
 
+/// A cache purge needs the authentication of the route or a client on this host. A trusted peer
+/// forwards the requests of every internet client, so neither the peer nor its trust counts.
 fn is_purge_authorized(has_auth: bool, client: &client_ip::ClientAddr) -> bool {
-    client.peer.is_loopback() || client.ip.is_loopback() || client.trusted_peer || has_auth
+    client.ip.is_loopback() || has_auth
 }
 
 fn handle_purge_request<B>(
@@ -2374,12 +2376,23 @@ mod tests {
         };
         assert!(is_purge_authorized(false, &ipv6_loopback));
 
-        let trusted_peer_addr = client_ip::ClientAddr {
+        // A trusted CDN or proxy forwards every internet client; the client behind it is not
+        // trusted, so it purges only with authentication.
+        let behind_trusted_peer = client_ip::ClientAddr {
             peer: "198.51.100.10".parse().unwrap(),
             ip: "203.0.113.5".parse().unwrap(),
             trusted_peer: true,
         };
-        assert!(is_purge_authorized(false, &trusted_peer_addr));
+        assert!(!is_purge_authorized(false, &behind_trusted_peer));
+        assert!(is_purge_authorized(true, &behind_trusted_peer));
+
+        // The same holds for a trusted proxy on the same host.
+        let behind_local_proxy = client_ip::ClientAddr {
+            peer: "127.0.0.1".parse().unwrap(),
+            ip: "203.0.113.5".parse().unwrap(),
+            trusted_peer: true,
+        };
+        assert!(!is_purge_authorized(false, &behind_local_proxy));
 
         let remote_addr = client_ip::ClientAddr {
             peer: "198.51.100.1".parse().unwrap(),

@@ -1222,7 +1222,7 @@ r3v3rs3 removes `Accept-Encoding` from the requests that can use the cache, so t
 To remove stored responses:
 - Send `DELETE /api/proxies/{id}/cache` (or `DELETE /api/proxies/{id}/cache?path=/api/v1/` to purge only entries whose path starts with the given prefix).
 - Send `POST /api/proxies/{id}/cache/purge` with optional JSON body `{"path": "/prefix"}`.
-- Send an HTTP `PURGE` request directly to the proxy URL (e.g. `curl -X PURGE https://app.example.com/data.json`).
+- Send an HTTP `PURGE` request directly to the proxy URL (e.g. `curl -X PURGE https://app.example.com/data.json`). The proxy accepts it only when the route has an authentication that the request passed, or when the client address is a loopback address. A request through a trusted proxy or CDN does not count as trusted, because the trusted proxy forwards every internet client; other clients get `403 Forbidden`.
 - Or click "Purge" in the proxy list of the WebUI.
 
 The stored responses stay in memory while the cache settings do not change. A restart or a change of the cache settings removes them.
