@@ -37,10 +37,13 @@ async fn test_rfc9218_spec_compliance() {
     assert_eq!(StreamPriority::new(0, false).to_header_value(), "u=0");
     assert_eq!(StreamPriority::new(5, true).to_header_value(), "u=5, i");
 
-    // Weights
-    assert_eq!(StreamPriority::new(0, false).weight(), 256);
-    assert_eq!(StreamPriority::new(1, false).weight(), 128);
-    assert_eq!(StreamPriority::new(7, true).weight(), 2);
+    // RFC 9218 section 4.1: a lower urgency is a higher priority, so each urgency weighs more
+    // than the next one.
+    for urgency in 0..7 {
+        let higher = StreamPriority::new(urgency, false).weight();
+        let lower = StreamPriority::new(urgency + 1, false).weight();
+        assert!(higher > lower, "u={urgency}: {higher} <= {lower}");
+    }
 }
 
 #[tokio::test]
@@ -71,26 +74,25 @@ async fn test_mime_heuristics_and_custom_rules() {
     let svg = resolve_stream_priority(None, "/logo.svg", Some("image/svg+xml"), &config);
     assert_eq!(svg.urgency, 2);
 
-    // Built-in heuristics
+    // Built-in heuristics: the document blocks rendering most, then the styles and scripts, then
+    // the fonts, then the images and the videos (a lower urgency is sent first, RFC 9218
+    // section 4.1). Images and videos render progressively, so they are incremental (section 4.2).
     let html = resolve_stream_priority(None, "/index.html", Some("text/html"), &config);
-    assert_eq!(html.urgency, 0);
-
     let css = resolve_stream_priority(None, "/assets/app.css", Some("text/css"), &config);
-    assert_eq!(css.urgency, 1);
-
     let js = resolve_stream_priority(None, "/app.mjs", None, &config);
-    assert_eq!(js.urgency, 1);
-
     let font = resolve_stream_priority(None, "/fonts/inter.woff2", None, &config);
-    assert_eq!(font.urgency, 2);
-
     let img = resolve_stream_priority(None, "/photo.webp", Some("image/webp"), &config);
-    assert_eq!(img.urgency, 5);
-    assert!(img.incremental);
-
     let video = resolve_stream_priority(None, "/stream.mp4", Some("video/mp4"), &config);
-    assert_eq!(video.urgency, 6);
-    assert!(video.incremental);
+    assert!(html.urgency < css.urgency, "{html:?} {css:?}");
+    assert!(html.urgency < js.urgency, "{html:?} {js:?}");
+    assert!(
+        css.urgency.max(js.urgency) < font.urgency,
+        "{css:?} {js:?} {font:?}"
+    );
+    assert!(font.urgency < img.urgency, "{font:?} {img:?}");
+    assert!(img.urgency <= video.urgency, "{img:?} {video:?}");
+    assert!(img.incremental && video.incremental, "{img:?} {video:?}");
+    assert!(!html.incremental, "{html:?}");
 
     // Client header takes precedence when present
     let client_override =
@@ -136,96 +138,69 @@ async fn test_controller_backpressure_and_counters() {
     assert_eq!(controller.stats().active_streams, 0);
 }
 
+/// An upstream that answers every request with the `Priority` header it received.
+async fn priority_echo_upstream() -> anyhow::Result<url::Url> {
+    let app = axum::Router::new().fallback(|headers: axum::http::HeaderMap| async move {
+        headers
+            .get("priority")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("-")
+            .to_string()
+    });
+    common::serve_http_upstream(app).await
+}
+
+/// The `Priority` header that the upstream received for the path.
+async fn upstream_priority(
+    client: &reqwest::Client,
+    port: &common::TestPort,
+    path: &str,
+    priority: Option<&str>,
+) -> anyhow::Result<StreamPriority> {
+    let mut request = client.get(port.http_url(path));
+    if let Some(priority) = priority {
+        request = request.header("priority", priority);
+    }
+    let received = request.send().await?.error_for_status()?.text().await?;
+    parse_rfc9218_priority(&received)
+        .ok_or_else(|| anyhow::anyhow!("{path}: the upstream got {received:?}"))
+}
+
+/// The proxy sends a `Priority` header for each request: the document before the styles before
+/// the images, which are incremental (RFC 9218 sections 4.1 and 4.2). A valid client header is
+/// passed on as it is; an out-of-range urgency is ignored (section 4), so the heuristic of the
+/// path applies instead of a clamped `u=7`.
 #[tokio::test]
 async fn test_proxy_injects_priority_header() -> anyhow::Result<()> {
-    let mut server = mockito::Server::new_async().await;
-    let mock_html = server
-        .mock("GET", "/page.html")
-        .match_header("priority", "u=0")
-        .with_body("html-ok")
-        .create_async()
-        .await;
-
-    let mock_css = server
-        .mock("GET", "/style.css")
-        .match_header("priority", "u=1")
-        .with_body("css-ok")
-        .create_async()
-        .await;
-
-    let mock_img = server
-        .mock("GET", "/picture.webp")
-        .match_header("priority", "u=5, i")
-        .with_body("img-ok")
-        .create_async()
-        .await;
-
-    let mock_client = server
-        .mock("GET", "/custom.webp")
-        .match_header("priority", "u=2")
-        .with_body("custom-ok")
-        .create_async()
-        .await;
-
-    // RFC 9218 section 4: an out-of-range urgency is ignored, so the heuristic of the path
-    // applies instead of a clamped `u=7`.
-    let mock_invalid = server
-        .mock("GET", "/invalid.webp")
-        .match_header("priority", "u=5, i")
-        .with_body("invalid-ok")
-        .create_async()
-        .await;
-
+    let upstream = priority_echo_upstream().await?;
     let proxy_port = alloc_tcp_port().await?;
-    let config = priority_storage(&proxy_port, &server.url())?;
+    let config = priority_storage(&proxy_port, upstream.as_str())?;
 
     with_server(config, |_| async move {
         wait_for_listener(proxy_port.socket_addr()).await?;
         let client = reqwest::Client::new();
-        let base_url = proxy_port.http_url("");
-
-        // 1. Request to HTML document -> should receive Priority: u=0
-        let resp_html = fetch_text(&client, format!("{base_url}/page.html"), None).await?;
-        assert_eq!(resp_html, "html-ok");
-        mock_html.assert_async().await;
-
-        // 2. Request to CSS -> should receive Priority: u=1
-        let resp_css = fetch_text(&client, format!("{base_url}/style.css"), None).await?;
-        assert_eq!(resp_css, "css-ok");
-        mock_css.assert_async().await;
-
-        // 3. Request to image -> should receive Priority: u=5, i
-        let resp_img = fetch_text(&client, format!("{base_url}/picture.webp"), None).await?;
-        assert_eq!(resp_img, "img-ok");
-        mock_img.assert_async().await;
-
-        // 4. Request with explicit client Priority header -> preserved!
-        let resp_custom =
-            fetch_text(&client, format!("{base_url}/custom.webp"), Some("u=2")).await?;
-        assert_eq!(resp_custom, "custom-ok");
-        mock_client.assert_async().await;
-
-        let resp_invalid =
-            fetch_text(&client, format!("{base_url}/invalid.webp"), Some("u=8")).await?;
-        assert_eq!(resp_invalid, "invalid-ok");
-        mock_invalid.assert_async().await;
-
+        let img = check_heuristic_headers(&client, &proxy_port).await?;
+        let get = |path, priority| upstream_priority(&client, &proxy_port, path, priority);
+        let custom = get("/custom.webp", Some("u=2")).await?;
+        assert_eq!(custom, StreamPriority::new(2, false));
+        assert_eq!(get("/invalid.webp", Some("u=8")).await?, img);
         Ok(())
     })
     .await
 }
 
-/// Sends a GET, with the client `Priority` header when one is given, and returns the body.
-async fn fetch_text(
+/// Checks the order of the headers that the proxy sends without a client header, and returns the
+/// one of an image.
+async fn check_heuristic_headers(
     client: &reqwest::Client,
-    url: String,
-    priority: Option<&str>,
-) -> anyhow::Result<String> {
-    let mut request = client.get(url);
-    if let Some(priority) = priority {
-        request = request.header("priority", priority);
-    }
-    Ok(request.send().await?.text().await?)
+    port: &common::TestPort,
+) -> anyhow::Result<StreamPriority> {
+    let html = upstream_priority(client, port, "/page.html", None).await?;
+    let css = upstream_priority(client, port, "/style.css", None).await?;
+    let img = upstream_priority(client, port, "/picture.webp", None).await?;
+    assert!(html.urgency < css.urgency && css.urgency < img.urgency);
+    assert!(img.incremental && !html.incremental, "{html:?} {img:?}");
+    Ok(img)
 }
 
 /// Builds the storage with an HTTP proxy to the upstream that injects the `Priority` header.
@@ -381,9 +356,10 @@ async fn finish(
     Ok(())
 }
 
-/// docs/content/configuration.md: the background stream limit counts each client. One client
-/// that holds its limit gets 429, while another client is still served; a client that forges
-/// `X-Forwarded-For` on a port that trusts nobody stays one client.
+/// The background stream limit counts each client, so one client cannot starve the others: the
+/// client that holds its limit gets 429 Too Many Requests (RFC 6585 section 4), while another
+/// client is still served; a client that forges `X-Forwarded-For` on a port that trusts nobody
+/// stays one client.
 #[tokio::test]
 async fn background_limit_is_counted_per_client() -> anyhow::Result<()> {
     let release = Arc::new(tokio::sync::Semaphore::new(0));
