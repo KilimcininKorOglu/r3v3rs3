@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.4] - 2026-11-16
+
+### Changed
+- Behind a trusted proxy, the HTTP proxy and the admin API read the client address only from `X-Forwarded-For`. The RFC 7239 `Forwarded` header and, in the admin API, `X-Real-IP` are no longer read. A trusted proxy that writes only `Forwarded` or `X-Real-IP` must now write `X-Forwarded-For`.
+- The backup documentation states that the S3 endpoint and the heartbeat URL may point at private and loopback addresses, and what this means for the accounts that can change them.
+
+### Fixed
+- A client behind a trusted proxy could name its own address in a `Forwarded` header, which the proxy merged into the `X-Forwarded-For` chain, and pass IP filters, the quarantine and rate limits.
+- The admin API took the leftmost `X-Forwarded-For` entry, which the client writes, for sign-in bans, rate limits and the audit log. It now takes the rightmost entry that is not a trusted proxy.
+- `/api/metrics` showed an account with a proxy list the request, upstream error and latency series of every proxy. It now shows only the series of its own proxies.
+- The MCP account tools turned an unknown role into `admin`, `create_auth_token` turned an unknown scope into `read`, `sync_project_env` turned an unknown mode into `sync_missing` and `dismiss_ct_alert` turned an unknown status into `dismissed`. Each unknown value now fails with `invalid_params`.
+- The MCP account tools dropped invalid proxy ids, so a list of only invalid ids gave an account access to every proxy. `install_store_app` dropped invalid domains and catalog fields and `sync_project_env` dropped invalid keys. Each invalid value now fails with `invalid_params`.
+- The MCP schemas mark the disaster recovery passphrase, the Git client secret and the registry password as required where the server needs them.
+- The MCP webhook tools accept the underscore form of multi-word event names, such as `deploy_pending_approval`.
+- The prune policy refuses an invalid interval and a disk pressure threshold outside 10 to 99 percent. Earlier, an invalid interval silently became one day.
+
 ## [3.4.3] - 2026-11-16
 
 ### Changed
