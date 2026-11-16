@@ -323,8 +323,8 @@ async fn verify_other_accounts(
     verify_editor_cannot_replay(client, addr, &editor).await
 }
 
-/// docs/content/accounts.md: a proxy outside the list of an account does not exist for it. The
-/// entries of `resource` stay hidden from `scoped`.
+/// An account with a proxy list must not read the requests of another proxy, and must not learn
+/// that the proxy exists, so every way to its entries answers as for a missing resource.
 async fn verify_scoped_account(
     client: &Client,
     addr: SocketAddr,
@@ -478,6 +478,56 @@ async fn verify_active_connections(
     assert_eq!(not_found_resp.status(), StatusCode::NOT_FOUND);
 
     Ok(())
+}
+
+/// Opens the live stream, records one entry of `resource`, and returns the stream text read
+/// within `wait`.
+async fn live_text(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    resource: ShortId,
+    wait: std::time::Duration,
+) -> anyhow::Result<String> {
+    let mut resp = client
+        .get(format!("http://{addr}/api/traffic/live"))
+        .header(COOKIE, cookie)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    // The handler subscribes before it answers, so the entry is sent after the subscription.
+    record(sample_log(resource, 200, "/live", "GET", None));
+    let mut text = String::new();
+    let deadline = tokio::time::Instant::now() + wait;
+    while !text.contains(&resource.to_string()) {
+        match tokio::time::timeout_at(deadline, resp.chunk()).await {
+            Ok(Ok(Some(chunk))) => text.push_str(&String::from_utf8_lossy(&chunk)),
+            _ => break,
+        }
+    }
+    Ok(text)
+}
+
+/// The live stream follows the same scope as the list: an account with a proxy list gets no
+/// entry of another proxy, while the admin gets it.
+#[tokio::test]
+async fn the_live_stream_keeps_the_scope_of_the_account() -> anyhow::Result<()> {
+    let dir = TempDir::new("traffic-live")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let resource = random_id();
+        let admin = login_when_allowed(addr, "admin", "password").await?;
+        let wait = std::time::Duration::from_secs(5);
+        let seen = live_text(&client, addr, &admin, resource, wait).await?;
+        assert!(seen.contains(&resource.to_string()), "{seen}");
+
+        let scoped = login_when_allowed(addr, "scoped", "password").await?;
+        let wait = std::time::Duration::from_secs(1);
+        let seen = live_text(&client, addr, &scoped, resource, wait).await?;
+        assert!(!seen.contains(&resource.to_string()), "{seen}");
+        Ok(())
+    })
+    .await
 }
 
 /// Every value below is a secret of a client; each carries `s3cr3t`, so one search finds a leak.
