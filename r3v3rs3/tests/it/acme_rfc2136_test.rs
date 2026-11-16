@@ -31,6 +31,8 @@ enum Mode {
     RefuseUpdates,
     /// Signs every response with another key.
     WrongKey,
+    /// Accepts every update but sends the response without a TSIG record.
+    Unsigned,
 }
 
 fn signer(key: Vec<u8>) -> anyhow::Result<TSigner> {
@@ -69,10 +71,13 @@ async fn serve(
 
     let mut response = answer(&request, mode)?;
     let signing_key = match mode {
-        Mode::WrongKey => b"another key".to_vec(),
-        _ => key.to_vec(),
+        Mode::WrongKey => Some(b"another key".to_vec()),
+        Mode::Unsigned => None,
+        _ => Some(key.to_vec()),
     };
-    sign_response(&mut response, &request_mac, signing_key)?;
+    if let Some(signing_key) = signing_key {
+        sign_response(&mut response, &request_mac, signing_key)?;
+    }
     write_response(&mut stream, &response).await
 }
 
@@ -244,6 +249,14 @@ async fn rfc2136_finds_the_zone_and_signs_every_update() -> anyhow::Result<()> {
 async fn rfc2136_rejects_a_response_signed_with_another_key() -> anyhow::Result<()> {
     let (err, _) = add_error(Mode::WrongKey, "example.test").await?;
     assert!(err.contains("TSIG signature"), "{err}");
+    Ok(())
+}
+
+/// RFC 8945 5.3: a client that signed its request must not accept an unsigned response, or an
+/// attacker on the path could forge the success of an update.
+#[tokio::test]
+async fn rfc2136_rejects_an_unsigned_response() -> anyhow::Result<()> {
+    add_error(Mode::Unsigned, "example.test").await?;
     Ok(())
 }
 
