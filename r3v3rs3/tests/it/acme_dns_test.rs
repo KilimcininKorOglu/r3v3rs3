@@ -966,7 +966,8 @@ if [ "$1" = add ] && [ "$3" = v2 ]; then echo "zone is locked" >&2; exit 3; fi"#
 
 #[tokio::test]
 async fn an_exec_program_is_stopped_when_the_timeout_expires() -> anyhow::Result<()> {
-    let (script, _) = exec_script("slow", "exec /bin/sleep 5")?;
+    // `exec` keeps the pid, so the logged pid is the pid of the sleep.
+    let (script, log) = exec_script("slow", "echo $$ >> \"$log\"\nexec /bin/sleep 5")?;
     let config = allowlist(&[&script], Duration::from_millis(200));
     let client = dns::client(&exec_provider(&script), &config).await?;
 
@@ -976,7 +977,28 @@ async fn an_exec_program_is_stopped_when_the_timeout_expires() -> anyhow::Result
     };
     assert!(format!("{err:#}").contains("did not add"), "{err:#}");
     assert!(started.elapsed() < Duration::from_secs(3));
-    Ok(())
+    let pid = log_lines(&log)?.first().cloned().unwrap_or_default();
+    anyhow::ensure!(
+        pid.parse::<u32>().is_ok(),
+        "the program logged no pid: {pid:?}"
+    );
+    wait_until_stopped(&pid).await
+}
+
+/// Waits up to 2 seconds until the process is gone or only a zombie, and fails if it still
+/// runs.
+async fn wait_until_stopped(pid: &str) -> anyhow::Result<()> {
+    for _ in 0..20 {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()?;
+        let state = String::from_utf8(output.stdout)?;
+        if state.trim().is_empty() || state.trim().starts_with('Z') {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("the program {pid} still runs after the timeout")
 }
 
 fn porkbun_with(url: String) -> DnsProvider {
@@ -1126,6 +1148,45 @@ fn route53(call: &Call) -> (StatusCode, String) {
     )
 }
 
+fn hmac_sha256(key: &[u8], data: &str) -> Vec<u8> {
+    use hmac::{Hmac, KeyInit, Mac};
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(key).unwrap();
+    mac.update(data.as_bytes());
+    mac.finalize().into_bytes().to_vec()
+}
+
+fn sha256_hex(data: &str) -> String {
+    use sha2::Digest as _;
+    hex::encode(sha2::Sha256::digest(data.as_bytes()))
+}
+
+/// The Authorization value that AWS Signature Version 4 gives the request for the access key
+/// `AKIDTEST` with `secret`: Route 53 signs in `us-east-1` with the `host` and `x-amz-date`
+/// headers.
+fn sigv4_authorization(call: &Call, secret: &str) -> String {
+    let date_time = call.header("x-amz-date");
+    let scope = format!("{}/us-east-1/route53/aws4_request", &date_time[..8]);
+    let (path, query) = call.uri.split_once('?').unwrap_or((&call.uri, ""));
+    let canonical_request = format!(
+        "{}\n{path}\n{query}\nhost:{}\nx-amz-date:{date_time}\n\nhost;x-amz-date\n{}",
+        call.method,
+        call.header("host"),
+        sha256_hex(&call.body)
+    );
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{date_time}\n{scope}\n{}",
+        sha256_hex(&canonical_request)
+    );
+    let key = ["us-east-1", "route53", "aws4_request"].iter().fold(
+        hmac_sha256(format!("AWS4{secret}").as_bytes(), &date_time[..8]),
+        |key, part| hmac_sha256(&key, part),
+    );
+    format!(
+        "AWS4-HMAC-SHA256 Credential=AKIDTEST/{scope}, SignedHeaders=host;x-amz-date, Signature={}",
+        hex::encode(hmac_sha256(&key, &string_to_sign))
+    )
+}
+
 #[tokio::test]
 async fn route53_upserts_and_deletes_one_record_set_in_the_public_zone() -> anyhow::Result<()> {
     let calls = add_and_remove(route53, |url| {
@@ -1147,16 +1208,10 @@ async fn route53_upserts_and_deletes_one_record_set_in_the_public_zone() -> anyh
     );
     let calls = calls.lock().unwrap();
     for call in calls.iter() {
-        assert!(
-            call.authorization
-                .starts_with("AWS4-HMAC-SHA256 Credential=AKIDTEST/"),
-            "{}",
-            call.authorization
+        assert_eq!(
+            call.authorization,
+            sigv4_authorization(call, "route53-secret")
         );
-        assert!(call.authorization.contains(
-            "/us-east-1/route53/aws4_request, SignedHeaders=host;x-amz-date, Signature="
-        ));
-        assert!(!call.authorization.contains("route53-secret"));
     }
     let values = "<ResourceRecord><Value>\"v1\"</Value></ResourceRecord><ResourceRecord><Value>\"v2\"</Value></ResourceRecord>";
     assert!(calls[1].body.contains("<Action>UPSERT</Action>"));
