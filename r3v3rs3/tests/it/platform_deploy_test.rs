@@ -181,8 +181,9 @@ async fn build_and_delete(ctx: &Context, id: &str) -> anyhow::Result<()> {
 async fn check_build(ctx: &Context, deployment: &str) -> anyhow::Result<()> {
     let path = format!("/api/deployments/{deployment}");
     let entry = call(ctx, Method::GET, &path, None).await?;
+    // The app deploys the branch `GIT_TAG`, so the build must record the commit of that tag.
     let sha = entry["commit_sha"].as_str().context("commit sha")?;
-    ensure!(sha.len() == 40, "{entry}");
+    ensure!(sha == GIT_COMMIT, "{entry}");
     let digest = entry["image_digest"].as_str().context("image digest")?;
     ensure!(digest.starts_with("sha256:"), "{entry}");
     Ok(())
@@ -244,9 +245,17 @@ async fn add_app(ctx: &Context, source: Value) -> anyhow::Result<String> {
 async fn deploy_and_roll_back(ctx: &Context, id: &str) -> anyhow::Result<()> {
     let blue = deploy(ctx, id, "blue").await?;
     wait_for_answer(ctx, "Name: blue").await?;
+    // A blue-green deployment keeps the old container serving until the new one answers, so
+    // no request fails during the switch.
+    let probe = Probe::start(ctx.proxy.socket_addr());
     let green = deploy(ctx, id, "green").await?;
     ensure!(blue != green);
     wait_for_answer(ctx, "Name: green").await?;
+    let failures = probe.stop().await?;
+    ensure!(
+        failures.is_empty(),
+        "requests failed during the switch: {failures:?}"
+    );
     wait_for_containers(id, 1).await?;
     roll_back(ctx, &blue).await?;
     wait_for_containers(id, 1).await?;
@@ -343,6 +352,44 @@ async fn wait_for_answer(ctx: &Context, expected: &str) -> anyhow::Result<()> {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     bail!("the proxy did not answer {expected}: {last}")
+}
+
+/// Sends a request to the app every 50 ms and records every answer that is not 200.
+struct Probe {
+    stop: tokio::sync::watch::Sender<bool>,
+    task: tokio::task::JoinHandle<Vec<String>>,
+}
+
+impl Probe {
+    fn start(proxy: SocketAddr) -> Self {
+        let (stop, mut stopped) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(async move {
+            let (url, client) = (format!("http://{proxy}/"), reqwest::Client::new());
+            let mut failures = Vec::new();
+            while !*stopped.borrow() {
+                if let Some(failure) = probe_once(&client, &url).await {
+                    failures.push(failure);
+                }
+                let _ = tokio::time::timeout(Duration::from_millis(50), stopped.changed()).await;
+            }
+            failures
+        });
+        Self { stop, task }
+    }
+
+    async fn stop(self) -> anyhow::Result<Vec<String>> {
+        self.stop.send(true)?;
+        Ok(self.task.await?)
+    }
+}
+
+/// Sends one request and describes it when it does not answer 200.
+async fn probe_once(client: &reqwest::Client, url: &str) -> Option<String> {
+    match client.get(url).header(HOST, DOMAIN).send().await {
+        Ok(reply) if reply.status() == 200 => None,
+        Ok(reply) => Some(reply.status().to_string()),
+        Err(err) => Some(err.to_string()),
+    }
 }
 
 async fn wait_until_unrouted(ctx: &Context) -> anyhow::Result<()> {
