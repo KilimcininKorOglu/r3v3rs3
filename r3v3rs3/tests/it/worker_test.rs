@@ -159,8 +159,12 @@ fn expect_pong(master: &mut std::os::unix::net::UnixStream) -> anyhow::Result<()
     }
 }
 
-/// Checks that the heartbeat and the status request of the master get their answers.
-fn check_ping_and_status(master: &mut std::os::unix::net::UnixStream) -> anyhow::Result<()> {
+/// Checks that the heartbeat and the status request of the master get their answers. The
+/// status names the worker process `pid` and counts the one client connection that is open.
+fn check_ping_and_status(
+    master: &mut std::os::unix::net::UnixStream,
+    pid: u32,
+) -> anyhow::Result<()> {
     expect_pong(master)?;
 
     // The status request reports the live state of the worker process.
@@ -168,9 +172,20 @@ fn check_ping_and_status(master: &mut std::os::unix::net::UnixStream) -> anyhow:
     let WorkerEvent::Status(status) = read_frame(master)? else {
         anyhow::bail!("the worker did not answer the status request");
     };
-    assert!(status.pid > 0);
-    assert!(status.open_connections > 0);
+    assert_eq!(status.pid, pid);
+    assert_eq!(status.open_connections, 1);
     Ok(())
+}
+
+/// Starts an upstream that answers every connection with `marker`, so a reply shows which
+/// upstream served it.
+fn spawn_marker_upstream(addr: SocketAddr, marker: &'static [u8]) {
+    tokio::spawn(async move {
+        let upstream = tokio::net::TcpListener::bind(addr).await.unwrap();
+        while let Ok((mut socket, _)) = upstream.accept().await {
+            tokio::spawn(async move { socket.write_all(marker).await });
+        }
+    });
 }
 
 /// Checks that a new configuration moves the proxy of the worker to a new upstream.
@@ -181,14 +196,19 @@ async fn check_new_config(
 ) -> anyhow::Result<()> {
     // A new configuration replaces the state of the worker.
     let second_port = alloc_tcp_port().await?;
-    spawn_echo_upstream(second_port.socket_addr());
+    spawn_marker_upstream(second_port.socket_addr(), b"second");
     let mut new_config = config.clone();
     new_config.proxies[0].proxy = tcp_proxy_to(&second_port.socket_addr());
     write_frame(master, &WorkerCommand::Config(Box::new(new_config)))?;
+    // The worker answers the commands in order, so the pong follows the applied configuration.
+    expect_pong(master)?;
 
+    // The first upstream echoes the payload, so only the new upstream answers "second" to it.
     let mut client = wait_for_proxy(&proxy_addr).await?;
-    expect_echo(&mut client, b"second").await?;
-    drop(client);
+    let mut buf = [0u8; 6];
+    client.write_all(b"xxxxxx").await?;
+    client.read_exact(&mut buf).await?;
+    assert_eq!(&buf, b"second");
     Ok(())
 }
 
@@ -242,8 +262,9 @@ async fn check_commands(
     master: &mut std::os::unix::net::UnixStream,
     config: &WorkerConfig,
     proxy_addr: SocketAddr,
+    pid: u32,
 ) -> anyhow::Result<()> {
-    check_ping_and_status(master)?;
+    check_ping_and_status(master, pid)?;
     check_new_config(master, config, proxy_addr).await
 }
 
@@ -275,7 +296,7 @@ async fn a_worker_serves_the_listeners_of_the_master() -> anyhow::Result<()> {
     // The first connection stays open until the worker stops.
     let client = connect_and_echo(&proxy_addr, b"first").await?;
 
-    check_commands(&mut master, &config, proxy_addr).await?;
+    check_commands(&mut master, &config, proxy_addr, child.id()).await?;
     stop_worker(master, child).await?;
     drop(client);
 
