@@ -57,24 +57,9 @@ impl RequestRewriter {
         Vec::new()
     }
 
-    fn parse_forwarded(&self, headers: &mut HeaderMap) -> Vec<String> {
-        if let Entry::Occupied(entry) = headers.entry(FORWARDED) {
-            return entry
-                .remove_entry_mult()
-                .1
-                .flat_map(|v| {
-                    v.to_str()
-                        .ok()
-                        .unwrap_or_default()
-                        .split(',')
-                        .map(|item| item.trim().to_string())
-                        .collect::<Vec<String>>()
-                })
-                .collect();
-        }
-        Vec::new()
-    }
-
+    /// Rewrites the forwarding headers for the upstream server. The `Forwarded` header is always
+    /// built from the `X-Forwarded-For` chain: a trusted proxy writes only `X-Forwarded-For`, so
+    /// an incoming `Forwarded` header comes from the client and would name any address.
     pub fn pre_process(
         &self,
         headers: &mut HeaderMap,
@@ -83,12 +68,11 @@ impl RequestRewriter {
         forwarded_proto: &'static str,
     ) {
         let mut x_forwarded_for = Vec::new();
-        let mut forwarded = Vec::new();
         let remote_addr = client.peer;
 
         if client.trusted_peer {
             x_forwarded_for = self.parse_x_forwarded_for(headers);
-            forwarded = self.parse_forwarded(headers);
+            headers.remove(FORWARDED);
             if let Ok(real_ip) = HeaderValue::from_str(&client.ip.to_string()) {
                 headers.insert("x-real-ip", real_ip);
             }
@@ -96,12 +80,10 @@ impl RequestRewriter {
             self.remove_untrusted_headers(headers);
         }
 
-        if forwarded.is_empty() {
-            forwarded = x_forwarded_for
-                .iter()
-                .map(|ip| forwarded_for_directive(*ip))
-                .collect();
-        }
+        let forwarded: Vec<String> = x_forwarded_for
+            .iter()
+            .map(|ip| forwarded_for_directive(*ip))
+            .collect();
         let current_hop = iter::once(forwarded_for_directive(remote_addr))
             .chain(request_host.as_deref().and_then(forwarded_host_directive))
             .chain(iter::once(forwarded_proto_directive(forwarded_proto)))
@@ -766,6 +748,8 @@ mod test {
         );
         assert_eq!(headers.get("x-forwarded-host"), None);
 
+        // A Forwarded header behind a trusted proxy comes from the client, because a trusted
+        // proxy writes only X-Forwarded-For; it never reaches the upstream server.
         let mut headers = HeaderMap::new();
         headers.append(FORWARDED, "for=192.168.0.1".parse().unwrap());
 
@@ -778,7 +762,7 @@ mod test {
         );
         assert_eq!(
             headers.get(FORWARDED).unwrap(),
-            "for=192.168.0.1, for=127.0.0.1;host=example.com;proto=http"
+            "for=127.0.0.1;host=example.com;proto=http"
         );
         assert_eq!(headers.get("x-forwarded-for").unwrap(), "127.0.0.1");
         assert_eq!(headers.get("x-real-ip").unwrap(), "192.168.0.1");

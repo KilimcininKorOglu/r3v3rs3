@@ -33,10 +33,29 @@ async fn client_ip_from_trusted_proxy() -> anyhow::Result<()> {
         .create_async()
         .await;
 
+    // Behind the trusted proxy the client also forged a Forwarded and a CF-Connecting-IP header;
+    // the trusted proxy is no CDN edge and writes only X-Forwarded-For, so neither names the
+    // client.
+    let mock_forged = server
+        .mock("GET", "/forged")
+        .match_header("x-real-ip", "203.0.113.9")
+        .match_header(
+            "forwarded",
+            Matcher::Regex(r"^for=203\.0\.113\.9, for=[^,]+$".into()),
+        )
+        .with_body("forged")
+        .create_async()
+        .await;
+
+    // A direct client forged every client IP header; none of them reaches the upstream server.
     let mock_direct = server
         .mock("GET", "/direct")
         .match_header("x-real-ip", Matcher::Missing)
         .match_header("cf-connecting-ip", Matcher::Missing)
+        // r3v3rs3 writes its own hop; the forged element of the client is gone.
+        .match_header("forwarded", Matcher::Regex(r"^for=[^,]+$".into()))
+        .match_header("true-client-ip", Matcher::Missing)
+        .match_header("fastly-client-ip", Matcher::Missing)
         .match_header("x-forwarded-for", Matcher::Regex(r"^[^,]+$".into()))
         .with_body("direct")
         .create_async()
@@ -63,30 +82,51 @@ async fn client_ip_from_trusted_proxy() -> anyhow::Result<()> {
         .build();
 
     with_server(config, |_| async move {
-        let client = reqwest::Client::new();
-
-        let resp = client
-            .get(trusted_port.http_url("/trusted"))
-            .header("x-forwarded-for", "203.0.113.9")
-            .send()
-            .await?;
-        assert_eq!(resp.text().await?, "trusted");
-
-        let resp = client
-            .get(direct_port.http_url("/direct"))
-            .header("x-forwarded-for", "203.0.113.9")
-            .header("x-real-ip", "203.0.113.9")
-            .header("cf-connecting-ip", "203.0.113.9")
-            .send()
-            .await?;
-        assert_eq!(resp.text().await?, "direct");
-
-        Ok(())
+        send_trusted_requests(&trusted_port).await?;
+        send_direct_request(&direct_port).await
     })
     .await?;
 
     mock_trusted.assert_async().await;
+    mock_forged.assert_async().await;
     mock_direct.assert_async().await;
+    Ok(())
+}
+
+/// Sends a plain request and one with forged client IP headers through the trusted proxy.
+async fn send_trusted_requests(port: &common::TestPort) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(port.http_url("/trusted"))
+        .header("x-forwarded-for", "203.0.113.9")
+        .send()
+        .await?;
+    assert_eq!(resp.text().await?, "trusted");
+
+    let resp = client
+        .get(port.http_url("/forged"))
+        .header("x-forwarded-for", "203.0.113.9")
+        .header("forwarded", "for=198.51.100.7")
+        .header("cf-connecting-ip", "198.51.100.8")
+        .send()
+        .await?;
+    assert_eq!(resp.text().await?, "forged");
+    Ok(())
+}
+
+/// Sends a request with every forged client IP header from a direct client.
+async fn send_direct_request(port: &common::TestPort) -> anyhow::Result<()> {
+    let resp = reqwest::Client::new()
+        .get(port.http_url("/direct"))
+        .header("x-forwarded-for", "203.0.113.9")
+        .header("x-real-ip", "203.0.113.9")
+        .header("cf-connecting-ip", "203.0.113.9")
+        .header("forwarded", "for=203.0.113.9")
+        .header("true-client-ip", "203.0.113.9")
+        .header("fastly-client-ip", "203.0.113.9")
+        .send()
+        .await?;
+    assert_eq!(resp.text().await?, "direct");
     Ok(())
 }
 

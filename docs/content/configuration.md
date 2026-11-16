@@ -655,7 +655,7 @@ For a trusted peer, r3v3rs3 reads the client IP in this order:
 1. The provider header: `CF-Connecting-IP` for Cloudflare, `X-Real-IP` for Bunny CDN, `CloudFront-Viewer-Address` for Amazon CloudFront.
 2. The rightmost address in `X-Forwarded-For` that is not a trusted proxy or a known CDN edge. The entries left of it come from the client. r3v3rs3 never reads the RFC 7239 `Forwarded` header, because a trusted proxy that does not write it passes on the value that the client sent, and the client could then name any address.
 
-r3v3rs3 then sends the resolved address to the upstream server in `X-Real-IP` and keeps the incoming `X-Forwarded-For` and `Forwarded` chains. For an untrusted peer, r3v3rs3 removes `Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP`, `CloudFront-Viewer-Address`, `Fastly-Client-IP` and `Incap-Client-IP`, because the client can forge them.
+r3v3rs3 then sends the resolved address to the upstream server in `X-Real-IP` and appends the peer to the incoming `X-Forwarded-For` chain. It builds the `Forwarded` header from that chain and drops an incoming `Forwarded` header, because a trusted proxy that does not write it passes on the value of the client. For an untrusted peer, r3v3rs3 removes `Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP`, `CloudFront-Viewer-Address`, `Fastly-Client-IP` and `Incap-Client-IP`, because the client can forge them.
 
 The CDN IP ranges are compiled into the binary and downloaded again every day. The last downloaded list is saved to `cdn-ranges.json` in the configuration directory. If a download fails, r3v3rs3 keeps the last known list. The "Settings" section shows the list status and has a "Refresh Now" button.
 
