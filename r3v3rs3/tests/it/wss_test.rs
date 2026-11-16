@@ -5,7 +5,6 @@ use axum::{
     routing::any,
 };
 use axum_server::tls_rustls::RustlsConfig;
-use core::panic;
 use futures::{SinkExt, StreamExt};
 use hyper::Uri;
 use r3v3rs3::certs::Cert;
@@ -16,30 +15,32 @@ use r3v3rs3_api::{
 };
 use std::sync::Arc;
 use tokio_rustls::rustls::{RootCertStore, client::ClientConfig};
-use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite::Message};
+use tokio_tungstenite::{
+    Connector, connect_async_tls_with_config,
+    tungstenite::{Error as WsError, Message},
+};
 
 use crate::common;
-use common::{TestStorage, alloc_tcp_port, with_server};
+use common::{TestPort, TestStorage, alloc_tcp_port, with_server};
 
-#[tokio::test]
-async fn wss_proxy() -> anyhow::Result<()> {
-    let listen_port = alloc_tcp_port().await?;
-    let proxy_port = alloc_tcp_port().await?;
-
-    let root = Arc::new(Cert::new_ca().unwrap());
-    let cert = Arc::new(Cert::new_self_signed(&["localhost".parse().unwrap()], &root).unwrap());
-
-    let config = RustlsConfig::from_pem(
-        cert.pem_chain.to_vec(),
-        cert.pem_key.as_ref().unwrap().to_vec(),
-    )
-    .await
-    .unwrap();
+/// Starts a TLS WebSocket echo server on `port` with `cert`.
+async fn spawn_upstream(port: &TestPort, cert: &Cert) -> anyhow::Result<()> {
+    let key = cert
+        .pem_key
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("the upstream certificate has no key"))?;
+    let config = RustlsConfig::from_pem(cert.pem_chain.to_vec(), key.to_vec()).await?;
     let app = Router::new().route("/ws", any(ws_handler));
-    let addr = listen_port.socket_addr();
-    tokio::spawn(axum_server::bind_rustls(addr, config).serve(app.into_make_service()));
+    tokio::spawn(
+        axum_server::bind_rustls(port.socket_addr(), config).serve(app.into_make_service()),
+    );
+    Ok(())
+}
 
-    let config = TestStorage::builder()
+/// A TLS port on `proxy_port` that routes `localhost` to the TLS server on `listen_port`. The
+/// proxy holds `certs`, so it trusts only the root certificates among them.
+fn storage(listen_port: &TestPort, proxy_port: &TestPort, certs: &[Arc<Cert>]) -> TestStorage {
+    TestStorage::builder()
         .ports(vec![PortEntry {
             id: "test".parse().unwrap(),
             port: Port {
@@ -105,46 +106,112 @@ async fn wss_proxy() -> anyhow::Result<()> {
                 ..Default::default()
             },
         }])
-        .certs(
-            [(root.id, root.clone()), (cert.id, cert.clone())]
-                .into_iter()
-                .collect(),
-        )
-        .build();
+        .certs(certs.iter().map(|cert| (cert.id, cert.clone())).collect())
+        .build()
+}
 
-    let mut root_certs = RootCertStore::empty();
-    for cert in root.certified_key().unwrap().cert {
-        root_certs.add(cert).unwrap();
+/// A client that trusts `root`, the CA of the certificate that the proxy presents.
+fn client(root: &Cert) -> anyhow::Result<Connector> {
+    let mut roots = RootCertStore::empty();
+    for cert in root.certified_key()?.cert {
+        roots.add(cert)?;
     }
-
-    let client = ClientConfig::builder()
-        .with_root_certificates(root_certs)
+    let config = ClientConfig::builder()
+        .with_root_certificates(roots)
         .with_no_client_auth();
+    Ok(Connector::Rustls(Arc::new(config)))
+}
 
-    with_server(config, |_| async move {
-        let url = Uri::try_from(&format!(
-            "wss://localhost:{}/ws",
-            proxy_port.socket_addr().port()
-        ))?;
-        let (mut ws_stream, _) = connect_async_tls_with_config(
-            url,
-            None,
-            false,
-            Some(Connector::Rustls(Arc::new(client))),
-        )
-        .await?;
-        ws_stream
-            .send(Message::Text("Hello, server!".to_string().into()))
-            .await?;
+fn wss_url(proxy_port: &TestPort) -> anyhow::Result<Uri> {
+    let port = proxy_port.socket_addr().port();
+    Ok(Uri::try_from(format!("wss://localhost:{port}/ws"))?)
+}
 
-        let message = ws_stream.next().await.unwrap();
-        match message {
-            Ok(msg) => assert_eq!("Hello, server!", msg.into_text()?.as_str()),
-            Err(e) => panic!("{e}"),
-        }
-        Ok(())
+/// A running TLS upstream, the proxy configuration that routes to it, and a client of the proxy.
+struct Setup {
+    proxy_port: TestPort,
+    config: TestStorage,
+    connector: Connector,
+}
+
+/// The certificate of the upstream: from the CA that the proxy trusts, or from a stranger CA.
+fn upstream_cert(root: &Cert, trusted: bool) -> anyhow::Result<Cert> {
+    let stranger;
+    let ca = if trusted {
+        root
+    } else {
+        stranger = Cert::new_ca()?;
+        &stranger
+    };
+    Ok(Cert::new_self_signed(&["localhost".parse()?], ca)?)
+}
+
+/// Starts the upstream and builds the proxy configuration. The proxy holds only `root` and its
+/// own certificate.
+async fn setup(trusted_upstream: bool) -> anyhow::Result<Setup> {
+    let listen_port = alloc_tcp_port().await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let root = Arc::new(Cert::new_ca()?);
+    let proxy_cert = Arc::new(Cert::new_self_signed(&["localhost".parse()?], &root)?);
+    spawn_upstream(&listen_port, &upstream_cert(&root, trusted_upstream)?).await?;
+    let config = storage(&listen_port, &proxy_port, &[root.clone(), proxy_cert]);
+    let connector = client(&root)?;
+    Ok(Setup {
+        proxy_port,
+        config,
+        connector,
     })
-    .await
+}
+
+/// Sends one message over the proxy and requires the echo.
+async fn echo_once(proxy_port: TestPort, connector: Connector) -> anyhow::Result<()> {
+    let url = wss_url(&proxy_port)?;
+    let (mut ws_stream, _) =
+        connect_async_tls_with_config(url, None, false, Some(connector)).await?;
+    ws_stream
+        .send(Message::Text("Hello, server!".to_string().into()))
+        .await?;
+    let message = ws_stream
+        .next()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("the socket closed"))??;
+    assert_eq!("Hello, server!", message.into_text()?.as_str());
+    Ok(())
+}
+
+/// Requires that the proxy refuses the WebSocket with 526.
+async fn refused(proxy_port: TestPort, connector: Connector) -> anyhow::Result<()> {
+    let url = wss_url(&proxy_port)?;
+    match connect_async_tls_with_config(url, None, false, Some(connector)).await {
+        Err(WsError::Http(response)) => assert_eq!(response.status(), 526),
+        Err(err) => anyhow::bail!("expected a 526 answer, got {err}"),
+        Ok(_) => anyhow::bail!("the proxy opened a WebSocket to an untrusted upstream"),
+    }
+    Ok(())
+}
+
+/// A WebSocket message goes through the TLS port to a TLS upstream whose CA the proxy trusts.
+#[tokio::test]
+async fn wss_proxy() -> anyhow::Result<()> {
+    let Setup {
+        proxy_port,
+        config,
+        connector,
+    } = setup(true).await?;
+    with_server(config, |_| echo_once(proxy_port, connector)).await
+}
+
+/// A TLS upstream whose certificate comes from a CA that the proxy does not hold can be anyone on
+/// the path, so the proxy must not open the WebSocket to it. The client gets 526 (Invalid SSL
+/// Certificate), the gateway code that names a refused origin certificate.
+#[tokio::test]
+async fn wss_refuses_an_upstream_with_an_untrusted_certificate() -> anyhow::Result<()> {
+    let Setup {
+        proxy_port,
+        config,
+        connector,
+    } = setup(false).await?;
+    with_server(config, |_| refused(proxy_port, connector)).await
 }
 
 async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
@@ -152,10 +219,8 @@ async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
 }
 
 async fn handle_socket(mut socket: WebSocket) {
-    while let Some(msg) = socket.recv().await {
-        if let Ok(msg) = msg {
-            socket.send(msg).await.unwrap();
-        } else {
+    while let Some(Ok(msg)) = socket.recv().await {
+        if socket.send(msg).await.is_err() {
             return;
         }
     }
