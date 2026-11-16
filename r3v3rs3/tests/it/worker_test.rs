@@ -452,29 +452,100 @@ async fn a_quarantine_of_the_worker_shows_in_the_master() -> anyhow::Result<()> 
     server_task.await?
 }
 
-/// Starts a worker with a TCP proxy and no client, and returns the master end of its channel.
-async fn start_plain_worker(
+/// Starts a worker with an HTTP proxy that trusts `X-Forwarded-For` from 127.0.0.1, so a test
+/// on loopback can act as any client address. Returns the master end of its channel, the
+/// worker process and the URL of the proxy.
+async fn start_http_worker(
     log_dir: &std::path::Path,
-) -> anyhow::Result<(std::os::unix::net::UnixStream, std::process::Child)> {
-    let (upstream_port, proxy_port) = (alloc_tcp_port().await?, alloc_tcp_port().await?);
+) -> anyhow::Result<(
+    std::os::unix::net::UnixStream,
+    std::process::Child,
+    url::Url,
+)> {
+    let upstream =
+        common::serve_http_upstream(axum::Router::new().fallback(|| async { "ok" })).await?;
+    let proxy_port = alloc_tcp_port().await?;
     let (listener, proxy_addr) = bind_proxy_listener(&proxy_port)?;
     std::fs::create_dir_all(log_dir)?;
-    let config = worker_config(&proxy_port, &upstream_port.socket_addr());
-    start_worker(listener, proxy_addr, &config, log_dir)
+    let proxy = r3v3rs3_api::proxy::HttpProxy {
+        routes: vec![common::http_route("/", upstream.as_str(), None)],
+        client_ip: r3v3rs3_api::client_ip::ClientIpConfig {
+            trust_cdn: false,
+            trusted_proxies: vec!["127.0.0.0/8".parse()?],
+        },
+        upgrade_insecure: false,
+        ..Default::default()
+    };
+    let config = WorkerConfig {
+        ports: vec![common::http_port_entry("test", &proxy_port)],
+        proxies: vec![common::http_proxy_entry("test2", "test", proxy)],
+        ..worker_config(&proxy_port, &proxy_addr)
+    };
+    let (master, child) = start_worker(listener, proxy_addr, &config, log_dir)?;
+    // The worker listens on the IPv4 loopback only, so the URL names that address and not
+    // `localhost`, which can resolve to `::1` first.
+    Ok((master, child, format!("http://{proxy_addr}/").parse()?))
 }
 
-/// The worker applies the quarantine commands of the master and keeps answering.
+/// Whether a request as the client `ip` gets an answer through the worker.
+async fn served(url: &url::Url, ip: &str) -> bool {
+    let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let request = reqwest::Client::new()
+        .get(url.clone())
+        .header("x-forwarded-for", ip)
+        .send()
+        .await;
+    request.is_ok_and(|resp| resp.status().is_success())
+}
+
+/// The worker applies the quarantine commands of the master: a quarantined client is refused,
+/// another client is still served, and the client is served again after the unquarantine.
 #[tokio::test]
 async fn a_worker_takes_the_quarantine_commands_of_the_master() -> anyhow::Result<()> {
     let log_dir = std::env::temp_dir().join(format!("r3v3rs3-wqcmd-{}", std::process::id()));
-    let (mut master, child) = start_plain_worker(&log_dir).await?;
-    let entry = quarantine_entry("203.0.113.82".parse()?);
-    let ip = entry.ip;
-    write_frame(&mut master, &WorkerCommand::Quarantine(Box::new(entry)))?;
-    write_frame(&mut master, &WorkerCommand::Unquarantine(ip))?;
-    expect_pong(&mut master)?;
+    let (mut master, child, url) = start_http_worker(&log_dir).await?;
+    wait_for_proxy(&url.socket_addrs(|| None)?[0]).await?;
+    check_quarantine_refuses(&mut master, &url).await?;
+    check_unquarantine_serves(&mut master, &url).await?;
     stop_worker(master, child).await?;
     std::fs::remove_dir_all(&log_dir).ok();
+    Ok(())
+}
+
+/// After a quarantine command the worker refuses the client and still serves another one.
+async fn check_quarantine_refuses(
+    master: &mut std::os::unix::net::UnixStream,
+    url: &url::Url,
+) -> anyhow::Result<()> {
+    let entry = quarantine_entry("203.0.113.82".parse()?);
+    write_frame(master, &WorkerCommand::Quarantine(Box::new(entry)))?;
+    // The worker answers the commands in order, so the pong follows the applied quarantine.
+    expect_pong(master)?;
+    assert!(
+        !served(url, "203.0.113.82").await,
+        "a quarantined client was served"
+    );
+    assert!(
+        served(url, "198.51.100.83").await,
+        "another client was refused"
+    );
+    Ok(())
+}
+
+/// After an unquarantine command the worker serves the client again.
+async fn check_unquarantine_serves(
+    master: &mut std::os::unix::net::UnixStream,
+    url: &url::Url,
+) -> anyhow::Result<()> {
+    write_frame(
+        master,
+        &WorkerCommand::Unquarantine("203.0.113.82".parse()?),
+    )?;
+    expect_pong(master)?;
+    assert!(
+        served(url, "203.0.113.82").await,
+        "the unquarantined client was refused"
+    );
     Ok(())
 }
 
