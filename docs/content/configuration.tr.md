@@ -186,6 +186,7 @@ Mobil ve yüksek gecikmeli istemcilerde bağlantı gecikmesini en aza indirmek i
 - **RFC 8470 Yalnızca Güvenli Metodlar**: RFC 8470 standardına uygun olarak yalnızca güvenli HTTP metodlarına (`GET`, `HEAD`, `OPTIONS`, `TRACE`) early data içinde izin verilir. Early data ile gönderilen durum değiştiren istekler (`POST`, `PUT`, `DELETE`, `PATCH`), replay saldırılarına karşı `425 Too Early` durum kodu ve `Retry-After: 0` başlığıyla reddedilir.
 - **Bellek İçi Anti-Replay Arabelleği**: 60 saniyelik kayan zaman penceresinde 0-RTT istek özetleri takip edilir. Tekrar yakalanan paketler anında `425 Too Early` ile durdurulur.
 - **Upstream İletimi**: 0-RTT üzerinden gelen isteklere `Early-Data: 1` header'ı eklenerek upstream sunucuya iletilir. İstemcinin standart bir bağlantıda gönderdiği `Early-Data` header'ı upstream'e değişmeden ulaşır. Çünkü RFC 8470 Bölüm 5.1, aracının bu header'ı silmesini yasaklar.
+- **0-RTT Bağlantısında Tek İstek**: Early data taşıyan bağlantı ilk yanıttan sonra kapanır. Sonraki istek yeni bir bağlantı açar. Böylece yalnız early data içinde gelen istekler early sayılır.
 
 ```toml
 [my-port]

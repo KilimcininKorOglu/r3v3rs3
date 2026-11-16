@@ -52,6 +52,16 @@ pub struct PrefixedIo {
     io: Box<dyn Io>,
 }
 
+impl PrefixedIo {
+    /// Reads `prefix` first, then `io`; writes go to `io`.
+    pub fn new(prefix: Bytes, io: impl AsyncRead + AsyncWrite + Send + Unpin + 'static) -> Self {
+        Self {
+            prefix,
+            io: Box::new(io),
+        }
+    }
+}
+
 impl AsyncRead for PrefixedIo {
     fn poll_read(
         mut self: Pin<&mut Self>,

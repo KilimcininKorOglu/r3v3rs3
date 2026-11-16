@@ -504,6 +504,10 @@ async fn start(
         early_data,
     } = tls_info;
 
+    // A connection that carried early data closes after its first response, so only the requests
+    // in the early data count as early and every later request comes after a full handshake.
+    let answered = early_data.then(|| Arc::new(Notify::new()));
+    let answered_cloned = answered.clone();
     let span_cloned = span.clone();
     let service = hyper::service::service_fn(move |req: Request<Incoming>| {
         let mut shared_cache = shared_cache.clone();
@@ -514,6 +518,7 @@ async fn start(
         let shared = shared_cache.load().clone();
         let sni = sni.clone();
         let client_cert = client_cert.clone();
+        let answered = answered_cloned.clone();
 
         async move {
             let info = RequestInfo {
@@ -526,20 +531,28 @@ async fn start(
                 early_data,
             };
             let fronting = is_domain_fronting(&req, sni.as_deref());
-            proxied_response(&shared, req, &info, fronting).await
+            let response = proxied_response(&shared, req, &info, fronting).await;
+            answered.inspect(|answered| answered.notify_one());
+            response
         }
         .instrument(span)
     });
 
-    spawn_http(stream, service, server_http2, http2, span.clone());
+    spawn_http(stream, service, server_http2, http2, answered, span.clone());
 
     Ok(())
 }
 
 /// Serves the connection with the HTTP service. `http2_only` skips the protocol detection, because
 /// the TLS handshake already selected HTTP/2 through ALPN.
-fn spawn_http<I, S, B>(stream: I, service: S, http2_only: bool, limits: Http2Limits, span: Span)
-where
+fn spawn_http<I, S, B>(
+    stream: I,
+    service: S,
+    http2_only: bool,
+    limits: Http2Limits,
+    close_after: Option<Arc<Notify>>,
+    span: Span,
+) where
     I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     S: hyper::service::Service<Request<Incoming>, Response = Response<B>> + Send + 'static,
     S::Future: Send + 'static,
@@ -558,12 +571,24 @@ where
                 builder
             };
             let http = builder.serve_connection_with_upgrades(stream, service);
-            if let Err(err) = http.await {
-                debug!(%err, "client HTTP connection closed");
+            tokio::pin!(http);
+            if let Some(answered) = close_after {
+                // Finish the requests already received, then close instead of waiting for more.
+                tokio::select! {
+                    result = http.as_mut() => return log_http_close(result),
+                    () = answered.notified() => http.as_mut().graceful_shutdown(),
+                }
             }
+            log_http_close(http.await);
         }
         .instrument(span),
     );
+}
+
+fn log_http_close<E: std::fmt::Display>(result: Result<(), E>) {
+    if let Err(err) = result {
+        debug!(%err, "client HTTP connection closed");
+    }
 }
 
 /// Copies the bytes of the client connection into the duplex stream of the proxy until one side
@@ -997,15 +1022,31 @@ async fn handshake(
             return Err(err.into());
         }
     };
-    let early_data = accepted.get_mut().1.early_data().is_some();
+    let early = read_early_data(accepted.get_mut().1)?;
     let conn = &accepted.get_ref().1;
     let info = TlsInfo {
         http2: conn.alpn_protocol() == Some(b"h2"),
         sni: conn.server_name().map(str::to_string),
         client_cert: ClientCertInfo::from_chain(conn.peer_certificates()).map(Arc::new),
-        early_data,
+        early_data: !early.is_empty(),
     };
-    Ok(Some((accepted, info)))
+    if early.is_empty() {
+        return Ok(Some((accepted, info)));
+    }
+    // rustls hands the 0-RTT bytes out only through `early_data()`, never through the normal
+    // reader, so they go in front of the stream for the HTTP parser.
+    let stream = crate::kv::http::PrefixedIo::new(Bytes::from(early), accepted);
+    Ok(Some((Box::new(stream), info)))
+}
+
+/// Takes the 0-RTT bytes that the client sent during the handshake. An accepted early data
+/// extension without bytes gives an empty buffer, because no request arrived in early data.
+fn read_early_data(conn: &mut tokio_rustls::rustls::ServerConnection) -> std::io::Result<Vec<u8>> {
+    let mut early = Vec::new();
+    if let Some(mut reader) = conn.early_data() {
+        std::io::Read::read_to_end(&mut reader, &mut early)?;
+    }
+    Ok(early)
 }
 
 /// A request for the upstream server with the upstream connections of the route, and its
