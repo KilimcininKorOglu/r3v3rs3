@@ -185,7 +185,7 @@ For mobile and high-latency clients, r3v3rs3 supports TLS 1.3 0-RTT Early Data o
 
 - **RFC 8470 Safe Methods Only**: Per RFC 8470 Section 5.2, safe HTTP methods (`GET`, `HEAD`, `OPTIONS`, `TRACE`) are allowed in early data. State-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`) sent in early data are rejected with HTTP `425 Too Early` and include a `Retry-After: 0` header, instructing clients to retry once the TLS handshake finishes.
 - **In-Memory Anti-Replay Buffer**: Sliding-window anti-replay cache records 0-RTT request identifiers within a 60-second window. Any detected replay attempt is rejected with `425 Too Early`.
-- **Upstream Forwarding**: Upstream requests arriving via 0-RTT carry an injected `Early-Data: 1` header. Any client-sent `Early-Data` header on standard connections is stripped to prevent spoofing.
+- **Upstream Forwarding**: Upstream requests arriving via 0-RTT carry an injected `Early-Data: 1` header. An `Early-Data` header that the client sends on a standard connection reaches the upstream unchanged, because RFC 8470 Section 5.1 forbids an intermediary to remove it.
 
 ```toml
 [my-port]

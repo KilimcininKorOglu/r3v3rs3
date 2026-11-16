@@ -1152,9 +1152,9 @@ fn validate_early_data<B>(
     req: &mut Request<B>,
     info: &RequestInfo<'_>,
 ) -> Option<Response<Full<Bytes>>> {
+    // RFC 8470 section 5.1: an intermediary must not remove an Early-Data header that is present;
+    // a forged one only makes the upstream more careful.
     if !info.early_data {
-        req.headers_mut()
-            .remove(r3v3rs3_api::early_data::EARLY_DATA_HEADER);
         return None;
     }
 
@@ -2293,6 +2293,33 @@ mod tests {
     use super::*;
     use hyper::HeaderMap;
     use hyper::header::{AUTHORIZATION, COOKIE, HeaderValue, SET_COOKIE, USER_AGENT};
+
+    /// RFC 8470 section 5.1: an intermediary must not remove an Early-Data header that is
+    /// present, also on a connection without early data.
+    #[test]
+    fn an_early_data_header_of_the_client_is_kept() {
+        let remote: SocketAddr = "198.51.100.4:40000".parse().unwrap();
+        let info = RequestInfo {
+            remote,
+            peer: remote,
+            local: String::new(),
+            sni: None,
+            proto: "https",
+            client_cert: None,
+            early_data: false,
+        };
+        let mut req = Request::builder()
+            .header(r3v3rs3_api::early_data::EARLY_DATA_HEADER, "1")
+            .body(())
+            .unwrap();
+        assert!(validate_early_data(&mut req, &info).is_none());
+        assert_eq!(
+            req.headers()
+                .get(r3v3rs3_api::early_data::EARLY_DATA_HEADER)
+                .unwrap(),
+            "1"
+        );
+    }
 
     #[test]
     fn one_scanner_probe_counts_as_one_violation() {
