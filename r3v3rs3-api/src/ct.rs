@@ -141,10 +141,25 @@ pub fn validate_ct_api_url(template: &str) -> Result<(), Error> {
     validate_public_https_target(&parsed)
 }
 
+/// Set by the integration tests, which serve the CT API from a local mock server.
+#[cfg(feature = "test-util")]
+static ALLOW_LOCAL_CT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Lets the CT API URL point at a local mock server. Only the `test-util` feature, a
+/// dev-dependency feature, compiles it, so a release build has no switch for the SSRF check.
+#[cfg(feature = "test-util")]
+pub fn allow_local_ct_urls_for_tests() {
+    ALLOW_LOCAL_CT.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(feature = "test-util")]
 fn is_local_ct_allowed() -> bool {
-    std::env::var("R3V3RS3_TEST_ALLOW_LOCAL_CT")
-        .map(|v| v == "1" || v == "true")
-        .unwrap_or(false)
+    ALLOW_LOCAL_CT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(not(feature = "test-util"))]
+fn is_local_ct_allowed() -> bool {
+    false
 }
 
 fn validate_public_https_target(parsed: &url::Url) -> Result<(), Error> {
@@ -448,5 +463,19 @@ mod tests {
         // Blocked internal suffixes
         assert!(validate_ct_api_url("https://internal.corp/?q={domain}").is_err());
         assert!(validate_ct_api_url("https://host.local/?q={domain}").is_err());
+    }
+
+    /// The process environment of a server is no switch for the SSRF check: an environment
+    /// variable that a deployment sets must not let the CT URL reach loopback or private hosts.
+    #[test]
+    fn an_environment_variable_does_not_turn_off_the_ssrf_check() {
+        // SAFETY: no other test of this crate reads or writes this variable.
+        unsafe { std::env::set_var("R3V3RS3_TEST_ALLOW_LOCAL_CT", "1") };
+        let loopback = validate_ct_api_url("https://127.0.0.1:8443/?q={domain}");
+        let private = validate_ct_api_url("https://10.0.0.1/?q={domain}");
+        // SAFETY: as above.
+        unsafe { std::env::remove_var("R3V3RS3_TEST_ALLOW_LOCAL_CT") };
+        assert!(loopback.is_err());
+        assert!(private.is_err());
     }
 }

@@ -122,9 +122,7 @@ async fn test_ct_config_and_status() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_ct_check_and_dismiss_flow() -> anyhow::Result<()> {
-    unsafe {
-        std::env::set_var("R3V3RS3_TEST_ALLOW_LOCAL_CT", "1");
-    }
+    r3v3rs3_api::ct::allow_local_ct_urls_for_tests();
     let dir = TempDir::new("ct-flow")?;
 
     // Start mock CT API server with mockito

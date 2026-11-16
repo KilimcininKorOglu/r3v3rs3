@@ -15,6 +15,10 @@ license = "MIT"
 repository = "https://github.com/KilimcininKorOglu/r3v3rs3"
 homepage = "https://r3v3rs3.keremgok.tr/"
 
+[features]
+# Test helpers for the integration tests; a dev-dependency feature only.
+test-util = []
+
 [dependencies]
 base64 = "0.23.1"
 hex = "0.4.3"
