@@ -1019,18 +1019,20 @@ async fn read_one_char(stream: &mut TcpStream) -> anyhow::Result<char> {
     Ok(buf[0] as char)
 }
 
-/// Opens connections until one reaches the server `expected`, for up to five seconds. A
-/// connection to another server is closed at once, so it does not change the balance.
-async fn connect_until(proxy: SocketAddr, expected: char) -> anyhow::Result<TcpStream> {
+/// Waits until the proxy counts no active connection on its upstream server at `index`.
+async fn wait_until_released(
+    channels: &mut ServerChannels,
+    id: &str,
+    index: usize,
+) -> anyhow::Result<()> {
     for _ in 0..50 {
-        let mut stream = TcpStream::connect(proxy).await?;
-        if read_one_char(&mut stream).await? == expected {
-            return Ok(stream);
+        let status = call(channels, GetProxyStatus { id: id.parse()? }).await??;
+        if status.upstreams[index].active_connections == 0 {
+            return Ok(());
         }
-        drop(stream);
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    anyhow::bail!("no connection reached {expected}")
+    anyhow::bail!("the proxy did not release upstream server {index}")
 }
 
 #[tokio::test]
@@ -1049,7 +1051,7 @@ async fn tcp_least_conn_balances_by_active_connections() -> anyhow::Result<()> {
         ProxyKind::Tcp(tcp),
     )]);
 
-    with_server(config, |_| async move {
+    with_server(config, |mut channels| async move {
         // First connection goes to a (index 0).
         let mut s1 = TcpStream::connect(proxy_port.socket_addr()).await?;
         assert_eq!(read_one_char(&mut s1).await?, 'a');
@@ -1058,12 +1060,14 @@ async fn tcp_least_conn_balances_by_active_connections() -> anyhow::Result<()> {
         let mut s2 = TcpStream::connect(proxy_port.socket_addr()).await?;
         assert_eq!(read_one_char(&mut s2).await?, 'b');
 
-        // Close connection 1 (releasing a). With b still active and a idle, a new connection
-        // must go to a once the proxy has seen the close.
-        drop(s1);
-        let s3 = connect_until(proxy_port.socket_addr(), 'a').await?;
-
+        // Close connection 2 (releasing b). With a still active and b idle, the next connection
+        // must go to b; round robin would send it to a.
         drop(s2);
+        wait_until_released(&mut channels, "tcplc", 1).await?;
+        let mut s3 = TcpStream::connect(proxy_port.socket_addr()).await?;
+        assert_eq!(read_one_char(&mut s3).await?, 'b');
+
+        drop(s1);
         drop(s3);
         Ok(())
     })
