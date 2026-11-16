@@ -98,10 +98,12 @@ pub fn error_headers(err: &anyhow::Error) -> HeaderMap {
     headers
 }
 
+/// An upstream certificate that the proxy does not trust is an invalid upstream answer:
+/// 502 Bad Gateway (RFC 9110 §15.6.3). Every other TLS failure is 525.
 fn check_rustls_error(err: &(dyn std::error::Error + 'static)) -> Option<StatusCode> {
     if let Some(err) = err.downcast_ref::<rustls::Error>() {
         return Some(if matches!(err, rustls::Error::InvalidCertificate(_)) {
-            status_code(526)
+            StatusCode::BAD_GATEWAY
         } else {
             status_code(525)
         });
@@ -177,7 +179,7 @@ fn status_code(code: u16) -> StatusCode {
 }
 
 /// The `error_page.<code>` key of every status code that [`map_error`] returns.
-const ERROR_PAGE_KEYS: [(u16, &str); 11] = [
+const ERROR_PAGE_KEYS: [(u16, &str); 10] = [
     (401, "error_page.401"),
     (403, "error_page.403"),
     (413, "error_page.413"),
@@ -188,7 +190,6 @@ const ERROR_PAGE_KEYS: [(u16, &str); 11] = [
     (504, "error_page.504"),
     (523, "error_page.523"),
     (525, "error_page.525"),
-    (526, "error_page.526"),
 ];
 
 /// Returns the reason phrase that the error page shows for the status code. A status code
@@ -230,7 +231,6 @@ mod tests {
         assert_eq!(text(StatusCode::SERVICE_UNAVAILABLE), "Service Unavailable");
         assert_eq!(text(status_code(523)), "Origin Is Unreachable");
         assert_eq!(text(status_code(525)), "SSL Handshake Failed");
-        assert_eq!(text(status_code(526)), "Invalid SSL Certificate");
         assert_eq!(text(StatusCode::NOT_FOUND), "Not Found");
     }
 
@@ -254,7 +254,7 @@ mod tests {
         let invalid_cert =
             rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer);
         let wrapped_tls = anyhow::Error::new(io::Error::other(invalid_cert));
-        assert_eq!(map_error(wrapped_tls), status_code(526));
+        assert_eq!(map_error(wrapped_tls), StatusCode::BAD_GATEWAY);
 
         let handshake_err = rustls::Error::General("handshake failed".into());
         let wrapped_handshake = anyhow::Error::new(io::Error::other(handshake_err));

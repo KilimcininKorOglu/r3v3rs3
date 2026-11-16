@@ -708,7 +708,6 @@
   "error_page.504": "Gateway Timeout",
   "error_page.523": "Origin Sunucusuna Ulaşılamıyor",
   "error_page.525": "SSL Handshake Başarısız",
-  "error_page.526": "Geçersiz SSL Sertifikası",
   "footer.documentation": "Dokümantasyon",
   "http_form.access_list": "Erişim Listesi",
   "http_form.access_list_hint": "Seçilen erişim listesinin IP filtresi ve kimlik doğrulaması, proxy'nin ayarlarının yerini alır.",

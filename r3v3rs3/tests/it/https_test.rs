@@ -240,27 +240,29 @@ async fn https_proxy_invalid_cert() -> anyhow::Result<()> {
         .certs([(cert.id, cert.clone())].into_iter().collect())
         .build();
 
+    // The proxy does not hold the CA of the upstream certificate, so it must not trust the
+    // upstream: RFC 9110 §15.6.3 answers an invalid upstream with 502 Bad Gateway.
     let ca = reqwest::Certificate::from_pem(&root.pem_chain)?;
     with_server(config, |_| async move {
         let client = reqwest::Client::builder()
             .add_root_certificate(ca.clone())
             .build()?;
         let resp = client.get(proxy_port.https_url("/hello")).send().await?;
-        assert_eq!(resp.status(), 526);
+        assert_eq!(resp.status(), 502);
 
         let client = reqwest::Client::builder()
             .http1_only()
             .add_root_certificate(ca.clone())
             .build()?;
         let resp = client.get(proxy_port.https_url("/hello")).send().await?;
-        assert_eq!(resp.status(), 526);
+        assert_eq!(resp.status(), 502);
 
         let client = reqwest::Client::builder()
             .http2_prior_knowledge()
             .add_root_certificate(ca)
             .build()?;
         let resp = client.get(proxy_port.https_url("/hello")).send().await?;
-        assert_eq!(resp.status(), 526);
+        assert_eq!(resp.status(), 502);
 
         Ok(())
     })

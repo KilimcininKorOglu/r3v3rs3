@@ -179,12 +179,12 @@ async fn echo_once(proxy_port: TestPort, connector: Connector) -> anyhow::Result
     Ok(())
 }
 
-/// Requires that the proxy refuses the WebSocket with 526.
+/// Requires that the proxy refuses the WebSocket with 502.
 async fn refused(proxy_port: TestPort, connector: Connector) -> anyhow::Result<()> {
     let url = wss_url(&proxy_port)?;
     match connect_async_tls_with_config(url, None, false, Some(connector)).await {
-        Err(WsError::Http(response)) => assert_eq!(response.status(), 526),
-        Err(err) => anyhow::bail!("expected a 526 answer, got {err}"),
+        Err(WsError::Http(response)) => assert_eq!(response.status(), 502),
+        Err(err) => anyhow::bail!("expected a 502 answer, got {err}"),
         Ok(_) => anyhow::bail!("the proxy opened a WebSocket to an untrusted upstream"),
     }
     Ok(())
@@ -202,8 +202,8 @@ async fn wss_proxy() -> anyhow::Result<()> {
 }
 
 /// A TLS upstream whose certificate comes from a CA that the proxy does not hold can be anyone on
-/// the path, so the proxy must not open the WebSocket to it. The client gets 526 (Invalid SSL
-/// Certificate), the gateway code that names a refused origin certificate.
+/// the path, so the proxy must not open the WebSocket to it. The client gets 502 Bad Gateway, the
+/// RFC 9110 §15.6.3 answer for an invalid upstream.
 #[tokio::test]
 async fn wss_refuses_an_upstream_with_an_untrusted_certificate() -> anyhow::Result<()> {
     let Setup {
