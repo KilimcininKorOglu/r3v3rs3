@@ -29,40 +29,6 @@ pub struct ClientIpConfig {
     #[schema(value_type = [String], example = json!(["10.0.0.0/8"]))]
     #[schemars(with = "Vec<String>")]
     pub trusted_proxies: Vec<IpNet>,
-
-    /// The header that the trusted proxies write the client address into. Only this header is
-    /// read, because a client can send the other one itself and a proxy that does not write it
-    /// passes it on unchanged.
-    #[serde(default, skip_serializing_if = "ForwardedHeader::is_default")]
-    pub forwarded_header: ForwardedHeader,
-}
-
-/// The header that carries the chain of client addresses through trusted proxies.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    ToSchema,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ForwardedHeader {
-    /// `X-Forwarded-For`, which nginx, HAProxy, Caddy, Traefik and most load balancers write.
-    #[default]
-    XForwardedFor,
-    /// The RFC 7239 `Forwarded` header.
-    Forwarded,
-}
-
-impl ForwardedHeader {
-    fn is_default(&self) -> bool {
-        *self == Self::default()
-    }
 }
 
 impl Default for ClientIpConfig {
@@ -70,7 +36,6 @@ impl Default for ClientIpConfig {
         Self {
             trust_cdn: default_trust_cdn(),
             trusted_proxies: Vec::new(),
-            forwarded_header: ForwardedHeader::default(),
         }
     }
 }

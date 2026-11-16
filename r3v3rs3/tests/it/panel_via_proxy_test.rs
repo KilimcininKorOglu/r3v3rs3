@@ -123,7 +123,6 @@ fn panel_proxy(admin: SocketAddr) -> HttpProxy {
         client_ip: ClientIpConfig {
             trust_cdn: false,
             trusted_proxies: vec!["127.0.0.0/8".parse().unwrap()],
-            ..ClientIpConfig::default()
         },
         ..Default::default()
     }

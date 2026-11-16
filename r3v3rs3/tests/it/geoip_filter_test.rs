@@ -45,7 +45,6 @@ async fn test_geoip_country_filter() -> anyhow::Result<()> {
         client_ip: ClientIpConfig {
             trust_cdn: true,
             trusted_proxies: loopback(),
-            ..ClientIpConfig::default()
         },
         ip_filter: IpFilter {
             allow_countries: vec!["GB".into()],

@@ -653,7 +653,7 @@ Behind a CDN or a load balancer, the TCP peer of r3v3rs3 is the edge server, not
 For a trusted peer, r3v3rs3 reads the client IP in this order:
 
 1. The provider header: `CF-Connecting-IP` for Cloudflare, `X-Real-IP` for Bunny CDN, `CloudFront-Viewer-Address` for Amazon CloudFront.
-2. The rightmost address of the header that the trusted proxies write that is not a trusted proxy or a known CDN edge. "Header Written by the Trusted Proxies" (`forwarded_header`) picks it: `x_forwarded_for` (default; nginx, HAProxy, Caddy and Traefik write it) or `forwarded` (the RFC 7239 `Forwarded` header, whose `for=` elements may hold quoted IPv6 addresses with a port). r3v3rs3 never reads the other header, because a trusted proxy that does not write it passes on the value that the client sent, and the client could then name any address.
+2. The rightmost address in `X-Forwarded-For` that is not a trusted proxy or a known CDN edge. The entries left of it come from the client. r3v3rs3 never reads the RFC 7239 `Forwarded` header, because a trusted proxy that does not write it passes on the value that the client sent, and the client could then name any address.
 
 r3v3rs3 then sends the resolved address to the upstream server in `X-Real-IP` and keeps the incoming `X-Forwarded-For` and `Forwarded` chains. For an untrusted peer, r3v3rs3 removes `Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP`, `CloudFront-Viewer-Address`, `Fastly-Client-IP` and `Incap-Client-IP`, because the client can forge them.
 
@@ -664,7 +664,7 @@ Akamai does not publish its edge IP ranges. Add your Akamai Site Shield ranges t
 ```toml
 [my-app]
 protocol = "http"
-client_ip = { trust_cdn = true, trusted_proxies = ["10.0.0.0/8"], forwarded_header = "x_forwarded_for" }
+client_ip = { trust_cdn = true, trusted_proxies = ["10.0.0.0/8"] }
 ```
 
 ## IP Filter
@@ -958,7 +958,7 @@ The `[admin]` settings in `config.toml` apply to these sessions too:
 
 A proxy of r3v3rs3 whose route points at the admin address hands the request to the panel in process, without a TCP connection. The panel then gets the client address, the HTTPS state and the `Host` that the proxy resolved, including the [client IP](#client-ip) settings of the proxy, and no client can forge them. This proxy needs no setting below.
 
-The `trusted_proxies` setting of `[admin]` (**Trusted Proxies** on the **Settings** page) lists the addresses or CIDR blocks of other reverse proxies in front of the panel, for example an nginx or a tunnel that connects to the admin address over TCP. The panel takes the client address of the audit log, of the rate limits and of the MCP token ban from the rightmost `X-Forwarded-For` entry that is not one of these addresses (the entries left of it come from the client), from `X-Real-IP` when no `X-Forwarded-For` exists, and the HTTPS state of the session cookie from the `X-Forwarded-Proto` header, only when the request comes from one of these addresses. Otherwise it records the address of the connection. A loopback address is not trusted on its own, because any process of the host can connect from there. The workers mode (`worker_mode = "workers"`) serves the ports in another process, so its proxy connects to the panel over TCP; enter `127.0.0.1/32` in that mode. The list of CDN address ranges is a separate setting of each proxy and does not apply to the panel.
+The `trusted_proxies` setting of `[admin]` (**Trusted Proxies** on the **Settings** page) lists the addresses or CIDR blocks of other reverse proxies in front of the panel, for example an nginx or a tunnel that connects to the admin address over TCP. The panel takes the client address of the audit log, of the rate limits and of the MCP token ban from the rightmost `X-Forwarded-For` entry that is not one of these addresses (the entries left of it come from the client; no other header such as `X-Real-IP` is read), and the HTTPS state of the session cookie from the `X-Forwarded-Proto` header, only when the request comes from one of these addresses. Otherwise it records the address of the connection. A loopback address is not trusted on its own, because any process of the host can connect from there. The workers mode (`worker_mode = "workers"`) serves the ports in another process, so its proxy connects to the panel over TCP; enter `127.0.0.1/32` in that mode. The list of CDN address ranges is a separate setting of each proxy and does not apply to the panel.
 
 r3v3rs3 keeps the sessions in memory, so a restart signs every client out. To add a sign-out button to your application:
 

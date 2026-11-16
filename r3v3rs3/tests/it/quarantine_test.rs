@@ -32,7 +32,6 @@ fn proxy(upstream: &str) -> anyhow::Result<HttpProxy> {
         client_ip: ClientIpConfig {
             trust_cdn: false,
             trusted_proxies: vec!["127.0.0.0/8".parse()?, "::1/128".parse()?],
-            ..ClientIpConfig::default()
         },
         ..Default::default()
     })

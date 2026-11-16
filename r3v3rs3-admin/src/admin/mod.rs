@@ -1607,21 +1607,23 @@ mod tests {
 
         state.data.lock().await.config.admin.trusted_proxies =
             vec!["127.0.0.1/32".parse().unwrap()];
+        // The client wrote 203.0.113.195 itself; the trusted proxy appended the real client.
         let req = Request::builder()
-            .header("x-forwarded-for", "203.0.113.195, 10.0.0.1")
+            .header("x-forwarded-for", "203.0.113.195, 198.51.100.20")
             .extension(loopback())
             .body(())
             .unwrap();
         let key = extractor.extract(&req).unwrap();
-        assert_eq!(key, IpAddr::V4(Ipv4Addr::new(203, 0, 113, 195)));
+        assert_eq!(key, IpAddr::V4(Ipv4Addr::new(198, 51, 100, 20)));
 
+        // X-Real-IP is never read, because a proxy that does not write it passes the client's on.
         let req = Request::builder()
             .header("x-real-ip", "198.51.100.5")
             .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
             .body(())
             .unwrap();
         let key = extractor.extract(&req).unwrap();
-        assert_eq!(key, IpAddr::V4(Ipv4Addr::new(198, 51, 100, 5)));
+        assert_eq!(key, IpAddr::V4(Ipv4Addr::LOCALHOST));
 
         let req = Request::builder()
             .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))

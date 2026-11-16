@@ -3,10 +3,7 @@
 use crate::cdn::CdnTable;
 use hyper::HeaderMap;
 use ipnet::IpNet;
-use r3v3rs3_api::{
-    cdn::CdnProvider,
-    client_ip::{ClientIpConfig, ForwardedHeader},
-};
+use r3v3rs3_api::{cdn::CdnProvider, client_ip::ClientIpConfig};
 use std::net::{IpAddr, SocketAddr};
 
 /// Client IP headers that only a trusted proxy may set.
@@ -60,7 +57,6 @@ impl ClientAddr {
 pub struct ClientIpResolver {
     trust_cdn: bool,
     trusted_proxies: Vec<IpNet>,
-    forwarded_header: ForwardedHeader,
 }
 
 enum Trust {
@@ -73,7 +69,6 @@ impl ClientIpResolver {
         Self {
             trust_cdn: config.trust_cdn,
             trusted_proxies: config.trusted_proxies.clone(),
-            forwarded_header: config.forwarded_header,
         }
     }
 
@@ -104,14 +99,11 @@ impl ClientIpResolver {
         table.lookup(ip).map(Trust::Cdn)
     }
 
-    /// Returns the rightmost untrusted address of the header that the trusted proxies write. The
-    /// other header is never read: a proxy that does not write it passes the value of the client
-    /// on, and the client could then name any address.
+    /// Returns the rightmost untrusted address of `X-Forwarded-For`. No other header is read: a
+    /// trusted proxy that does not write a header passes on the value that the client sent in
+    /// it, and the client could then name any address.
     fn forwarded_for_ip(&self, headers: &HeaderMap, table: &CdnTable) -> Option<IpAddr> {
-        let entries = match self.forwarded_header {
-            ForwardedHeader::XForwardedFor => x_forwarded_for_ips(headers),
-            ForwardedHeader::Forwarded => rfc7239_forwarded_ips(headers),
-        };
+        let entries = x_forwarded_for_ips(headers);
         entries
             .iter()
             .rev()
@@ -129,31 +121,6 @@ pub fn x_forwarded_for_ips(headers: &HeaderMap) -> Vec<IpAddr> {
         .filter_map(|value| value.to_str().ok())
         .flat_map(|value| value.split(','))
         .filter_map(parse_forwarded_ip)
-        .collect()
-}
-
-/// The `for` addresses of the RFC 7239 `Forwarded` header, in chain order. A `for=unknown`
-/// element carries no address and is skipped.
-fn rfc7239_forwarded_ips(headers: &HeaderMap) -> Vec<IpAddr> {
-    headers
-        .get_all("forwarded")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .filter_map(|element| {
-            let directive = element.split(';').find(|directive| {
-                directive
-                    .trim()
-                    .get(..4)
-                    .is_some_and(|head| head.eq_ignore_ascii_case("for="))
-            })?;
-            let value = directive.trim()[4..].trim();
-            let value = value
-                .strip_prefix('"')
-                .and_then(|value| value.strip_suffix('"'))
-                .unwrap_or(value);
-            parse_forwarded_ip(value)
-        })
         .collect()
 }
 
@@ -229,18 +196,9 @@ mod tests {
     }
 
     fn resolver(trust_cdn: bool, proxies: &[&str]) -> ClientIpResolver {
-        resolver_with(trust_cdn, proxies, ForwardedHeader::XForwardedFor)
-    }
-
-    fn resolver_with(
-        trust_cdn: bool,
-        proxies: &[&str],
-        header: ForwardedHeader,
-    ) -> ClientIpResolver {
         ClientIpResolver::new(&ClientIpConfig {
             trust_cdn,
             trusted_proxies: proxies.iter().map(|p| p.parse().unwrap()).collect(),
-            forwarded_header: header,
         })
     }
 
@@ -309,34 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn forwarded_header_carries_the_client_ip() {
-        // The client spoofed 1.2.3.4. The trusted load balancer appended its own element.
-        let headers = headers(&[("forwarded", "for=1.2.3.4, for=203.0.113.9;proto=https")]);
-        let client = resolver_with(true, &["10.0.0.0/8"], ForwardedHeader::Forwarded).resolve(
-            ip("10.0.0.5"),
-            &headers,
-            &table(),
-        );
-        assert_eq!(client.ip, ip("203.0.113.9"));
-        assert!(client.trusted_peer);
-    }
-
-    #[test]
-    fn forwarded_header_supports_quoted_ipv6_and_unknown() {
-        let headers = headers(&[
-            ("forwarded", "for=unknown"),
-            ("forwarded", "for=\"[2001:db8::1]:443\""),
-        ]);
-        let client = resolver_with(true, &["10.0.0.0/8"], ForwardedHeader::Forwarded).resolve(
-            ip("10.0.0.5"),
-            &headers,
-            &table(),
-        );
-        assert_eq!(client.ip, ip("2001:db8::1"));
-    }
-
-    #[test]
-    fn a_forwarded_header_of_the_client_is_ignored_behind_an_x_forwarded_for_proxy() {
+    fn a_forwarded_header_of_the_client_is_never_read() {
         // The trusted proxy appended the client to X-Forwarded-For and passed on the Forwarded
         // header that the client sent itself.
         let headers = headers(&[
@@ -345,20 +276,15 @@ mod tests {
         ]);
         let client = resolver(true, &["10.0.0.0/8"]).resolve(ip("10.0.0.5"), &headers, &table());
         assert_eq!(client.ip, ip("203.0.113.9"));
+
+        // Without X-Forwarded-For the client is the trusted peer, not the forged address.
+        let headers = headers_only_forwarded();
+        let client = resolver(true, &["10.0.0.0/8"]).resolve(ip("10.0.0.5"), &headers, &table());
+        assert_eq!(client.ip, ip("10.0.0.5"));
     }
 
-    #[test]
-    fn an_x_forwarded_for_header_of_the_client_is_ignored_behind_a_forwarded_proxy() {
-        let headers = headers(&[
-            ("forwarded", "for=203.0.113.9"),
-            ("x-forwarded-for", "198.51.100.7"),
-        ]);
-        let client = resolver_with(true, &["10.0.0.0/8"], ForwardedHeader::Forwarded).resolve(
-            ip("10.0.0.5"),
-            &headers,
-            &table(),
-        );
-        assert_eq!(client.ip, ip("203.0.113.9"));
+    fn headers_only_forwarded() -> HeaderMap {
+        headers(&[("forwarded", "for=198.51.100.7")])
     }
 
     #[test]

@@ -136,30 +136,19 @@ async fn record_successful_login(
 
 /// The client address that a trusted proxy of the admin API reported: the rightmost
 /// `X-Forwarded-For` entry that is not a trusted proxy itself. The entries left of it come from
-/// the client, which can write any address there. `X-Real-IP` counts only without
-/// `X-Forwarded-For`.
+/// the client, which can write any address there. No other header is read: a proxy that does
+/// not write a header passes on the value that the client sent in it.
 pub(crate) fn forwarded_client_ip(
     trusted_proxies: &[ipnet::IpNet],
     headers: &axum::http::HeaderMap,
 ) -> Option<IpAddr> {
     let chain = crate::proxy::http::client_ip::x_forwarded_for_ips(headers);
-    if chain.is_empty() {
-        return header_ip(headers, "x-real-ip");
-    }
     chain
         .iter()
         .rev()
         .find(|ip| !trusted_proxies.iter().any(|net| net.contains(*ip)))
         .or(chain.first())
         .copied()
-}
-
-fn header_ip(headers: &axum::http::HeaderMap, name: &'static str) -> Option<IpAddr> {
-    headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .and_then(|s| s.trim().parse::<IpAddr>().ok())
 }
 
 /// The address of the client. A request that the proxy of this process handed over carries the
@@ -1157,12 +1146,10 @@ mod tests {
             forwarded_client_ip(&trusted, &headers),
             Some("203.0.113.9".parse().unwrap())
         );
+        // A client sends X-Real-IP through a proxy that does not write it.
         headers.remove("x-forwarded-for");
         headers.insert("x-real-ip", "198.51.100.4".parse().unwrap());
-        assert_eq!(
-            forwarded_client_ip(&trusted, &headers),
-            Some("198.51.100.4".parse().unwrap())
-        );
+        assert_eq!(forwarded_client_ip(&trusted, &headers), None);
     }
 
     #[test]
