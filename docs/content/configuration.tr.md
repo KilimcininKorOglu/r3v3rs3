@@ -1781,6 +1781,7 @@ r3v3rs3, gelen canlı HTTP ve TCP trafiğini izleyerek dış tehdit istihbaratı
 - **Her Portta Drop Yaptırımı**:
   - Karantinaya alınan IP'lerden gelen bağlantılar, HTTP istek çözümlemesi veya TLS handshake yapılmadan TCP dinleyici seviyesinde anında kapatılır (TCP Drop / Reset). Sunucu CPU ve bellek tüketimi sıfıra indirilir.
   - UDP portunda karantinadaki IP'nin paketleri atılır ve açık session'ı kapanır. Upstream sunucu bu paketleri almaz ve cevap vermez.
+  - PROXY protocol header'ı okuyan bir TCP portunda client, header'daki kaynak adrestir. Header'ı karantinadaki bir IP'yi gösteren bağlantı, upstream sunucuya ulaşmadan kapanır.
 - **Webhook Bildirimi**:
   - Bir IP karantinaya alındığında otomatik olarak `security.threat_detected` webhook olayı tetiklenir.
 - **Yönetim ve WebUI Kontrolleri**:

@@ -187,9 +187,8 @@ async fn start_echo_server() -> anyhow::Result<SocketAddr> {
     Ok(addr)
 }
 
-#[tokio::test]
-async fn tcp_port_passes_the_payload_after_the_header() -> anyhow::Result<()> {
-    let proxy_port = alloc_tcp_port().await?;
+/// A TCP port that reads PROXY protocol headers from loopback, with a proxy to the echo server.
+async fn echo_tcp_storage(proxy_port: &common::TestPort) -> anyhow::Result<TestStorage> {
     let echo = start_echo_server().await?;
     let proxy = TcpProxy {
         client_cert: None,
@@ -202,16 +201,47 @@ async fn tcp_port_passes_the_payload_after_the_header() -> anyhow::Result<()> {
             format!("/ip4/127.0.0.1/tcp/{}", echo.port()).parse()?,
         )],
     };
-    let config = TestStorage::builder()
+    Ok(TestStorage::builder()
         .ports(vec![with_proxy_protocol(
             port_entry("test", proxy_port.multiaddr_tcp()),
             receive(&["127.0.0.0/8", "::1/128"]),
         )])
         .proxies(vec![proxy_entry("proxy", "test", ProxyKind::Tcp(proxy))])
-        .build();
+        .build())
+}
 
+#[tokio::test]
+async fn tcp_port_passes_the_payload_after_the_header() -> anyhow::Result<()> {
+    let proxy_port = alloc_tcp_port().await?;
+    let config = echo_tcp_storage(&proxy_port).await?;
     with_server(config, |_| async move {
         check_payload_after_header(proxy_port.socket_addr()).await
+    })
+    .await
+}
+
+/// A quarantined client reaches no port of the server. Behind a trusted load balancer the
+/// client is the source address of the PROXY protocol header, not the socket peer, so a
+/// quarantined source is refused while another source is still served.
+#[tokio::test]
+async fn tcp_port_refuses_a_quarantined_source_of_the_header() -> anyhow::Result<()> {
+    use r3v3rs3::server::rpc::quarantine::QuarantineIp;
+    let proxy_port = alloc_tcp_port().await?;
+    let config = echo_tcp_storage(&proxy_port).await?;
+    with_server(config, |mut channels| async move {
+        let addr = proxy_port.socket_addr();
+        wait_for_listener(addr).await?;
+        let denied: SocketAddr = DENIED_SOURCE.parse()?;
+        let quarantine = QuarantineIp {
+            ip: denied.ip(),
+            reason: "test".into(),
+            duration_seconds: 60,
+        };
+        common::call(&mut channels, quarantine).await??;
+
+        let refused = echo_after_header(addr, v1_header(DENIED_SOURCE)).await;
+        assert!(refused.is_err(), "a quarantined source was served");
+        echo_after_header(addr, v1_header(ALLOWED_SOURCE)).await
     })
     .await
 }

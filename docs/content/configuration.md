@@ -1781,6 +1781,7 @@ r3v3rs3 monitors incoming live HTTP and TCP traffic to detect scanner probes, pa
 - **Drop Enforcement on Every Port**:
   - Quarantined IP connections are immediately dropped at the TCP listener level before HTTP request parsing or TLS handshakes, consuming near-zero server CPU and memory.
   - On a UDP port, the packets of a quarantined IP are dropped and its open session closes, so the upstream server neither gets them nor answers.
+  - On a TCP port that reads PROXY protocol headers, the source address of the header is the client: a connection whose header names a quarantined IP closes before it reaches the upstream server.
 - **Webhook Alerting**:
   - Automatically triggers `security.threat_detected` webhook notifications upon IP quarantine.
 - **Management & WebUI Controls**:

@@ -7,6 +7,7 @@ use super::{
     tls::{Handshake, PortTls, TlsTermination, port_acceptor, port_tls, upstream_client_config},
 };
 use crate::certs::cert_list::CertList;
+use crate::security::AutoQuarantineTracker;
 use anyhow::Context as _;
 use r3v3rs3_api::{error::Error, id::ShortId, multiaddr::Multiaddr};
 use r3v3rs3_api::{
@@ -48,6 +49,7 @@ pub struct TcpPortContext {
     resolver: Resolver,
     tls_termination: Option<TlsTermination>,
     proxy_protocol: Option<Arc<ProxyProtocolReceive>>,
+    quarantine: Arc<AutoQuarantineTracker>,
     stop_notifier: Arc<Notify>,
 }
 
@@ -81,17 +83,21 @@ impl TcpPortContext {
             resolver,
             tls_termination,
             proxy_protocol: entry.port.opts.proxy_protocol.clone().map(Arc::new),
+            quarantine: Default::default(),
             stop_notifier: Arc::new(Notify::new()),
         })
     }
 
-    /// Uses the upstream servers of the first proxy of the port that has a valid server.
+    /// Uses the upstream servers of the first proxy of the port that has a valid server, and the
+    /// quarantine of the server for the source addresses of PROXY protocol headers.
     pub async fn setup(
         &mut self,
         certs: &CertList,
         proxies: Vec<ProxyEntry>,
         groups: &GroupRegistry,
+        quarantine: &Arc<AutoQuarantineTracker>,
     ) -> Result<(), Error> {
+        self.quarantine = quarantine.clone();
         let mut upstream = None;
         for entry in proxies {
             if let ProxyKind::Tcp(proxy) = &entry.proxy.kind {
@@ -146,6 +152,7 @@ impl TcpPortContext {
             resolver: self.resolver.clone(),
             tls_acceptor: port_acceptor(self.tls_termination.as_ref()),
             proxy_protocol: self.proxy_protocol.clone(),
+            quarantine: self.quarantine.clone(),
             stop_notifier: self.stop_notifier.clone(),
             span: self.span.clone(),
         }
@@ -159,6 +166,7 @@ pub struct TcpStarter {
     /// `None` when the TLS config of the port is invalid.
     tls_acceptor: Option<Option<TlsAcceptor>>,
     proxy_protocol: Option<Arc<ProxyProtocolReceive>>,
+    quarantine: Arc<AutoQuarantineTracker>,
     stop_notifier: Arc<Notify>,
     span: Span,
 }
@@ -174,12 +182,19 @@ impl TcpStarter {
             return;
         };
         let (resolver, stop_notifier) = (self.resolver, self.stop_notifier);
-        let proxy_protocol = self.proxy_protocol;
+        let (proxy_protocol, quarantine) = (self.proxy_protocol, self.quarantine);
         let peer = stream.get_ref().peer_addr().ok();
         let task = async move {
             let client = proxy_protocol::accept(stream, proxy_protocol.as_deref())
                 .await
                 .context("proxy protocol")?;
+            // The listener checks only the socket peer, which is the load balancer when the
+            // port reads PROXY protocol headers; the source of the header is the client.
+            anyhow::ensure!(
+                !quarantine.is_quarantined(&client.remote.ip()),
+                "dropped a connection of a quarantined client {}",
+                client.remote
+            );
             start(client, upstream, resolver, tls, stop_notifier).await
         };
         spawn_connection(self.span, peer, task);

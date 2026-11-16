@@ -216,7 +216,11 @@ impl PortContext {
         registries: &ProxyRegistries,
     ) -> Result<(), Error> {
         match &mut self.kind {
-            PortContextKind::Tcp(ctx) => ctx.setup(certs, proxies, &registries.groups).await,
+            PortContextKind::Tcp(ctx) => {
+                let quarantine = &registries.quarantine;
+                ctx.setup(certs, proxies, &registries.groups, quarantine)
+                    .await
+            }
             PortContextKind::Http(ctx) => {
                 ctx.setup(ports, certs, proxies, sessions, registries).await
             }
