@@ -17,6 +17,12 @@ async fn api_token_scoped_access_and_lifecycle() -> anyhow::Result<()> {
     let addr = alloc_tcp_port().await?.socket_addr();
     let storage = TestStorage::builder()
         .accounts(HashMap::from([("admin".to_string(), "secret".to_string())]))
+        .account(
+            "viewer",
+            "viewer-secret",
+            r3v3rs3_api::auth::Role::Viewer,
+            None,
+        )
         .build();
 
     let app_info = new_appinfo(&dir, &dir);
@@ -71,9 +77,46 @@ async fn manage_the_tokens(addr: SocketAddr) -> anyhow::Result<()> {
     assert_eq!(read_token.scope, TokenScope::Read);
     assert_eq!(edit_token.scope, TokenScope::Edit);
 
+    // A token that the server never issued opens nothing, while real tokens exist.
+    let forged = format!("r3v_{}", "0".repeat(40));
+    let status = get_with_token(&client, addr, "/api/proxies", &forged).await?;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
     check_token_list(&client, addr, &cookie, &read_token, &edit_token).await?;
     check_token_scopes(&client, addr, &read_token, &edit_token).await?;
+    check_hostile_tokens(&client, addr, &edit_token).await?;
     check_deleted_token(&client, addr, &cookie, &read_token).await
+}
+
+/// Checks the tokens of a viewer: no edit token, and no deletion of the admin's token.
+async fn check_hostile_tokens(
+    client: &Client,
+    addr: SocketAddr,
+    admin_token: &ApiTokenCreated,
+) -> anyhow::Result<()> {
+    // The scope of a token never raises the role of its account: a viewer gets no edit token.
+    let viewer = common::session_cookie(addr, "viewer", "viewer-secret").await?;
+    let request = CreateApiTokenRequest {
+        name: "viewer-edit".into(),
+        scope: TokenScope::Edit,
+    };
+    let resp = client
+        .post(format!("http://{addr}/api/auth/tokens"))
+        .header(COOKIE, &viewer)
+        .json(&request)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // A viewer cannot delete the token of another account.
+    client
+        .delete(format!("http://{addr}/api/auth/tokens/{}", admin_token.id))
+        .header(COOKIE, &viewer)
+        .send()
+        .await?;
+    let status = get_with_token(client, addr, "/api/proxies", &admin_token.token).await?;
+    assert_eq!(status, StatusCode::OK);
+    Ok(())
 }
 
 /// Creates an API token with the session cookie and checks that the request succeeds.
