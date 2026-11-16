@@ -352,7 +352,7 @@ async fn the_supervisor_serves_the_ports_through_a_worker() -> anyhow::Result<()
         }])
         .build();
     let app_info = r3v3rs3::config::new_appinfo(&log_dir, &log_dir);
-    let (server, channels) =
+    let (server, mut channels) =
         Server::new_shared(app_info.clone(), std::sync::Arc::new(storage)).await;
     let manifest = server.listener_manifest()?;
     assert_eq!(manifest.len(), 1);
@@ -380,9 +380,7 @@ async fn the_supervisor_serves_the_ports_through_a_worker() -> anyhow::Result<()
         "the event of the worker did not reach the master"
     );
 
-    let proxy_addr = proxy_port.socket_addr();
-    let mut client = wait_for_proxy(&proxy_addr).await?;
-    expect_echo(&mut client, b"hello").await?;
+    check_worker_serves(&mut channels, &proxy_port.socket_addr()).await?;
 
     channels.shutdown();
     if let Err(err) = supervisor_task.await {
@@ -391,6 +389,74 @@ async fn the_supervisor_serves_the_ports_through_a_worker() -> anyhow::Result<()
     server_task.await??;
     std::fs::remove_dir_all(&log_dir).ok();
     Ok(())
+}
+
+/// Checks that the port answers, and that it answers through the worker only.
+async fn check_worker_serves(
+    channels: &mut r3v3rs3::server::ServerChannels,
+    proxy_addr: &SocketAddr,
+) -> anyhow::Result<()> {
+    let mut client = wait_for_proxy(proxy_addr).await?;
+    expect_echo(&mut client, b"hello").await?;
+    let pid = worker_pid(channels).await?;
+    check_only_the_worker_accepts(pid, proxy_addr).await
+}
+
+/// Reads the pid of the worker from the status that the master reports, for up to 10 seconds.
+/// The supervisor asks the worker for its status at the start.
+async fn worker_pid(channels: &mut r3v3rs3::server::ServerChannels) -> anyhow::Result<u32> {
+    use r3v3rs3::server::rpc::workers::GetWorkers;
+    for _ in 0..100 {
+        let report = common::call(channels, GetWorkers).await??;
+        if let Some(status) = report.workers.first().and_then(|w| w.status.as_ref()) {
+            anyhow::ensure!(status.pid != std::process::id(), "the master is the worker");
+            return Ok(status.pid);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("the master reports no worker status")
+}
+
+/// Freezes the worker: a client gets no answer while it is stopped, because the master no
+/// longer accepts on the port, and the answer comes once the worker runs again.
+async fn check_only_the_worker_accepts(pid: u32, addr: &SocketAddr) -> anyhow::Result<()> {
+    let signal = |sig| {
+        // SAFETY: kill sends a signal to the worker process and touches no memory.
+        let result = unsafe { libc::kill(pid as libc::pid_t, sig) };
+        anyhow::ensure!(
+            result == 0,
+            "kill failed: {}",
+            std::io::Error::last_os_error()
+        );
+        Ok(())
+    };
+    signal(libc::SIGSTOP)?;
+    let frozen = ask_while_frozen(addr).await;
+    signal(libc::SIGCONT)?;
+    let (mut client, answer) = frozen?;
+    anyhow::ensure!(
+        answer.is_none(),
+        "a client got an answer while the worker was stopped"
+    );
+    let mut buf = [0u8; 5];
+    tokio::time::timeout(Duration::from_secs(10), client.read_exact(&mut buf)).await??;
+    anyhow::ensure!(&buf == b"while", "{buf:?}");
+    Ok(())
+}
+
+/// Connects, writes and waits one second for the echo. The kernel completes the handshake
+/// into the backlog of the listener, so the connection opens while no process accepts.
+async fn ask_while_frozen(
+    addr: &SocketAddr,
+) -> anyhow::Result<(tokio::net::TcpStream, Option<usize>)> {
+    let mut client = tokio::net::TcpStream::connect(addr).await?;
+    client.write_all(b"while").await?;
+    let mut buf = [0u8; 5];
+    let answer = tokio::time::timeout(Duration::from_secs(1), client.read(&mut buf))
+        .await
+        .ok()
+        .transpose()?;
+    Ok((client, answer))
 }
 
 /// A one minute quarantine of the address.
