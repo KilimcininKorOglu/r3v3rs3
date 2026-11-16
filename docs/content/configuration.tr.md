@@ -1644,7 +1644,7 @@ r3v3rs3, çoklu çoğullanan (multiplexed) HTTP/2 ve HTTP/3 bağlantılarını o
 
 ### Öncelik Kademeleri ve Yapılandırılmış Alanlar
 
-RFC 9218, önceliği `Priority` HTTP header'ı ile aciliyet (`u=0..7`) ve artımlı bayrak (`i`) kullanarak iletir:
+RFC 9218, önceliği `Priority` HTTP header'ı ile aciliyet (`u=0..7`) ve artımlı bayrak (`i`) kullanarak iletir. İstemcinin gönderdiği geçerli bir `Priority` header'ı aşağıdaki kurallardan önce gelir. RFC 9218'in istediği gibi r3v3rs3, aralık dışı ya da yanlış türde değer taşıyan üyeyi (örneğin `u=8` veya `i=1`) yok sayar. Geçerli üyesi olmayan header hiç gönderilmemiş sayılır.
 
 | Aciliyet (`u`) | Sınıf | Kaynak Türleri | Ağırlık | İletim Davranışı |
 |---|---|---|---|---|

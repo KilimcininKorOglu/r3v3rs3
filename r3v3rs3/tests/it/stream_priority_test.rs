@@ -154,6 +154,15 @@ async fn test_proxy_injects_priority_header() -> anyhow::Result<()> {
         .create_async()
         .await;
 
+    // RFC 9218 section 4: an out-of-range urgency is ignored, so the heuristic of the path
+    // applies instead of a clamped `u=7`.
+    let mock_invalid = server
+        .mock("GET", "/invalid.webp")
+        .match_header("priority", "u=5, i")
+        .with_body("invalid-ok")
+        .create_async()
+        .await;
+
     let proxy_port = alloc_tcp_port().await?;
     let config = priority_storage(&proxy_port, &server.url())?;
 
@@ -182,6 +191,11 @@ async fn test_proxy_injects_priority_header() -> anyhow::Result<()> {
             fetch_text(&client, format!("{base_url}/custom.webp"), Some("u=2")).await?;
         assert_eq!(resp_custom, "custom-ok");
         mock_client.assert_async().await;
+
+        let resp_invalid =
+            fetch_text(&client, format!("{base_url}/invalid.webp"), Some("u=8")).await?;
+        assert_eq!(resp_invalid, "invalid-ok");
+        mock_invalid.assert_async().await;
 
         Ok(())
     })

@@ -205,23 +205,25 @@ enum MemberParsed {
     Incremental(bool),
 }
 
+/// RFC 9218 section 4: a parameter with an out-of-range value or a value of an unexpected type
+/// is ignored. `u` is an Integer from 0 to 7 and `i` a Boolean (`?1`, `?0` or a bare `i`);
+/// RFC 8941 section 3.2 allows no whitespace around `=`.
 fn parse_rfc9218_member(member: &str) -> Option<MemberParsed> {
-    if let Some(u_str) = member
-        .strip_prefix("u=")
-        .or_else(|| member.strip_prefix("u ="))
-    {
-        u_str
-            .trim()
-            .parse::<u8>()
-            .ok()
-            .map(|u| MemberParsed::Urgency(u.min(7)))
-    } else if member == "i" || member == "i=?1" || member == "i=1" {
-        Some(MemberParsed::Incremental(true))
-    } else if member == "i=?0" || member == "i=0" {
-        Some(MemberParsed::Incremental(false))
-    } else {
-        None
+    match member.split_once('=') {
+        Some(("u", value)) => parse_urgency(value).map(MemberParsed::Urgency),
+        Some(("i", "?1")) => Some(MemberParsed::Incremental(true)),
+        Some(("i", "?0")) => Some(MemberParsed::Incremental(false)),
+        None if member == "i" => Some(MemberParsed::Incremental(true)),
+        _ => None,
     }
+}
+
+/// Parses an RFC 8941 Integer of digits only and keeps it when it lies in 0..=7.
+fn parse_urgency(value: &str) -> Option<u8> {
+    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    value.parse::<u8>().ok().filter(|urgency| *urgency <= 7)
 }
 
 /// Resolves stream priority by checking client header, custom rules, or MIME heuristics.
@@ -490,6 +492,25 @@ mod tests {
         );
         assert_eq!(parse_rfc9218_priority(""), None);
         assert_eq!(parse_rfc9218_priority("invalid"), None);
+    }
+
+    /// RFC 9218 section 4: out-of-range values and values of an unexpected type are ignored,
+    /// so the other members of the field still count and the ignored one keeps its default.
+    #[test]
+    fn invalid_priority_members_are_ignored() {
+        for header in [
+            "u=8", "u=255", "u=-1", "u=+2", "u=", "u=1.5", "u =2", "i=1", "i=0",
+        ] {
+            assert_eq!(parse_rfc9218_priority(header), None, "{header}");
+        }
+        assert_eq!(
+            parse_rfc9218_priority("u=9, i"),
+            Some(StreamPriority::new(3, true))
+        );
+        assert_eq!(
+            parse_rfc9218_priority("u=1, i=1"),
+            Some(StreamPriority::new(1, false))
+        );
     }
 
     #[test]

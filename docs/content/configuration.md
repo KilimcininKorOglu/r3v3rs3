@@ -1644,7 +1644,7 @@ r3v3rs3 implements the RFC 9218 Extensible Prioritization Scheme for HTTP to opt
 
 ### Priority Levels and Structured Fields
 
-RFC 9218 signals priority using the `Priority` HTTP header with urgency (`u=0..7`) and an incremental flag (`i`):
+RFC 9218 signals priority using the `Priority` HTTP header with urgency (`u=0..7`) and an incremental flag (`i`). A valid `Priority` header of the client takes precedence over the rules below. As RFC 9218 requires, r3v3rs3 ignores a member with an out-of-range value or an unexpected type (for example `u=8` or `i=1`); a header without a valid member counts as absent.
 
 | Urgency (`u`) | Class | Resource Types | Weight | Delivery Behavior |
 |---|---|---|---|---|
