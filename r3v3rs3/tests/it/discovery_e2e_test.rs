@@ -142,7 +142,7 @@ fn docker(args: &[&str]) -> anyhow::Result<String> {
 #[tokio::test]
 #[ignore = "needs the discovery containers, run it with make test-discovery-e2e"]
 async fn docker_labels_of_a_running_container_define_a_proxy() -> anyhow::Result<()> {
-    start_whoami()?;
+    let hostname = start_whoami()?;
 
     let (port, url) = web_port().await?;
     let mut config = AppConfig::default();
@@ -150,15 +150,16 @@ async fn docker_labels_of_a_running_container_define_a_proxy() -> anyhow::Result
     config.discovery.docker.endpoint = "unix:///var/run/docker.sock".into();
     let storage = TestStorage::builder().ports(vec![port]).build();
     let result = with_server(storage, |channels| {
-        check_docker_proxy(channels, config, url)
+        check_docker_proxy(channels, config, url, hostname)
     })
     .await;
     docker(&["rm", "-f", WHOAMI])?;
     result
 }
 
-/// Starts the labeled whoami container after it removes a container left by an earlier run.
-fn start_whoami() -> anyhow::Result<()> {
+/// Starts the labeled whoami container after it removes a container left by an earlier run, and
+/// returns the hostname of the container.
+fn start_whoami() -> anyhow::Result<String> {
     // `rm -f` also succeeds without the container, so a failed earlier run does not break this run.
     docker(&["rm", "-f", WHOAMI])?;
     docker(&[
@@ -176,7 +177,7 @@ fn start_whoami() -> anyhow::Result<()> {
         "r3v3rs3.http.whoami.port=80",
         "traefik/whoami:v1.11",
     ])?;
-    Ok(())
+    docker(&["inspect", "-f", "{{.Config.Hostname}}", WHOAMI])
 }
 
 /// Checks that the container label proxy reaches whoami and that removing the container removes
@@ -185,12 +186,14 @@ async fn check_docker_proxy(
     mut channels: ServerChannels,
     config: AppConfig,
     url: String,
+    hostname: String,
 ) -> anyhow::Result<()> {
     call(&mut channels, SetConfig { config }).await??;
     wait_for_proxies(&mut channels, DiscoveryProvider::Docker, 1).await?;
     let body = wait_for_host_status(&url, Some("docker.e2e.test"), 200).await?;
-    // whoami answers with the container hostname, so the request reached the container.
-    assert!(body.contains("Hostname: "), "{body}");
+    // whoami answers with its own hostname, so only the labeled container gives this line.
+    let line = format!("Hostname: {hostname}");
+    assert!(body.lines().any(|l| l == line), "{body}");
 
     // The removed container removes its proxy.
     docker(&["rm", "-f", WHOAMI])?;
