@@ -40,6 +40,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 r3v3rs3-api = { workspace = true, features = ["test-util"] }
+r3v3rs3-core = { workspace = true, features = ["test-util"] }
 tokio-rustls = { workspace = true, features = ["early-data"] }
 argon2.workspace = true
 async-compression.workspace = true

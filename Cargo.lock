@@ -3185,6 +3185,7 @@ dependencies = [
  "quinn",
  "r3v3rs3-admin",
  "r3v3rs3-api",
+ "r3v3rs3-core",
  "rand 0.10.2",
  "rcgen",
  "reqwest",
