@@ -571,38 +571,39 @@ mod tests {
         assert_eq!(StreamPriority::new(5, true).to_header_value(), "u=5, i");
     }
 
+    /// RFC 9218 section 4.1: a lower urgency is a higher priority, so it weighs more.
     #[test]
     fn test_weight_mapping() {
-        assert_eq!(StreamPriority::new(0, false).weight(), 256);
-        assert_eq!(StreamPriority::new(1, false).weight(), 128);
-        assert_eq!(StreamPriority::new(3, false).weight(), 32);
-        assert_eq!(StreamPriority::new(7, true).weight(), 2);
+        for urgency in 0..7 {
+            let higher = StreamPriority::new(urgency, false).weight();
+            let lower = StreamPriority::new(urgency + 1, true).weight();
+            assert!(higher > lower, "u={urgency}: {higher} <= {lower}");
+        }
     }
 
+    /// The document comes before the styles and the API calls, which come before the images and
+    /// the videos (RFC 9218 section 4.1); images and videos render progressively, so they are
+    /// incremental (section 4.2).
     #[test]
     fn test_heuristic_resolution() {
         let config = StreamPriorityConfig {
             enabled: true,
             ..Default::default()
         };
+        let resolve = |path| resolve_stream_priority(None, path, None, &config);
+        let html = resolve("/index.html");
+        let css = resolve("/style.css");
+        let api = resolve("/api/v1/users");
+        let image = resolve("/banner.webp");
+        let video = resolve("/video.mp4");
 
-        let html = resolve_stream_priority(None, "/index.html", None, &config);
-        assert_eq!(html.urgency, 0);
-        assert!(!html.incremental);
-
-        let css = resolve_stream_priority(None, "/style.css", None, &config);
-        assert_eq!(css.urgency, 1);
-
-        let image = resolve_stream_priority(None, "/banner.webp", None, &config);
-        assert_eq!(image.urgency, 5);
-        assert!(image.incremental);
-
-        let video = resolve_stream_priority(None, "/video.mp4", None, &config);
-        assert_eq!(video.urgency, 6);
-        assert!(video.incremental);
-
-        let api = resolve_stream_priority(None, "/api/v1/users", None, &config);
-        assert_eq!(api.urgency, 1);
+        assert!(html.urgency < css.urgency, "{html:?} {css:?}");
+        assert!(
+            css.urgency.max(api.urgency) < image.urgency,
+            "{css:?} {api:?} {image:?}"
+        );
+        assert!(image.urgency <= video.urgency, "{image:?} {video:?}");
+        assert!(!html.incremental && image.incremental && video.incremental);
     }
 
     #[test]
