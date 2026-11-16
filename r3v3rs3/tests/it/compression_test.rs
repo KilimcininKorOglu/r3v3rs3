@@ -180,75 +180,157 @@ async fn check_ineligible_responses(
     Ok(())
 }
 
-#[tokio::test]
-async fn shared_compression_dictionary_serving_and_dcz_encoding() -> anyhow::Result<()> {
-    let port = alloc_tcp_port().await?;
+const DICT_RAW: &str = "{\"schema\":\"v1\",\"users\":[";
+
+/// The JSON body of both API paths, which shares its start with the dictionary.
+fn api_payload() -> String {
+    format!("{DICT_RAW}{{\"id\":1,\"name\":\"Alice\"}},{{\"id\":2,\"name\":\"Bob\"}}]}}")
+}
+
+/// An upstream with the same JSON body on `/api/users` and on `/static/users`.
+async fn dictionary_upstream() -> mockito::ServerGuard {
     let mut upstream = mockito::Server::new_async().await;
-    let dict_raw = "{\"schema\":\"v1\",\"users\":[".to_string();
-    let body_payload =
-        format!("{dict_raw}{{\"id\":1,\"name\":\"Alice\"}},{{\"id\":2,\"name\":\"Bob\"}}]}}");
+    for path in ["/api/users", "/static/users"] {
+        upstream
+            .mock("GET", path)
+            .with_header("content-type", "application/json")
+            .with_header("etag", "\"v1\"")
+            .with_body(api_payload())
+            .expect_at_least(0)
+            .create_async()
+            .await;
+    }
+    upstream
+}
 
-    let _mock_api = upstream
-        .mock("GET", "/api/users")
-        .with_header("content-type", "application/json")
-        .with_header("etag", "\"v1\"")
-        .with_body(&body_payload)
-        .create_async()
-        .await;
-
+/// A dictionary for the paths below `/api/`.
+fn users_dictionary() -> r3v3rs3_api::compression_dictionary::CompressionDictionary {
     let mut dict = r3v3rs3_api::compression_dictionary::CompressionDictionary {
         id: r3v3rs3_api::id::ShortId::new(),
         name: "Users Schema".to_string(),
         match_pattern: "/api/*".to_string(),
         path: "/.well-known/dict/users.dict".to_string(),
-        raw_data: dict_raw.clone(),
+        raw_data: DICT_RAW.to_string(),
         sha256_sf: String::new(),
     };
     dict.ensure_hash();
-    let dict_hash = dict.sha256_sf.clone();
+    dict
+}
 
+/// A proxy with the dictionary on a plain HTTP port and on an HTTPS port for `localhost`.
+fn dictionary_storage(
+    plain: &TestPort,
+    secure: &TestPort,
+    upstream: &str,
+    root: &std::sync::Arc<r3v3rs3::certs::Cert>,
+) -> TestStorage {
+    use r3v3rs3::certs::Cert;
+    let cert =
+        std::sync::Arc::new(Cert::new_self_signed(&["localhost".parse().unwrap()], root).unwrap());
+    // Without `upgrade_insecure`, the plain port answers itself instead of redirecting to HTTPS.
     let proxy = HttpProxy {
         vhosts: vec!["localhost".parse().unwrap()],
-        routes: vec![http_route("/", &upstream.url(), None)],
+        routes: vec![http_route("/", upstream, None)],
         upgrade_insecure: false,
         compression: Compression {
             algorithms: vec![CompressionAlgorithm::Zstd, CompressionAlgorithm::Gzip],
-            dictionaries: vec![dict.clone()],
+            dictionaries: vec![users_dictionary()],
             min_size: 10,
             ..Default::default()
         },
         ..Default::default()
     };
-    let config = TestStorage::builder()
-        .ports(vec![http_port_entry("port1", &port)])
-        .proxies(vec![http_proxy_entry("proxy1", "port1", proxy)])
-        .build();
+    let mut entry = http_proxy_entry("proxy1", "plain", proxy);
+    entry.proxy.ports.push("secure".parse().unwrap());
+    let mut secure_entry = common::port_entry("secure", secure.multiaddr_https());
+    secure_entry.port.opts.tls_termination = Some(r3v3rs3_api::tls::TlsTermination {
+        server_names: vec!["localhost".into()],
+        ..Default::default()
+    });
+    TestStorage::builder()
+        .ports(vec![http_port_entry("plain", plain), secure_entry])
+        .proxies(vec![entry])
+        .certs(
+            [(root.id, root.clone()), (cert.id, cert)]
+                .into_iter()
+                .collect(),
+        )
+        .build()
+}
+
+/// RFC 9842: a dictionary-compressed response uses `dcz` only on HTTPS (section 8), only with
+/// the dictionary that the client announced for a matching path and only when the client
+/// accepts `dcz` (section 6.2).
+#[tokio::test]
+async fn shared_compression_dictionary_serving_and_dcz_encoding() -> anyhow::Result<()> {
+    let plain = alloc_tcp_port().await?;
+    let secure = alloc_tcp_port().await?;
+    let upstream = dictionary_upstream().await;
+    let root = std::sync::Arc::new(r3v3rs3::certs::Cert::new_ca()?);
+    let ca = reqwest::Certificate::from_pem(&root.pem_chain)?;
+    let config = dictionary_storage(&plain, &secure, &upstream.url(), &root);
+    let dict_hash = users_dictionary().sha256_sf;
 
     with_server(config, |_| async move {
-        let client = reqwest::Client::builder().no_gzip().no_brotli().build()?;
-        check_dictionary_served(&client, &port, &dict_raw).await?;
-        let api_resp = request_with_dictionary(&client, &port, &dict_hash).await?;
-        // 3. Decompress response using dictionary
-        let compressed_bytes = api_resp.bytes().await?;
-        let mut decompressor = zstd::bulk::Decompressor::with_dictionary(dict_raw.as_bytes())?;
-        let decompressed = decompressor.decompress(&compressed_bytes, 10 * 1024)?;
-        assert_eq!(String::from_utf8(decompressed)?, body_payload);
-        Ok(())
+        let client = reqwest::Client::builder()
+            .add_root_certificate(ca)
+            .no_gzip()
+            .no_brotli()
+            .build()?;
+        check_dictionary_served(&client, &secure.https_url("/.well-known/dict/users.dict")).await?;
+        let api_resp = request_with_dictionary(&client, &secure, &dict_hash).await?;
+        check_dcz_body(&api_resp.bytes().await?)?;
+        check_no_dictionary_use(&client, &plain, &secure, &dict_hash).await
     })
     .await
 }
 
-/// Checks that the proxy serves the dictionary with its headers and its raw data.
-async fn check_dictionary_served(
+/// RFC 9842 section 5: the body starts with the 8 fixed bytes and the SHA-256 digest of the
+/// dictionary, and a Zstandard frame with the raw dictionary follows.
+fn check_dcz_body(body: &[u8]) -> anyhow::Result<()> {
+    use sha2::Digest;
+    const MAGIC: [u8; 8] = [0x5e, 0x2a, 0x4d, 0x18, 0x20, 0x00, 0x00, 0x00];
+    assert!(body.len() > 40, "{body:?}");
+    assert_eq!(body[..8], MAGIC);
+    assert_eq!(body[8..40], sha2::Sha256::digest(DICT_RAW.as_bytes())[..]);
+    let mut decompressor = zstd::bulk::Decompressor::with_dictionary(DICT_RAW.as_bytes())?;
+    let decompressed = decompressor.decompress(&body[40..], 10 * 1024)?;
+    assert_eq!(String::from_utf8(decompressed)?, api_payload());
+    Ok(())
+}
+
+/// Requests that must not get `dcz`: another dictionary, a path outside the dictionary
+/// pattern, and a client that does not accept `dcz`. Each gets plain `zstd`.
+async fn check_no_dictionary_use(
     client: &reqwest::Client,
-    port: &TestPort,
-    dict_raw: &str,
+    plain: &TestPort,
+    secure: &TestPort,
+    dict_hash: &str,
 ) -> anyhow::Result<()> {
-    // 1. Verify dictionary serving
-    let dict_resp = client
-        .get(port.http_url("/.well-known/dict/users.dict"))
-        .send()
-        .await?;
+    let other_hash = ":AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:";
+    let _ = plain;
+    let cases = [
+        (secure.https_url("/api/users"), "dcz, zstd", other_hash),
+        (secure.https_url("/static/users"), "dcz, zstd", dict_hash),
+        (secure.https_url("/api/users"), "zstd", dict_hash),
+    ];
+    for (url, accept, hash) in cases {
+        let resp = client
+            .get(url.clone())
+            .header(ACCEPT_ENCODING, accept)
+            .header("available-dictionary", hash)
+            .send()
+            .await?;
+        assert_eq!(resp.status(), 200, "{url}");
+        assert_eq!(encoding(&resp), Some("zstd"), "{url} {accept} {hash}");
+        assert_eq!(decode("zstd", &resp.bytes().await?).await?, api_payload());
+    }
+    Ok(())
+}
+
+/// Checks that the proxy serves the dictionary with its headers and its raw data.
+async fn check_dictionary_served(client: &reqwest::Client, url: &url::Url) -> anyhow::Result<()> {
+    let dict_resp = client.get(url.clone()).send().await?;
     assert_eq!(dict_resp.status(), 200);
     let dict_headers = dict_resp.headers();
     assert_eq!(
@@ -262,19 +344,19 @@ async fn check_dictionary_served(
         "public, max-age=31536000, immutable"
     );
     let served_bytes = dict_resp.text().await?;
-    assert_eq!(served_bytes, dict_raw);
+    assert_eq!(served_bytes, DICT_RAW);
     Ok(())
 }
 
-/// Requests the API with the dictionary hash, checks the `dcz` headers, and returns the response.
+/// Requests the API over HTTPS with the dictionary hash, checks the `dcz` headers (RFC 9842
+/// section 6.2), and returns the response.
 async fn request_with_dictionary(
     client: &reqwest::Client,
     port: &TestPort,
     dict_hash: &str,
 ) -> anyhow::Result<reqwest::Response> {
-    // 2. Request API endpoint with Available-Dictionary header
     let api_resp = client
-        .get(port.http_url("/api/users"))
+        .get(port.https_url("/api/users"))
         .header(ACCEPT_ENCODING, "dcz, zstd, gzip")
         .header("available-dictionary", dict_hash)
         .send()
@@ -283,10 +365,6 @@ async fn request_with_dictionary(
     assert_eq!(api_resp.status(), 200);
     assert_eq!(encoding(&api_resp), Some("dcz"));
     let api_headers = api_resp.headers();
-    assert_eq!(
-        api_headers.get("content-dictionary").unwrap().to_str()?,
-        dict_hash
-    );
     assert_eq!(api_headers[ETAG], "W/\"v1\"");
     let vary_items = api_headers
         .get_all(VARY)

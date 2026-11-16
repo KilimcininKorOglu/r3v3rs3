@@ -489,11 +489,27 @@ fn encode_dictionary_body(
             CompressionAlgorithm::Dcb => {
                 compress_brotli_with_dict(&raw_bytes, dict.raw_data.as_bytes(), level)?
             }
-            _ => raw_bytes.to_vec(),
+            _ => return Ok(Frame::data(raw_bytes)),
         };
-        Ok(Frame::data(Bytes::from(compressed)))
+        let mut framed = dictionary_header(algorithm, dict.raw_data.as_bytes());
+        framed.extend_from_slice(&compressed);
+        Ok(Frame::data(Bytes::from(framed)))
     });
     BoxBody::new(StreamBody::new(stream))
+}
+
+/// The fixed header of a dictionary-compressed body (RFC 9842 sections 4 and 5): the magic
+/// bytes of the encoding and the SHA-256 digest of the dictionary. A client checks the digest
+/// before it decodes the body.
+fn dictionary_header(algorithm: CompressionAlgorithm, dict: &[u8]) -> Vec<u8> {
+    use sha2::Digest;
+    let magic: &[u8] = match algorithm {
+        CompressionAlgorithm::Dcb => &[0xff, 0x44, 0x43, 0x42],
+        _ => &[0x5e, 0x2a, 0x4d, 0x18, 0x20, 0x00, 0x00, 0x00],
+    };
+    let mut header = magic.to_vec();
+    header.extend_from_slice(&sha2::Sha256::digest(dict));
+    header
 }
 
 #[cfg(test)]
@@ -677,10 +693,22 @@ mod tests {
         assert!(vary_items.contains(&"Accept-Encoding"));
         assert!(vary_items.contains(&"Available-Dictionary"));
 
+        // RFC 9842 section 5: 8 fixed bytes and the SHA-256 digest of the dictionary come first.
         let encoded = res.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(
+            encoded[..8],
+            [0x5e, 0x2a, 0x4d, 0x18, 0x20, 0x00, 0x00, 0x00]
+        );
+        {
+            use sha2::Digest;
+            assert_eq!(
+                encoded[8..40],
+                sha2::Sha256::digest(dict_data.as_bytes())[..]
+            );
+        }
         let mut decompressor =
             zstd::bulk::Decompressor::with_dictionary(dict_data.as_bytes()).unwrap();
-        let decompressed = decompressor.decompress(&encoded, 10 * 1024).unwrap();
+        let decompressed = decompressor.decompress(&encoded[40..], 10 * 1024).unwrap();
         assert_eq!(String::from_utf8(decompressed).unwrap(), body);
     }
 

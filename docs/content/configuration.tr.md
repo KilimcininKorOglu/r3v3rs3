@@ -1153,11 +1153,11 @@ r3v3rs3 isteğin `Accept-Encoding` header'ını okur ve istemcinin kabul ettiği
 
 `adaptive_level` etkinleştirildiğinde (varsayılan `true`), r3v3rs3 yanıt boyutuna göre sıkıştırma kalitesini otomatik olarak optimize eder: küçük yanıtlar (< 8 KB) CPU maliyetinin önemsiz olduğu durumlarda en yüksek sıkıştırma oranını kullanır, büyük veya akışlı (stream) yanıtlar ise worker thread'lerin doymasını engellemek için maksimum verim (throughput) seviyelerini tercih eder. Ayrıca metin, JSON ve SVG içerikleri için minimum boyut eşiği dinamik olarak 256 byte'a indirilir.
 
-### Paylaşılan Sıkıştırma Sözlükleri (RFC 9651 / RFC 9652)
+### Paylaşılan Sıkıştırma Sözlükleri (RFC 9842)
 
-r3v3rs3, Chromium ve uyumlu modern HTTP istemcileri için Sıkıştırma Sözlüğü Aktarımı (RFC 9651 Structured Fields ve RFC 9652) standardını destekler:
+r3v3rs3, Chromium ve uyumlu modern HTTP istemcileri için Sıkıştırma Sözlüğü Aktarımı (RFC 9842) standardını destekler:
 - **Sözlük Sunumu**: HTTP proxy'sinde yapılandırılan sözlükler, belirlenen `path` yolunda r3v3rs3 tarafından doğrudan `Content-Type: application/octet-stream`, `Use-As-Dictionary: match="<match_pattern>", id="<id>"`, `Cache-Control: public, max-age=31536000, immutable` ve `ETag: "<sha256>"` başlıklarıyla sunulur.
-- **İçerik Müzakeresi ve Kodlama**: Gelen istekte yapılandırılmış bir sözlüğün SHA-256 hash'i ve yoluyla eşleşen `Available-Dictionary` (veya `Sec-Available-Dictionary`) başlığı bulunduğunda ve istemci `dcz` ya da `dcb` encoding'ini kabul ettiğinde, r3v3rs3 yanıtı sözlükle sıkıştırır. Yanıta `Content-Encoding: dcz` (veya `dcb`), `Content-Dictionary: :<sha256>:` ve `Vary: Available-Dictionary, Accept-Encoding` eklenir.
+- **İçerik Müzakeresi ve Kodlama**: Gelen istekte yapılandırılmış bir sözlüğün SHA-256 hash'i ve yoluyla eşleşen `Available-Dictionary` (veya `Sec-Available-Dictionary`) başlığı bulunduğunda ve istemci `dcz` ya da `dcb` encoding'ini kabul ettiğinde, r3v3rs3 yanıtı sözlükle sıkıştırır. Yanıta `Content-Encoding: dcz` (veya `dcb`), `Content-Dictionary: :<sha256>:` ve `Vary: Available-Dictionary, Accept-Encoding` eklenir. Gövde, encoding'in sabit başlığı ve sözlüğün SHA-256 özetiyle başlar. İstemci bu özetle doğru sözlüğü kullandığını denetler.
 - **Bant Genişliği Tasarrufu**: Statik JSON şemalarını, yinelenen nesne anahtarlarını ve tekrarlayan HTML kalıplarını ortadan kaldırarak yinelenen API trafiğinde %80 ile %95 arasında bant genişliği tasarrufu sağlar.
 - **Yönetim**: Sıkıştırma sözlükleri WebUI Proxy Yapılandırması sayfasından, MCP araçlarından (`list_compression_dictionaries`, `get_compression_dictionary`, `add_compression_dictionary`, `delete_compression_dictionary`) veya CLI üzerinden (`r3 proxy dictionary list/get/add/delete`) yönetilebilir.
 

@@ -1153,11 +1153,11 @@ r3v3rs3 reads the `Accept-Encoding` header of the request and uses the accepted 
 
 When `adaptive_level` is enabled (default `true`), r3v3rs3 tunes compression quality based on response size: small responses (< 8 KB) receive higher compression ratios where CPU cost is negligible, while large or streamed responses use maximum throughput levels to prevent worker thread saturation. In addition, the minimum size threshold is dynamically lowered to 256 bytes for text, JSON, and SVG payloads.
 
-### Shared Compression Dictionaries (RFC 9651 / RFC 9652)
+### Shared Compression Dictionaries (RFC 9842)
 
-r3v3rs3 supports Compression Dictionary Transport (RFC 9651 Structured Fields and RFC 9652) for Chromium and compatible modern HTTP clients:
+r3v3rs3 supports Compression Dictionary Transport (RFC 9842) for Chromium and compatible modern HTTP clients:
 - **Serving Dictionaries**: Dictionaries configured on an HTTP proxy are directly served by r3v3rs3 at their configured `path` with `Content-Type: application/octet-stream`, `Use-As-Dictionary: match="<match_pattern>", id="<id>"`, `Cache-Control: public, max-age=31536000, immutable`, and `ETag: "<sha256>"`.
-- **Content Negotiation & Encoding**: When an incoming request includes `Available-Dictionary` (or `Sec-Available-Dictionary`) matching a configured dictionary's SHA-256 hash and path, and the client accepts `dcz` or `dcb`, r3v3rs3 compresses the response against the dictionary. The response carries `Content-Encoding: dcz` (or `dcb`), `Content-Dictionary: :<sha256>:`, and `Vary: Available-Dictionary, Accept-Encoding`.
+- **Content Negotiation & Encoding**: When an incoming request includes `Available-Dictionary` (or `Sec-Available-Dictionary`) matching a configured dictionary's SHA-256 hash and path, and the client accepts `dcz` or `dcb`, r3v3rs3 compresses the response against the dictionary. The response carries `Content-Encoding: dcz` (or `dcb`), `Content-Dictionary: :<sha256>:`, and `Vary: Available-Dictionary, Accept-Encoding`. The body starts with the fixed header of the encoding and the SHA-256 digest of the dictionary, so the client can check that it decodes with the right dictionary.
 - **Bandwidth Reduction**: By eliminating static JSON schemas, recurring object keys, and repetitive HTML wrappers, shared dictionary compression delivers 80% to 95% bandwidth savings on recurring API traffic.
 - **Management**: Compression dictionaries can be added, inspected, and removed via the WebUI Proxy Configuration page, MCP tools (`list_compression_dictionaries`, `get_compression_dictionary`, `add_compression_dictionary`, `delete_compression_dictionary`), or the CLI (`r3 proxy dictionary list/get/add/delete`).
 
