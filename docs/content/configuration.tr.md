@@ -1707,7 +1707,7 @@ Akış önceliklendirmesi doğrudan WebUI üzerinden yönetilebilir:
 
 `Accept: application/json` başlığı gönderildiğinde sistem öz izleme (self-monitoring) metrikleri JSON formatında döner.
 
-İsteği bir admin session cookie'si veya geçerli bir MCP / API Bearer token'ı yetkilendirir. Bir Prometheus job'ı `bearer_token` ile scrape ederken WebUI cookie'sini kullanmaya devam edebilir. Sayaçlar tek süreci sayar: worker modunda portları worker sunar ve kendi sayaçlarını tutar, worker durumu ayrıca `GET /api/workers` üzerinden raporlanır.
+İsteği bir admin session cookie'si veya geçerli bir MCP / API Bearer token'ı yetkilendirir. Bir Prometheus job'ı `bearer_token` ile scrape ederken WebUI cookie'sini kullanmaya devam edebilir. Proxy listesi olan bir hesap, `proxy` etiketli serileri (`r3v3rs3_http_requests_total`, `r3v3rs3_upstream_errors_total`, `r3v3rs3_http_request_duration_seconds`) yalnız kendi proxy'leri için alır. `proxy` etiketi olmayan seriler sürecin toplamı olarak kalır. Sayaçlar tek süreci sayar: worker modunda portları worker sunar ve kendi sayaçlarını tutar, worker durumu ayrıca `GET /api/workers` üzerinden raporlanır.
 
 ### Grafana Panosu
 

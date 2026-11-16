@@ -148,10 +148,37 @@ fn escape_label_value(s: &str) -> String {
         .replace('\n', "\\n")
 }
 
-fn format_http_request_metrics(out: &mut String) {
+/// The proxy labels that the caller may read. `None` means every label, including the empty
+/// label of requests that matched no proxy. Labels are compared as strings, because parsing the
+/// empty label as a `ShortId` gives the zero ID instead of an error.
+fn visible_proxies(caller: &Caller) -> Option<std::collections::BTreeSet<String>> {
+    caller
+        .proxies
+        .as_ref()
+        .map(|proxies| proxies.iter().map(ToString::to_string).collect())
+}
+
+/// Keeps the labeled rows whose proxy the caller may read.
+fn visible_rows<T>(
+    rows: Vec<(String, String, T)>,
+    visible: &Option<std::collections::BTreeSet<String>>,
+) -> Vec<(String, String, T)> {
+    match visible {
+        None => rows,
+        Some(proxies) => rows
+            .into_iter()
+            .filter(|(proxy, _, _)| proxies.contains(proxy))
+            .collect(),
+    }
+}
+
+fn format_http_request_metrics(
+    out: &mut String,
+    visible: &Option<std::collections::BTreeSet<String>>,
+) {
     out.push_str("# HELP r3v3rs3_http_requests_total The proxied HTTP requests on the TCP and TLS ports of this process.\n");
     out.push_str("# TYPE r3v3rs3_http_requests_total counter\n");
-    let items = stats::snapshot_http_requests();
+    let items = visible_rows(stats::snapshot_http_requests(), visible);
     if items.is_empty() {
         out.push_str("r3v3rs3_http_requests_total{proxy=\"\",route=\"\"} 0\n");
     } else {
@@ -165,10 +192,13 @@ fn format_http_request_metrics(out: &mut String) {
     }
 }
 
-fn format_upstream_error_total_metrics(out: &mut String) {
+fn format_upstream_error_total_metrics(
+    out: &mut String,
+    visible: &Option<std::collections::BTreeSet<String>>,
+) {
     out.push_str("# HELP r3v3rs3_upstream_errors_total The requests that this process answered without a successful upstream response.\n");
     out.push_str("# TYPE r3v3rs3_upstream_errors_total counter\n");
-    let items = stats::snapshot_upstream_error_totals();
+    let items = visible_rows(stats::snapshot_upstream_error_totals(), visible);
     if items.is_empty() {
         out.push_str("r3v3rs3_upstream_errors_total{proxy=\"\",route=\"\"} 0\n");
     } else {
@@ -209,15 +239,25 @@ fn format_single_latency_histogram(
     ));
 }
 
-fn format_latency_histogram_metrics(out: &mut String) {
+fn format_latency_histogram_metrics(
+    out: &mut String,
+    visible: &Option<std::collections::BTreeSet<String>>,
+) {
     out.push_str(
         "# HELP r3v3rs3_http_request_duration_seconds HTTP request latencies in seconds.\n",
     );
     out.push_str("# TYPE r3v3rs3_http_request_duration_seconds histogram\n");
-    let items = stats::snapshot_labeled_latency_histograms();
+    let items = visible_rows(stats::snapshot_labeled_latency_histograms(), visible);
     if items.is_empty() {
         let (buckets, inf, sum, count) = stats::snapshot_latency_histogram();
-        format_single_latency_histogram(out, "", "", &buckets, inf, sum, count);
+        if visible.is_some() {
+            // The process histogram holds the requests of every proxy, so an account with a
+            // proxy list gets an empty one.
+            let empty: Vec<(f64, u64)> = buckets.iter().map(|(le, _)| (*le, 0)).collect();
+            format_single_latency_histogram(out, "", "", &empty, 0, 0.0, 0);
+        } else {
+            format_single_latency_histogram(out, "", "", &buckets, inf, sum, count);
+        }
     } else {
         for (proxy, route, (buckets, inf, sum, count)) in items {
             format_single_latency_histogram(out, &proxy, &route, &buckets, inf, sum, count);
@@ -362,7 +402,8 @@ fn format_system_memory_metrics(
     }
 }
 
-/// Exports the proxy counters in the Prometheus text format.
+/// Exports the proxy counters in the Prometheus text format. An account with a proxy list gets
+/// the per-proxy series of its own proxies only; the process totals stay unlabeled.
 #[utoipa::path(
     get,
     path = "/",
@@ -375,7 +416,7 @@ fn format_system_memory_metrics(
 )]
 pub async fn metrics(
     headers: HeaderMap,
-    Extension(_caller): Extension<Caller>,
+    Extension(caller): Extension<Caller>,
 ) -> Result<Response, AppError> {
     let sys = crate::system_metrics::collect_system_metrics();
     if headers
@@ -388,12 +429,13 @@ pub async fn metrics(
 
     let mut out = String::new();
     let values = stats::snapshot();
+    let visible = visible_proxies(&caller);
     format_basic_metrics(&mut out, &values);
-    format_http_request_metrics(&mut out);
-    format_upstream_error_total_metrics(&mut out);
+    format_http_request_metrics(&mut out, &visible);
+    format_upstream_error_total_metrics(&mut out, &visible);
     format_http_status_metrics(&mut out);
     format_upstream_error_metrics(&mut out);
-    format_latency_histogram_metrics(&mut out);
+    format_latency_histogram_metrics(&mut out, &visible);
     format_latency_quantile_metrics(&mut out);
     format_tls_handshake_histogram_metrics(&mut out);
     format_tls_handshake_quantile_metrics(&mut out);
@@ -436,4 +478,53 @@ pub async fn grafana_dashboard(
         DASHBOARD,
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use r3v3rs3_api::{auth::Role, id::ShortId};
+
+    fn caller(proxies: Option<&[ShortId]>) -> Caller {
+        Caller {
+            username: "viewer".into(),
+            role: Role::Viewer,
+            proxies: proxies.map(|ids| ids.iter().copied().collect()),
+            client: None,
+        }
+    }
+
+    /// Records a request, an upstream error and a duration for the proxy.
+    fn record(proxy: &str) {
+        stats::count_http_request(Some(proxy), Some("/"));
+        stats::count_upstream_error(Some(proxy), Some("/"));
+        stats::record_request_duration(std::time::Duration::from_millis(5), Some(proxy), Some("/"));
+    }
+
+    async fn body_for(caller: Caller) -> String {
+        let Ok(response) = metrics(HeaderMap::new(), Extension(caller)).await else {
+            panic!("the metrics handler failed");
+        };
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_account_with_a_proxy_list_reads_only_the_series_of_its_proxies() {
+        // Fixed IDs that no other test records; `ShortId::new` is the zero ID.
+        let own = ShortId::from(*b"mtrcown");
+        let other = ShortId::from(*b"mtrcoth");
+        record(&own.to_string());
+        record(&other.to_string());
+
+        let scoped = body_for(caller(Some(&[own]))).await;
+        assert!(scoped.contains(&format!("proxy=\"{own}\"")));
+        assert!(!scoped.contains(&other.to_string()));
+
+        let unscoped = body_for(caller(None)).await;
+        assert!(unscoped.contains(&format!("proxy=\"{own}\"")));
+        assert!(unscoped.contains(&format!("proxy=\"{other}\"")));
+    }
 }

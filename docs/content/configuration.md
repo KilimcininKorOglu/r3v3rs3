@@ -1707,7 +1707,7 @@ Stream prioritization can be managed directly from the WebUI:
 
 Sending `Accept: application/json` returns the system self-monitoring metrics as a JSON object.
 
-An admin session cookie or a valid MCP / API Bearer token authorizes the request, so a Prometheus job can scrape it with `bearer_token` while the WebUI uses its cookie. The counters count one process: with worker mode, the worker serves the ports and keeps its own counters, which `GET /api/workers` reports separately.
+An admin session cookie or a valid MCP / API Bearer token authorizes the request, so a Prometheus job can scrape it with `bearer_token` while the WebUI uses its cookie. An account with a proxy list gets the series with a `proxy` label (`r3v3rs3_http_requests_total`, `r3v3rs3_upstream_errors_total`, `r3v3rs3_http_request_duration_seconds`) only for its own proxies; the series without a `proxy` label stay the totals of the process. The counters count one process: with worker mode, the worker serves the ports and keeps its own counters, which `GET /api/workers` reports separately.
 
 ### Grafana Dashboard
 
