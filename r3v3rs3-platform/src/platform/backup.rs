@@ -2581,13 +2581,6 @@ fn extract_sql_table_name(line: &str) -> Option<String> {
     }
 }
 
-fn check_sql_completion_marker(trimmed: &str) -> bool {
-    trimmed.contains("PostgreSQL database dump complete")
-        || trimmed.contains("Dump completed on")
-        || trimmed.contains("SET TIME_ZONE=@OLD_TIME_ZONE")
-        || trimmed == "COMMIT;"
-}
-
 fn check_sql_statement_kind(lower: &str) -> (bool, bool) {
     if lower.starts_with("insert into ") || lower.starts_with("copy ") {
         (true, true)
@@ -2602,20 +2595,31 @@ fn check_sql_statement_kind(lower: &str) -> (bool, bool) {
     }
 }
 
-fn check_sql_engine_hint(text: &str) -> bool {
-    text.contains("PostgreSQL")
-        || text.contains("MySQL")
-        || text.contains("mariadb")
-        || text.contains("sqlite")
-}
-
 #[derive(Default)]
 struct SqlDumpScan {
     tables: Vec<String>,
     table_count: u32,
     has_data: bool,
     schema_objects_count: u32,
-    has_completion_marker: bool,
+    /// The dump is a `pg_dumpall` cluster dump, which ends with its own trailer after the
+    /// trailers of its databases.
+    cluster: bool,
+    /// The last line that is not blank, a bare `--` or the `\unrestrict` line that pg_dump 17
+    /// writes after its trailer.
+    last_line: String,
+}
+
+/// Records the last meaningful line of a dump, the line that holds the trailer of a complete
+/// dump.
+fn track_sql_trailer(trimmed: &str, scan: &mut SqlDumpScan) {
+    if trimmed == "--" || trimmed.starts_with("\\unrestrict ") {
+        return;
+    }
+    if trimmed == "-- PostgreSQL database cluster dump" {
+        scan.cluster = true;
+    }
+    scan.last_line.clear();
+    scan.last_line.push_str(trimmed);
 }
 
 fn process_sql_line(line: &str, scan: &mut SqlDumpScan) {
@@ -2623,6 +2627,7 @@ fn process_sql_line(line: &str, scan: &mut SqlDumpScan) {
     if trimmed.is_empty() {
         return;
     }
+    track_sql_trailer(trimmed, scan);
     if let Some(table) = extract_sql_table_name(trimmed) {
         scan.table_count += 1;
         scan.schema_objects_count += 1;
@@ -2639,15 +2644,25 @@ fn process_sql_line(line: &str, scan: &mut SqlDumpScan) {
     if is_obj {
         scan.schema_objects_count += 1;
     }
-    if check_sql_completion_marker(trimmed) {
-        scan.has_completion_marker = true;
-    }
 }
 
-fn is_sql_integrity_valid(scan: &SqlDumpScan, len: usize, has_engine_hint: bool) -> bool {
-    scan.has_completion_marker
-        || (scan.schema_objects_count > 0 && len >= 32)
-        || (len > 0 && has_engine_hint)
+/// A dump verifies only when it ran to its end: its last meaningful line is the trailer that
+/// the dump tool of the engine writes last (pg_dumpall, pg_dump, mysqldump and mariadb-dump),
+/// or the line that the backup writes for a server without user databases. A dump cut short by
+/// a failed or killed run has no trailer.
+fn is_sql_integrity_valid(engine: &str, scan: &SqlDumpScan) -> bool {
+    let last = scan.last_line.as_str();
+    match engine {
+        "postgres" if scan.cluster => last == "-- PostgreSQL database cluster dump complete",
+        "postgres" => last == "-- PostgreSQL database dump complete",
+        "mysql" | "mariadb" => {
+            last.starts_with("-- Dump completed")
+                || last == "-- MySQL dump: no user databases"
+                || last == "-- MariaDB dump: no user databases"
+        }
+        "sqlite" => last == "COMMIT;",
+        _ => false,
+    }
 }
 
 /// Analyzes an SQL text dump (Postgres, MySQL, MariaDB, SQLite) for schema structure, objects and data.
@@ -2660,8 +2675,7 @@ fn analyze_sql_dump(plain: &[u8], engine: &str) -> BackupDrillDetails {
         process_sql_line(line, &mut scan);
     }
 
-    let integrity_check_passed =
-        is_sql_integrity_valid(&scan, plain.len(), check_sql_engine_hint(&text));
+    let integrity_check_passed = is_sql_integrity_valid(engine, &scan);
 
     let summary = format!(
         "verified {} uncompressed bytes, {} tables found, {} schema objects, data: {}",
@@ -2834,7 +2848,7 @@ async fn ungzip_limited(content: &[u8], max_bytes: u64) -> anyhow::Result<Vec<u8
 async fn compute_file_sha256(path: &std::path::Path) -> anyhow::Result<String> {
     let mut file = tokio::fs::File::open(path).await?;
     let mut hasher = Sha256::new();
-    let mut buf = [0u8; 65536];
+    let mut buf = vec![0u8; 65536];
     loop {
         let n = file.read(&mut buf).await?;
         if n == 0 {
@@ -2879,23 +2893,46 @@ fn detect_drill_format(header: &[u8], engine: &str) -> &'static str {
         "redis"
     } else if header.starts_with(b"SQLite format 3\0") {
         "sqlite"
+    } else if header.starts_with(&MONGO_ARCHIVE_MAGIC) {
+        "mongodb"
     } else {
         "sql"
     }
 }
 
+/// The CRC-64/Jones checksum that Redis appends to an RDB file: reflected polynomial
+/// `0x95ac9329ac4bc9b5`, initial value 0, no final xor.
+fn crc64_jones_update(mut crc: u64, bytes: &[u8]) -> u64 {
+    for &byte in bytes {
+        crc ^= u64::from(byte);
+        for _ in 0..8 {
+            let mask = (crc & 1).wrapping_neg();
+            crc = (crc >> 1) ^ (0x95ac_9329_ac4b_c9b5 & mask);
+        }
+    }
+    crc
+}
+
+#[cfg(test)]
+fn crc64_jones(bytes: &[u8]) -> u64 {
+    crc64_jones_update(0, bytes)
+}
+
 fn build_redis_drill_details(
     version: String,
     total_bytes: u64,
-    has_eof: bool,
-    valid_magic: bool,
+    complete: bool,
 ) -> BackupDrillDetails {
-    let integrity_check_passed = valid_magic && total_bytes >= 9;
+    let integrity_check_passed = complete;
     let summary = format!(
-        "valid Redis RDB v{}, size: {} bytes, eof marker: {}",
+        "Redis RDB v{}, size: {} bytes, eof marker and checksum: {}",
         version,
         total_bytes,
-        if has_eof { "present" } else { "clean" }
+        if complete {
+            "valid"
+        } else {
+            "missing or wrong"
+        }
     );
     let sample = if total_bytes > 9 {
         vec!["keyspace_0".to_string()]
@@ -2926,30 +2963,92 @@ async fn stream_analyze_redis<R: tokio::io::AsyncRead + Unpin>(
     } else {
         "unknown".to_string()
     };
-    let mut total_bytes = header.len() as u64;
-    let mut buf = [0u8; 65536];
-    let mut last_bytes: Vec<u8> = header.to_vec();
-    if last_bytes.len() > 16 {
-        let overflow = last_bytes.len() - 16;
-        last_bytes.drain(..overflow);
-    }
-
+    let mut rdb = RdbTrailer::default();
+    rdb.feed(header);
+    let mut buf = vec![0u8; 65536];
     loop {
         let n = stream.read(&mut buf).await?;
         if n == 0 {
             break;
         }
-        total_bytes += n as u64;
-        last_bytes.extend_from_slice(&buf[..n]);
-        if last_bytes.len() > 16 {
-            let overflow = last_bytes.len() - 16;
-            last_bytes.drain(..overflow);
-        }
+        rdb.feed(&buf[..n]);
+    }
+    let complete = valid_magic && rdb.is_complete();
+    let drill = build_redis_drill_details(version, rdb.total, complete);
+    Ok((drill, rdb.total))
+}
+
+/// The end of an RDB file as it streams by. Redis ends a complete file with the EOF opcode
+/// `0xFF` and the little-endian CRC-64/Jones of every byte before the checksum, or eight zero
+/// bytes when `rdbchecksum` is off.
+#[derive(Default)]
+struct RdbTrailer {
+    crc: u64,
+    /// The last byte that went into the checksum.
+    last: Option<u8>,
+    /// The last eight bytes, the checksum of a complete file.
+    tail: Vec<u8>,
+    total: u64,
+}
+
+impl RdbTrailer {
+    fn feed(&mut self, bytes: &[u8]) {
+        self.total += bytes.len() as u64;
+        self.tail.extend_from_slice(bytes);
+        let Some(spill) = self.tail.len().checked_sub(8).filter(|n| *n > 0) else {
+            return;
+        };
+        let body: Vec<u8> = self.tail.drain(..spill).collect();
+        self.crc = crc64_jones_update(self.crc, &body);
+        self.last = body.last().copied();
     }
 
-    let has_eof = last_bytes.contains(&0xFF);
-    let drill = build_redis_drill_details(version, total_bytes, has_eof, valid_magic);
-    Ok((drill, total_bytes))
+    fn is_complete(&self) -> bool {
+        let Ok(checksum) = <[u8; 8]>::try_from(self.tail.as_slice()) else {
+            return false;
+        };
+        self.last == Some(0xFF) && (checksum == self.crc.to_le_bytes() || checksum == [0; 8])
+    }
+}
+
+/// The magic of a `mongodump --archive` file.
+const MONGO_ARCHIVE_MAGIC: [u8; 4] = [0x6d, 0xe2, 0x99, 0x81];
+
+/// A `mongodump --archive` file ends with the terminator `ff ff ff ff` after its last
+/// collection (read from mongodump 100.x output); an archive cut short has none.
+async fn stream_analyze_mongo<R: tokio::io::AsyncRead + Unpin>(
+    header: &[u8],
+    mut stream: R,
+) -> anyhow::Result<(BackupDrillDetails, u64)> {
+    let mut total = header.len() as u64;
+    let mut tail = header[header.len().saturating_sub(4)..].to_vec();
+    let mut buf = vec![0u8; 65536];
+    loop {
+        let n = stream.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        tail.extend_from_slice(&buf[..n]);
+        let spill = tail.len().saturating_sub(4);
+        tail.drain(..spill);
+    }
+    let complete = total >= 8 && tail == [0xff; 4];
+    let summary = format!(
+        "MongoDB archive, size: {total} bytes, terminator: {}",
+        if complete { "present" } else { "missing" }
+    );
+    let drill = BackupDrillDetails {
+        drill_mode: "mongodb_archive_drill".to_string(),
+        table_count: 0,
+        tables_sample: Vec::new(),
+        has_data: total > 8,
+        integrity_check_passed: complete,
+        schema_objects_count: 0,
+        drill_duration_ms: 0,
+        summary,
+    };
+    Ok((drill, total))
 }
 
 async fn stream_analyze_sqlite<R: tokio::io::AsyncRead + Unpin>(
@@ -2965,7 +3064,7 @@ async fn stream_analyze_sqlite<R: tokio::io::AsyncRead + Unpin>(
     let is_valid_page = page_size == 1 || (page_size >= 512 && page_size.is_power_of_two());
 
     let mut total_bytes = header.len() as u64;
-    let mut buf = [0u8; 65536];
+    let mut buf = vec![0u8; 65536];
     loop {
         let n = stream.read(&mut buf).await?;
         if n == 0 {
@@ -3010,7 +3109,6 @@ async fn stream_analyze_sql<R: tokio::io::AsyncRead + Unpin>(
     let mut line_bytes = Vec::new();
     let mut scan = SqlDumpScan::default();
     let mut total_bytes = 0u64;
-    let mut engine_hint = false;
 
     loop {
         line_bytes.clear();
@@ -3020,16 +3118,13 @@ async fn stream_analyze_sql<R: tokio::io::AsyncRead + Unpin>(
         }
         total_bytes += n as u64;
         let line = String::from_utf8_lossy(&line_bytes);
-        if !engine_hint && check_sql_engine_hint(&line) {
-            engine_hint = true;
-        }
         process_sql_line(&line, &mut scan);
         if line_bytes.capacity() > 1_000_000 {
             line_bytes = Vec::new();
         }
     }
 
-    let integrity_check_passed = is_sql_integrity_valid(&scan, total_bytes as usize, engine_hint);
+    let integrity_check_passed = is_sql_integrity_valid(engine, &scan);
 
     let summary = format!(
         "verified {} uncompressed bytes, {} tables found, {} schema objects, data: {}",
@@ -3072,6 +3167,7 @@ async fn stream_verify_drill(
     let (mut drill, uncompressed_size) = match format {
         "redis" => stream_analyze_redis(header, stream).await?,
         "sqlite" => stream_analyze_sqlite(header, stream).await?,
+        "mongodb" => stream_analyze_mongo(header, stream).await?,
         _ => stream_analyze_sql(engine, header, stream).await?,
     };
     drill.drill_duration_ms = started_at.elapsed().as_millis().max(1) as u64;
@@ -3775,6 +3871,60 @@ mod tests {
         assert_eq!(drill.table_count, 1);
         assert!(drill.has_data);
         assert_eq!(uncompressed_size, postgres_dump.len() as u64);
+    }
+
+    /// Verifies `bytes` as a stored backup of `engine` through the drill of
+    /// `test_database_backup`.
+    async fn drill_passes(engine: &str, bytes: &[u8]) -> bool {
+        let dir = std::env::temp_dir().join(format!("r3v3rs3-drill-{:08x}", rand::random::<u32>()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = dir.join("b.dump.gz");
+        write_compressed_dump(bytes, &path).await.unwrap();
+        let started = std::time::Instant::now();
+        let (drill, _) = stream_verify_drill(engine, &path, started).await.unwrap();
+        tokio::fs::remove_dir_all(&dir).await.unwrap();
+        drill.integrity_check_passed
+    }
+
+    /// The trailer of a complete dump (taken from pg_dumpall 17, pg_dump 17, mysqldump 8.4,
+    /// mariadb-dump 11 and mongodump 100.x) proves that the dump ran to its end. A dump that a
+    /// failed or killed run cut short has no trailer and cannot restore every database, so the
+    /// verification must fail it; a complete dump of an empty server must pass.
+    /// The check value of CRC-64/Jones from the test of `crc64.c` in Redis.
+    #[test]
+    fn the_rdb_checksum_matches_the_redis_check_value() {
+        assert_eq!(crc64_jones(b"123456789"), 0xe9c6_d914_c4b8_d9ca);
+    }
+
+    #[tokio::test]
+    async fn only_a_dump_that_ran_to_its_end_verifies() {
+        let pg_head = "--\n-- PostgreSQL database cluster dump\n--\n\nSET default_transaction_read_only = off;\n";
+        let pg_db = "--\n-- PostgreSQL database dump\n--\n\nCREATE TABLE public.a (i integer);\nCOPY public.a (i) FROM stdin;\n1\n\\.\n\n--\n-- PostgreSQL database dump complete\n--\n\n\\unrestrict AbC123\n\n";
+        let pg_tail = "--\n-- PostgreSQL database cluster dump complete\n--\n\n";
+        let complete = format!("{pg_head}{pg_db}{pg_tail}");
+        assert!(drill_passes("postgres", complete.as_bytes()).await);
+        assert!(drill_passes("postgres", pg_db.as_bytes()).await);
+        assert!(!drill_passes("postgres", pg_head.as_bytes()).await);
+        let cut_after_first_db = format!("{pg_head}{pg_db}");
+        assert!(!drill_passes("postgres", cut_after_first_db.as_bytes()).await);
+
+        let my = "-- MySQL dump 10.13\n/*!40101 SET NAMES utf8mb4 */;\nCREATE TABLE `a` (`i` int);\nINSERT INTO `a` VALUES (1);\n/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;\n\n-- Dump completed on 2026-11-17 16:49:42\n";
+        assert!(drill_passes("mysql", my.as_bytes()).await);
+        let cut = &my[..my.find("INSERT").unwrap() + 12];
+        assert!(!drill_passes("mysql", cut.as_bytes()).await);
+        assert!(drill_passes("mysql", b"-- MySQL dump: no user databases\n").await);
+        assert!(drill_passes("mariadb", b"-- MariaDB dump: no user databases\n").await);
+
+        let mut archive = vec![0x6d, 0xe2, 0x99, 0x81, 0x05, 0, 0, 0, 0x00];
+        archive.extend_from_slice(&[0xff, 0xff, 0xff, 0xff]);
+        assert!(drill_passes("mongodb", &archive).await);
+        assert!(!drill_passes("mongodb", &archive[..9]).await);
+
+        let mut rdb = b"REDIS0011\xfa\x09redis-ver\x057.4.1\xff".to_vec();
+        rdb.extend_from_slice(&crc64_jones(&rdb).to_le_bytes());
+        assert!(drill_passes("redis", &rdb).await);
+        assert!(!drill_passes("redis", &rdb[..rdb.len() - 3]).await);
+        assert!(!drill_passes("redis", b"REDIS0011\xfa\x09redis-ver").await);
     }
 
     #[test]
