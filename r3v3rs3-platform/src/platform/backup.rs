@@ -17,6 +17,7 @@ use r3v3rs3_api::platform::{
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 /// The settings row of the backup configuration in the platform database.
@@ -770,21 +771,20 @@ impl Platform {
         dump: Vec<u8>,
         data_path: &str,
     ) -> anyhow::Result<()> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-        while std::time::Instant::now() < deadline {
-            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-            if let Ok((_app, container, runtime)) = self.database_container(db_id).await
-                && run_restore(&runtime, &container, plan, dump.clone(), data_path)
-                    .await
-                    .is_ok()
-            {
-                tracing::info!(%db_id, "database clone restored successfully");
-                // The dump holds no account passwords; the tenants copied from the source get
-                // their stored ones.
-                return self.reapply_tenants(db_id).await;
-            }
-        }
-        bail!("timed out waiting for cloned database container to be ready for restore");
+        retry_until(
+            Duration::from_secs(60),
+            Duration::from_millis(1500),
+            || async {
+                let (_app, container, runtime) = self.database_container(db_id).await?;
+                run_restore(&runtime, &container, plan, dump.clone(), data_path).await
+            },
+        )
+        .await
+        .context("the new database container did not take the restore")?;
+        tracing::info!(%db_id, "database clone restored successfully");
+        // The dump holds no account passwords; the tenants copied from the source get their
+        // stored ones.
+        self.reapply_tenants(db_id).await
     }
 
     /// Copies data from a source database into a newly deployed cloned database.
@@ -1018,6 +1018,28 @@ fn branch_spec(
         read_only: false,
     }];
     Ok(spec)
+}
+
+/// Runs `attempt` every `interval` until it succeeds or `limit` has passed. A container that
+/// is still starting fails the first attempts; when none succeeds, the error of the last one
+/// says why.
+async fn retry_until<F, Fut>(
+    limit: Duration,
+    interval: Duration,
+    mut attempt: F,
+) -> anyhow::Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<()>>,
+{
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        tokio::time::sleep(interval).await;
+        let result = attempt().await;
+        if result.is_ok() || std::time::Instant::now() >= deadline {
+            return result.with_context(|| format!("gave up after {} seconds", limit.as_secs()));
+        }
+    }
 }
 
 fn create_database_spec(
@@ -3258,6 +3280,31 @@ mod tests {
         assert!(
             adapt_postgres_cluster_dump(&mysql, b"-- PostgreSQL database cluster dump").is_none()
         );
+    }
+
+    /// A restore that keeps failing until its deadline must say why it failed: an operator
+    /// cannot act on a bare timeout, for example when the dump is rejected every time.
+    #[tokio::test]
+    async fn a_restore_that_never_succeeds_reports_its_last_error() {
+        let attempts = std::sync::atomic::AtomicU32::new(0);
+        let result = retry_until(
+            Duration::from_millis(50),
+            Duration::from_millis(5),
+            || async {
+                let attempt = attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                anyhow::bail!("dump rejected on attempt {attempt}")
+            },
+        )
+        .await;
+        let message = format!("{:#}", result.unwrap_err());
+        assert!(message.contains("dump rejected on attempt"), "{message}");
+        assert!(attempts.load(std::sync::atomic::Ordering::SeqCst) > 1);
+        let done = retry_until(
+            Duration::from_millis(50),
+            Duration::from_millis(5),
+            || async { anyhow::Ok(()) },
+        );
+        assert!(done.await.is_ok());
     }
 
     /// A point-in-time restore that skips a segment it cannot read or restore reports a state
