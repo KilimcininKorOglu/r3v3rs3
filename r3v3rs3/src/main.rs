@@ -400,7 +400,9 @@ async fn serve_admin(
                         return;
                     }
                 }
-                _ = upgrade_receiver.recv() => {
+                // A closed channel (no panel, `--no-webui`) turns this branch off instead of
+                // reading its `None` as an upgrade request.
+                Some(()) = upgrade_receiver.recv() => {
                     info!("received the upgrade request of the panel");
                     if try_hand_over(&exe_args, manifest.as_deref()).await {
                         return;
