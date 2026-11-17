@@ -2179,8 +2179,10 @@ fn restore_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Resu
             command: vec![
                 "sh".into(),
                 "-c".into(),
+                // The `admin` database holds every account with its password; a restore of it
+                // would bring back old passwords over the stored ones.
                 format!(
-                    "mongorestore --uri=\"$MONGO_URI\" --archive={RESTORE_DIR}/dump.archive --drop"
+                    "mongorestore --uri=\"$MONGO_URI\" --archive={RESTORE_DIR}/dump.archive --drop --nsExclude='admin.*'"
                 ),
             ],
             env: vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password)?)],
@@ -3102,15 +3104,13 @@ mod tests {
             )]
         );
 
+        // The accounts live in the `admin` database; a restore must not bring back their old
+        // passwords over the stored ones.
         let restore = restore_plan("mongodb", &info, secret).unwrap();
-        assert_eq!(
-            restore.command,
-            [
-                "sh",
-                "-c",
-                "mongorestore --uri=\"$MONGO_URI\" --archive=/tmp/r3v3rs3-restore/dump.archive --drop"
-            ]
-        );
+        assert!(restore.command[2].starts_with(
+            "mongorestore --uri=\"$MONGO_URI\" --archive=/tmp/r3v3rs3-restore/dump.archive --drop"
+        ));
+        assert!(restore.command[2].contains("--nsExclude='admin.*'"));
         assert!(!restore.command.iter().any(|arg| arg.contains(secret)));
         assert_eq!(
             restore.env,
