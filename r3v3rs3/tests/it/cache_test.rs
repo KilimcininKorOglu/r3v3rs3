@@ -606,8 +606,9 @@ async fn unsafe_requests_invalidate_cached_response_of_the_same_uri() -> anyhow:
 }
 
 /// RFC 9111 section 3 lets a cache store any complete response; the framing does not matter.
-/// A chunked response (RFC 9112 section 7.1) that is fresh for 60 s must be served from the
-/// cache on the next request, and the upstream server must see only the first request.
+/// A chunked response (RFC 9112 section 7.1) without a Cache-Control header is fresh for the
+/// `default_ttl` of the proxy (RFC 9111 section 4.2.2 heuristic freshness), so it must be served
+/// from the cache on the next request, and the upstream server must see only the first request.
 #[tokio::test]
 async fn a_chunked_response_is_stored_and_served_from_the_cache() -> anyhow::Result<()> {
     let counter = Arc::new(AtomicUsize::new(0));
@@ -622,10 +623,7 @@ async fn a_chunked_response_is_stored_and_served_from_the_cache() -> anyhow::Res
                         chunk.as_bytes(),
                     ))
                 }));
-                (
-                    [("cache-control", "max-age=60")],
-                    axum::body::Body::from_stream(chunks),
-                )
+                axum::body::Body::from_stream(chunks)
             }
         }),
     );
@@ -636,6 +634,7 @@ async fn a_chunked_response_is_stored_and_served_from_the_cache() -> anyhow::Res
         routes: vec![http_route("/", upstream.as_str(), None)],
         cache: CacheConfig {
             enabled: true,
+            default_ttl: std::time::Duration::from_secs(60),
             ..Default::default()
         },
         ..Default::default()
@@ -661,6 +660,54 @@ async fn a_chunked_response_is_stored_and_served_from_the_cache() -> anyhow::Res
         assert_eq!(x_cache(&second), Some("HIT"));
         assert_eq!(second.text().await?, "hello chunked world");
         assert_eq!(counter.load(Ordering::SeqCst), 1);
+        Ok(())
+    })
+    .await
+}
+
+/// An upstream server that sends one chunk of a chunked body and closes the connection sends
+/// an incomplete message (RFC 9112 section 8). A cache must not store the part it received, so
+/// the next request goes to the upstream server again.
+#[tokio::test]
+async fn a_chunked_response_cut_by_the_upstream_is_not_stored() -> anyhow::Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let upstream_port = alloc_tcp_port().await?;
+    let listener = tokio::net::TcpListener::bind(upstream_port.socket_addr()).await?;
+    let counter = Arc::new(AtomicUsize::new(0));
+    let accepted = counter.clone();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            accepted.fetch_add(1, Ordering::SeqCst);
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request).await;
+            let cut = "HTTP/1.1 200 OK\r\ncache-control: max-age=60\r\ntransfer-encoding: chunked\r\n\r\n6\r\nhello \r\n";
+            let _ = stream.write_all(cut.as_bytes()).await;
+        }
+    });
+    let port = alloc_tcp_port().await?;
+    let upstream = upstream_port.http_url("/");
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse()?],
+        routes: vec![http_route("/", upstream.as_str(), None)],
+        cache: CacheConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("p-cut", &port)])
+        .proxies(vec![http_proxy_entry("pxcut", "p-cut", proxy)])
+        .build();
+
+    with_server(config, |_channels| async move {
+        let client = reqwest::Client::new();
+        for _ in 0..2 {
+            let resp = get_path(&client, &port, "/cut").send().await?;
+            assert_eq!(x_cache(&resp), Some("MISS"));
+            assert!(resp.bytes().await.is_err());
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
         Ok(())
     })
     .await
