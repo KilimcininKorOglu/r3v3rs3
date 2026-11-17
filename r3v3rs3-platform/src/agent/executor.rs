@@ -189,6 +189,10 @@ impl Executor {
                 let result = self.runtime.prune_platform(&policy).await?;
                 Ok(AgentOutput::Prune { result })
             }
+            AgentRequest::DiskSpace => {
+                let disk = self.runtime.disk_space().await?;
+                Ok(AgentOutput::DiskSpace { disk })
+            }
             // The request can hold the values of variables, so the message does not show it.
             _ => bail!("the agent cannot answer this request here"),
         }

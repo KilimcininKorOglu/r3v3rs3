@@ -55,6 +55,8 @@ pub struct FakeState {
     /// The prunes of the host in their order: `true` for a full prune, `false` for the prune of
     /// an agent host.
     pub host_prunes: Vec<bool>,
+    /// The used share of the disk of the host, in percent.
+    pub disk_used_percent: u8,
 }
 
 /// One build of the fake runtime.
@@ -550,6 +552,16 @@ impl ContainerRuntime for FakeRuntime {
             space_reclaimed_bytes: 10,
             ..Default::default()
         })
+    }
+
+    async fn disk_space(&self) -> anyhow::Result<Option<r3v3rs3_api::dashboard::DiskSpace>> {
+        let used_percent = self.check()?.disk_used_percent;
+        Ok(Some(r3v3rs3_api::dashboard::DiskSpace {
+            total_bytes: 100,
+            available_bytes: 100 - u64::from(used_percent),
+            used_bytes: u64::from(used_percent),
+            used_percent,
+        }))
     }
 
     async fn logs(&self, name: &ContainerName, _: u32) -> anyhow::Result<String> {

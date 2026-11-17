@@ -279,6 +279,8 @@ pub struct Platform {
     public_url: std::sync::RwLock<Option<PublicUrl>>,
     /// Records the last auto-upgrade attempt time for each target to avoid repeated attempts.
     agent_upgrade_attempts: std::sync::Mutex<HashMap<ShortId, std::time::Instant>>,
+    /// The Unix time of the last disk-pressure prune of each agent target, for its cooldown.
+    pub(super) agent_pressure_prunes: std::sync::Mutex<HashMap<ShortId, u64>>,
     /// A cancellation token that fires when the platform is shutting down.
     shutdown_token: CancellationToken,
     /// Counter of active background jobs (deployments, backups, commands, prunes).
@@ -374,6 +376,7 @@ impl Platform {
             renewing: Mutex::new(()),
             public_url: std::sync::RwLock::new(public_url),
             agent_upgrade_attempts: std::sync::Mutex::new(HashMap::new()),
+            agent_pressure_prunes: std::sync::Mutex::new(HashMap::new()),
             shutdown_token: CancellationToken::new(),
             active_jobs: Arc::new(AtomicUsize::new(0)),
         })

@@ -935,6 +935,10 @@ impl ContainerRuntime for DockerRuntime {
         Ok(result)
     }
 
+    async fn disk_space(&self) -> anyhow::Result<Option<r3v3rs3_api::dashboard::DiskSpace>> {
+        Ok(crate::platform::prune::system_disk_space())
+    }
+
     async fn prune_platform(
         &self,
         policy: &r3v3rs3_api::platform::PrunePolicy,

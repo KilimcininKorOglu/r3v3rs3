@@ -131,6 +131,9 @@ pub enum AgentRequest {
     RunPrune {
         policy: r3v3rs3_api::platform::PrunePolicy,
     },
+    /// The usage of the disk that holds the Docker data of the agent host. An older agent
+    /// refuses the variant.
+    DiskSpace,
     /// Connects the stream to a published port of a container. After the answer the stream
     /// carries the bytes of the connection.
     Tunnel {
@@ -227,6 +230,9 @@ pub enum AgentOutput {
     },
     Prune {
         result: r3v3rs3_api::platform::PruneResult,
+    },
+    DiskSpace {
+        disk: Option<r3v3rs3_api::dashboard::DiskSpace>,
     },
     /// The stream is connected to the port.
     Tunnel,

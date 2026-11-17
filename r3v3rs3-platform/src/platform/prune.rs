@@ -12,6 +12,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
+/// The time after a disk-pressure prune of a host before the next one of the same host.
+const PRESSURE_COOLDOWN_SECS: u64 = 900;
+
 fn add_prune(total: &mut PruneResult, part: &PruneResult) {
     total.containers_deleted += part.containers_deleted;
     total.images_deleted += part.images_deleted;
@@ -72,10 +75,13 @@ async fn check_and_run_prune(platform: &Platform) -> anyhow::Result<()> {
     }
     let now = unix_secs();
 
-    if let Some(threshold) = policy.disk_pressure_threshold
-        && check_disk_pressure(platform, &policy, threshold, now).await?
-    {
-        return Ok(());
+    if let Some(threshold) = policy.disk_pressure_threshold {
+        platform
+            .prune_agents_under_pressure(&policy, threshold, now)
+            .await?;
+        if check_disk_pressure(platform, &policy, threshold, now).await? {
+            return Ok(());
+        }
     }
 
     check_periodic_prune(platform, &policy, now).await
@@ -93,9 +99,8 @@ async fn check_disk_pressure(
     if disk.used_percent < threshold {
         return Ok(false);
     }
-    let cooldown_secs = 900;
     let in_cooldown = match policy.last_pressure_pruned_at {
-        Some(last) => now < last.saturating_add(cooldown_secs),
+        Some(last) => now < last.saturating_add(PRESSURE_COOLDOWN_SECS),
         None => false,
     };
     if in_cooldown {
@@ -208,6 +213,79 @@ impl Platform {
         policy.last_reclaimed_bytes = Some(result.space_reclaimed_bytes);
         self.store.save_prune_policy(&policy).await?;
         Ok(result)
+    }
+
+    /// Prunes each agent host whose disk usage reaches the threshold, once in the cooldown of
+    /// that host, and names the target in the `system.disk_pressure` webhook. Returns the names
+    /// of the pruned targets. An agent that cannot answer is logged and skipped, so one offline
+    /// agent does not stop the checks of the others.
+    pub(super) async fn prune_agents_under_pressure(
+        &self,
+        policy: &PrunePolicy,
+        threshold: u8,
+        now: u64,
+    ) -> anyhow::Result<Vec<String>> {
+        let mut pruned = Vec::new();
+        for target in self.store.targets().await? {
+            if super::is_local(target.id) || self.in_pressure_cooldown(target.id, now) {
+                continue;
+            }
+            match self
+                .prune_agent_if_full(policy, &target, threshold, now)
+                .await
+            {
+                Ok(true) => pruned.push(target.name),
+                Ok(false) => {}
+                Err(err) => {
+                    warn!(target = %target.name, err = format!("{err:#}"), "disk pressure check of an agent failed")
+                }
+            }
+        }
+        Ok(pruned)
+    }
+
+    fn in_pressure_cooldown(&self, target: r3v3rs3_api::id::ShortId, now: u64) -> bool {
+        let prunes = self
+            .agent_pressure_prunes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        prunes
+            .get(&target)
+            .is_some_and(|last| now < last.saturating_add(PRESSURE_COOLDOWN_SECS))
+    }
+
+    async fn prune_agent_if_full(
+        &self,
+        policy: &PrunePolicy,
+        target: &r3v3rs3_api::platform::TargetEntry,
+        threshold: u8,
+        now: u64,
+    ) -> anyhow::Result<bool> {
+        let runtime = self.runtime(target.id);
+        let Some(disk) = runtime.disk_space().await? else {
+            return Ok(false);
+        };
+        if disk.used_percent < threshold {
+            return Ok(false);
+        }
+        self.agent_pressure_prunes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(target.id, now);
+        let result = runtime.run_prune(policy).await?;
+        let payload = serde_json::json!({
+            "target": target.name,
+            "used_percent": disk.used_percent,
+            "threshold": threshold,
+            "space_reclaimed_bytes": result.space_reclaimed_bytes,
+        });
+        let summary = format!(
+            "Disk pressure on {} at {}% exceeded {threshold}% threshold, emergency prune reclaimed {} bytes",
+            target.name, disk.used_percent, result.space_reclaimed_bytes
+        );
+        self.dispatch_webhook_event(WebhookEvent::SystemDiskPressure, summary, payload)
+            .await;
+        Ok(true)
     }
 
     /// Prunes the host of every agent target and adds its result. Returns the error of each

@@ -369,3 +369,39 @@ async fn an_offline_agent_fails_the_prune_and_keeps_the_server_run() -> anyhow::
     assert_eq!(setup.local.state().host_prunes, [true]);
     Ok(())
 }
+
+/// The disk pressure of an agent host is measured on that host: a full disk gets one prune of
+/// that host, a second check inside the 15 minute cooldown does not prune it again, and the
+/// server host is not pruned for the disk of an agent.
+#[tokio::test]
+async fn a_full_agent_disk_prunes_only_that_agent_once_in_its_cooldown() -> anyhow::Result<()> {
+    let setup = setup().await?;
+    let policy = setup.platform.prune_policy().await?;
+    setup.agent.runtime.state().disk_used_percent = 50;
+    let calm = setup
+        .platform
+        .prune_agents_under_pressure(&policy, 85, 1_000)
+        .await?;
+    assert!(calm.is_empty());
+    assert!(setup.agent.runtime.state().host_prunes.is_empty());
+
+    setup.agent.runtime.state().disk_used_percent = 90;
+    let full = setup
+        .platform
+        .prune_agents_under_pressure(&policy, 85, 2_000)
+        .await?;
+    assert_eq!(full, ["edge"]);
+    let again = setup
+        .platform
+        .prune_agents_under_pressure(&policy, 85, 2_000 + 899)
+        .await?;
+    assert!(again.is_empty());
+    assert_eq!(setup.agent.runtime.state().host_prunes, [false]);
+    assert!(setup.local.state().host_prunes.is_empty());
+    let later = setup
+        .platform
+        .prune_agents_under_pressure(&policy, 85, 2_000 + 900)
+        .await?;
+    assert_eq!(later, ["edge"]);
+    Ok(())
+}

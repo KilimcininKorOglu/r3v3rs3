@@ -293,6 +293,13 @@ impl ContainerRuntime for RemoteRuntime {
             other => Err(unexpected(&other)),
         }
     }
+
+    async fn disk_space(&self) -> anyhow::Result<Option<r3v3rs3_api::dashboard::DiskSpace>> {
+        match self.call(AgentRequest::DiskSpace).await? {
+            AgentOutput::DiskSpace { disk } => Ok(disk),
+            other => Err(unexpected(&other)),
+        }
+    }
 }
 
 #[cfg(test)]

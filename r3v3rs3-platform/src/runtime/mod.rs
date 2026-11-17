@@ -71,6 +71,12 @@ pub trait ContainerRuntime: Send + Sync {
         anyhow::bail!("the runtime does not prune its host");
     }
 
+    /// The usage of the disk that holds the Docker data of the host. `None` when the disk
+    /// cannot be read.
+    async fn disk_space(&self) -> anyhow::Result<Option<r3v3rs3_api::dashboard::DiskSpace>> {
+        anyhow::bail!("the runtime does not measure its disk");
+    }
+
     /// Creates a bridge network unless it exists.
     async fn ensure_network(&self, network: &NetworkName, app: &AppName) -> anyhow::Result<()>;
 
