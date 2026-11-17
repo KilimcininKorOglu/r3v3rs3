@@ -172,6 +172,12 @@ async fn check_invalid_accounts(addr: SocketAddr, admin: &str) -> anyhow::Result
         assert_eq!(status, 400, "{body}");
         assert!(body.contains(message), "{body}");
     }
+    // A change of an existing account follows the same rule as a new account.
+    let update = Some(json!({"role": "viewer", "proxies": ["zzz-zzz"]}));
+    let path = "/api/accounts/viewer";
+    let (status, body) = send(addr, Method::PUT, path, admin, update).await?;
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("unknown_scope_proxy"), "{body}");
     Ok(())
 }
 
