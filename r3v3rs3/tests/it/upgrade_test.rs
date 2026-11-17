@@ -153,9 +153,25 @@ async fn check_handover(
     // Closing the old connections lets the old process finish its drain.
     drop(open);
     drop(client);
-    let status = tokio::task::spawn_blocking(move || first.wait()).await??;
+    let status = wait_for_exit(&mut first).await?;
     assert!(status.success(), "{status}");
     Ok(())
+}
+
+/// Waits for the old process to end its drain. A process that did not hand over keeps serving
+/// and never exits, so it is killed and the test fails instead of waiting without end.
+async fn wait_for_exit(
+    process: &mut std::process::Child,
+) -> anyhow::Result<std::process::ExitStatus> {
+    for _ in 0..150 {
+        if let Some(status) = process.try_wait()? {
+            return Ok(status);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    process.kill().ok();
+    process.wait()?;
+    anyhow::bail!("the old process did not exit within 15 s after the SIGUSR2")
 }
 
 /// The old process is gone, so only the new process can answer this connection.
