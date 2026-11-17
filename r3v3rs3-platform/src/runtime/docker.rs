@@ -496,16 +496,17 @@ impl DockerRuntime {
             frames.extend_from_slice(&chunk[..read]);
         }
         let state: ExecInspectResponse = self.get(&format!("/exec/{}/json", exec.id)).await?;
-        let output = demux_stream(&frames)?;
+        let (stdout, stderr) = split_exec_stream(&frames)?;
         if state.exit_code != 0 {
             bail!(
-                "the command {:?} failed with exit code {}: {}",
+                "the command {:?} failed with exit code {}: {}{}",
                 command,
                 state.exit_code,
-                String::from_utf8_lossy(&output)
+                String::from_utf8_lossy(&stderr),
+                String::from_utf8_lossy(&stdout)
             );
         }
-        Ok(output)
+        Ok(stdout)
     }
 
     /// The resource usage of a container, from one stats document.
@@ -1451,22 +1452,52 @@ fn demux_logs(data: &[u8]) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&demux_stream(data)?).into_owned())
 }
 
-/// Joins the payloads of a multiplexed exec or log stream: an 8-byte header per frame (the stream
-/// type, three zero bytes and the payload size as a big-endian `u32`), payload after it.
-fn demux_stream(mut data: &[u8]) -> anyhow::Result<Vec<u8>> {
+/// Joins the payloads of a multiplexed log stream, stdout and stderr in their order.
+fn demux_stream(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut output = Vec::with_capacity(data.len());
-    while !data.is_empty() {
-        let header = data
-            .get(..8)
-            .ok_or_else(|| anyhow!("a log frame header is truncated"))?;
-        let size = u32::from_be_bytes([header[4], header[5], header[6], header[7]]) as usize;
-        let payload = data
-            .get(8..8 + size)
-            .ok_or_else(|| anyhow!("a log frame is truncated"))?;
-        output.extend_from_slice(payload);
-        data = &data[8 + size..];
+    for (_, payload) in stream_frames(data) {
+        output.extend_from_slice(payload?);
     }
     Ok(output)
+}
+
+/// Splits a multiplexed exec stream into its standard output and its standard error. A
+/// command whose output is data, such as a database dump, must not get the warnings and the
+/// progress lines that the tool writes to stderr mixed into that data.
+fn split_exec_stream(data: &[u8]) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
+    let (mut stdout, mut stderr) = (Vec::with_capacity(data.len()), Vec::new());
+    for (stream, payload) in stream_frames(data) {
+        match stream {
+            STDERR_STREAM => stderr.extend_from_slice(payload?),
+            _ => stdout.extend_from_slice(payload?),
+        }
+    }
+    Ok((stdout, stderr))
+}
+
+/// The stream type of a frame of the standard error.
+const STDERR_STREAM: u8 = 2;
+
+/// The frames of a multiplexed exec or log stream: an 8-byte header per frame (the stream
+/// type, three zero bytes and the payload size as a big-endian `u32`), payload after it.
+fn stream_frames(mut data: &[u8]) -> impl Iterator<Item = (u8, anyhow::Result<&[u8]>)> {
+    std::iter::from_fn(move || {
+        if data.is_empty() {
+            return None;
+        }
+        let Some(header) = data.get(..8) else {
+            data = &[];
+            return Some((0, Err(anyhow!("a log frame header is truncated"))));
+        };
+        let stream = header[0];
+        let size = u32::from_be_bytes([header[4], header[5], header[6], header[7]]) as usize;
+        let Some(payload) = data.get(8..8 + size) else {
+            data = &[];
+            return Some((stream, Err(anyhow!("a log frame is truncated"))));
+        };
+        data = &data[8 + size..];
+        Some((stream, Ok(payload)))
+    })
 }
 
 #[derive(Deserialize)]
@@ -1900,16 +1931,24 @@ mod tests {
         assert_eq!(stats, ContainerStats::default());
     }
 
+    /// The Docker exec stream protocol tags each frame with its stream: 1 is stdout, 2 is
+    /// stderr. A log shows both; the output of a command, such as a database dump, is its
+    /// stdout alone, and stderr only explains a failure.
     #[test]
-    fn captured_frames_carry_the_payload_bytes() {
+    fn captured_output_keeps_stdout_and_stderr_apart() {
         let mut data = frame(1, "head ");
-        data.extend(frame(2, "ignored err "));
+        data.extend(frame(2, "warning on stderr "));
         data.extend(frame(1, "tail"));
         assert_eq!(
             demux_stream(&data).unwrap(),
-            b"head ignored err tail".to_vec()
+            b"head warning on stderr tail".to_vec()
         );
+        let (stdout, stderr) = split_exec_stream(&data).unwrap();
+        assert_eq!(stdout, b"head tail".to_vec());
+        assert_eq!(stderr, b"warning on stderr ".to_vec());
         assert_eq!(demux_stream(&[]).unwrap(), Vec::<u8>::new());
+        assert!(split_exec_stream(&[1, 0, 0, 0, 0, 0, 0, 9, b'x']).is_err());
+        assert!(split_exec_stream(&[1, 0, 0]).is_err());
     }
 
     #[test]
