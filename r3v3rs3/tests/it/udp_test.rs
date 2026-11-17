@@ -184,6 +184,45 @@ async fn udp_drops_an_upstream_reply_above_the_size_limit() -> anyhow::Result<()
     .await
 }
 
+/// RFC 8085 section 5.1: a UDP receiver checks the source address of each datagram. A packet
+/// that another host sends to the upstream socket of a session is not the reply of the upstream,
+/// so it never reaches the client; the reply of the upstream still does.
+#[tokio::test]
+async fn udp_drops_a_packet_that_does_not_come_from_the_upstream() -> anyhow::Result<()> {
+    let upstream_port = alloc_udp_port().await?;
+    let proxy_port = alloc_udp_port().await?;
+    let mut sources = start_echo_upstream(&upstream_port).await?;
+    let config = udp_storage(&proxy_port, &upstream_port, SHORT_IDLE);
+
+    with_server(config, |_| async move {
+        check_spoofed_reply(&proxy_port, &mut sources).await
+    })
+    .await
+}
+
+/// Sends a packet from another socket to the session socket of the proxy and checks that the
+/// client gets only the echo of the upstream.
+async fn check_spoofed_reply(
+    proxy_port: &TestPort,
+    sources: &mut mpsc::UnboundedReceiver<SocketAddr>,
+) -> anyhow::Result<()> {
+    let proxy = proxy_port.socket_addr();
+    let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
+    send_and_expect_echo(&client, proxy, b"open").await?;
+    let session = next_source(sources).await?;
+
+    let attacker = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
+    attacker.send_to(b"spoofed", session).await?;
+    let mut buf = [0; 1024];
+    let reply = timeout(NO_PACKET_WAIT, client.recv_from(&mut buf)).await;
+    assert!(
+        reply.is_err(),
+        "a packet of another host reached the client: {:?}",
+        reply.map(|res| res.map(|(size, _)| buf[..size].to_vec()))
+    );
+    send_and_expect_echo(&client, proxy, b"still").await
+}
+
 fn udp_storage_with_size(
     proxy_port: &TestPort,
     upstream_port: &TestPort,
