@@ -361,6 +361,35 @@ async fn verify_scoped_account(
         .await?
         .status();
     assert_eq!(status, StatusCode::NOT_FOUND);
+    verify_scoped_cannot_close(client, addr, scoped).await
+}
+
+/// Closing a connection needs the edit permission, which an editor with a proxy list does not
+/// hold: the connection of another proxy, or of no proxy, stays open.
+async fn verify_scoped_cannot_close(
+    client: &Client,
+    addr: SocketAddr,
+    scoped: &str,
+) -> anyhow::Result<()> {
+    use r3v3rs3::proxy::connection_tracker;
+    use r3v3rs3_api::traffic::ConnectionProtocol;
+    for proxy_id in [Some(random_id()), None] {
+        let (conn_id, _guard, cancel_rx, _, _) = connection_tracker::register(
+            proxy_id,
+            "test-ws",
+            ConnectionProtocol::WebSocket,
+            "192.168.1.51:54321",
+            "10.0.0.6:8080",
+        );
+        let status = client
+            .delete(format!("http://{addr}/api/traffic/connections/{conn_id}"))
+            .header(COOKIE, scoped)
+            .send()
+            .await?
+            .status();
+        assert_eq!(status, StatusCode::FORBIDDEN, "{proxy_id:?}");
+        assert!(!*cancel_rx.borrow(), "{proxy_id:?}");
+    }
     Ok(())
 }
 
