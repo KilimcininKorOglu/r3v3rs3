@@ -779,7 +779,9 @@ impl Platform {
                     .is_ok()
             {
                 tracing::info!(%db_id, "database clone restored successfully");
-                return Ok(());
+                // The dump holds no account passwords; the tenants copied from the source get
+                // their stored ones.
+                return self.reapply_tenants(db_id).await;
             }
         }
         bail!("timed out waiting for cloned database container to be ready for restore");
@@ -798,11 +800,11 @@ impl Platform {
             .database
             .clone()
             .context("the source app is not a managed database")?;
-        // The clone runs the image of its source, so both mount the same data directory.
         let info = r3v3rs3_api::platform::app_engine_info(&source.spec)
             .context("the engine is not in the database catalog")?;
 
         let dump_bytes = self.get_clone_dump(source_id, &engine, &info).await?;
+        self.copy_tenants(source_id, dest_id).await?;
         let restore = restore_plan(&engine, &info, dest_password)?;
         let platform = self.clone();
         let data_path = info.data_path.clone();
@@ -1282,6 +1284,7 @@ impl Platform {
         let info = r3v3rs3_api::platform::app_engine_info(&source.spec)
             .context("engine not in catalog")?;
         let created_app = self.create_pitr_app(source, new_name, host_port).await?;
+        self.copy_tenants(source_id, created_app.id).await?;
         let dest_password = self
             .sync_pitr_password(source_id, created_app.id, &info)
             .await?;
@@ -1293,13 +1296,25 @@ impl Platform {
         )
         .await?;
 
+        let restore = restore_plan(engine, &info, &dest_password)?;
+        self.restore_base_into(source_id, created_app.id, base_backup, &restore, &info)
+            .await?;
+        Ok(created_app)
+    }
+
+    /// Restores the base backup of a source database into a new database container.
+    async fn restore_base_into(
+        &self,
+        source_id: ShortId,
+        dest_id: ShortId,
+        base_backup: &BackupEntry,
+        restore: &RestorePlan,
+        info: &EngineInfo,
+    ) -> anyhow::Result<()> {
         let dump_bytes = self.download_backup(source_id, &base_backup.id).await?;
         let uncompressed = ungzip(&dump_bytes).await?;
-        let restore = restore_plan(engine, &info, &dest_password)?;
-        self.wait_and_restore(created_app.id, &restore, uncompressed, &info.data_path)
-            .await?;
-
-        Ok(created_app)
+        self.wait_and_restore(dest_id, restore, uncompressed, &info.data_path)
+            .await
     }
 
     async fn create_pitr_app(

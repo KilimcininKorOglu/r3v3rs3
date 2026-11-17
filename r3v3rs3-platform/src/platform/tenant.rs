@@ -398,6 +398,19 @@ impl Platform {
         self.store.set_secret(db_id, &name, &sealed).await
     }
 
+    /// Gives a clone of a shared database the tenant records of its source, with the same
+    /// passwords, so the tenants reach the copied data with their own credentials.
+    pub(super) async fn copy_tenants(&self, source: ShortId, dest: ShortId) -> anyhow::Result<()> {
+        for tenant in self.tenants(source).await? {
+            let password = self
+                .tenant_password(source, &tenant)
+                .await?
+                .with_context(|| format!("the tenant {tenant} has no stored password"))?;
+            self.store_tenant_password(dest, &tenant, &password).await?;
+        }
+        Ok(())
+    }
+
     /// Sets the stored password of every tenant again, after a restore that brought back the
     /// roles without their passwords. The first failure ends the call.
     pub(super) async fn reapply_tenants(&self, db_id: ShortId) -> anyhow::Result<()> {
@@ -444,6 +457,44 @@ mod tests {
 
     fn id(text: &str) -> ShortId {
         text.parse().unwrap()
+    }
+
+    /// A clone of a shared server holds the data of its tenants, so it takes their records with
+    /// the same passwords: a tenant reaches its data on the clone with its own credentials.
+    #[tokio::test]
+    async fn a_clone_takes_the_tenants_of_its_source_with_their_passwords() -> anyhow::Result<()> {
+        let (platform, _dir) = crate::platform::tests::platform().await?;
+        let request = crate::platform::tests::request;
+        let source = platform.add_app(request("shop-db"), 1).await?;
+        let clone = platform.add_app(request("shop-db-copy"), 2).await?;
+        let other = platform.add_app(request("other-db"), 3).await?;
+        for (db, tenant, password) in [
+            (source.id, "p_one", "pw-one"),
+            (source.id, "a_two", "pw-two"),
+            (other.id, "a_foreign", "pw-x"),
+        ] {
+            platform.store_tenant_password(db, tenant, password).await?;
+        }
+
+        platform.copy_tenants(source.id, clone.id).await?;
+
+        let expected =
+            [("a_two", "pw-two"), ("p_one", "pw-one")].map(|(t, p)| (t.into(), p.into()));
+        assert_eq!(stored(&platform, clone.id).await?, expected);
+        // The source keeps its own records.
+        assert_eq!(stored(&platform, source.id).await?, expected);
+        Ok(())
+    }
+
+    /// The tenants of a database with their stored passwords, by name.
+    async fn stored(platform: &Platform, db_id: ShortId) -> anyhow::Result<Vec<(String, String)>> {
+        let mut tenants = Vec::new();
+        for tenant in platform.tenants(db_id).await? {
+            let password = platform.tenant_password(db_id, &tenant).await?;
+            tenants.push((tenant, password.unwrap_or_default()));
+        }
+        tenants.sort();
+        Ok(tenants)
     }
 
     #[test]
