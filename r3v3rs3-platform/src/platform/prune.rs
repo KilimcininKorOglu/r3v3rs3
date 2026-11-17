@@ -12,6 +12,15 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
+fn add_prune(total: &mut PruneResult, part: &PruneResult) {
+    total.containers_deleted += part.containers_deleted;
+    total.images_deleted += part.images_deleted;
+    total.volumes_deleted += part.volumes_deleted;
+    total.build_cache_deleted += part.build_cache_deleted;
+    total.logs_truncated += part.logs_truncated;
+    total.space_reclaimed_bytes += part.space_reclaimed_bytes;
+}
+
 /// Deletes the rotated log files of the named containers whose logs reach the threshold, the
 /// same rule as the vacuum of the local Docker host.
 async fn vacuum_over(
@@ -183,14 +192,50 @@ impl Platform {
         self.store.save_prune_policy(&policy).await
     }
 
-    /// Executes a disk hygiene prune immediately and updates the policy run stats.
+    /// Executes a disk hygiene prune immediately on the server host and on every agent target,
+    /// and updates the policy run stats. The time of the run is saved before the agents run, so
+    /// an offline agent does not make the scheduler repeat the prune of the server host.
     pub async fn run_prune(&self) -> anyhow::Result<PruneResult> {
         let mut policy = self.prune_policy().await?;
-        let result = self.local.run_prune(&policy).await?;
+        let mut result = self.local.run_prune(&policy).await?;
         policy.last_pruned_at = Some(unix_secs());
         policy.last_reclaimed_bytes = Some(result.space_reclaimed_bytes);
         self.store.save_prune_policy(&policy).await?;
+        let failures = self.prune_agents(&policy, &mut result).await?;
+        if !failures.is_empty() {
+            anyhow::bail!("the prune failed on {}", failures.join("; "));
+        }
+        policy.last_reclaimed_bytes = Some(result.space_reclaimed_bytes);
+        self.store.save_prune_policy(&policy).await?;
         Ok(result)
+    }
+
+    /// Prunes the host of every agent target and adds its result. Returns the error of each
+    /// target that failed; the other targets still run.
+    async fn prune_agents(
+        &self,
+        policy: &PrunePolicy,
+        result: &mut PruneResult,
+    ) -> anyhow::Result<Vec<String>> {
+        let mut failures = Vec::new();
+        for target in self.store.targets().await? {
+            if super::is_local(target.id) {
+                continue;
+            }
+            match self.runtime(target.id).run_prune(policy).await {
+                Ok(part) => add_prune(result, &part),
+                Err(err) => failures.push(format!("{}: {err:#}", target.name)),
+            }
+        }
+        if policy.prune_logs {
+            let threshold = policy
+                .log_vacuum_threshold_mb
+                .map(|mb| mb.saturating_mul(1024 * 1024));
+            let vacuum = self.vacuum_agent_logs(threshold).await?;
+            result.logs_truncated += vacuum.truncated_files as u64;
+            result.space_reclaimed_bytes += vacuum.freed_bytes;
+        }
+        Ok(failures)
     }
 
     /// Vacuums container logs across the platform exceeding the optional MB threshold.
@@ -200,6 +245,18 @@ impl Platform {
     ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
         let threshold_bytes = threshold_mb.map(|mb| mb.saturating_mul(1024 * 1024));
         let mut total = self.local.vacuum_all_logs(threshold_bytes).await?;
+        let agents = self.vacuum_agent_logs(threshold_bytes).await?;
+        total.truncated_files += agents.truncated_files;
+        total.freed_bytes += agents.freed_bytes;
+        Ok(total)
+    }
+
+    /// Vacuums the logs of the running apps on their agent targets, on the agent hosts.
+    async fn vacuum_agent_logs(
+        &self,
+        threshold_bytes: Option<u64>,
+    ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+        let mut total = r3v3rs3_api::container::LogVacuumResult::default();
         for app in self.store.apps().await? {
             let Some(deployment) = self.store.running_deployment(app.id).await? else {
                 continue;

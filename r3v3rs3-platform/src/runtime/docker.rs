@@ -283,16 +283,18 @@ impl DockerRuntime {
         Ok(())
     }
 
-    async fn prune_docker_containers(&self) -> anyhow::Result<(u64, u64)> {
+    /// Removes the stopped containers; with `label`, only the stopped containers that carry it.
+    async fn prune_docker_containers(&self, label: Option<&str>) -> anyhow::Result<(u64, u64)> {
         let allowed = [StatusCode::CONFLICT];
+        let path = match label {
+            Some(label) => {
+                let filters = json!({ "label": [label] }).to_string();
+                format!("/containers/prune?filters={}", encode(&filters))
+            }
+            None => "/containers/prune".to_string(),
+        };
         let res = self
-            .send(
-                Method::POST,
-                "/containers/prune",
-                None,
-                &allowed,
-                RESPONSE_TIMEOUT,
-            )
+            .send(Method::POST, &path, None, &allowed, RESPONSE_TIMEOUT)
             .await?;
         let val: Value = read_json(res).await?;
         let count = val
@@ -918,7 +920,7 @@ impl ContainerRuntime for DockerRuntime {
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
         let mut result = r3v3rs3_api::platform::PruneResult::default();
         if policy.prune_containers {
-            let (count, space) = self.prune_docker_containers().await?;
+            let (count, space) = self.prune_docker_containers(None).await?;
             result.containers_deleted += count;
             result.space_reclaimed_bytes += space;
         }
@@ -930,6 +932,31 @@ impl ContainerRuntime for DockerRuntime {
             result.space_reclaimed_bytes += space;
         }
         self.prune_storage(policy, &mut result).await?;
+        Ok(result)
+    }
+
+    async fn prune_platform(
+        &self,
+        policy: &r3v3rs3_api::platform::PrunePolicy,
+    ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
+        let mut result = r3v3rs3_api::platform::PruneResult::default();
+        if policy.prune_containers {
+            let (count, space) = self.prune_docker_containers(Some(APP_LABEL)).await?;
+            result.containers_deleted += count;
+            result.space_reclaimed_bytes += space;
+        }
+        if policy.prune_images {
+            let (count, space) = self.prune_dangling_images().await?;
+            result.images_deleted += count;
+            result.space_reclaimed_bytes += space;
+        }
+        if policy.prune_build_cache {
+            let (count, space) = self
+                .prune_docker_build_cache(policy.build_cache_keep_storage_mb)
+                .await?;
+            result.build_cache_deleted += count;
+            result.space_reclaimed_bytes += space;
+        }
         Ok(result)
     }
 

@@ -281,6 +281,18 @@ impl ContainerRuntime for RemoteRuntime {
             other => Err(unexpected(&other)),
         }
     }
+
+    /// The agent cleans its own host, limited to what the platform owns or can make again.
+    async fn run_prune(
+        &self,
+        policy: &r3v3rs3_api::platform::PrunePolicy,
+    ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
+        let policy = policy.clone();
+        match self.call(AgentRequest::RunPrune { policy }).await? {
+            AgentOutput::Prune { result } => Ok(result),
+            other => Err(unexpected(&other)),
+        }
+    }
 }
 
 #[cfg(test)]

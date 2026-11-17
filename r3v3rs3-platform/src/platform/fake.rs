@@ -52,6 +52,9 @@ pub struct FakeState {
     pub log_delay: Option<std::time::Duration>,
     /// The size of the log files of each container, keyed by its name.
     pub log_sizes: BTreeMap<String, u64>,
+    /// The prunes of the host in their order: `true` for a full prune, `false` for the prune of
+    /// an agent host.
+    pub host_prunes: Vec<bool>,
 }
 
 /// One build of the fake runtime.
@@ -524,6 +527,28 @@ impl ContainerRuntime for FakeRuntime {
             app_id: None,
             truncated_files: 1,
             freed_bytes,
+        })
+    }
+
+    async fn run_prune(
+        &self,
+        _: &r3v3rs3_api::platform::PrunePolicy,
+    ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
+        self.check()?.host_prunes.push(true);
+        Ok(r3v3rs3_api::platform::PruneResult {
+            space_reclaimed_bytes: 100,
+            ..Default::default()
+        })
+    }
+
+    async fn prune_platform(
+        &self,
+        _: &r3v3rs3_api::platform::PrunePolicy,
+    ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
+        self.check()?.host_prunes.push(false);
+        Ok(r3v3rs3_api::platform::PruneResult {
+            space_reclaimed_bytes: 10,
+            ..Default::default()
         })
     }
 

@@ -171,7 +171,8 @@ impl Executor {
         }
     }
 
-    /// The requests about the log files of a container of the platform.
+    /// The requests about the log files of a container of the platform and the prune of the
+    /// agent host.
     async fn log_file_request(&self, request: AgentRequest) -> anyhow::Result<AgentOutput> {
         match request {
             AgentRequest::ContainerLogInfo { name } => {
@@ -183,6 +184,10 @@ impl Executor {
                 self.owned(&name).await?;
                 let result = self.runtime.vacuum_container_logs(&name).await?;
                 Ok(AgentOutput::LogVacuum { result })
+            }
+            AgentRequest::RunPrune { policy } => {
+                let result = self.runtime.prune_platform(&policy).await?;
+                Ok(AgentOutput::Prune { result })
             }
             // The request can hold the values of variables, so the message does not show it.
             _ => bail!("the agent cannot answer this request here"),

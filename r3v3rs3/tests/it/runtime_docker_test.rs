@@ -717,3 +717,54 @@ async fn a_fixed_host_port_publishes_the_same_port() -> anyhow::Result<()> {
     container?;
     network
 }
+
+/// The prune of an agent host removes the stopped containers of the platform and keeps a
+/// stopped container without the app label, which belongs to software outside the platform.
+/// Only the container switch is on, so the test deletes no image or build cache of the host.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn the_agent_prune_keeps_the_containers_outside_the_platform() -> anyhow::Result<()> {
+    let runtime = runtime()?;
+    let image = pull(&runtime).await?;
+    let (platform, outside) = (Names::new()?, Names::new()?);
+    let result = prune_a_stopped_pair(&runtime, &platform, &outside, image).await;
+    let _ = runtime.remove_container(&platform.container).await;
+    runtime.remove_container(&outside.container).await?;
+    result
+}
+
+/// Creates a stopped platform container and a stopped container without the app label, runs
+/// the agent prune with only the container switch on, and checks what stays.
+async fn prune_a_stopped_pair(
+    runtime: &DockerRuntime,
+    platform: &Names,
+    outside: &Names,
+    image: ImageRef,
+) -> anyhow::Result<()> {
+    let mut owned = spec(platform, image.clone())?;
+    owned.network = None;
+    let mut foreign = spec(outside, image)?;
+    foreign.network = None;
+    foreign.labels.clear();
+    runtime.create_container(&owned).await?;
+    runtime.create_container(&foreign).await?;
+    let policy = r3v3rs3_api::platform::PrunePolicy {
+        prune_containers: true,
+        prune_images: false,
+        prune_build_cache: false,
+        ..Default::default()
+    };
+    let result = runtime.prune_platform(&policy).await?;
+    ensure!(result.containers_deleted >= 1, "{result:?}");
+    let owned_left = runtime.inspect_container(&platform.container).await?;
+    ensure!(
+        owned_left.is_none(),
+        "the stopped platform container stayed"
+    );
+    let foreign_left = runtime.inspect_container(&outside.container).await?;
+    ensure!(
+        foreign_left.is_some(),
+        "the container outside the platform was deleted"
+    );
+    Ok(())
+}

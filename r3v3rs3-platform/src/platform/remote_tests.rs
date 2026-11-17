@@ -331,3 +331,41 @@ async fn the_platform_log_vacuum_reaches_the_apps_on_an_agent() -> anyhow::Resul
     assert_eq!(setup.agent.runtime.state().log_sizes[name.as_str()], 0);
     Ok(())
 }
+
+/// An offline agent fails the vacuum of the platform with its error instead of a vacuum that
+/// reports nothing freed.
+#[tokio::test]
+async fn the_log_vacuum_reports_an_offline_agent() -> anyhow::Result<()> {
+    let setup = setup().await?;
+    deploy(&setup).await?;
+    setup.agent.stop().await;
+    let err = setup.platform.vacuum_all_logs(None).await.unwrap_err();
+    assert!(matches!(api_error(err), Error::AgentOffline { .. }));
+    Ok(())
+}
+
+/// The prune cleans the host of the server and the host of each agent target. The agent host
+/// gets the platform prune, which keeps what software outside the platform owns.
+#[tokio::test]
+async fn the_prune_cleans_the_agent_hosts_within_the_platform() -> anyhow::Result<()> {
+    let setup = setup().await?;
+    let result = setup.platform.run_prune().await?;
+    assert_eq!(setup.local.state().host_prunes, [true]);
+    assert_eq!(setup.agent.runtime.state().host_prunes, [false]);
+    assert_eq!(result.space_reclaimed_bytes, 110);
+    Ok(())
+}
+
+/// An offline agent fails the prune with its name, but the prune of the server host is saved,
+/// so the scheduler does not run it again every minute.
+#[tokio::test]
+async fn an_offline_agent_fails_the_prune_and_keeps_the_server_run() -> anyhow::Result<()> {
+    let setup = setup().await?;
+    setup.agent.stop().await;
+    let err = setup.platform.run_prune().await.unwrap_err();
+    assert!(format!("{err:#}").contains("edge"), "{err:#}");
+    let policy = setup.platform.prune_policy().await?;
+    assert!(policy.last_pruned_at.is_some());
+    assert_eq!(setup.local.state().host_prunes, [true]);
+    Ok(())
+}

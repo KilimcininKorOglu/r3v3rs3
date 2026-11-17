@@ -126,6 +126,11 @@ pub enum AgentRequest {
     VacuumContainerLogs {
         name: ContainerName,
     },
+    /// Cleans the Docker host of the agent with the switches of the policy, limited to what the
+    /// platform owns or can make again. An older agent refuses the variant.
+    RunPrune {
+        policy: r3v3rs3_api::platform::PrunePolicy,
+    },
     /// Connects the stream to a published port of a container. After the answer the stream
     /// carries the bytes of the connection.
     Tunnel {
@@ -219,6 +224,9 @@ pub enum AgentOutput {
     },
     LogVacuum {
         result: r3v3rs3_api::container::LogVacuumResult,
+    },
+    Prune {
+        result: r3v3rs3_api::platform::PruneResult,
     },
     /// The stream is connected to the port.
     Tunnel,

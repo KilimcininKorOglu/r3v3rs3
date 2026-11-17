@@ -58,7 +58,17 @@ pub trait ContainerRuntime: Send + Sync {
         &self,
         _policy: &r3v3rs3_api::platform::PrunePolicy,
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
-        Ok(r3v3rs3_api::platform::PruneResult::default())
+        anyhow::bail!("the runtime does not prune its host");
+    }
+
+    /// The prune of an agent host: the stopped containers of the platform, the dangling image
+    /// layers and the build cache. The other containers, the tagged images and the volumes of
+    /// the host can belong to software outside the platform, so they stay.
+    async fn prune_platform(
+        &self,
+        _policy: &r3v3rs3_api::platform::PrunePolicy,
+    ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
+        anyhow::bail!("the runtime does not prune its host");
     }
 
     /// Creates a bridge network unless it exists.
