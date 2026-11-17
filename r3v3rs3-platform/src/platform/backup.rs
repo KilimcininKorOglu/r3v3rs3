@@ -2010,21 +2010,11 @@ async fn run_restore(
             Some(
                 runtime
                     .exec_capture(container, plan.command.clone(), plan.env.clone())
-                    .await,
+                    .await
+                    .map(|_| ()),
             )
         }
-        None => {
-            let path = format!("{data_path}/dump.rdb");
-            let uploaded = runtime.upload_file(container, &path, bytes).await;
-            match uploaded {
-                Ok(()) => Some(
-                    runtime
-                        .exec_capture(container, plan.command.clone(), plan.env.clone())
-                        .await,
-                ),
-                Err(err) => Some(Err(err)),
-            }
-        }
+        None => Some(restore_redis(runtime, container, plan, bytes, data_path).await),
     };
     if let Some(path) = &plan.upload {
         runtime.remove_path(container, path).await.ok();
@@ -2033,6 +2023,55 @@ async fn run_restore(
         result?;
     }
     Ok(())
+}
+
+/// Writes the dump into the data volume and stops the server without a save, so its next start
+/// loads the dump. The `SHUTDOWN` ends the process that the exec of the command runs in, so the
+/// exec reports a failure even when the server stopped. The restore therefore counts as done
+/// only when the server answers with a new run id, which proves a new process started.
+async fn restore_redis(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    plan: &RestorePlan,
+    bytes: Vec<u8>,
+    data_path: &str,
+) -> anyhow::Result<()> {
+    let before = redis_run_id(runtime, container, plan).await?;
+    runtime
+        .upload_file(container, &format!("{data_path}/dump.rdb"), bytes)
+        .await?;
+    let shutdown = runtime
+        .exec_capture(container, plan.command.clone(), plan.env.clone())
+        .await;
+    for _ in 0..30 {
+        runtime.start_container(container).await?;
+        if let Ok(after) = redis_run_id(runtime, container, plan).await
+            && after != before
+        {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    match shutdown {
+        Ok(_) => bail!("the Redis server did not restart to load the restored dump"),
+        Err(err) => Err(err.context("the Redis server did not restart to load the restored dump")),
+    }
+}
+
+/// The run id of the Redis server, which changes with every start of the process.
+async fn redis_run_id(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    plan: &RestorePlan,
+) -> anyhow::Result<String> {
+    let command = vec!["redis-cli".into(), "INFO".into(), "server".into()];
+    let output = runtime
+        .exec_capture(container, command, plan.env.clone())
+        .await?;
+    String::from_utf8_lossy(&output)
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("run_id:").map(str::to_string))
+        .context("the Redis server reported no run id")
 }
 
 /// Takes the dump of a database container, for the tests on a Docker Engine.
