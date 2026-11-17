@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.6] - 2026-11-18
+
+### Added
+- The platform prune also cleans every agent host, limited to what the platform owns: stopped app containers, dangling image layers and the build cache.
+- An agent host whose own disk is under pressure is pruned on its own, at most once every 15 minutes, and the webhook names the target.
+
+### Changed
+- The r3-server systemd unit sets `MALLOC_ARENA_MAX=2`, so glibc keeps less freed memory on a long-running server.
+- The install examples point at 3.4.6.
+
+### Fixed
+- The access log and the upstream byte counters count the body of a chunked response as it streams.
+- A chunked response that ends cleanly is stored in the cache, and one that the upstream cuts is not.
+- The CT monitor gives a slow log 120 seconds and queries four domains at the same time.
+- The MCP list of error page themes leaves out the page HTML.
+- The container log vacuum reaches the apps on agent targets.
+- A full image prune keeps the rollback builds of the apps and the images in use.
+- The MCP answer of `create_account` names the created account.
+- An account proxy list that names a proxy that does not exist fails with `unknown_scope_proxy`.
+- The message of a missing id no longer names a port for every resource.
+- A deployment ends only after its old container is gone.
+- A TCP connection and a WebSocket are listed under their proxy.
+- The database backup, clone, PITR and restore paths keep the tenants, their passwords and the table rows on PostgreSQL, MySQL, MariaDB, MongoDB and Redis, and report the real error when a restore fails.
+- The server reads and empties the Docker container logs of an app, on the server and on its agent, and keeps the active log so `docker logs` works.
+- Generating missing app secrets keeps the stored ones.
+- The unmaintained humantime crate is replaced with a duration module.
+
 ## [3.4.5] - 2026-11-17
 
 ### Changed
