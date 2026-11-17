@@ -105,9 +105,10 @@ async fn a_sigusr2_hands_the_listeners_to_a_new_process() -> anyhow::Result<()> 
     check_handover(first, proxy_port.socket_addr()).await?;
     check_new_process_serves(proxy_port.socket_addr()).await?;
 
-    // Stop the new process, which the old one left running on its own.
+    // Stop the new process, which the old one left running on its own. The pattern names the
+    // config directory of this test, so the servers of other tests keep running.
     let _ = std::process::Command::new("pkill")
-        .args(["-f", &format!("^{} start", exe)])
+        .args(["-f", &format!("^{exe} start .*{}", dir.display())])
         .status();
     std::fs::remove_dir_all(&dir).ok();
     Ok(())
