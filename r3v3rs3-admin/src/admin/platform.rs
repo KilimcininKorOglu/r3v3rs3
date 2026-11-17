@@ -840,7 +840,7 @@ pub async fn get_log_size(
     ))
 }
 
-/// Truncates (vacuums) the container log files of an app.
+/// Deletes the rotated container log files of an app.
 #[utoipa::path(
     post,
     path = "/{id}/logs/vacuum",
@@ -2028,11 +2028,12 @@ pub async fn run_prune(
 
 #[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
 pub struct VacuumQuery {
-    /// Optional threshold in MB. Only log files exceeding this size are truncated.
+    /// Optional threshold in MB. Only the containers whose log files exceed this size lose
+    /// their rotated files.
     pub threshold_mb: Option<u64>,
 }
 
-/// Truncates (vacuums) container log files across the platform.
+/// Deletes the rotated container log files across the platform.
 #[utoipa::path(
     post,
     path = "/logs/vacuum",

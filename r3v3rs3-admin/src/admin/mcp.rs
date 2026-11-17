@@ -649,7 +649,8 @@ pub struct DeleteDrBackupParams {
 /// The arguments of `vacuum_all_logs`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct VacuumLogsParams {
-    /// Optional size threshold in megabytes. Only log files exceeding this size are truncated.
+    /// Optional size threshold in megabytes. Only the containers whose log files exceed this
+    /// size lose their rotated files.
     pub threshold_mb: Option<u64>,
 }
 
@@ -837,9 +838,9 @@ pub struct UpdatePrunePolicyParams {
     pub prune_build_cache: Option<bool>,
     /// Whether to delete stopped containers.
     pub prune_containers: Option<bool>,
-    /// Whether to empty container log files during a prune.
+    /// Whether to delete the rotated container log files during a prune.
     pub prune_logs: Option<bool>,
-    /// Empty only the container logs larger than this many MB.
+    /// Delete only the rotated files of the container logs larger than this many MB.
     pub log_vacuum_threshold_mb: Option<u64>,
     /// The MB of build cache to keep; older cache goes first.
     pub build_cache_keep_storage_mb: Option<u64>,
@@ -2807,9 +2808,9 @@ impl McpServer {
         json_result(summary)
     }
 
-    /// Truncate (vacuum) container log files for an application.
+    /// Delete the rotated container log files of an application.
     #[tool(
-        description = "Empty the container log files of an app (`id`) to free disk space at once, and return the number of bytes freed. The old log lines are lost; `get_app_logs` then shows only new lines. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+        description = "Delete the rotated container log files (`<id>-json.log.N`) of an app (`id`) to free disk space at once, and return the number of deleted files and bytes freed. The active log file stays, because Docker Engine stops serving `docker logs --tail` for a file emptied from outside; `max-size` caps it. The deleted lines are lost. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn vacuum_app_logs(
         &self,
@@ -4236,9 +4237,9 @@ impl McpServer {
         }))
     }
 
-    /// Truncate (vacuum) container logs across the platform.
+    /// Delete the rotated container log files across the platform.
     #[tool(
-        description = "Empty the container log files of every app on the platform to free disk space at once; with `threshold_mb` only files larger than that many megabytes are emptied. The removed log lines are lost. Returns the number of emptied files and the bytes freed. Needs a token with the edit scope and an admin account."
+        description = "Delete the rotated container log files of every app on the platform to free disk space at once; with `threshold_mb` only the containers whose log files are larger than that many megabytes lose them. The active log files stay. The deleted lines are lost. Returns the number of deleted files and the bytes freed. Needs a token with the edit scope and an admin account."
     )]
     async fn vacuum_all_logs(
         &self,

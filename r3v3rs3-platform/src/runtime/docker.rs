@@ -1240,22 +1240,17 @@ fn inspect_container_log_files(log_path: &str) -> anyhow::Result<(u64, usize)> {
     Ok((size, rotated.len()))
 }
 
-/// Empties the active log file and deletes the rotated ones: the files it changed and the
-/// bytes it freed.
+/// Deletes the rotated log files of a container: the files it deleted and the bytes it freed.
 fn vacuum_container_log_files(log_path: &str) -> anyhow::Result<(usize, u64)> {
     let path = std::path::Path::new(log_path);
-    let mut files = rotated_logs(path)?;
+    // The active file stays: Docker Engine keeps its size in memory, and a file emptied from
+    // outside stalls `docker logs --tail` until the container restarts. Its size is capped by
+    // the `max-size` of the container, and Docker rotates it into a file the next vacuum
+    // deletes.
+    let files = rotated_logs(path)?;
     for (file, _) in &files {
         std::fs::remove_file(file)
             .with_context(|| format!("failed to delete {}", file.display()))?;
-    }
-    if let Some(size) = active_log_size(path)? {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(path)
-            .with_context(|| format!("failed to empty {}", path.display()))?;
-        files.push((path.to_path_buf(), size));
     }
     Ok((files.len(), files.iter().map(|(_, size)| size).sum()))
 }
@@ -1908,8 +1903,10 @@ mod tests {
     }
 
     /// The json-file log driver writes `<id>-json.log` and rotates it into `<id>-json.log.N`
-    /// next to it. The size counts both, the vacuum empties the active file and deletes the
-    /// rotated ones, and a log that cannot be read is an error, never a size of 0.
+    /// next to it. The size counts both. The vacuum deletes the rotated files and leaves the
+    /// active file intact: Docker Engine keeps the size of the active file in memory, so
+    /// emptying it from outside stalls `docker logs --tail` until the container restarts
+    /// (measured on Docker 29). A log that cannot be read is an error, never a size of 0.
     #[test]
     fn container_logs_are_measured_and_emptied_or_the_error_is_reported() {
         use std::os::unix::fs::PermissionsExt;
@@ -1921,8 +1918,8 @@ mod tests {
         std::fs::write(dir.join("other-json.log"), b"0123456789012").unwrap();
         let path = log.to_str().unwrap();
         assert_eq!(inspect_container_log_files(path).unwrap(), (15, 1));
-        assert_eq!(vacuum_container_log_files(path).unwrap(), (2, 15));
-        assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
+        assert_eq!(vacuum_container_log_files(path).unwrap(), (1, 5));
+        assert_eq!(std::fs::read(&log).unwrap(), b"0123456789");
         assert!(!dir.join("abc-json.log.1").exists());
         assert_eq!(
             std::fs::metadata(dir.join("other-json.log")).unwrap().len(),

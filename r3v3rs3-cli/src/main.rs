@@ -483,7 +483,7 @@ pub enum AppCommand {
     },
     /// Shows container log file sizes of an application.
     LogSize { id: String },
-    /// Truncates (vacuums) container log files of an application.
+    /// Deletes the rotated container log files of an application.
     VacuumLogs { id: String },
     /// Shows live container resource throttling, CFS quota, and OOM diagnostic status.
     Diagnostics { id: String },
@@ -1084,7 +1084,7 @@ pub enum PlatformCommand {
     },
     /// Rotates the platform encryption key and re-encrypts all stored secrets.
     RotateKey,
-    /// Truncates (vacuums) container log files across the platform.
+    /// Deletes the rotated container log files across the platform.
     VacuumLogs {
         /// Optional minimum size threshold in MB for vacuuming.
         #[arg(long)]
