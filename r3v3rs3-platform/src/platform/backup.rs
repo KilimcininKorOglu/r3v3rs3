@@ -2085,6 +2085,16 @@ pub(super) async fn dump_for_test(
     take_dump(runtime, container, dump_plan(&info.engine, info, password)?).await
 }
 
+/// The dump of a MySQL server: every database but the system schemas. The `mysql` schema holds
+/// the accounts with their passwords, so a restore of it would bring back old passwords over
+/// the stored ones; the platform sets the accounts of the tenants again after a restore.
+const MYSQL_DUMP: &str = "dbs=$(mysql -u root -N -e \"SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql', 'sys', 'information_schema', 'performance_schema')\") || exit 1; \
+     if [ -z \"$dbs\" ]; then echo '-- MySQL dump: no user databases'; else mysqldump -u root --single-transaction --routines --events --databases $dbs; fi";
+
+/// The dump of a MariaDB server, like `MYSQL_DUMP` with the MariaDB tools.
+const MARIADB_DUMP: &str = "dbs=$(mariadb -u root -N -e \"SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql', 'sys', 'information_schema', 'performance_schema')\") || exit 1; \
+     if [ -z \"$dbs\" ]; then echo '-- MariaDB dump: no user databases'; else mariadb-dump -u root --single-transaction --routines --events --databases $dbs; fi";
+
 /// The dump command of one engine over the local connection of the container itself. The
 /// engines with a dump command are the ones that the catalog of the `r3v3rs3-apps`
 /// repository carries; an engine without a command cannot be backed up.
@@ -2101,22 +2111,12 @@ fn dump_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Result<
             file: None,
         },
         "mariadb" => DumpPlan {
-            command: vec![
-                "mariadb-dump".into(),
-                "-u".into(),
-                "root".into(),
-                "--all-databases".into(),
-            ],
+            command: vec!["sh".into(), "-c".into(), MARIADB_DUMP.into()],
             env: vec![format!("MYSQL_PWD={password}")],
             file: None,
         },
         "mysql" => DumpPlan {
-            command: vec![
-                "mysqldump".into(),
-                "-u".into(),
-                "root".into(),
-                "--all-databases".into(),
-            ],
+            command: vec!["sh".into(), "-c".into(), MYSQL_DUMP.into()],
             env: vec![format!("MYSQL_PWD={password}")],
             file: None,
         },
@@ -3063,6 +3063,24 @@ mod tests {
         assert_eq!(plan.command, ["pg_dump", "-U", "postgres", "postgres"]);
         assert_eq!(plan.env, ["PGPASSWORD=pass"]);
         assert!(plan.file.is_none());
+    }
+
+    /// The `mysql` schema holds every account with its password hash; a restore of it would
+    /// bring back old passwords over the stored ones, so the dump leaves the system schemas out
+    /// and still takes every other database.
+    #[test]
+    fn mysql_dumps_leave_the_account_schema_out() {
+        catalog();
+        for engine in ["mysql", "mariadb"] {
+            let info = r3v3rs3_api::platform::engine_info(engine).unwrap();
+            let plan = dump_plan(engine, &info, "pass").unwrap();
+            let script = &plan.command[2];
+            assert!(!script.contains("--all-databases"), "{engine}");
+            assert!(script.contains("NOT IN ('mysql', 'sys',"), "{engine}");
+            assert!(script.contains("--databases $dbs"), "{engine}");
+            assert!(!plan.command.iter().any(|arg| arg.contains("pass")));
+            assert_eq!(plan.env, ["MYSQL_PWD=pass"]);
+        }
     }
 
     #[test]
