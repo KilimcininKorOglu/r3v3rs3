@@ -155,8 +155,8 @@ impl CtMonitorState {
         let mut newly_discovered_rogues = Vec::new();
         let mut fetch_errors = Vec::new();
 
-        for domain in &domains {
-            match fetch_entries_for_domain(&client, domain, &config).await {
+        for (domain, result) in fetch_all_domains(&client, &domains, &config).await {
+            match result {
                 Ok(found) => {
                     let mut rogues = self.integrate_entries(found);
                     newly_discovered_rogues.append(&mut rogues);
@@ -383,6 +383,30 @@ fn add_domain_if_valid(set: &mut HashSet<String>, domain: &str) {
     }
 }
 
+/// The CT log queries that run at the same time. A query may take up to `CT_LIMITS.total`, so
+/// one query after the other would hold a check of many domains for many minutes.
+const PARALLEL_CT_QUERIES: usize = 4;
+
+/// Queries the CT log for every domain, `PARALLEL_CT_QUERIES` at a time.
+async fn fetch_all_domains(
+    client: &reqwest::Client,
+    domains: &[String],
+    config: &CtMonitorConfig,
+) -> Vec<(String, Result<Vec<CtLogEntry>, String>)> {
+    use futures::StreamExt;
+    let queries = domains.iter().cloned().map(|domain| {
+        let (client, config) = (client.clone(), config.clone());
+        async move {
+            let result = fetch_entries_for_domain(&client, &domain, &config).await;
+            (domain, result)
+        }
+    });
+    futures::stream::iter(queries)
+        .buffer_unordered(PARALLEL_CT_QUERIES)
+        .collect()
+        .await
+}
+
 async fn fetch_entries_for_domain(
     client: &reqwest::Client,
     domain: &str,
@@ -534,18 +558,43 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0u8; 1024];
-            let _ = stream.read(&mut request).await.unwrap();
-            tokio::time::sleep(delay).await;
-            let response =
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n[]";
-            let _ = stream.write_all(response.as_bytes()).await;
+            while let Ok((mut stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut request = [0u8; 1024];
+                    let _ = stream.read(&mut request).await;
+                    tokio::time::sleep(delay).await;
+                    let response = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n[]";
+                    let _ = stream.write_all(response.as_bytes()).await;
+                });
+            }
         });
         CtMonitorConfig {
             ct_api_url: Some(format!("http://127.0.0.1:{port}/?q={{domain}}")),
             ..Default::default()
         }
+    }
+
+    /// A query may take up to the 120 s limit, so the domains of one check must not wait for
+    /// each other: four domains of a log that answers in 400 ms end well before 4 × 400 ms.
+    #[tokio::test]
+    async fn the_domains_of_a_check_are_queried_at_the_same_time() {
+        let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let delay = Duration::from_millis(400);
+        let config = slow_ct_log(delay).await;
+        let client = build_http_client().unwrap();
+        let domains: Vec<String> = [
+            "a.example.com",
+            "b.example.com",
+            "c.example.com",
+            "d.example.com",
+        ]
+        .map(String::from)
+        .to_vec();
+        let started = Instant::now();
+        let results = fetch_all_domains(&client, &domains, &config).await;
+        assert!(started.elapsed() < delay * 2, "{:?}", started.elapsed());
+        assert_eq!(results.len(), 4);
+        assert!(results.iter().all(|(_, result)| result == &Ok(Vec::new())));
     }
 
     /// crt.sh answered a query in 20.29 s when measured from a test host, so the limit of a

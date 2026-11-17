@@ -1551,6 +1551,7 @@ r3v3rs3, alan adlarınız için genel Sertifika Şeffaflığı (Certificate Tran
 - **İzin Verilen Sertifika Otoriteleri**: Önceden tanımlanmış güvenilir genel CA sağlayıcıları (Let's Encrypt, Google Trust Services, DigiCert, Sectigo, ZeroSSL, Cloudflare) veya özel güvenilir sağlayıcı listeleri.
 - **Sahte Sertifika Tespiti**: Genel CT günlüklerinde keşfedilen ve tanınmayan veya yetkisiz bir CA tarafından düzenlenen tüm sertifikalar anında `investigating` durumuyla sahte (`is_rogue: true`) olarak işaretlenir.
 - **Alarmlar ve Webhook Bildirimleri**: Sertifika metadata bilgileriyle (sağlayıcı, seri numarası, common name, SAN listesi, kayıt zamanı) birlikte `cert.rogue_detected` webhook olayını tetikler.
+- **Sorgu Sınırları**: Bir kontrol, CT günlüğünü aynı anda dört alan adı için sorgular. crt.sh bir yanıt için 20 saniyeden fazla süre isteyebildiğinden bir sorgu 120 saniye sürebilir. Günlük sunucusuna bağlantı için yalnız 10 saniye vardır. Sorgusu başarısız olan bir alan adı durumu `partial_error` yapar ve `last_error` içinde adıyla yer alır.
 
 ## CLI Yönetimi
 

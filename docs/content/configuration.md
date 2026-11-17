@@ -1551,6 +1551,7 @@ The monitor runs on a configurable schedule (default: every 6 hours) and automat
 - **Allowed Certificate Authorities**: Predefined trusted public CAs (Let's Encrypt, Google Trust Services, DigiCert, Sectigo, ZeroSSL, Cloudflare) or customized trusted issuer lists.
 - **Rogue Detection**: Any certificate discovered in public CT logs issued by an unrecognized or unauthorized CA is immediately flagged as rogue (`is_rogue: true`) with status `investigating`.
 - **Alerting & Webhooks**: Triggers the `cert.rogue_detected` webhook event with complete certificate metadata (issuer, serial number, common name, SANs, logged timestamp).
+- **Query Limits**: A check queries the CT log for four domains at the same time. One query may take 120 seconds, because crt.sh can need more than 20 seconds for an answer; the connection to the log server alone has 10 seconds. A domain whose query fails sets the status to `partial_error` and names the domain in `last_error`.
 
 ## CLI Management
 
