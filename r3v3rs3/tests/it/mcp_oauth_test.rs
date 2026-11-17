@@ -1938,12 +1938,15 @@ async fn create_account_as_admin(
     role: &str,
 ) -> anyhow::Result<()> {
     let admin = mcp_client(addr, &access_token(&addr).await?).await?;
-    mcp_call(
+    let answer = mcp_call(
         &admin,
         "create_account",
         json!({ "username": username, "password": "password", "role": role }),
     )
     .await?;
+    // A tool answer tells the agent what happened; an empty object names nothing.
+    let answer: Value = serde_json::from_str(&answer)?;
+    assert_eq!(answer["created"], username, "{answer}");
     admin.cancel().await?;
     Ok(())
 }

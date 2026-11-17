@@ -5140,6 +5140,7 @@ impl McpServer {
             r3v3rs3_api::auth::Role::Admin,
         )?;
         let proxies = params.proxies.as_ref().map(parse_values).transpose()?;
+        let username = params.username.clone();
         let account = r3v3rs3_api::auth::NewAccount {
             username: params.username,
             password: params.password,
@@ -5152,7 +5153,13 @@ impl McpServer {
             .call(&caller, AddAccount { account })
             .await
             .map_err(any_error)?;
-        json_result(res)
+        // Without TOTP the result has no fields, so the answer names the created account.
+        let mut answer = serde_json::to_value(res)
+            .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
+        if let Some(fields) = answer.as_object_mut() {
+            fields.insert("created".into(), username.into());
+        }
+        json_result(answer)
     }
 
     /// Update an existing user account. Needs the edit scope.
