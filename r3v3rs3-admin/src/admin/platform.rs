@@ -540,12 +540,24 @@ pub async fn generate_app_env(
     Json(request): Json<GenerateAppEnvSecretsRequest>,
 ) -> Result<Json<ResolveEnvTemplateResponse>, AppError> {
     let platform = state.platform(&caller, Permission::Edit).await?;
-    let mut entries = platform.env(id).await.map_err(platform_error)?;
+    let entries = platform.env(id).await.map_err(platform_error)?;
+    // A stored secret comes back without its value; it is not missing.
+    let filled = match request.overwrite {
+        true => Vec::new(),
+        false => platform
+            .filled_secret_keys(id)
+            .await
+            .map_err(platform_error)?,
+    };
+    let (kept, mut entries): (Vec<_>, Vec<_>) = entries
+        .into_iter()
+        .partition(|entry| filled.iter().any(|key| key == entry.key.as_str()));
     let generated_keys = r3v3rs3_api::compose_env::resolve_env_entries(
         &mut entries,
         request.overwrite,
         generate_secret_for_key,
     );
+    entries.extend(kept);
     if request.save && !generated_keys.is_empty() {
         platform
             .set_env(id, entries.clone())
@@ -558,6 +570,12 @@ pub async fn generate_app_env(
         state
             .record_audit(&caller.username, caller.client, record)
             .await;
+    }
+    // A saved secret stays on the server; only an unsaved one goes to the form that asked.
+    if request.save {
+        for entry in entries.iter_mut().filter(|entry| entry.secret) {
+            entry.value = None;
+        }
     }
     Ok(Json(ResolveEnvTemplateResponse {
         template: String::new(),

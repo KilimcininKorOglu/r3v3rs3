@@ -147,6 +147,72 @@ async fn test_generate_app_env_secrets_endpoint() -> anyhow::Result<()> {
     .await
 }
 
+/// A stored secret is hidden from the API, which is not the same as empty: generating the
+/// missing secrets of an app must keep the secrets it already has, such as the password its
+/// database was created with, and a saved secret never comes back in the answer.
+#[tokio::test]
+async fn generating_app_secrets_keeps_the_stored_ones() -> anyhow::Result<()> {
+    let dir = TempDir::new("app-env-keep-test")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = Client::new();
+        let cookie = admin_session_cookie(addr).await?;
+        let app = create_app(&client, addr, &cookie).await?;
+        let env = vec![
+            EnvEntry {
+                key: "DATABASE_PASSWORD".parse()?,
+                value: Some("stored-database-password".into()),
+                secret: true,
+            },
+            EnvEntry {
+                key: "APP_KEY".parse()?,
+                value: Some("".into()),
+                secret: true,
+            },
+        ];
+        let res = client
+            .put(format!("http://{addr}/api/apps/{}/env", app.id))
+            .header(COOKIE, &cookie)
+            .json(&env)
+            .send()
+            .await?;
+        assert_eq!(res.status(), StatusCode::OK);
+        for save in [false, true] {
+            let body = generate(&client, addr, &cookie, &app, save).await?;
+            assert_eq!(body.generated_keys, ["APP_KEY"], "save: {save}");
+            let stored = body
+                .entries
+                .iter()
+                .find(|e| e.key.as_str() == "DATABASE_PASSWORD");
+            assert_eq!(stored.and_then(|e| e.value.clone()), None, "save: {save}");
+            let fresh = body.entries.iter().find(|e| e.key.as_str() == "APP_KEY");
+            // The form fills a value it has not saved yet; a saved one stays on the server.
+            assert_eq!(fresh.and_then(|e| e.value.clone()).is_some(), !save);
+        }
+        Ok(())
+    })
+    .await
+}
+
+async fn generate(
+    client: &Client,
+    addr: SocketAddr,
+    cookie: &str,
+    app: &AppEntry,
+    save: bool,
+) -> anyhow::Result<ResolveEnvTemplateResponse> {
+    let res = client
+        .post(format!("http://{addr}/api/apps/{}/env/generate", app.id))
+        .header(COOKIE, cookie)
+        .json(&GenerateAppEnvSecretsRequest {
+            save,
+            overwrite: false,
+        })
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::OK);
+    Ok(res.json().await?)
+}
+
 /// Creates an image app and returns it.
 async fn create_app(client: &Client, addr: SocketAddr, cookie: &str) -> anyhow::Result<AppEntry> {
     // 1. Create an app

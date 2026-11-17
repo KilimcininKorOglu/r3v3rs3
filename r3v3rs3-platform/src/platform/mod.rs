@@ -729,6 +729,21 @@ impl Platform {
             .collect()
     }
 
+    /// The keys of the secret variables of an app that hold a real value, not an empty one or a
+    /// template placeholder. The values themselves never leave the platform.
+    pub async fn filled_secret_keys(&self, id: ShortId) -> anyhow::Result<Vec<String>> {
+        self.app(id).await?;
+        let mut keys = Vec::new();
+        for var in self.store.env(id).await? {
+            if var.secret
+                && !r3v3rs3_api::compose_env::is_empty_or_placeholder(&self.open_value(id, &var)?)
+            {
+                keys.push(var.key);
+            }
+        }
+        Ok(keys)
+    }
+
     /// Replaces the environment variables of an app. A secret variable without a value keeps
     /// its current value.
     pub async fn set_env(&self, id: ShortId, entries: Vec<EnvEntry>) -> anyhow::Result<()> {
