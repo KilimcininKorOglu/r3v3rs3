@@ -30,7 +30,7 @@ pub struct CacheConfig {
 
     /// Freshness lifetime of a response without `Cache-Control: max-age`, `s-maxage` or `Expires`.
     /// Zero stores such a response only when it has an `ETag` or `Last-Modified` validator.
-    #[serde(default, with = "humantime_serde")]
+    #[serde(default, with = "crate::duration")]
     #[schema(value_type = String, example = "5m")]
     #[schemars(with = "String")]
     pub default_ttl: Duration,
@@ -38,7 +38,7 @@ pub struct CacheConfig {
     /// Stale-while-revalidate window duration. When non-zero, stale responses within this window
     /// are served immediately while an asynchronous revalidation runs in the background.
     /// Used as fallback when upstream does not supply `stale-while-revalidate` in Cache-Control.
-    #[serde(default, with = "humantime_serde")]
+    #[serde(default, with = "crate::duration")]
     #[schema(value_type = String, example = "1m")]
     #[schemars(with = "String")]
     pub stale_while_revalidate: Duration,

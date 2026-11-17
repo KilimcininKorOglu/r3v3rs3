@@ -239,7 +239,7 @@ pub struct SessionInfo {
     pub proxies: Option<BTreeSet<ShortId>>,
     /// The certificate list marks a certificate that expires within this time. Every role reads
     /// it, and only an admin reads the settings.
-    #[serde(with = "humantime_serde")]
+    #[serde(with = "crate::duration")]
     #[schema(value_type = String, example = "14days")]
     pub cert_expiry_warning: std::time::Duration,
     /// The IANA time zone that the panel renders the stored times in. An older server answers

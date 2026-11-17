@@ -28,7 +28,7 @@ pub const DEFAULT_STICKY_COOKIE_NAME: &str = "r3v3rs3_affinity";
 pub struct UpstreamTimeouts {
     /// Time limit for the DNS lookup, the TCP connection and the TLS handshake of a new upstream
     /// connection.
-    #[serde(default = "default_connect_timeout", with = "humantime_serde")]
+    #[serde(default = "default_connect_timeout", with = "crate::duration")]
     #[schema(value_type = String, example = "10s")]
     #[schemars(with = "String")]
     pub connect: Duration,
@@ -36,7 +36,7 @@ pub struct UpstreamTimeouts {
     /// Time limit from the start of the request until the response headers arrive, including a
     /// new connection. `0s` disables the limit. The response body and upgraded connections have
     /// no limit.
-    #[serde(default = "default_request_timeout", with = "humantime_serde")]
+    #[serde(default = "default_request_timeout", with = "crate::duration")]
     #[schema(value_type = String, example = "60s")]
     #[schemars(with = "String")]
     pub request: Duration,
@@ -215,7 +215,7 @@ pub struct HealthCheck {
     pub max_fails: u32,
 
     /// Time that an unhealthy server stays behind the healthy servers.
-    #[serde(default = "default_fail_timeout", with = "humantime_serde")]
+    #[serde(default = "default_fail_timeout", with = "crate::duration")]
     #[schema(value_type = String, example = "30s")]
     #[schemars(with = "String")]
     pub fail_timeout: Duration,
@@ -223,7 +223,7 @@ pub struct HealthCheck {
     /// Time between two active checks of the servers. `0s` disables the active health check.
     #[serde(
         default,
-        with = "humantime_serde",
+        with = "crate::duration",
         skip_serializing_if = "Duration::is_zero"
     )]
     #[schema(value_type = String, example = "10s")]
@@ -233,7 +233,7 @@ pub struct HealthCheck {
     /// Time limit of one active check.
     #[serde(
         default = "default_health_check_timeout",
-        with = "humantime_serde",
+        with = "crate::duration",
         skip_serializing_if = "is_default_health_check_timeout"
     )]
     #[schema(value_type = String, example = "5s")]
@@ -333,14 +333,14 @@ pub struct CircuitBreaker {
     pub min_requests: u32,
 
     /// Time that one window counts the requests of a server.
-    #[serde(default = "default_breaker_window", with = "humantime_serde")]
+    #[serde(default = "default_breaker_window", with = "crate::duration")]
     #[schema(value_type = String, example = "10s")]
     #[schemars(with = "String")]
     pub window: Duration,
 
     /// Time that an open circuit sends no traffic to the server. Then one trial request tests the
     /// server.
-    #[serde(default = "default_open_duration", with = "humantime_serde")]
+    #[serde(default = "default_open_duration", with = "crate::duration")]
     #[schema(value_type = String, example = "30s")]
     #[schemars(with = "String")]
     pub open_duration: Duration,
@@ -391,7 +391,7 @@ pub struct StickyCookie {
     /// `Max-Age` of the cookie. Without a value, the cookie ends with the browser session.
     #[serde(
         default,
-        with = "humantime_serde",
+        with = "crate::duration::option",
         skip_serializing_if = "Option::is_none"
     )]
     #[schema(value_type = Option<String>, example = "1h")]

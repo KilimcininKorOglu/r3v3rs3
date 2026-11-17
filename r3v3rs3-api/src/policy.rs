@@ -377,7 +377,7 @@ pub struct ForwardAuth {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub response_headers: Vec<String>,
 
-    #[serde(default = "default_forward_auth_timeout", with = "humantime_serde")]
+    #[serde(default = "default_forward_auth_timeout", with = "crate::duration")]
     #[schema(value_type = String, example = "10s")]
     #[schemars(with = "String")]
     pub timeout: Duration,

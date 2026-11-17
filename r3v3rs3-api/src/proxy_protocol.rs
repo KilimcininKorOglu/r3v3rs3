@@ -66,7 +66,7 @@ pub struct ProxyProtocolReceive {
     /// A trusted peer that does not send the complete header in this time is disconnected.
     #[serde(
         default = "default_timeout",
-        with = "humantime_serde",
+        with = "crate::duration",
         skip_serializing_if = "is_default_timeout"
     )]
     #[schema(value_type = String, example = "5s")]

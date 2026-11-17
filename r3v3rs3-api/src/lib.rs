@@ -19,6 +19,7 @@ pub mod container;
 pub mod ct;
 pub mod dashboard;
 pub mod discovery;
+pub mod duration;
 pub mod early_data;
 pub mod error;
 pub mod error_page_templates;

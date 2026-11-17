@@ -216,7 +216,7 @@ pub struct TcpProxy {
     /// connection.
     #[serde(
         default = "default_connect_timeout",
-        with = "humantime_serde",
+        with = "crate::duration",
         skip_serializing_if = "is_default_connect_timeout"
     )]
     #[schema(value_type = String, example = "10s")]
@@ -251,7 +251,7 @@ pub struct UdpProxy {
     /// A client session closes when no packet passes in either direction for this time.
     #[serde(
         default = "default_session_idle_timeout",
-        with = "humantime_serde",
+        with = "crate::duration",
         skip_serializing_if = "is_default_session_idle_timeout"
     )]
     #[schema(value_type = String, example = "60s")]

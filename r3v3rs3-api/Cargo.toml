@@ -22,7 +22,6 @@ test-util = []
 [dependencies]
 base64 = "0.23.1"
 hex = "0.4.3"
-humantime-serde = "1.1.1"
 # rand 0.8 sits on getrandom 0.2, whose `js` backend the WebUI resolves on wasm32.
 rand = "0.8.5"
 ipnet = { version = "2.11.0", features = ["serde"] }

@@ -9,13 +9,13 @@ use utoipa::ToSchema;
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AppConfig {
-    #[serde(with = "humantime_serde", default = "default_background_task_interval")]
+    #[serde(with = "crate::duration", default = "default_background_task_interval")]
     #[schema(value_type = String, example = "1h")]
     pub background_task_interval: Duration,
 
     /// The longest time that the server waits for the open client connections when it stops.
     #[serde(
-        with = "humantime_serde",
+        with = "crate::duration",
         default = "default_shutdown_graceful_timeout"
     )]
     #[schema(value_type = String, example = "30s")]
@@ -158,7 +158,7 @@ impl GeoIpConfig {
 /// the panel shows a banner on every page.
 #[derive(Debug, DefaultFromSerde, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct UpgradeConfig {
-    #[serde(with = "humantime_serde", default = "default_upgrade_check_interval")]
+    #[serde(with = "crate::duration", default = "default_upgrade_check_interval")]
     #[schema(value_type = String, example = "1h")]
     pub check_interval: Duration,
 }
@@ -288,7 +288,7 @@ pub struct AcmeExecConfig {
     pub programs: Vec<PathBuf>,
 
     /// Longest run time of one program call.
-    #[serde(with = "humantime_serde", default = "default_acme_exec_timeout")]
+    #[serde(with = "crate::duration", default = "default_acme_exec_timeout")]
     #[schema(value_type = String, example = "30s")]
     pub timeout: Duration,
 }
@@ -563,14 +563,14 @@ pub const DISPLAY_TIMEZONES: [&str; 17] = [
 
 #[derive(Debug, DefaultFromSerde, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AdminConfig {
-    #[serde(with = "humantime_serde", default = "default_admin_session_expiry")]
+    #[serde(with = "crate::duration", default = "default_admin_session_expiry")]
     #[schema(value_type = String, example = "1d")]
     pub session_expiry: Duration,
 
     #[serde(default = "default_max_attempts")]
     pub max_login_attempts: u32,
 
-    #[serde(with = "humantime_serde", default = "default_login_attempts_reset")]
+    #[serde(with = "crate::duration", default = "default_login_attempts_reset")]
     #[schema(value_type = String, example = "15m")]
     pub login_attempts_reset: Duration,
 
@@ -614,12 +614,12 @@ fn default_login_attempts_reset() -> Duration {
 
 #[derive(Debug, DefaultFromSerde, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct LogConfig {
-    #[serde(with = "humantime_serde", default = "default_database_log_retention")]
+    #[serde(with = "crate::duration", default = "default_database_log_retention")]
     #[schema(value_type = String, example = "3months")]
     pub database_log_retention: Duration,
 
     /// How long the audit log keeps an entry.
-    #[serde(with = "humantime_serde", default = "default_audit_log_retention")]
+    #[serde(with = "crate::duration", default = "default_audit_log_retention")]
     #[schema(value_type = String, example = "1year")]
     pub audit_log_retention: Duration,
 }
@@ -628,7 +628,7 @@ pub struct LogConfig {
 pub struct NotificationConfig {
     /// The certificate list marks a certificate that expires within this time, and the webhook
     /// gets a notification for it.
-    #[serde(with = "humantime_serde", default = "default_cert_expiry_warning")]
+    #[serde(with = "crate::duration", default = "default_cert_expiry_warning")]
     #[schema(value_type = String, example = "14days")]
     pub cert_expiry_warning: Duration,
 
@@ -690,7 +690,7 @@ pub struct WebhookConfig {
     #[schema(read_only)]
     pub token_set: bool,
     /// The longest time of one request.
-    #[serde(with = "humantime_serde", default = "default_webhook_timeout")]
+    #[serde(with = "crate::duration", default = "default_webhook_timeout")]
     #[schema(value_type = String, example = "10s")]
     pub timeout: Duration,
 }

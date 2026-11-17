@@ -65,7 +65,6 @@ hickory-resolver = { version = "0.26.3", features = [
 ] }
 http-body-util = "0.1.2"
 httpdate = "1.0.3"
-humantime-serde = "1.1.1"
 hyper = { version = "1.4.1", features = ["full"] }
 hyper-util = { version = "0.1.10", features = [
     "full",
