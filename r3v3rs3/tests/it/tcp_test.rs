@@ -132,6 +132,74 @@ async fn check_updated_upstream(
     Ok(())
 }
 
+/// Accepts connections and holds each one open until the client closes it.
+fn spawn_holding_upstream(port: &TestPort) {
+    let addr = port.socket_addr();
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        loop {
+            let (mut socket, _) = listener.accept().await?;
+            tokio::spawn(async move {
+                let mut sink = tokio::io::sink();
+                tokio::io::copy(&mut socket, &mut sink).await
+            });
+        }
+        #[allow(unreachable_code)]
+        anyhow::Ok(())
+    });
+}
+
+/// The ids of the tracked connections whose client address is one of `clients`.
+fn tracked_ids(clients: &[String]) -> Vec<r3v3rs3_api::id::ShortId> {
+    r3v3rs3::proxy::connection_tracker::list(None)
+        .into_iter()
+        .filter(|conn| clients.contains(&conn.client_addr))
+        .map(|conn| conn.id)
+        .collect()
+}
+
+/// Two open connections are two entries of the active connection list, each with its own id,
+/// because the panel terminates a connection by its id (an id shared by two connections would
+/// close or hide the wrong one).
+#[tokio::test]
+async fn each_open_tcp_connection_has_its_own_tracked_id() -> anyhow::Result<()> {
+    let upstream_port = alloc_tcp_port().await?;
+    let proxy_port = alloc_tcp_port().await?;
+    spawn_holding_upstream(&upstream_port);
+    let config = TestStorage::builder()
+        .ports(vec![port_entry("test", proxy_port.multiaddr_tcp())])
+        .proxies(vec![ProxyEntry {
+            id: "tracked".parse()?,
+            source: None,
+            status: None,
+            proxy: tcp_proxy_to(&upstream_port),
+        }])
+        .build();
+
+    with_server(config, |_| check_two_tracked_ids(proxy_port)).await
+}
+
+/// Opens two connections through the proxy and checks that each has its own tracked id.
+async fn check_two_tracked_ids(proxy_port: TestPort) -> anyhow::Result<()> {
+    wait_for_listener(proxy_port.socket_addr()).await?;
+    let first = tokio::net::TcpStream::connect(proxy_port.socket_addr()).await?;
+    let second = tokio::net::TcpStream::connect(proxy_port.socket_addr()).await?;
+    let clients = [
+        first.local_addr()?.to_string(),
+        second.local_addr()?.to_string(),
+    ];
+    let clients_ref = &clients;
+    common::wait_until(
+        || async move { Ok(tracked_ids(clients_ref).len() == 2) },
+        "the two open connections are not two tracked entries",
+    )
+    .await?;
+    let ids = tracked_ids(&clients);
+    assert_ne!(ids[0], ids[1], "two open connections share one id");
+    drop((first, second));
+    Ok(())
+}
+
 fn tcp_proxy_to(upstream: &TestPort) -> Proxy {
     Proxy {
         ports: vec!["test".parse().unwrap()],

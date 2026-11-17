@@ -10,8 +10,9 @@ use utoipa::ToSchema;
 pub struct ShortId([u8; 8]);
 
 impl ShortId {
+    /// A random id of seven bytes, so two new resources or connections never share one.
     pub fn new() -> Self {
-        Default::default()
+        Self::from(rand::random::<[u8; 7]>())
     }
 }
 
@@ -79,6 +80,13 @@ impl<'de> Deserialize<'de> for ShortId {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// A new id names a new resource, so two new ids never name the same one.
+    #[test]
+    fn each_new_id_is_different() {
+        let ids: std::collections::HashSet<ShortId> = (0..1000).map(|_| ShortId::new()).collect();
+        assert_eq!(ids.len(), 1000);
+    }
 
     #[test]
     fn parse_hex() {

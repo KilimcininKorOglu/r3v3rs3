@@ -23,6 +23,8 @@ test-util = []
 base64 = "0.23.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
+# rand 0.8 sits on getrandom 0.2, whose `js` backend the WebUI resolves on wasm32.
+rand = "0.8.5"
 ipnet = { version = "2.11.0", features = ["serde"] }
 regex = "1.11.1"
 rustls-pki-types = "1.10.0"
@@ -37,3 +39,6 @@ thiserror = "2.0.0"
 time = { version = "0.3.36", features = ["parsing", "formatting"] }
 url = { version = "2.4.0", features = ["serde"] }
 utoipa = "6.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
