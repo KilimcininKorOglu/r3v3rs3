@@ -34,6 +34,11 @@ static STORE: LazyLock<ConnectionTrackerStore> = LazyLock::new(|| ConnectionTrac
     connections: RwLock::new(BTreeMap::new()),
 });
 
+/// The proxy of a request, carried as a request extension to the connection that an upgrade
+/// keeps open, so the connection lists under its proxy.
+#[derive(Debug, Clone, Copy)]
+pub struct TrackedProxy(pub ShortId);
+
 /// RAII guard that automatically unregisters an active stream upon drop.
 pub struct StreamGuard {
     id: ShortId,

@@ -117,6 +117,50 @@ async fn handle_socket(mut socket: WebSocket) {
     }
 }
 
+/// An account with a proxy list sees and closes only the connections of its proxies, and the
+/// API filters the list by the proxy id, so an open WebSocket must carry the id of its proxy.
+#[tokio::test]
+async fn an_open_websocket_lists_under_its_proxy() -> anyhow::Result<()> {
+    let listen_port = alloc_tcp_port().await?;
+    let proxy_port = alloc_tcp_port().await?;
+    let app = Router::new().route("/ws", any(ws_handler));
+    tokio::spawn(axum_server::bind(listen_port.socket_addr()).serve(app.into_make_service()));
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("tpws", &proxy_port)])
+        .proxies(vec![http_proxy_entry(
+            "tpxws",
+            "tpws",
+            HttpProxy {
+                vhosts: vec!["localhost".parse().unwrap()],
+                routes: vec![Route {
+                    servers: vec![r3v3rs3_api::proxy::Server::new(
+                        listen_port.http_url("/").try_into().unwrap(),
+                    )],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )])
+        .build();
+
+    with_server(config, |_| async move {
+        let port = proxy_port.socket_addr().port();
+        let url = Uri::try_from(&format!("ws://localhost:{port}/ws"))?;
+        let (ws_stream, _) = connect_async(url).await?;
+        common::wait_until(
+            || async move {
+                let owned = "tpxws".parse()?;
+                Ok(!r3v3rs3::proxy::connection_tracker::list(Some(&owned)).is_empty())
+            },
+            "the open websocket is not listed under its proxy",
+        )
+        .await?;
+        drop(ws_stream);
+        Ok(())
+    })
+    .await
+}
+
 #[tokio::test]
 async fn non_websocket_upgrade_is_not_tunneled() -> anyhow::Result<()> {
     let listen_port = alloc_tcp_port().await?;

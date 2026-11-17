@@ -204,6 +204,8 @@ impl TcpStarter {
 /// The upstream servers of the TCP proxy of a port.
 #[derive(Debug, Clone)]
 struct TcpUpstream {
+    /// The proxy that the connections belong to, for the connection list and its scope.
+    proxy_id: ShortId,
     servers: Arc<[Connection]>,
     group: Arc<UpstreamGroup>,
 }
@@ -231,6 +233,7 @@ impl TcpUpstream {
             probe,
         );
         Self {
+            proxy_id: id,
             servers: servers.into(),
             group,
         }
@@ -348,7 +351,7 @@ async fn start(
 
     let (_conn_id, _stream_guard, cancel_rx, bytes_sent, bytes_received) =
         super::connection_tracker::register(
-            None,
+            Some(upstream.proxy_id),
             "tcp",
             r3v3rs3_api::traffic::ConnectionProtocol::Tcp,
             remote.to_string(),

@@ -200,6 +200,44 @@ async fn check_two_tracked_ids(proxy_port: TestPort) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// An account with a proxy list sees and closes only the connections of its proxies, and the
+/// API filters the list by the proxy id, so a TCP connection must carry the id of its proxy.
+#[tokio::test]
+async fn an_open_tcp_connection_lists_under_its_proxy() -> anyhow::Result<()> {
+    let upstream_port = alloc_tcp_port().await?;
+    let proxy_port = alloc_tcp_port().await?;
+    spawn_holding_upstream(&upstream_port);
+    let config = TestStorage::builder()
+        .ports(vec![port_entry("test", proxy_port.multiaddr_tcp())])
+        .proxies(vec![ProxyEntry {
+            id: "owned".parse()?,
+            source: None,
+            status: None,
+            proxy: tcp_proxy_to(&upstream_port),
+        }])
+        .build();
+
+    with_server(config, |_| async move {
+        wait_for_listener(proxy_port.socket_addr()).await?;
+        let client = tokio::net::TcpStream::connect(proxy_port.socket_addr()).await?;
+        let addr = client.local_addr()?.to_string();
+        let addr_ref = &addr;
+        common::wait_until(
+            || async move {
+                let owned = "owned".parse()?;
+                Ok(r3v3rs3::proxy::connection_tracker::list(Some(&owned))
+                    .iter()
+                    .any(|conn| conn.client_addr == *addr_ref))
+            },
+            "the open connection is not listed under its proxy",
+        )
+        .await?;
+        drop(client);
+        Ok(())
+    })
+    .await
+}
+
 fn tcp_proxy_to(upstream: &TestPort) -> Proxy {
     Proxy {
         ports: vec!["test".parse().unwrap()],

@@ -619,7 +619,11 @@ impl Upstream {
         &self,
         req: Request<ProxyBody>,
     ) -> Result<Response<ProxyBody>, anyhow::Error> {
-        let (req, limit) = BodyLimit::apply(req, self.max_body_size);
+        let (mut req, limit) = BodyLimit::apply(req, self.max_body_size);
+        req.extensions_mut()
+            .insert(crate::proxy::connection_tracker::TrackedProxy(
+                self.proxy_id,
+            ));
         let req = self.mirror(req);
         let result = self.send_request(req).await.map_err(|err| {
             if limit.exceeded() {
@@ -1107,6 +1111,10 @@ async fn upgrade_connection(
         .unwrap_or("unknown")
         .to_string();
     let upstream_addr = req.uri().to_string();
+    let proxy_id = req
+        .extensions()
+        .get::<crate::proxy::connection_tracker::TrackedProxy>()
+        .map(|proxy| proxy.0);
 
     let early_guard = guard_rx.try_recv().ok().flatten();
     let early_route_guard = route_guard_rx.try_recv().ok();
@@ -1125,7 +1133,7 @@ async fn upgrade_connection(
             let mut res = TokioIo::new(res);
 
             let (_id, _guard, cancel_rx, sent, recv) = crate::proxy::connection_tracker::register(
-                None,
+                proxy_id,
                 if is_ws { "websocket" } else { "http-upgrade" },
                 proto,
                 client_addr,
