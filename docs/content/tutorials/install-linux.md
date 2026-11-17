@@ -81,6 +81,7 @@ Type=simple
 Environment=R3V3RS3_CONFIG_DIR=/etc/r3v3rs3
 Environment=R3V3RS3_LOG_DIR=/var/log/r3v3rs3
 Environment=R3V3RS3_WEBUI=127.0.0.1:46492
+Environment=MALLOC_ARENA_MAX=2
 ExecStart=/usr/local/bin/r3-server start
 KillSignal=SIGINT
 Restart=on-failure
@@ -88,7 +89,7 @@ RestartSec=5
 LimitNOFILE=1048576
 ```
 
-`KillSignal=SIGINT` matters: r3-server shuts down gracefully on SIGINT. `LimitNOFILE=1048576` raises the file descriptor limit, because each connection needs one.
+`KillSignal=SIGINT` matters: r3-server shuts down gracefully on SIGINT. `LimitNOFILE=1048576` raises the file descriptor limit, because each connection needs one. `MALLOC_ARENA_MAX=2` limits glibc to two malloc arenas. Without it, glibc gives each busy thread its own arena and keeps the freed memory of every arena, so a long-running server holds more memory than it uses.
 
 The service runs as root, so r3-server binds a port below 1024 without another setting.
 

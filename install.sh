@@ -301,6 +301,9 @@ ReadWritePaths=$CONFIG_DIR $LOG_DIR -$(docker_logs_dir)
 Environment=R3V3RS3_CONFIG_DIR=$CONFIG_DIR
 Environment=R3V3RS3_LOG_DIR=$LOG_DIR
 Environment=R3V3RS3_WEBUI=$webui
+# glibc gives each busy thread its own malloc arena and keeps the freed pages of every arena;
+# two arenas bound that retained memory on a long-running server.
+Environment=MALLOC_ARENA_MAX=2
 ExecStart=$BIN start
 # SIGUSR2 hands the listeners to a new process without dropping the connections.
 ExecReload=/bin/kill -USR2 \$MAINPID

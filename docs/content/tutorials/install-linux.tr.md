@@ -81,6 +81,7 @@ Type=simple
 Environment=R3V3RS3_CONFIG_DIR=/etc/r3v3rs3
 Environment=R3V3RS3_LOG_DIR=/var/log/r3v3rs3
 Environment=R3V3RS3_WEBUI=127.0.0.1:46492
+Environment=MALLOC_ARENA_MAX=2
 ExecStart=/usr/local/bin/r3-server start
 KillSignal=SIGINT
 Restart=on-failure
@@ -88,7 +89,7 @@ RestartSec=5
 LimitNOFILE=1048576
 ```
 
-`KillSignal=SIGINT` satırı önemlidir: r3-server SIGINT ile düzgün kapanır. `LimitNOFILE=1048576` file descriptor limitini yükseltir, çünkü her bağlantı bir tane ister.
+`KillSignal=SIGINT` satırı önemlidir: r3-server SIGINT ile düzgün kapanır. `LimitNOFILE=1048576` file descriptor limitini yükseltir, çünkü her bağlantı bir tane ister. `MALLOC_ARENA_MAX=2` satırı glibc'yi iki malloc arenasıyla sınırlar. Bu satır olmadan glibc her yoğun thread'e ayrı bir arena verir ve her arenada serbest bırakılan belleği tutar. Bu yüzden uzun süre çalışan bir sunucu, kullandığından fazla bellek tutar.
 
 Servis root olarak çalışır, bu yüzden r3-server 1024 altındaki bir portu ek ayar olmadan bağlar.
 
