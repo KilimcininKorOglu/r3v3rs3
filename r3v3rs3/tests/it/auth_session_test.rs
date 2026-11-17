@@ -251,16 +251,27 @@ async fn only_the_accounts_that_see_the_proxy_keep_a_session() -> anyhow::Result
         .account("outsider", "outsider-secret", Role::Viewer, proxy("other")?)
         .account("member", "member-secret", Role::Viewer, proxy("proxy1")?)
         .ports(vec![http_port_entry("session", &port)])
-        .proxies(vec![http_proxy_entry(
-            "proxy1",
-            "session",
-            HttpProxy {
-                routes: vec![http_route("/", &upstream.url(), None)],
-                upgrade_insecure: false,
-                auth: AuthPolicy::Session,
-                ..Default::default()
-            },
-        )])
+        .proxies(vec![
+            http_proxy_entry(
+                "proxy1",
+                "session",
+                HttpProxy {
+                    routes: vec![http_route("/", &upstream.url(), None)],
+                    upgrade_insecure: false,
+                    auth: AuthPolicy::Session,
+                    ..Default::default()
+                },
+            ),
+            // The proxy that the member moves to; a proxy list names existing proxies.
+            http_proxy_entry(
+                "other",
+                "session",
+                HttpProxy {
+                    vhosts: vec!["other.example.com".parse()?],
+                    ..Default::default()
+                },
+            ),
+        ])
         .build();
 
     with_server(storage.clone(), |mut channels| async move {

@@ -593,6 +593,7 @@
   "error.id_already_exists": "Bu ID zaten kullanılıyor: {id}",
   "error.id_not_found": "ID bulunamadı: {id}",
   "error.invalid_account_scope": "Admin hesabı zaten bütün proxy'leri görür. Bu yüzden ona proxy listesi verilemez.",
+  "error.unknown_scope_proxy": "Proxy listesinde olmayan bir proxy var: {id}.",
   "error.invalid_cache_size": "Maksimum yanıt boyutu 1 byte ile bellek limiti arasında olmalıdır.",
   "error.invalid_cidr": "Geçersiz CIDR bloğu: {cidr}",
   "error.invalid_circuit_breaker": "Circuit breaker için hata oranı 1 ile 100 arasında, minimum istek sayısı en az 1, zaman penceresi ve açık kalma süresi sıfırdan büyük olmalıdır.",

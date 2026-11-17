@@ -26,6 +26,7 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 | Add, change, connect or delete a Git provider connection, create or install a GitHub App                                                                                        | yes         | no          | no                                   | no                                      |
 
 - An account without a proxy list sees every proxy. An admin always sees every proxy, so an admin cannot have a proxy list.
+- A proxy list names existing proxies. An id of a proxy that does not exist fails with `400 unknown_scope_proxy`, so a mistyped id does not leave the account with a list that matches nothing.
 - A proxy that is not in the list of an account does not exist for the account. The admin API answers `404 id_not_found`.
 - An action that the role does not allow gets `403 forbidden`.
 - A viewer gets `403 forbidden` for every admin API request other than GET before the request body is read. The exceptions are its own passkeys and API tokens and the requests that only compute a result: the proxy dry run, the gRPC reflection and health check of a proxy, the certificate coverage check and the security header analysis.

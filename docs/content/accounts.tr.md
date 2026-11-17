@@ -26,6 +26,7 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 | Git sağlayıcı bağlantısı ekleme, değiştirme, bağlama veya silme, GitHub App oluşturma veya kurma                                                                                                               | evet            | hayır           | hayır                              | hayır                                       |
 
 - Proxy listesi olmayan hesap bütün proxy'leri görür. Admin her zaman bütün proxy'leri görür. Bu yüzden admin hesabının proxy listesi olamaz.
+- Proxy listesi yalnız var olan proxy'leri içerir. Var olmayan bir proxy'nin id'si `400 unknown_scope_proxy` hatası verir. Böylece yanlış yazılmış bir id, hesaba hiçbir proxy'yle eşleşmeyen bir liste bırakmaz.
 - Hesabın listesinde olmayan proxy, bu hesap için yoktur. Yönetim API'si `404 id_not_found` döndürür.
 - Rolün izin vermediği işlem `403 forbidden` alır.
 - Viewer, admin API'ye gönderdiği GET dışındaki her istek için, istek gövdesi okunmadan `403 forbidden` alır. İstisnalar şunlardır: kendi passkey'leri ve API token'ları ile yalnız sonuç hesaplayan istekler. Bu istekler proxy dry run'ı, bir proxy'nin gRPC reflection ve sağlık kontrolü, sertifika kapsam kontrolü ve güvenlik header analizidir.

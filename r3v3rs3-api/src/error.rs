@@ -342,6 +342,9 @@ pub enum Error {
     #[error("an admin account sees every proxy and cannot have a proxy list")]
     InvalidAccountScope,
 
+    #[error("the proxy list of the account names a proxy that does not exist: {id}")]
+    UnknownScopeProxy { id: String },
+
     #[error("at least one admin account must remain")]
     LastAdmin,
 

@@ -80,7 +80,7 @@ impl RpcMethod for AddAccount {
             totp,
         } = self.account;
         validate_username(&username)?;
-        validate_scope(role, proxies.as_ref())?;
+        validate_scope(state, role, proxies.as_ref())?;
         let mut account = hash_account(password, totp).await?;
         account.role = role;
         account.proxies = proxies;
@@ -137,7 +137,7 @@ impl RpcMethod for UpdateAccount {
         if self.actor == self.username && !role.is_admin() {
             return Err(Error::CannotChangeOwnAccount);
         }
-        validate_scope(role, proxies.as_ref())?;
+        validate_scope(state, role, proxies.as_ref())?;
         let password = hash_optional_password(password).await?;
         let is_admin = role.is_admin();
         let username = self.username;
@@ -418,11 +418,29 @@ fn scope_summary(role: Role, proxies: Option<&BTreeSet<ShortId>>) -> String {
 }
 
 /// An admin sees every proxy, so only the other roles take a proxy list.
-fn validate_scope(role: Role, proxies: Option<&BTreeSet<ShortId>>) -> Result<(), Error> {
+/// An admin has no proxy list, and every proxy of a list exists, so a mistyped id does not
+/// leave the account with a scope that matches nothing.
+fn validate_scope(
+    state: &ServerState,
+    role: Role,
+    proxies: Option<&BTreeSet<ShortId>>,
+) -> Result<(), Error> {
+    check_scope(role, proxies, |id| state.proxies.get(id).is_some())
+}
+
+fn check_scope(
+    role: Role,
+    proxies: Option<&BTreeSet<ShortId>>,
+    exists: impl Fn(ShortId) -> bool,
+) -> Result<(), Error> {
     if role.is_admin() && proxies.is_some() {
         return Err(Error::InvalidAccountScope);
     }
-    Ok(())
+    let missing = proxies.into_iter().flatten().find(|id| !exists(**id));
+    match missing {
+        Some(id) => Err(Error::UnknownScopeProxy { id: id.to_string() }),
+        None => Ok(()),
+    }
 }
 
 /// Checks the password length and hashes the password on a blocking thread, because the hash
@@ -506,11 +524,16 @@ mod tests {
     #[test]
     fn only_a_role_without_admin_rights_takes_a_proxy_list() {
         let proxies = BTreeSet::from(["web".parse::<ShortId>().unwrap()]);
-        assert!(validate_scope(Role::Editor, Some(&proxies)).is_ok());
-        assert!(validate_scope(Role::Admin, None).is_ok());
+        let all = |_| true;
+        assert!(check_scope(Role::Editor, Some(&proxies), all).is_ok());
+        assert!(check_scope(Role::Admin, None, all).is_ok());
         assert!(matches!(
-            validate_scope(Role::Admin, Some(&proxies)),
+            check_scope(Role::Admin, Some(&proxies), all),
             Err(Error::InvalidAccountScope)
+        ));
+        assert!(matches!(
+            check_scope(Role::Editor, Some(&proxies), |_| false),
+            Err(Error::UnknownScopeProxy { .. })
         ));
     }
 

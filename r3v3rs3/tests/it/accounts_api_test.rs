@@ -7,8 +7,8 @@ use tracing_subscriber::filter::LevelFilter;
 
 use crate::common;
 use common::{
-    TestStorage, alloc_tcp_port, login_when_allowed, send, session_cookie, wait_for_listener,
-    with_server,
+    TestStorage, alloc_tcp_port, http_port_entry, http_proxy_entry, login_when_allowed, send,
+    session_cookie, wait_for_listener, with_server,
 };
 
 #[tokio::test]
@@ -18,9 +18,17 @@ async fn an_admin_manages_the_accounts_through_the_admin_api() -> anyhow::Result
     DatabaseLayer::new(&dir.join("log.db"), LevelFilter::INFO).await?;
 
     let addr = alloc_tcp_port().await?.socket_addr();
+    // The editor of the test is limited to this proxy, and a proxy list names existing proxies.
+    let port = alloc_tcp_port().await?;
     let storage = TestStorage::builder()
         .account("admin", "secret", Role::Admin, None)
         .account("viewer", "viewer-secret", Role::Viewer, None)
+        .ports(vec![http_port_entry("web-port", &port)])
+        .proxies(vec![http_proxy_entry(
+            "web",
+            "web-port",
+            Default::default(),
+        )])
         .build();
 
     let app_info = new_appinfo(&dir, &dir);
@@ -126,6 +134,12 @@ async fn check_invalid_accounts(addr: SocketAddr, admin: &str) -> anyhow::Result
         (
             json!({"username": "editor", "password": "long-enough", "proxies": ["web"]}),
             "invalid_account_scope",
+        ),
+        // A proxy list names proxies that exist; a mistyped id must not leave the account with
+        // a scope that silently matches nothing.
+        (
+            json!({"username": "editor", "password": "long-enough", "role": "editor", "proxies": ["zzz-zzz"]}),
+            "unknown_scope_proxy",
         ),
         (
             json!({"username": "bad:name", "password": "long-enough"}),

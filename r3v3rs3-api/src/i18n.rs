@@ -328,6 +328,7 @@ mod tests {
             Error::AccountNotFound { username: text() },
             Error::CannotChangeOwnAccount,
             Error::InvalidAccountScope,
+            Error::UnknownScopeProxy { id: text() },
             Error::LastAdmin,
             Error::InvalidTokenName { name: text() },
             Error::InvalidToken { name: text() },

@@ -593,6 +593,7 @@
   "error.id_already_exists": "ID already exists: {id}",
   "error.id_not_found": "ID not found: {id}",
   "error.invalid_account_scope": "An admin account sees every proxy, so it cannot have a proxy list.",
+  "error.unknown_scope_proxy": "The proxy list names a proxy that does not exist: {id}.",
   "error.invalid_cache_size": "Maximum response size must be from 1 byte to the memory limit.",
   "error.invalid_cidr": "Invalid CIDR block: {cidr}",
   "error.invalid_circuit_breaker": "Circuit breaker needs a failure ratio from 1 to 100, at least one minimum request, and a window and an open duration above zero.",
