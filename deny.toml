@@ -27,6 +27,7 @@ ignore = [
     "RUSTSEC-2025-0141", # bincode 1.x, through gloo-worker of yew (WebUI)
     "RUSTSEC-2024-0370", # proc-macro-error, through yew-macro and yewdux-macros (WebUI)
     "RUSTSEC-2024-0449", # unsafe-libyaml, unmaintained transitive dependency of serde_yaml_ng
+    "RUSTSEC-2026-0543", # chrono, through rmcp (MCP server) and its schemars dependency
 ]
 
 [licenses]
