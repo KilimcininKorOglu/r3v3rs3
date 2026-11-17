@@ -740,10 +740,28 @@ impl Upstream {
         req: Request<ProxyBody>,
         permit: Permit,
     ) -> Result<Response<ProxyBody>, SendError> {
+        let metrics = permit.metrics();
         let result = self.pool.send(req, self.request_timeout).await;
         let guard = record_response_permit(&result, permit);
-        result.map(|res| attach_guard_or_upgrade(res, guard))
+        result.map(|res| attach_guard_or_upgrade(count_server_bytes(res, metrics), guard))
     }
+}
+
+/// Counts the response body bytes of a server as they stream to the client. A chunked response
+/// has no Content-Length, so the header cannot tell the bytes.
+fn count_server_bytes(
+    res: Response<ProxyBody>,
+    metrics: Option<Arc<crate::proxy::health::ServerLiveMetrics>>,
+) -> Response<ProxyBody> {
+    let Some(metrics) = metrics else {
+        return res;
+    };
+    res.map(|body| {
+        BoxBody::new(
+            super::byte_count::ByteCountBody::quiet(body)
+                .on_end(move |sent| metrics.record_bytes(sent)),
+        )
+    })
 }
 
 fn attach_guard_or_upgrade(
@@ -773,12 +791,6 @@ fn record_response_permit(
     result: &Result<Response<ProxyBody>, SendError>,
     permit: Permit,
 ) -> Option<ConnGuard> {
-    if let Ok(res) = result
-        && let Some(cl) = res.headers().get(hyper::header::CONTENT_LENGTH)
-        && let Ok(bytes) = cl.to_str().unwrap_or_default().parse::<u64>()
-    {
-        permit.record_bytes(bytes);
-    }
     match result {
         Ok(res) if is_gateway_error(res.status()) => {
             permit.error_response(&format!("the server answered {}", res.status()));
@@ -1163,6 +1175,28 @@ async fn upgrade_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The upstream status shows the bytes that a server sent. A chunked response carries no
+    /// Content-Length, so the bytes count as its body streams to the client.
+    #[tokio::test]
+    async fn a_chunked_response_counts_its_bytes_for_the_server() {
+        let chunks =
+            futures::stream::iter([b"hello ".as_slice(), b"chunked ", b"world"].map(|chunk| {
+                Ok::<_, anyhow::Error>(hyper::body::Frame::data(Bytes::from_static(chunk)))
+            }));
+        let res = Response::new(BoxBody::new(http_body_util::StreamBody::new(chunks)));
+        assert!(res.headers().get(CONTENT_LENGTH).is_none());
+        let metrics = Arc::new(crate::proxy::health::ServerLiveMetrics::default());
+        let res = count_server_bytes(res, Some(metrics.clone()));
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body.len(), 19);
+        assert_eq!(
+            metrics
+                .total_bytes
+                .load(std::sync::atomic::Ordering::Relaxed),
+            19
+        );
+    }
 
     #[test]
     fn is_timeout_reads_the_error_sources() {

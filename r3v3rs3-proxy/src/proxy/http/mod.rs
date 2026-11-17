@@ -699,7 +699,7 @@ async fn proxied_response(
 
     let country = shared.geoip.lookup_country(client_ip);
     check_and_record_quarantine(&shared.quarantine, client_ip, &uri, own_response, &mapped);
-    record_access_log(
+    let line = record_access_log(
         AccessLogMeta {
             resource_id,
             client_ip,
@@ -717,7 +717,7 @@ async fn proxied_response(
         &mapped,
     );
 
-    mapped.map(|res| res.map(|body| BoxBody::new(ByteCountBody::tx(body))))
+    mapped.map(|res| res.map(|body| BoxBody::new(counted_body(body, line))))
 }
 
 const SENSITIVE_KEYWORDS: &[&str] = &[
@@ -868,71 +868,94 @@ struct AccessLogMeta {
     is_websocket: bool,
 }
 
-fn emit_completed_access_log(
-    meta: &AccessLogMeta,
+/// The access log line of one request, written when its response body ends, because the bytes
+/// of a chunked response are known only then.
+struct CompletedLine {
+    resource_id: Option<ShortId>,
+    client_ip: std::net::IpAddr,
+    method: String,
+    host: String,
+    uri: String,
     status: u16,
     latency_ms: f64,
-    bytes_sent: u64,
-    error: Option<&str>,
-) {
-    if let Some(err) = error {
+}
+
+impl CompletedLine {
+    fn emit(&self, bytes_sent: u64, error: Option<&str>) {
+        let Some(err) = error else {
+            info!(
+                target: "r3v3rs3::access_log",
+                resource_id = ?self.resource_id,
+                client = %self.client_ip,
+                method = %self.method,
+                host = %self.host,
+                uri = %self.uri,
+                status = self.status,
+                latency_ms = self.latency_ms,
+                bytes_sent,
+                "request completed"
+            );
+            return;
+        };
         info!(
             target: "r3v3rs3::access_log",
-            resource_id = ?meta.resource_id,
-            client = %meta.client_ip,
-            method = %meta.method,
-            host = %meta.host,
-            uri = %meta.uri,
-            status,
-            latency_ms,
+            resource_id = ?self.resource_id,
+            client = %self.client_ip,
+            method = %self.method,
+            host = %self.host,
+            uri = %self.uri,
+            status = self.status,
+            latency_ms = self.latency_ms,
             bytes_sent,
             error = %err,
             "request completed with error"
         );
-    } else {
-        info!(
-            target: "r3v3rs3::access_log",
-            resource_id = ?meta.resource_id,
-            client = %meta.client_ip,
-            method = %meta.method,
-            host = %meta.host,
-            uri = %meta.uri,
-            status,
-            latency_ms,
-            bytes_sent,
-            "request completed"
-        );
     }
 }
 
+/// Counts the bytes of a response body for the stats and writes the access log line of the
+/// request with them when the body ends.
+fn counted_body<B>(body: B, line: Option<CompletedLine>) -> ByteCountBody<B> {
+    let body = ByteCountBody::tx(body);
+    match line {
+        Some(line) => body.on_end(move |sent| line.emit(sent, None)),
+        None => body,
+    }
+}
+
+/// Records the request in the access log and returns its log line, which the caller writes when
+/// the response body ends. A failed request has no body, so its line is written at once.
 fn record_access_log<B>(
     meta: AccessLogMeta,
     duration: std::time::Duration,
     mapped: &Result<Response<B>, anyhow::Error>,
-) {
+) -> Option<CompletedLine> {
     let meta = AccessLogMeta {
         uri: redact_uri(&meta.uri),
         ..meta
     };
-    let (status, error, response_headers, bytes_sent) = match mapped {
-        Ok(res) => {
-            let bytes = res
-                .headers()
-                .get(hyper::header::CONTENT_LENGTH)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok());
-            (
-                res.status().as_u16(),
-                None,
-                extract_headers(res.headers()),
-                bytes.unwrap_or(0),
-            )
-        }
-        Err(err) => (502, Some(err.to_string()), Vec::new(), 0),
+    let (status, error, response_headers) = match mapped {
+        Ok(res) => (res.status().as_u16(), None, extract_headers(res.headers())),
+        Err(err) => (502, Some(err.to_string()), Vec::new()),
     };
     crate::stats::record_http_response(status);
     let latency_ms = duration.as_secs_f64() * 1000.0;
-    emit_completed_access_log(&meta, status, latency_ms, bytes_sent, error.as_deref());
+    let line = CompletedLine {
+        resource_id: meta.resource_id,
+        client_ip: meta.client_ip,
+        method: meta.method.clone(),
+        host: meta.host.clone(),
+        uri: meta.uri.clone(),
+        status,
+        latency_ms,
+    };
+    let line = match error.as_deref() {
+        Some(err) => {
+            line.emit(0, Some(err));
+            None
+        }
+        None => Some(line),
+    };
 
     crate::proxy::access_log::record(r3v3rs3_api::traffic::AccessLogEntry {
         id: 0,
@@ -954,6 +977,7 @@ fn record_access_log<B>(
         content_type: meta.content_type,
         is_websocket: Some(meta.is_websocket),
     });
+    line
 }
 
 /// Whether r3v3rs3 answers the request itself, without an upstream server: no route, a refused
@@ -2000,12 +2024,11 @@ where
     let own_response = answered_by_r3v3rs3(&req);
     let res = upstream_response(req).await;
     let mapped = response_rewriter.build().map_response(res);
-    let mapped = mapped.map(|res| res.map(|b| BoxBody::new(ByteCountBody::tx(b))));
     let duration = start.elapsed();
     crate::stats::record_request_duration(duration, proxy_id.as_deref(), route_path.as_deref());
     let country = shared.geoip.lookup_country(client_ip);
     check_and_record_quarantine(&shared.quarantine, client_ip, &uri, own_response, &mapped);
-    record_access_log(
+    let line = record_access_log(
         AccessLogMeta {
             resource_id,
             client_ip,
@@ -2023,6 +2046,7 @@ where
         &mapped,
     );
     let (parts, body) = mapped?.into_parts();
+    let body = counted_body(body, line);
     let mut res = Response::from_parts(parts, ());
     res.headers_mut().remove("transfer-encoding");
     let mut res_stream = BodyStream::new(body);

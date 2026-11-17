@@ -291,11 +291,10 @@ impl Permit {
         self.record(Some(error));
     }
 
-    /// Records transferred bytes to and from the upstream server.
-    pub fn record_bytes(&self, bytes: u64) {
-        if let Some(ref m) = self.metrics {
-            m.record_bytes(bytes);
-        }
+    /// The traffic metrics of the server, which count the bytes of its response body as the
+    /// body streams to the client.
+    pub fn metrics(&self) -> Option<Arc<ServerLiveMetrics>> {
+        self.metrics.clone()
     }
 
     fn record(&mut self, failure: Option<&str>) {
