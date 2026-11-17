@@ -2208,9 +2208,10 @@ pub(super) async fn dump_for_test(
 
 /// The dump of a MySQL server: every database but the system schemas. The `mysql` schema holds
 /// the accounts with their passwords, so a restore of it would bring back old passwords over
-/// the stored ones; the platform sets the accounts of the tenants again after a restore.
+/// the stored ones; the platform sets the accounts of the tenants again after a restore. The
+/// dump carries no GTID set: a server that executed transactions refuses to set one.
 const MYSQL_DUMP: &str = "dbs=$(mysql -u root -N -e \"SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql', 'sys', 'information_schema', 'performance_schema')\") || exit 1; \
-     if [ -z \"$dbs\" ]; then echo '-- MySQL dump: no user databases'; else mysqldump -u root --single-transaction --routines --events --databases $dbs; fi";
+     if [ -z \"$dbs\" ]; then echo '-- MySQL dump: no user databases'; else mysqldump -u root --single-transaction --routines --events --set-gtid-purged=OFF --databases $dbs; fi";
 
 /// The dump of a MariaDB server, like `MYSQL_DUMP` with the MariaDB tools.
 const MARIADB_DUMP: &str = "dbs=$(mariadb -u root -N -e \"SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql', 'sys', 'information_schema', 'performance_schema')\") || exit 1; \
@@ -3358,6 +3359,16 @@ mod tests {
             assert!(!plan.command.iter().any(|arg| arg.contains("pass")));
             assert_eq!(plan.env, ["MYSQL_PWD=pass"]);
         }
+    }
+
+    /// A restore runs into the live server, which has executed transactions of its own; MySQL
+    /// refuses to set the GTID set of a dump over them, so the dump must not carry one.
+    #[test]
+    fn a_mysql_dump_carries_no_gtid_set() {
+        catalog();
+        let info = r3v3rs3_api::platform::engine_info("mysql").unwrap();
+        let plan = dump_plan("mysql", &info, "pass").unwrap();
+        assert!(plan.command[2].contains("--set-gtid-purged=OFF"));
     }
 
     #[test]
