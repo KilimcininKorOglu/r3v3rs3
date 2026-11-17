@@ -1108,11 +1108,12 @@ impl Recorder {
         }
         self.buffer.extend_from_slice(data);
         if self.expected == Some(self.buffer.len() as u64) {
-            self.finish(true);
+            self.finish();
         }
     }
 
-    fn finish(&mut self, completed_cleanly: bool) {
+    /// Stores the body after its last frame.
+    fn finish(&mut self) {
         let guard = self.guard.take();
         let Some(head) = self.head.take() else {
             self.buffer = BytesMut::new();
@@ -1121,7 +1122,7 @@ impl Recorder {
         if self
             .expected
             .is_some_and(|length| length != self.buffer.len() as u64)
-            || (self.expected.is_none() && (!self.chunked || !completed_cleanly))
+            || (self.expected.is_none() && !self.chunked)
         {
             self.buffer = BytesMut::new();
             return;
@@ -1174,10 +1175,9 @@ impl Body for RecordingBody {
         match &frame {
             Some(Ok(frame)) => this.recorder.record(frame),
             Some(Err(_)) => this.recorder.abort(),
-            None => {
-                let clean = this.inner.is_end_stream();
-                this.recorder.finish(clean);
-            }
+            // The body ended cleanly: hyper reports a cut chunked body as an error, and
+            // `is_end_stream` of a chunked HTTP/1 body stays false after its last chunk.
+            None => this.recorder.finish(),
         }
         Poll::Ready(frame)
     }
@@ -1522,8 +1522,8 @@ mod tests {
         assert!(req.storable_head(&chunked_res).is_some());
     }
 
-    #[test]
-    fn aborted_or_unclean_chunked_stream_is_not_stored_and_frees_buffer() {
+    #[tokio::test]
+    async fn aborted_or_unclean_chunked_stream_is_not_stored_and_frees_buffer() {
         let cache = Arc::new(HttpCache::new(CacheConfig::default(), None));
         let mut recorder = Recorder {
             head: Some(StoredHead {
@@ -1546,7 +1546,9 @@ mod tests {
         assert!(recorder.head.is_none());
         assert!(recorder.buffer.is_empty());
 
-        let mut unclean_recorder = Recorder {
+        // A chunked body that the upstream connection cuts ends with an error (RFC 9112
+        // section 8: an incomplete message), so the cache must not keep the part before it.
+        let recorder = Recorder {
             head: Some(StoredHead {
                 status: StatusCode::OK,
                 headers: HeaderMap::new(),
@@ -1554,7 +1556,7 @@ mod tests {
                 initial_age: Duration::ZERO,
                 freshness: Duration::from_secs(60),
             }),
-            buffer: BytesMut::from(&b"truncated"[..]),
+            buffer: BytesMut::new(),
             expected: None,
             max_size: 100,
             cache: cache.clone(),
@@ -1562,9 +1564,14 @@ mod tests {
             guard: None,
             chunked: true,
         };
-        unclean_recorder.finish(false);
+        let frames = futures::stream::iter([
+            Ok(Frame::data(Bytes::from_static(b"truncated"))),
+            Err(anyhow::anyhow!("connection closed before the last chunk")),
+        ]);
+        let inner = BoxBody::new(http_body_util::StreamBody::new(frames));
+        let body = RecordingBody { inner, recorder };
+        assert!(body.collect().await.is_err());
         assert!(cache.entries.get("truncated-key").is_none());
-        assert!(unclean_recorder.buffer.is_empty());
     }
 
     #[test]

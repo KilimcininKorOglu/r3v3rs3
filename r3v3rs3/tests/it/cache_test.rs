@@ -604,3 +604,64 @@ async fn unsafe_requests_invalidate_cached_response_of_the_same_uri() -> anyhow:
     })
     .await
 }
+
+/// RFC 9111 section 3 lets a cache store any complete response; the framing does not matter.
+/// A chunked response (RFC 9112 section 7.1) that is fresh for 60 s must be served from the
+/// cache on the next request, and the upstream server must see only the first request.
+#[tokio::test]
+async fn a_chunked_response_is_stored_and_served_from_the_cache() -> anyhow::Result<()> {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let hits = counter.clone();
+    let app = Router::new().route(
+        "/chunked",
+        get(move || {
+            hits.fetch_add(1, Ordering::SeqCst);
+            async {
+                let chunks = futures::stream::iter(["hello ", "chunked ", "world"].map(|chunk| {
+                    Ok::<_, std::convert::Infallible>(axum::body::Bytes::from_static(
+                        chunk.as_bytes(),
+                    ))
+                }));
+                (
+                    [("cache-control", "max-age=60")],
+                    axum::body::Body::from_stream(chunks),
+                )
+            }
+        }),
+    );
+    let upstream = serve_http_upstream(app).await?;
+    let port = alloc_tcp_port().await?;
+    let proxy = HttpProxy {
+        vhosts: vec!["localhost".parse()?],
+        routes: vec![http_route("/", upstream.as_str(), None)],
+        cache: CacheConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("p-chunk", &port)])
+        .proxies(vec![http_proxy_entry("pxchunk", "p-chunk", proxy)])
+        .build();
+
+    with_server(config, |_channels| async move {
+        let client = reqwest::Client::new();
+        let first = get_path(&client, &port, "/chunked").send().await?;
+        assert_eq!(
+            first
+                .headers()
+                .get("transfer-encoding")
+                .map(|v| v.as_bytes()),
+            Some(&b"chunked"[..])
+        );
+        assert_eq!(x_cache(&first), Some("MISS"));
+        assert_eq!(first.text().await?, "hello chunked world");
+        let second = get_path(&client, &port, "/chunked").send().await?;
+        assert_eq!(x_cache(&second), Some("HIT"));
+        assert_eq!(second.text().await?, "hello chunked world");
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        Ok(())
+    })
+    .await
+}
