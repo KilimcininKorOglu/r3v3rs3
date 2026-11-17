@@ -1,7 +1,7 @@
 //! Sends every route of the admin API that changes state as the lowest-permission account and
-//! checks that the route refuses it. The expected statuses come from `docs/content/accounts.md`:
-//! a viewer changes nothing but its own session, passkeys and tokens, and "an action that the
-//! role does not allow gets `403 forbidden`".
+//! checks that the route refuses it. The source is the least-privilege rule of OWASP A01 (Broken
+//! Access Control): a read-only account changes nothing but its own session, passkeys and tokens,
+//! and an authenticated caller without the permission gets `403 Forbidden` (RFC 9110 15.5.4).
 
 use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
 use r3v3rs3_api::auth::Role;
