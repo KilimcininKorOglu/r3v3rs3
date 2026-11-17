@@ -215,4 +215,31 @@ mod tests {
         assert_eq!(err.to_string(), "no such container");
         Ok(())
     }
+
+    /// An older agent cannot read a request variant that it does not know, so it closes the
+    /// stream without an answer. The request of the master must end with an error at once
+    /// instead of waiting, because the scheduler sends such requests to every agent.
+    #[tokio::test]
+    async fn a_stream_closed_without_an_answer_fails_the_request() -> anyhow::Result<()> {
+        let (master_io, agent_io) = duplex(1 << 16);
+        tokio::spawn(async move {
+            serve(agent_io.compat(), |mut stream| {
+                tokio::spawn(async move {
+                    let unknown = read_frame::<_, AgentRequest>(&mut stream).await;
+                    drop(stream);
+                    unknown.map(|_| ())
+                });
+            })
+            .await
+        });
+        let (link, _task) = Link::spawn(master_io.compat());
+        let answer = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            link.request(&AgentRequest::Ping),
+        )
+        .await?;
+        assert!(answer.is_err());
+        assert!(!link.is_closed());
+        Ok(())
+    }
 }
