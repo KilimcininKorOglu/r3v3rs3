@@ -1026,6 +1026,21 @@ fn json_result(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }
 
+/// A theme without the HTML of its pages: each page gives its status code and body size.
+fn theme_summary(theme: &r3v3rs3_api::error_page_theme::ErrorPageTheme) -> serde_json::Value {
+    let pages: Vec<_> = theme
+        .pages
+        .iter()
+        .map(|page| json!({ "status": page.status, "body_bytes": page.body.len() }))
+        .collect();
+    json!({
+        "id": theme.id,
+        "name": theme.name,
+        "description": theme.description,
+        "pages": pages,
+    })
+}
+
 /// Constructs an AppRequest from a catalog store app and user parameters.
 fn build_store_app_request(
     store_app: &r3v3rs3_api::store::StoreApp,
@@ -2432,7 +2447,7 @@ impl McpServer {
 
     /// List all error page themes.
     #[tool(
-        description = "List every error page theme with its id, name, description and the custom pages it defines per HTTP status code. An HTTP proxy shows the pages of the theme set in its `error_page_theme` field instead of the built-in error pages. Takes no arguments. Read-only; any account can call it."
+        description = "List every error page theme with its id, name, description and, for each custom page, its HTTP status code and the size of its body in bytes. The HTML of the pages is left out, because a built-in theme holds tens of KB of it; read it with `get_error_page_theme`. An HTTP proxy shows the pages of the theme set in its `error_page_theme` field instead of the built-in error pages. Takes no arguments. Read-only; any account can call it."
     )]
     async fn list_error_page_themes(
         &self,
@@ -2447,7 +2462,7 @@ impl McpServer {
             )
             .await
             .map_err(tool_error)?;
-        json_result(themes)
+        json_result(themes.iter().map(theme_summary).collect::<Vec<_>>())
     }
 
     /// Get an error page theme by id.

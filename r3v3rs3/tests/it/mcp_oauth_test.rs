@@ -1022,6 +1022,33 @@ async fn assert_mcp_read_tools(
 
     let ports_text = mcp_call(client, "list_ports", json!({})).await?;
     assert!(ports_text.starts_with('['), "{ports_text}");
+    assert_theme_list_fits_an_mcp_client(client).await
+}
+
+/// The built-in themes hold 26 to 49 KB of HTML each, and the full list of 183 KB was more than
+/// an MCP client reads in one answer. The list names each theme and its status codes, and
+/// `get_error_page_theme` gives the HTML of one theme.
+async fn assert_theme_list_fits_an_mcp_client(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let list_text = mcp_call(client, "list_error_page_themes", json!({})).await?;
+    let themes: Value = serde_json::from_str(&list_text)?;
+    let themes = themes.as_array().context("the theme list is no array")?;
+    assert!(!themes.is_empty(), "{list_text}");
+    assert!(list_text.len() < 16 * 1024, "{} bytes", list_text.len());
+    let first = &themes[0];
+    let page = &first["pages"][0];
+    assert!(page["status"].is_u64(), "{list_text}");
+    assert!(page.get("body").is_none(), "{list_text}");
+
+    let id = first["id"].as_str().context("a theme without an id")?;
+    let theme_text = mcp_call(client, "get_error_page_theme", json!({ "id": id })).await?;
+    let theme: Value = serde_json::from_str(&theme_text)?;
+    assert!(
+        theme["pages"][0]["body"]
+            .as_str()
+            .is_some_and(|body| !body.is_empty())
+    );
     Ok(())
 }
 
