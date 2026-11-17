@@ -1232,9 +1232,8 @@ impl Platform {
             .await?;
 
         if !replayed.is_empty() {
-            let _ = self
-                .replay_wal_to_target(db_id, target_app.id, &replayed, request.target_time)
-                .await;
+            self.replay_wal_to_target(db_id, target_app.id, &replayed, request.target_time)
+                .await?;
         }
 
         Ok(PitrRestoreResponse {
@@ -1359,7 +1358,7 @@ impl Platform {
             if seg.start_time <= target_time {
                 let file_path = dir.join(format!("{}.wal.gz", seg.id));
                 replay_single_segment(&runtime, &container, &restore, &file_path, &info.data_path)
-                    .await;
+                    .await?;
             }
         }
         Ok(())
@@ -1989,12 +1988,17 @@ async fn replay_single_segment(
     restore: &RestorePlan,
     file_path: &std::path::Path,
     data_path: &str,
-) {
-    if let Ok(compressed) = tokio::fs::read(file_path).await
-        && let Ok(uncompressed) = ungzip(&compressed).await
-    {
-        let _ = run_restore(runtime, container, restore, uncompressed, data_path).await;
-    }
+) -> anyhow::Result<()> {
+    let segment = file_path.display();
+    let compressed = tokio::fs::read(file_path)
+        .await
+        .with_context(|| format!("failed to read the WAL segment {segment}"))?;
+    let uncompressed = ungzip(&compressed)
+        .await
+        .with_context(|| format!("failed to unpack the WAL segment {segment}"))?;
+    run_restore(runtime, container, restore, uncompressed, data_path)
+        .await
+        .with_context(|| format!("failed to replay the WAL segment {segment}"))
 }
 
 /// Uploads the dump into the container and runs the restore command of the engine. Redis takes
@@ -3238,6 +3242,40 @@ mod tests {
         assert!(
             adapt_postgres_cluster_dump(&mysql, b"-- PostgreSQL database cluster dump").is_none()
         );
+    }
+
+    /// A point-in-time restore that skips a segment it cannot read or restore reports a state
+    /// the database never had: every failed segment must fail the replay.
+    #[tokio::test]
+    async fn a_segment_that_cannot_be_replayed_fails_the_replay() {
+        catalog();
+        let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
+        let plan = restore_plan("postgres", &info, "pass").unwrap();
+        let fake = Arc::new(super::super::fake::FakeRuntime::default());
+        let name: ContainerName = "r3v3rs3-db-0".parse().unwrap();
+        fake.set(&name, true, &[]);
+        let runtime: Arc<dyn ContainerRuntime> = fake.clone();
+        let dir =
+            std::env::temp_dir().join(format!("r3v3rs3-replay-{:08x}", rand::random::<u32>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("missing.wal.gz");
+        let replay = replay_single_segment(&runtime, &name, &plan, &missing, &info.data_path);
+        assert!(replay.await.is_err());
+        let garbage = dir.join("garbage.wal.gz");
+        std::fs::write(&garbage, b"not gzip").unwrap();
+        let replay = replay_single_segment(&runtime, &name, &plan, &garbage, &info.data_path);
+        assert!(replay.await.is_err());
+        fake.state().hook_fail = true;
+        let segment = dir.join("segment.wal.gz");
+        std::fs::write(
+            &segment,
+            gzip(b"-- PostgreSQL database dump\n").await.unwrap(),
+        )
+        .unwrap();
+        let replay = replay_single_segment(&runtime, &name, &plan, &segment, &info.data_path);
+        let failed = replay.await.is_err();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(failed);
     }
 
     /// Two servers on one data directory corrupt it: a point-in-time branch must mount a volume
