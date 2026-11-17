@@ -294,7 +294,7 @@ impl DockerRuntime {
                 RESPONSE_TIMEOUT,
             )
             .await?;
-        let val: Value = read_json(res).await.unwrap_or_default();
+        let val: Value = read_json(res).await?;
         let count = val
             .get("ContainersDeleted")
             .and_then(|v| v.as_array())
@@ -314,7 +314,7 @@ impl DockerRuntime {
         let res = self
             .send(Method::POST, &path, None, &allowed, RESPONSE_TIMEOUT)
             .await?;
-        let val: Value = read_json(res).await.unwrap_or_default();
+        let val: Value = read_json(res).await?;
         let count = val
             .get("ImagesDeleted")
             .and_then(|v| v.as_array())
@@ -337,7 +337,7 @@ impl DockerRuntime {
                 RESPONSE_TIMEOUT,
             )
             .await?;
-        let val: Value = read_json(res).await.unwrap_or_default();
+        let val: Value = read_json(res).await?;
         let count = val
             .get("VolumesDeleted")
             .and_then(|v| v.as_array())
@@ -364,7 +364,7 @@ impl DockerRuntime {
         let res = self
             .send(Method::POST, &path, None, &allowed, RESPONSE_TIMEOUT)
             .await?;
-        let val: Value = read_json(res).await.unwrap_or_default();
+        let val: Value = read_json(res).await?;
         let count = val
             .get("CachesDeleted")
             .and_then(|v| v.as_array())
@@ -457,6 +457,35 @@ pub async fn resize_exec(client: &ApiClient, id: &str, cols: u16, rows: u16) -> 
 }
 
 impl DockerRuntime {
+    /// The volume, build cache and log steps of a prune.
+    async fn prune_storage(
+        &self,
+        policy: &r3v3rs3_api::platform::PrunePolicy,
+        result: &mut r3v3rs3_api::platform::PruneResult,
+    ) -> anyhow::Result<()> {
+        if policy.prune_volumes {
+            let (count, space) = self.prune_docker_volumes().await?;
+            result.volumes_deleted += count;
+            result.space_reclaimed_bytes += space;
+        }
+        if policy.prune_build_cache {
+            let (count, space) = self
+                .prune_docker_build_cache(policy.build_cache_keep_storage_mb)
+                .await?;
+            result.build_cache_deleted += count;
+            result.space_reclaimed_bytes += space;
+        }
+        if policy.prune_logs {
+            let threshold_bytes = policy
+                .log_vacuum_threshold_mb
+                .map(|mb| mb.saturating_mul(1024 * 1024));
+            let vacuum_res = self.vacuum_all_logs(threshold_bytes).await?;
+            result.logs_truncated += vacuum_res.truncated_files as u64;
+            result.space_reclaimed_bytes += vacuum_res.freed_bytes;
+        }
+        Ok(())
+    }
+
     /// Runs a command in the container and returns its demultiplexed standard output. The
     /// non-TTY exec stream carries stdout and stderr in length-prefixed frames.
     pub async fn exec_capture(
@@ -855,42 +884,18 @@ impl ContainerRuntime for DockerRuntime {
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
         let mut result = r3v3rs3_api::platform::PruneResult::default();
         if policy.prune_containers {
-            let (count, space) = self.prune_docker_containers().await.unwrap_or_default();
+            let (count, space) = self.prune_docker_containers().await?;
             result.containers_deleted += count;
             result.space_reclaimed_bytes += space;
         }
         if policy.prune_images {
             let (count, space) = self
                 .prune_docker_images(policy.dangling_layers_only)
-                .await
-                .unwrap_or_default();
+                .await?;
             result.images_deleted += count;
             result.space_reclaimed_bytes += space;
         }
-        if policy.prune_volumes {
-            let (count, space) = self.prune_docker_volumes().await.unwrap_or_default();
-            result.volumes_deleted += count;
-            result.space_reclaimed_bytes += space;
-        }
-        if policy.prune_build_cache {
-            let (count, space) = self
-                .prune_docker_build_cache(policy.build_cache_keep_storage_mb)
-                .await
-                .unwrap_or_default();
-            result.build_cache_deleted += count;
-            result.space_reclaimed_bytes += space;
-        }
-        if policy.prune_logs {
-            let threshold_bytes = policy
-                .log_vacuum_threshold_mb
-                .map(|mb| mb.saturating_mul(1024 * 1024));
-            let vacuum_res = self
-                .vacuum_all_logs(threshold_bytes)
-                .await
-                .unwrap_or_default();
-            result.logs_truncated += vacuum_res.truncated_files as u64;
-            result.space_reclaimed_bytes += vacuum_res.freed_bytes;
-        }
+        self.prune_storage(policy, &mut result).await?;
         Ok(result)
     }
 
@@ -1118,8 +1123,8 @@ impl ContainerRuntime for DockerRuntime {
             return Ok(None);
         };
         let (size_bytes, rotated_files_count) = match &container.log_path {
-            Some(lpath) => inspect_container_log_files(lpath),
-            None => (0, 0),
+            Some(lpath) if !lpath.is_empty() => inspect_container_log_files(lpath)?,
+            _ => bail!("the log driver of {name} keeps no log file"),
         };
         Ok(Some(r3v3rs3_api::container::ContainerLogInfo {
             container_id: container.id,
@@ -1138,8 +1143,8 @@ impl ContainerRuntime for DockerRuntime {
             return Ok(r3v3rs3_api::container::LogVacuumResult::default());
         };
         let (truncated_files, freed_bytes) = match &container.log_path {
-            Some(lpath) => vacuum_container_log_files(lpath),
-            None => (0, 0),
+            Some(lpath) if !lpath.is_empty() => vacuum_container_log_files(lpath)?,
+            _ => bail!("the log driver of {name} keeps no log file"),
         };
         Ok(r3v3rs3_api::container::LogVacuumResult {
             app_id: None,
@@ -1159,16 +1164,17 @@ impl ContainerRuntime for DockerRuntime {
 
         for item in list {
             let path = format!("/containers/{}/json", item.id);
-            let inspected = match self.get_optional::<InspectContainer>(&path).await {
-                Ok(Some(i)) => i,
-                _ => continue,
-            };
-            let Some(ref lpath) = inspected.log_path else {
+            // A container that went away since the listing has no logs left to vacuum.
+            let Some(inspected) = self.get_optional::<InspectContainer>(&path).await? else {
                 continue;
             };
-            let (size, _) = inspect_container_log_files(lpath);
+            // Another log driver, such as journald, keeps no file that the vacuum could empty.
+            let Some(lpath) = inspected.log_path.filter(|path| !path.is_empty()) else {
+                continue;
+            };
+            let (size, _) = inspect_container_log_files(&lpath)?;
             if size >= min_bytes {
-                let (files, freed) = vacuum_container_log_files(lpath);
+                let (files, freed) = vacuum_container_log_files(&lpath)?;
                 total_files += files;
                 total_freed += freed;
             }
@@ -1182,106 +1188,76 @@ impl ContainerRuntime for DockerRuntime {
     }
 }
 
-fn inspect_active_log(path: &std::path::Path) -> u64 {
-    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+/// The size of the active log file. A container that has written nothing yet has none.
+fn active_log_size(path: &std::path::Path) -> anyhow::Result<Option<u64>> {
+    match std::fs::metadata(path) {
+        Ok(meta) => Ok(Some(meta.len())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
 }
 
-fn inspect_rotated_logs(path: &std::path::Path) -> (u64, usize) {
-    let Some(parent) = path.parent() else {
-        return (0, 0);
-    };
-    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
-        return (0, 0);
-    };
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return (0, 0);
-    };
-
-    let mut size = 0u64;
-    let mut count = 0usize;
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if p == path {
-            continue;
-        }
-        let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
-        if !name.starts_with(file_name) || !is_file {
-            continue;
-        }
-        if let Ok(meta) = entry.metadata() {
-            size += meta.len();
-            count += 1;
+/// The rotated files of a json-file log with their sizes: the files next to it whose name
+/// starts with its name.
+fn rotated_logs(path: &std::path::Path) -> anyhow::Result<Vec<(std::path::PathBuf, u64)>> {
+    let parent = path.parent().context("a log path has no directory")?;
+    let name = path.file_name().context("a log path has no file name")?;
+    let entries = std::fs::read_dir(parent)
+        .with_context(|| format!("failed to list {}", parent.display()))?;
+    let mut files = Vec::new();
+    for entry in entries {
+        if let Some(file) = rotated_log(&entry?, path, name)? {
+            files.push(file);
         }
     }
-    (size, count)
+    Ok(files)
 }
 
-fn vacuum_active_log(path: &std::path::Path) -> (usize, u64) {
-    if let Ok(meta) = std::fs::metadata(path) {
-        let size = meta.len();
-        if std::fs::OpenOptions::new()
+/// The path and size of a directory entry that is a rotated file of the log `path`.
+fn rotated_log(
+    entry: &std::fs::DirEntry,
+    path: &std::path::Path,
+    name: &std::ffi::OsStr,
+) -> anyhow::Result<Option<(std::path::PathBuf, u64)>> {
+    let file = entry.path();
+    let rotated = file != path
+        && entry
+            .file_name()
+            .as_encoded_bytes()
+            .starts_with(name.as_encoded_bytes());
+    if !rotated || !entry.file_type()?.is_file() {
+        return Ok(None);
+    }
+    Ok(Some((file, entry.metadata()?.len())))
+}
+
+/// The total size of the log files of a container and the number of rotated files.
+fn inspect_container_log_files(log_path: &str) -> anyhow::Result<(u64, usize)> {
+    let path = std::path::Path::new(log_path);
+    let active = active_log_size(path)?.unwrap_or(0);
+    let rotated = rotated_logs(path)?;
+    let size = rotated.iter().map(|(_, size)| size).sum::<u64>() + active;
+    Ok((size, rotated.len()))
+}
+
+/// Empties the active log file and deletes the rotated ones: the files it changed and the
+/// bytes it freed.
+fn vacuum_container_log_files(log_path: &str) -> anyhow::Result<(usize, u64)> {
+    let path = std::path::Path::new(log_path);
+    let mut files = rotated_logs(path)?;
+    for (file, _) in &files {
+        std::fs::remove_file(file)
+            .with_context(|| format!("failed to delete {}", file.display()))?;
+    }
+    if let Some(size) = active_log_size(path)? {
+        std::fs::OpenOptions::new()
             .write(true)
             .truncate(true)
             .open(path)
-            .is_ok()
-        {
-            return (1, size);
-        }
+            .with_context(|| format!("failed to empty {}", path.display()))?;
+        files.push((path.to_path_buf(), size));
     }
-    (0, 0)
-}
-
-fn vacuum_rotated_logs(path: &std::path::Path) -> (usize, u64) {
-    let Some(parent) = path.parent() else {
-        return (0, 0);
-    };
-    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
-        return (0, 0);
-    };
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return (0, 0);
-    };
-
-    let mut count = 0usize;
-    let mut freed = 0u64;
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if p == path {
-            continue;
-        }
-        let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
-        if !name.starts_with(file_name) || !is_file {
-            continue;
-        }
-        if let Ok(meta) = entry.metadata() {
-            let size = meta.len();
-            if std::fs::remove_file(&p).is_ok() {
-                count += 1;
-                freed += size;
-            }
-        }
-    }
-    (count, freed)
-}
-
-fn inspect_container_log_files(log_path: &str) -> (u64, usize) {
-    let path = std::path::Path::new(log_path);
-    let active_size = inspect_active_log(path);
-    let (rotated_size, count) = inspect_rotated_logs(path);
-    (active_size + rotated_size, count)
-}
-
-fn vacuum_container_log_files(log_path: &str) -> (usize, u64) {
-    let path = std::path::Path::new(log_path);
-    let (active_count, active_freed) = vacuum_active_log(path);
-    let (rotated_count, rotated_freed) = vacuum_rotated_logs(path);
-    (active_count + rotated_count, active_freed + rotated_freed)
+    Ok((files.len(), files.iter().map(|(_, size)| size).sum()))
 }
 
 fn container_id(found: Option<InspectContainer>, name: &ContainerName) -> anyhow::Result<String> {
@@ -1929,6 +1905,37 @@ mod tests {
         .unwrap()
         .into_stats();
         assert_eq!(stats, ContainerStats::default());
+    }
+
+    /// The json-file log driver writes `<id>-json.log` and rotates it into `<id>-json.log.N`
+    /// next to it. The size counts both, the vacuum empties the active file and deletes the
+    /// rotated ones, and a log that cannot be read is an error, never a size of 0.
+    #[test]
+    fn container_logs_are_measured_and_emptied_or_the_error_is_reported() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("r3v3rs3-logs-{:08x}", rand::random::<u32>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("abc-json.log");
+        std::fs::write(&log, b"0123456789").unwrap();
+        std::fs::write(dir.join("abc-json.log.1"), b"01234").unwrap();
+        std::fs::write(dir.join("other-json.log"), b"0123456789012").unwrap();
+        let path = log.to_str().unwrap();
+        assert_eq!(inspect_container_log_files(path).unwrap(), (15, 1));
+        assert_eq!(vacuum_container_log_files(path).unwrap(), (2, 15));
+        assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
+        assert!(!dir.join("abc-json.log.1").exists());
+        assert_eq!(
+            std::fs::metadata(dir.join("other-json.log")).unwrap().len(),
+            13
+        );
+        // The server user cannot list the directory of the Docker logs.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o100)).unwrap();
+        let unreadable = inspect_container_log_files(path);
+        let unwritable = vacuum_container_log_files(path);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(unreadable.is_err());
+        assert!(unwritable.is_err());
     }
 
     /// The Docker exec stream protocol tags each frame with its stream: 1 is stdout, 2 is

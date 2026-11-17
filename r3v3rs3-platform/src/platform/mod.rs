@@ -1068,7 +1068,7 @@ impl Platform {
         let mut total_size_bytes = 0u64;
 
         for cname in cnames {
-            if let Ok(Some(info)) = runtime.container_log_info(&cname).await {
+            if let Some(info) = runtime.container_log_info(&cname).await? {
                 total_size_bytes += info.size_bytes;
                 containers.push(info);
             }
@@ -1097,10 +1097,9 @@ impl Platform {
         let mut freed_bytes = 0u64;
 
         for cname in cnames {
-            if let Ok(res) = runtime.vacuum_container_logs(&cname).await {
-                truncated_files += res.truncated_files;
-                freed_bytes += res.freed_bytes;
-            }
+            let res = runtime.vacuum_container_logs(&cname).await?;
+            truncated_files += res.truncated_files;
+            freed_bytes += res.freed_bytes;
         }
 
         Ok(LogVacuumResult {
