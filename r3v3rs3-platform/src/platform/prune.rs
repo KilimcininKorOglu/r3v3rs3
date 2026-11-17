@@ -12,6 +12,28 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
+/// Deletes the rotated log files of the named containers whose logs reach the threshold, the
+/// same rule as the vacuum of the local Docker host.
+async fn vacuum_over(
+    runtime: &dyn crate::runtime::ContainerRuntime,
+    names: &[r3v3rs3_api::container::ContainerName],
+    threshold_bytes: Option<u64>,
+) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+    let mut total = r3v3rs3_api::container::LogVacuumResult::default();
+    for name in names {
+        let Some(info) = runtime.container_log_info(name).await? else {
+            continue;
+        };
+        if info.size_bytes < threshold_bytes.unwrap_or(0) {
+            continue;
+        }
+        let freed = runtime.vacuum_container_logs(name).await?;
+        total.truncated_files += freed.truncated_files;
+        total.freed_bytes += freed.freed_bytes;
+    }
+    Ok(total)
+}
+
 pub(super) fn spawn_prune_scheduler(platform: &Arc<Platform>) {
     let weak = Arc::downgrade(platform);
     let cancel = platform.shutdown_token().clone();
@@ -177,7 +199,45 @@ impl Platform {
         threshold_mb: Option<u64>,
     ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
         let threshold_bytes = threshold_mb.map(|mb| mb.saturating_mul(1024 * 1024));
-        self.local.vacuum_all_logs(threshold_bytes).await
+        let mut total = self.local.vacuum_all_logs(threshold_bytes).await?;
+        for app in self.store.apps().await? {
+            let Some(deployment) = self.store.running_deployment(app.id).await? else {
+                continue;
+            };
+            let remote = app.spec.targets_or_default(app.target);
+            for target in remote
+                .into_iter()
+                .filter(|target| !super::is_local(*target))
+            {
+                let names = self.container_names_on(&app, deployment, target).await?;
+                let runtime = self.runtime(target);
+                let freed = vacuum_over(runtime.as_ref(), &names, threshold_bytes).await?;
+                total.truncated_files += freed.truncated_files;
+                total.freed_bytes += freed.freed_bytes;
+            }
+        }
+        Ok(total)
+    }
+
+    /// The containers of the running deployment of an app on one of its targets.
+    async fn container_names_on(
+        &self,
+        app: &r3v3rs3_api::platform::AppEntry,
+        deployment: r3v3rs3_api::id::ShortId,
+        target: r3v3rs3_api::id::ShortId,
+    ) -> anyhow::Result<Vec<r3v3rs3_api::container::ContainerName>> {
+        if !app.spec.source.is_compose() {
+            return Ok(vec![super::proxy::container_name(app.id, deployment)?]);
+        }
+        let project = super::compose::project_name(app.id)?;
+        let list = self
+            .runtime(target)
+            .list_project_containers(&project)
+            .await?;
+        Ok(list
+            .into_iter()
+            .filter_map(|item| item.name.parse().ok())
+            .collect())
     }
 
     /// Executes an emergency disk pressure prune, dispatches a system.disk_pressure webhook,

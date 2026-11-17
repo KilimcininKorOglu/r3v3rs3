@@ -304,3 +304,30 @@ async fn a_git_app_on_an_agent_is_built_there() -> anyhow::Result<()> {
     assert!(setup.local.state().builds.is_empty());
     Ok(())
 }
+
+/// The platform-wide log vacuum covers every app of the platform (docs: "across the entire
+/// platform"), so the rotated logs of an app on an agent go too, on the agent host, and a log
+/// under the threshold stays.
+#[tokio::test]
+async fn the_platform_log_vacuum_reaches_the_apps_on_an_agent() -> anyhow::Result<()> {
+    let setup = setup().await?;
+    let deployment = deploy(&setup).await?;
+    let name = super::proxy::container_name(setup.app.id, deployment.id)?;
+    let sizes = |bytes: u64| {
+        setup
+            .agent
+            .runtime
+            .state()
+            .log_sizes
+            .insert(name.to_string(), bytes);
+    };
+    sizes(4096);
+    let kept = setup.platform.vacuum_all_logs(Some(1)).await?;
+    assert_eq!(kept.freed_bytes, 0);
+    assert_eq!(setup.agent.runtime.state().log_sizes[name.as_str()], 4096);
+
+    let vacuum = setup.platform.vacuum_all_logs(None).await?;
+    assert_eq!(vacuum.freed_bytes, 4096);
+    assert_eq!(setup.agent.runtime.state().log_sizes[name.as_str()], 0);
+    Ok(())
+}
