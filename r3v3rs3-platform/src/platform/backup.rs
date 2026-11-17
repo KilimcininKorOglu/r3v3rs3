@@ -56,6 +56,7 @@ struct DumpPlan {
 
 /// How the engine takes its dump back: the file that the restore uploads, and the command that
 /// reads it.
+#[derive(Clone)]
 struct RestorePlan {
     /// The target path of the upload. `None` for an engine that takes the file in place.
     upload: Option<String>,
@@ -1997,6 +1998,11 @@ async fn run_restore(
     bytes: Vec<u8>,
     data_path: &str,
 ) -> anyhow::Result<()> {
+    let (plan, bytes) = match adapt_postgres_cluster_dump(plan, &bytes) {
+        Some((plan, bytes)) => (plan, bytes),
+        None => (plan.clone(), bytes),
+    };
+    let plan = &plan;
     let outcome = match &plan.upload {
         Some(path) => {
             runtime
@@ -2074,6 +2080,59 @@ async fn redis_run_id(
         .context("the Redis server reported no run id")
 }
 
+/// The first line of the comment block that `pg_dumpall` writes at the top of its output.
+const POSTGRES_CLUSTER_DUMP: &[u8] = b"PostgreSQL database cluster dump";
+
+/// A `pg_dumpall` dump runs into a server that keeps working: apps hold connections and the
+/// root account of the restore session exists already. The restore therefore stops at the
+/// first error, drops the old databases with `FORCE`, which ends their connections, and leaves
+/// out the lines that drop and create the root role, which cannot succeed. `None` for every
+/// other dump, such as the single-database dumps of older backups.
+fn adapt_postgres_cluster_dump(plan: &RestorePlan, bytes: &[u8]) -> Option<(RestorePlan, Vec<u8>)> {
+    let head = &bytes[..bytes.len().min(256)];
+    if plan.command.first().map(String::as_str) != Some("psql")
+        || !head
+            .windows(POSTGRES_CLUSTER_DUMP.len())
+            .any(|w| w == POSTGRES_CLUSTER_DUMP)
+    {
+        return None;
+    }
+    let user = plan
+        .command
+        .iter()
+        .position(|arg| arg == "-U")
+        .and_then(|index| plan.command.get(index + 1))?;
+    let text = String::from_utf8_lossy(bytes);
+    let mut script = String::with_capacity(text.len() + 64);
+    for line in text.lines() {
+        if let Some(line) = cluster_dump_line(line, user) {
+            script.push_str(&line);
+            script.push('\n');
+        }
+    }
+    let mut command = plan.command.clone();
+    command.splice(1..1, ["-v".to_string(), "ON_ERROR_STOP=1".to_string()]);
+    let plan = RestorePlan {
+        command,
+        ..plan.clone()
+    };
+    Some((plan, script.into_bytes()))
+}
+
+/// One line of a `pg_dumpall` dump as the restore runs it: `None` drops the line.
+fn cluster_dump_line(line: &str, root: &str) -> Option<String> {
+    if line == format!("DROP ROLE IF EXISTS {root};") || line == format!("CREATE ROLE {root};") {
+        return None;
+    }
+    match line
+        .strip_prefix("DROP DATABASE ")
+        .and_then(|rest| rest.strip_suffix(';'))
+    {
+        Some(target) => Some(format!("DROP DATABASE {target} WITH (FORCE);")),
+        None => Some(line.to_string()),
+    }
+}
+
 /// Takes the dump of a database container, for the tests on a Docker Engine.
 #[cfg(test)]
 pub(super) async fn dump_for_test(
@@ -2100,12 +2159,17 @@ const MARIADB_DUMP: &str = "dbs=$(mariadb -u root -N -e \"SELECT schema_name FRO
 /// repository carries; an engine without a command cannot be backed up.
 fn dump_plan(engine: &str, info: &EngineInfo, password: &str) -> anyhow::Result<DumpPlan> {
     let plan = match engine {
+        // Every database of the server: the tenants of a shared server live in databases of
+        // their own. The role passwords stay out of the dump, so a restore cannot bring back an
+        // old password; the platform sets the stored ones again after the restore.
         "postgres" => DumpPlan {
             command: vec![
-                "pg_dump".into(),
+                "pg_dumpall".into(),
                 "-U".into(),
                 info.user.clone(),
-                info.default_db.clone(),
+                "--clean".into(),
+                "--if-exists".into(),
+                "--no-role-passwords".into(),
             ],
             env: vec![format!("PGPASSWORD={password}")],
             file: None,
@@ -3057,14 +3121,60 @@ mod tests {
         Ok(())
     }
 
+    /// The tenants of a shared PostgreSQL server live in databases of their own, so a backup
+    /// of the server must hold every database, and no role password that a restore could bring
+    /// back over the stored one.
     #[test]
-    fn postgres_dumps_its_default_database() {
+    fn postgres_dumps_every_database_without_role_passwords() {
         catalog();
         let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
         let plan = dump_plan("postgres", &info, "pass").unwrap();
-        assert_eq!(plan.command, ["pg_dump", "-U", "postgres", "postgres"]);
+        assert_eq!(plan.command[0], "pg_dumpall");
+        assert!(plan.command.iter().any(|arg| arg == "--no-role-passwords"));
+        assert!(plan.command.iter().any(|arg| arg == "--clean"));
+        assert!(!plan.command.iter().any(|arg| arg == "pass"));
         assert_eq!(plan.env, ["PGPASSWORD=pass"]);
         assert!(plan.file.is_none());
+    }
+
+    /// A restore into a running server must end the connections of the databases it replaces,
+    /// keep the root role of its own session and stop at the first error instead of reporting
+    /// success over a half-restored server.
+    #[test]
+    fn a_postgres_cluster_dump_restores_over_open_connections_and_stops_on_error() {
+        catalog();
+        let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
+        let plan = restore_plan("postgres", &info, "pass").unwrap();
+        let dump = b"--\n-- PostgreSQL database cluster dump\n--\n\nDROP DATABASE IF EXISTS p_shop;\nDROP ROLE IF EXISTS p_shop;\nDROP ROLE IF EXISTS postgres;\nCREATE ROLE p_shop;\nCREATE ROLE postgres;\n\\connect template1\nDROP DATABASE postgres;\n";
+        let (adapted, script) = adapt_postgres_cluster_dump(&plan, dump).unwrap();
+        let script = String::from_utf8(script).unwrap();
+        assert!(script.contains("DROP DATABASE IF EXISTS p_shop WITH (FORCE);"));
+        assert!(script.contains("DROP DATABASE postgres WITH (FORCE);"));
+        assert!(script.contains("DROP ROLE IF EXISTS p_shop;"));
+        assert!(script.contains("CREATE ROLE p_shop;"));
+        assert!(!script.contains("ROLE IF EXISTS postgres;"));
+        assert!(!script.contains("CREATE ROLE postgres;"));
+        assert!(
+            adapted
+                .command
+                .windows(2)
+                .any(|w| w == ["-v", "ON_ERROR_STOP=1"])
+        );
+        assert_eq!(adapted.upload, plan.upload);
+    }
+
+    /// The backups taken before the cluster dump hold one database; they restore as before.
+    #[test]
+    fn a_single_database_dump_restores_unchanged() {
+        catalog();
+        let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
+        let plan = restore_plan("postgres", &info, "pass").unwrap();
+        let dump = b"--\n-- PostgreSQL database dump\n--\n\nCREATE TABLE public.t (x integer);\n";
+        assert!(adapt_postgres_cluster_dump(&plan, dump).is_none());
+        let mysql = restore_plan("mysql", &info, "pass").unwrap();
+        assert!(
+            adapt_postgres_cluster_dump(&mysql, b"-- PostgreSQL database cluster dump").is_none()
+        );
     }
 
     /// The `mysql` schema holds every account with its password hash; a restore of it would
