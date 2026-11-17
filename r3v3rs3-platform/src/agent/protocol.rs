@@ -118,6 +118,14 @@ pub enum AgentRequest {
         name: ContainerName,
         tail: u32,
     },
+    /// The size of the log files of a container. An older agent refuses the variant.
+    ContainerLogInfo {
+        name: ContainerName,
+    },
+    /// Empties the log files of a container. An older agent refuses the variant.
+    VacuumContainerLogs {
+        name: ContainerName,
+    },
     /// Connects the stream to a published port of a container. After the answer the stream
     /// carries the bytes of the connection.
     Tunnel {
@@ -205,6 +213,12 @@ pub enum AgentOutput {
     },
     Log {
         log: String,
+    },
+    LogInfo {
+        info: Option<r3v3rs3_api::container::ContainerLogInfo>,
+    },
+    LogVacuum {
+        result: r3v3rs3_api::container::LogVacuumResult,
     },
     /// The stream is connected to the port.
     Tunnel,

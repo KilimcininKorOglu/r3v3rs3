@@ -167,6 +167,23 @@ impl Executor {
                     .await
                     .map(|log| AgentOutput::Log { log })
             }
+            request => self.log_file_request(request).await,
+        }
+    }
+
+    /// The requests about the log files of a container of the platform.
+    async fn log_file_request(&self, request: AgentRequest) -> anyhow::Result<AgentOutput> {
+        match request {
+            AgentRequest::ContainerLogInfo { name } => {
+                self.owned(&name).await?;
+                let info = self.runtime.container_log_info(&name).await?;
+                Ok(AgentOutput::LogInfo { info })
+            }
+            AgentRequest::VacuumContainerLogs { name } => {
+                self.owned(&name).await?;
+                let result = self.runtime.vacuum_container_logs(&name).await?;
+                Ok(AgentOutput::LogVacuum { result })
+            }
             // The request can hold the values of variables, so the message does not show it.
             _ => bail!("the agent cannot answer this request here"),
         }

@@ -50,6 +50,8 @@ pub struct FakeState {
     pub files: BTreeMap<(String, String), Vec<u8>>,
     /// A log read waits this long before it answers.
     pub log_delay: Option<std::time::Duration>,
+    /// The size of the log files of each container, keyed by its name.
+    pub log_sizes: BTreeMap<String, u64>,
 }
 
 /// One build of the fake runtime.
@@ -493,6 +495,36 @@ impl ContainerRuntime for FakeRuntime {
             })
             .collect();
         Ok(summaries)
+    }
+
+    async fn container_log_info(
+        &self,
+        name: &ContainerName,
+    ) -> anyhow::Result<Option<r3v3rs3_api::container::ContainerLogInfo>> {
+        let state = self.check()?;
+        let Some(container) = state.containers.get(name.as_str()) else {
+            return Ok(None);
+        };
+        Ok(Some(r3v3rs3_api::container::ContainerLogInfo {
+            container_id: container.id.clone(),
+            container_name: name.to_string(),
+            log_path: None,
+            size_bytes: state.log_sizes.get(name.as_str()).copied().unwrap_or(0),
+            rotated_files_count: 0,
+        }))
+    }
+
+    async fn vacuum_container_logs(
+        &self,
+        name: &ContainerName,
+    ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+        let mut state = self.check()?;
+        let freed_bytes = state.log_sizes.insert(name.to_string(), 0).unwrap_or(0);
+        Ok(r3v3rs3_api::container::LogVacuumResult {
+            app_id: None,
+            truncated_files: 1,
+            freed_bytes,
+        })
     }
 
     async fn logs(&self, name: &ContainerName, _: u32) -> anyhow::Result<String> {

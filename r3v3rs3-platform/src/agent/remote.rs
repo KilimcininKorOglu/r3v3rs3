@@ -256,6 +256,31 @@ impl ContainerRuntime for RemoteRuntime {
             other => Err(unexpected(&other)),
         }
     }
+
+    async fn container_log_info(
+        &self,
+        name: &ContainerName,
+    ) -> anyhow::Result<Option<r3v3rs3_api::container::ContainerLogInfo>> {
+        let name = name.clone();
+        match self.call(AgentRequest::ContainerLogInfo { name }).await? {
+            AgentOutput::LogInfo { info } => Ok(info),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    async fn vacuum_container_logs(
+        &self,
+        name: &ContainerName,
+    ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+        let name = name.clone();
+        match self
+            .call(AgentRequest::VacuumContainerLogs { name })
+            .await?
+        {
+            AgentOutput::LogVacuum { result } => Ok(result),
+            other => Err(unexpected(&other)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -320,6 +345,41 @@ mod tests {
             }
         });
         Ok(port)
+    }
+
+    /// The log size and the vacuum of an app on an agent target run on the agent host, where
+    /// its log files are; a container outside the platform stays out of reach.
+    #[tokio::test]
+    async fn the_log_files_of_a_platform_container_are_read_and_emptied_on_the_agent()
+    -> anyhow::Result<()> {
+        let setup = setup();
+        let remote = &setup.remote;
+        let web = spec("r3v3rs3-web-one", &[(APP_LABEL, "web")]);
+        remote.pull_image(&web.image).await?;
+        remote.create_container(&web).await?;
+        setup
+            .agent
+            .runtime
+            .state()
+            .log_sizes
+            .insert(web.name.to_string(), 4096);
+        let info = remote.container_log_info(&web.name).await?.unwrap();
+        assert_eq!(info.size_bytes, 4096);
+        let vacuum = remote.vacuum_container_logs(&web.name).await?;
+        assert_eq!(vacuum.freed_bytes, 4096);
+        assert_eq!(setup.agent.runtime.state().log_sizes[web.name.as_str()], 0);
+        let db: ContainerName = "db".parse()?;
+        setup.agent.runtime.set(&db, true, &[]);
+        setup
+            .agent
+            .runtime
+            .state()
+            .log_sizes
+            .insert("db".into(), 99);
+        assert!(remote.container_log_info(&db).await.is_err());
+        assert!(remote.vacuum_container_logs(&db).await.is_err());
+        assert_eq!(setup.agent.runtime.state().log_sizes["db"], 99);
+        Ok(())
     }
 
     #[tokio::test]
