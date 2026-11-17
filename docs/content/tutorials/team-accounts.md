@@ -62,7 +62,7 @@ A proxy outside her list does not exist for her:
 
 ```bash
 $ curl -s -b alice.txt http://localhost:46492/api/proxies/cfr-kpm
-{"message":"port id not found: cfr-kpm","error":{"message":"id_not_found","id":"cfr-kpm"}}
+{"message":"id not found: cfr-kpm","error":{"message":"id_not_found","id":"cfr-kpm"}}
 ```
 
 That is a 404, not a 403. An editor with a proxy list also cannot change the ports:

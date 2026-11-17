@@ -62,7 +62,7 @@ Listesinde olmayan proxy onun için yoktur:
 
 ```bash
 $ curl -s -b alice.txt http://localhost:46492/api/proxies/cfr-kpm
-{"message":"port id not found: cfr-kpm","error":{"message":"id_not_found","id":"cfr-kpm"}}
+{"message":"id not found: cfr-kpm","error":{"message":"id_not_found","id":"cfr-kpm"}}
 ```
 
 Bu 404'tür, 403 değil. Proxy listesi olan editör portları da değiştiremez:

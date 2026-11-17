@@ -97,7 +97,7 @@ pub enum Error {
     #[error("invalid short id: {id}")]
     InvalidShortId { id: String },
 
-    #[error("port id not found: {id}")]
+    #[error("id not found: {id}")]
     IdNotFound { id: String },
 
     #[error("port id already exists: {id}")]
@@ -680,5 +680,14 @@ mod tests {
         assert_eq!(Error::FailedToRefreshAppStore.status_code(), 502);
         assert_eq!(Error::Unauthorized.status_code(), 401);
         assert_eq!(Error::Forbidden.status_code(), 403);
+    }
+
+    /// `IdNotFound` answers for tokens, proxies, apps and every other resource, so its message
+    /// must not name one resource type, the same as `error.id_not_found` in the locale files.
+    #[test]
+    fn a_missing_id_message_names_no_resource_type() {
+        let message = Error::IdNotFound { id: "abc".into() }.to_string();
+        assert!(!message.contains("port"), "{message}");
+        assert!(message.contains("abc"), "{message}");
     }
 }
