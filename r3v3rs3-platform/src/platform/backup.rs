@@ -1779,7 +1779,7 @@ async fn capture_engine_wal(
 ) -> anyhow::Result<(String, Vec<u8>)> {
     match engine {
         "postgres" => capture_postgres_wal(runtime, container, info, password).await,
-        "mariadb" | "mysql" => capture_mysql_wal(runtime, container, password).await,
+        "mariadb" | "mysql" => capture_mysql_wal(runtime, container, engine, info, password).await,
         "mongodb" => capture_mongodb_oplog(runtime, container, info, password).await,
         "redis" => capture_redis_aof(runtime, container, info, password).await,
         other => anyhow::bail!("engine {other} does not support WAL archiving"),
@@ -1834,33 +1834,17 @@ async fn capture_postgres_wal(
     Ok((filename, dump))
 }
 
+/// The segment of a MySQL or MariaDB server is a dump of its user databases, the same as its
+/// backup, so a replay cannot bring back the accounts of the `mysql` schema.
 async fn capture_mysql_wal(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
+    engine: &str,
+    info: &EngineInfo,
     password: &str,
 ) -> anyhow::Result<(String, Vec<u8>)> {
-    let cmd = vec![
-        "mysql".into(),
-        "-u".into(),
-        "root".into(),
-        "-e".into(),
-        "FLUSH BINARY LOGS;".into(),
-    ];
-    let env = vec![format!("MYSQL_PWD={password}")];
-    let _ = runtime.exec_capture(container, cmd, env).await;
     let filename = format!("binlog-{}.sql", unix_ms());
-    let dump = runtime
-        .exec_capture(
-            container,
-            vec![
-                "mysqldump".into(),
-                "-u".into(),
-                "root".into(),
-                "--all-databases".into(),
-            ],
-            vec![format!("MYSQL_PWD={password}")],
-        )
-        .await?;
+    let dump = take_dump(runtime, container, dump_plan(engine, info, password)?).await?;
     if dump.is_empty() {
         bail!("mysqldump captured empty database dump");
     }
@@ -3234,6 +3218,33 @@ mod tests {
         assert!(
             adapt_postgres_cluster_dump(&mysql, b"-- PostgreSQL database cluster dump").is_none()
         );
+    }
+
+    /// An archived segment is restored after the base backup and after the tenant accounts are
+    /// set again, so it must not carry the `mysql` schema with old passwords either; MariaDB
+    /// takes its dump with its own tool.
+    #[tokio::test]
+    async fn mysql_wal_segments_leave_the_account_schema_out() {
+        catalog();
+        for engine in ["mysql", "mariadb"] {
+            let info = r3v3rs3_api::platform::engine_info(engine).unwrap();
+            let fake = Arc::new(super::super::fake::FakeRuntime::default());
+            let name: ContainerName = "r3v3rs3-db-0".parse().unwrap();
+            fake.set(&name, true, &[]);
+            let runtime: Arc<dyn ContainerRuntime> = fake.clone();
+            capture_engine_wal(&runtime, &name, engine, &info, "pass")
+                .await
+                .unwrap();
+            let execs = fake.state().execs.clone();
+            let expected = dump_plan(engine, &info, "pass").unwrap().command;
+            assert!(
+                execs.iter().any(|(_, command, _)| *command == expected),
+                "{engine}"
+            );
+            for (_, command, _) in execs {
+                assert!(!command.iter().any(|arg| arg.contains("--all-databases")));
+            }
+        }
     }
 
     /// The `mysql` schema holds every account with its password hash; a restore of it would
