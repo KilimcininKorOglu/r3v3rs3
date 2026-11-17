@@ -287,15 +287,17 @@ NotifyAccess=main
 User=r3v3rs3
 Group=r3v3rs3
 SupplementaryGroups=docker
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# The container logs of Docker belong to root: reading their size and emptying them needs the
+# DAC capabilities. The docker group gives the same reach through the engine already.
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
-ReadWritePaths=$CONFIG_DIR $LOG_DIR
+ReadWritePaths=$CONFIG_DIR $LOG_DIR -$(docker_logs_dir)
 Environment=R3V3RS3_CONFIG_DIR=$CONFIG_DIR
 Environment=R3V3RS3_LOG_DIR=$LOG_DIR
 Environment=R3V3RS3_WEBUI=$webui
@@ -400,6 +402,13 @@ open_firewall() {
 		"["*) open_iptables ip6tables /etc/iptables "$port" ;;
 		esac
 	fi
+}
+
+# The directory of the container log files of Docker Engine. The platform reads their size and
+# empties them; a host without a running engine gets the default path of Docker.
+docker_logs_dir() {
+	root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null) || root=""
+	echo "${root:-/var/lib/docker}/containers"
 }
 
 check_docker() {
@@ -551,7 +560,7 @@ ProtectHome=true
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
-ReadWritePaths=$AGENT_DATA_DIR
+ReadWritePaths=$AGENT_DATA_DIR -$(docker_logs_dir)
 Environment=R3V3RS3_AGENT_MASTER=$master
 Environment=R3V3RS3_AGENT_DATA_DIR=$AGENT_DATA_DIR
 # Holds the enrollment token until the agent is enrolled.
