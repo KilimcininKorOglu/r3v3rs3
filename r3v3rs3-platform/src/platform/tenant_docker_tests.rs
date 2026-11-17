@@ -447,6 +447,46 @@ async fn restore_and_read(
     Ok(())
 }
 
+/// A restore runs into the live server, where apps keep their connections open: it replaces
+/// the data over an open tenant session and the tenant reads it again afterwards.
+async fn check_in_place_restore(
+    runtime: &Arc<dyn ContainerRuntime>,
+    name: &ContainerName,
+    info: &EngineInfo,
+) -> anyhow::Result<()> {
+    let dump = super::backup::dump_for_test(runtime, name, info, "rootpw9876").await?;
+    // A session that stays connected to the tenant database during the restore. It runs in
+    // an exec of its own that the test waits for: a client left in the background would be
+    // adopted by the server process, which counts its exit as a crash of the server.
+    let hold = format!("{HOST}; psql postgresql://p_one:pwone2@$H/p_one -c 'SELECT pg_sleep(60)'");
+    let shell = vec!["sh".to_string(), "-c".to_string(), hold];
+    let session = (info.engine == "postgres").then(|| {
+        let (runtime, name) = (runtime.clone(), name.clone());
+        tokio::spawn(async move { runtime.exec_capture(&name, shell, Vec::new()).await })
+    });
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    super::backup::restore_for_test(runtime, name, info, "rootpw9876", dump).await?;
+    if let Some(session) = session {
+        ensure!(
+            session.await?.is_err(),
+            "the restore left the open tenant session running"
+        );
+    }
+    wait_ready(runtime, name, info, "rootpw9876").await?;
+    run_script(
+        runtime,
+        name,
+        create_script(info, "rootpw9876", "p_one", "pwone2")?,
+    )
+    .await?;
+    ensure!(
+        can_read(runtime, name, info, &tenant("p_one", "pwone2"), "p_one").await,
+        "the {} restore into the live server lost the data of the tenant",
+        info.engine
+    );
+    Ok(())
+}
+
 /// Starts the server and runs every check on it.
 async fn run_checks(
     runtime: &Arc<dyn ContainerRuntime>,
@@ -461,7 +501,8 @@ async fn run_checks(
     check_reset_and_drop(runtime, name, info).await?;
     check_root_password(runtime, name, info).await?;
     check_restart(runtime, name, info).await?;
-    check_backup_round_trip(runtime, name, info, image).await
+    check_backup_round_trip(runtime, name, info, image).await?;
+    check_in_place_restore(runtime, name, info).await
 }
 
 /// Runs every check on a fresh container of the image and removes it again.
