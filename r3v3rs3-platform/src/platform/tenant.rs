@@ -398,6 +398,17 @@ impl Platform {
         self.store.set_secret(db_id, &name, &sealed).await
     }
 
+    /// Sets the stored password of every tenant again, after a restore that brought back the
+    /// roles without their passwords. The first failure ends the call.
+    pub(super) async fn reapply_tenants(&self, db_id: ShortId) -> anyhow::Result<()> {
+        for tenant in self.tenants(db_id).await? {
+            self.ensure_tenant(db_id, &tenant)
+                .await
+                .with_context(|| format!("failed to set the password of the tenant {tenant}"))?;
+        }
+        Ok(())
+    }
+
     /// Sets the users of every tenant again after a deployment of a shared database, because a
     /// new container of an engine that keeps its users in memory, like Redis, starts without
     /// them. A failure only reaches the log: the next deployment of the app repeats it.

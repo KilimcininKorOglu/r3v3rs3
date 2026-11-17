@@ -729,6 +729,11 @@ impl Platform {
             &info.data_path,
         )
         .await?;
+        // The dumps hold no account passwords; Redis keeps its users in the ACL file of its
+        // volume, which a restore does not touch.
+        if engine != "redis" {
+            self.reapply_tenants(db_id).await?;
+        }
         self.dispatch_backup_restored(db_id, app.name.as_str(), &engine, backup_id)
             .await;
         Ok(())
