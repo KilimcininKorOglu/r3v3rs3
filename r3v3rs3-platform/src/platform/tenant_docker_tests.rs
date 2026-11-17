@@ -149,14 +149,15 @@ async fn can_write(
         .is_ok()
 }
 
-/// The command that succeeds once the server takes connections over TCP, which the images
-/// open only after their initialization.
+/// The command that succeeds once the final server takes connections over TCP. The mongo image
+/// runs its initialization on a temporary server at 127.0.0.1:27017 and shuts it down before it
+/// starts the final one as PID 1, so the check also requires that PID 1 is `mongod`.
 fn ready_command(info: &EngineInfo, root: &str) -> String {
     match info.engine.as_str() {
         "postgres" => "pg_isready -h 127.0.0.1 -U postgres".to_string(),
         "mysql" | "mariadb" => format!("{} -h127.0.0.1 -uroot -p{root} -e 'SELECT 1'", info.engine),
         "mongodb" => format!(
-            "mongosh 'mongodb://root:{root}@127.0.0.1/admin' --quiet --eval 'db.runCommand({{ping: 1}})'"
+            "[ \"$(cat /proc/1/comm)\" = mongod ] && mongosh 'mongodb://root:{root}@127.0.0.1/admin' --quiet --eval 'db.runCommand({{ping: 1}})'"
         ),
         _ => format!("REDISCLI_AUTH={root} redis-cli ping | grep -qx PONG"),
     }
