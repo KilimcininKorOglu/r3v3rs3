@@ -993,6 +993,8 @@ Admin hesabı ayrıca şunları görür:
 
 **Hedefler** sayfası, kullanılmayan Docker kaynaklarını otomatik temizlemek ve disk tükenmesini önlemek için bir **Disk Hijyeni ve Temizleme Politikası** kartı sunar:
 
+- **Kapsam**: Zamanlanmış temizlik, disk basıncına duyarlı temizlik ve **Şimdi Temizle** yalnız r3v3rs3 sunucusunun Docker makinesini temizler. Disk basıncı da bu makinenin diskidir. Agent hedefleri temizlenmez. Platformun isteğe bağlı **Logları Temizle** butonu, agent hedefindeki her uygulamanın döndürülmüş log dosyalarını da agent makinesinde siler.
+
 - **Otomatik Zamanlanmış Temizlik**: Etkinleştirildiğinde, arka plan işleyicisi kaynakları yapılandırılan zaman aralığına göre temizler. Aralık, saat veya gün olarak pozitif bir sayıdır (ör. `24h`, `7d` veya `7days`). Sunucunun okuyamadığı bir aralık kaydedilmez ve `invalid_prune_policy` hatası döner.
 - **Disk Basıncına Duyarlı Acil Temizlik**: Zamanlanmış aralıklara ek olarak, düğüm disk kullanımı yapılandırılan yüzde eşiğine (10 ile 99 arası, varsayılan: %85) ulaştığında veya aştığında otomatik bir acil durum temizliği tetiklenir. 15 dakikalık bekleme süresi (cooldown) peş peşe gereksiz döngüleri engeller; tetiklenen her acil temizlik `system.disk_pressure` giden webhook bildirimini ateşler ve geri kazanılan alan ayrıntılarıyla denetim günlüğü kaydı oluşturur. Eşik boş bırakılarak reaktif temizlik devre dışı bırakılabilir.
 - **Kaynak Seçimi**: Kullanılmayan ve artık (dangling) imajlar, durdurulmuş konteynerler, BuildKit derleme önbelleği ve referanssız birimler için ayrı kontrol anahtarları.

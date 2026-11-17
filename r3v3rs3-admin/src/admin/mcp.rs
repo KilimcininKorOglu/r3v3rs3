@@ -4284,7 +4284,7 @@ impl McpServer {
 
     /// Execute automated Docker disk hygiene prune immediately.
     #[tool(
-        description = "Run the Docker disk cleanup now, with the switches of the prune policy (`get_prune_policy`): unused images, stopped containers, build cache, unused volumes and large container logs. The newest builds of each app stay for rollback. Returns the bytes reclaimed. Takes no arguments. Needs a token with the edit scope and an admin account."
+        description = "Run the Docker disk cleanup now on the Docker host of the r3v3rs3 server, with the switches of the prune policy (`get_prune_policy`): unused images, stopped containers, build cache, unused volumes and large container logs. Agent targets are not pruned. The newest builds of each app stay for rollback. Returns the bytes reclaimed. Takes no arguments. Needs a token with the edit scope and an admin account."
     )]
     async fn run_platform_prune(
         &self,
