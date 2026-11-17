@@ -1210,6 +1210,7 @@ r3v3rs3 bir yanıtı yalnız şu koşulların hepsi sağlanırsa saklar:
 - Yanıtta `Vary: *` header'ı yoktur.
 - İstekte `Authorization` header'ı varsa `Cache-Control` içinde `public`, `s-maxage` veya `must-revalidate` bulunur.
 - Yanıtın geçerlilik süresi veya validator'ı vardır ve gövdesi `max_entry_size` değerini aşmaz.
+- Gövde eksiksiz gelir: gövde ya `Content-Length` kadar bayttır ya da chunked gövdenin son parçasıyla biter. Upstream sunucunun yarıda kestiği bir gövde saklanmaz.
 
 Geçerlilik süresi için sırasıyla `s-maxage`, `max-age`, `Expires` ve `default_ttl` değerlerine bakılır. `Cache-Control: no-cache` bu süreyi sıfır yapar. Saklanan yanıtın yaşına upstream yanıtındaki `Age` header'ının değeri de eklenir.
 

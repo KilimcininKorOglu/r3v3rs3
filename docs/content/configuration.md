@@ -1210,6 +1210,7 @@ r3v3rs3 stores a response only when all of these conditions are true:
 - The response has no `Vary: *` header.
 - When the request has an `Authorization` header, `Cache-Control` contains `public`, `s-maxage` or `must-revalidate`.
 - The response has a lifetime or a validator, and the body is not larger than `max_entry_size`.
+- The body arrives complete: it holds the `Content-Length` bytes, or a chunked body ends with its last chunk. A body that the upstream server cuts is not stored.
 
 The lifetime comes from `s-maxage`, then `max-age`, then `Expires`, then `default_ttl`. `Cache-Control: no-cache` sets the lifetime to zero. The age of a stored response includes the `Age` header of the upstream response.
 
