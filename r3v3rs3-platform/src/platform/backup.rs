@@ -2107,13 +2107,17 @@ fn adapt_postgres_cluster_dump(plan: &RestorePlan, bytes: &[u8]) -> Option<(Rest
         .iter()
         .position(|arg| arg == "-U")
         .and_then(|index| plan.command.get(index + 1))?;
-    let text = String::from_utf8_lossy(bytes);
-    let mut script = String::with_capacity(text.len() + 64);
-    for line in text.lines() {
-        if let Some(line) = cluster_dump_line(line, user) {
-            script.push_str(&line);
-            script.push('\n');
+    let mut script = Vec::with_capacity(bytes.len() + 64);
+    let mut in_copy = false;
+    for line in bytes.split_inclusive(|&byte| byte == b'\n') {
+        // The rows of a `COPY ... FROM stdin;` block run up to the `\.` line; they are data.
+        if in_copy {
+            in_copy = line.trim_ascii_end() != b"\\.";
+            script.extend_from_slice(line);
+            continue;
         }
+        in_copy = line.starts_with(b"COPY ") && line.trim_ascii_end().ends_with(b"FROM stdin;");
+        script.extend_from_slice(&cluster_dump_line(line, user.as_bytes()));
     }
     let mut command = plan.command.clone();
     command.splice(1..1, ["-v".to_string(), "ON_ERROR_STOP=1".to_string()]);
@@ -2121,20 +2125,28 @@ fn adapt_postgres_cluster_dump(plan: &RestorePlan, bytes: &[u8]) -> Option<(Rest
         command,
         ..plan.clone()
     };
-    Some((plan, script.into_bytes()))
+    Some((plan, script))
 }
 
-/// One line of a `pg_dumpall` dump as the restore runs it: `None` drops the line.
-fn cluster_dump_line(line: &str, root: &str) -> Option<String> {
-    if line == format!("DROP ROLE IF EXISTS {root};") || line == format!("CREATE ROLE {root};") {
-        return None;
+/// One statement line of a `pg_dumpall` dump, with its line end, as the restore runs it; an
+/// empty result drops the line.
+fn cluster_dump_line(line: &[u8], root: &[u8]) -> Vec<u8> {
+    let statement = line.trim_ascii_end();
+    let role = |prefix: &[u8]| {
+        statement
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(b";"))
+            == Some(root)
+    };
+    if role(b"DROP ROLE IF EXISTS ") || role(b"CREATE ROLE ") {
+        return Vec::new();
     }
-    match line
-        .strip_prefix("DROP DATABASE ")
-        .and_then(|rest| rest.strip_suffix(';'))
+    match statement
+        .strip_prefix(b"DROP DATABASE ")
+        .and_then(|rest| rest.strip_suffix(b";"))
     {
-        Some(target) => Some(format!("DROP DATABASE {target} WITH (FORCE);")),
-        None => Some(line.to_string()),
+        Some(target) => [b"DROP DATABASE ", target, b" WITH (FORCE);\n"].concat(),
+        None => line.to_vec(),
     }
 }
 
@@ -3188,6 +3200,26 @@ mod tests {
                 .any(|w| w == ["-v", "ON_ERROR_STOP=1"])
         );
         assert_eq!(adapted.upload, plan.upload);
+    }
+
+    /// The rows of a table are user data: a row that reads like a statement of the dump and a
+    /// byte that is not UTF-8 reach the restore exactly as the dump holds them.
+    #[test]
+    fn a_postgres_cluster_dump_keeps_table_rows_byte_for_byte() {
+        catalog();
+        let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
+        let plan = restore_plan("postgres", &info, "pass").unwrap();
+        let rows: &[u8] = b"CREATE ROLE postgres;\nDROP DATABASE shop;\nlatin1 \xe9 byte\n\\.\n";
+        let mut dump =
+            b"--\n-- PostgreSQL database cluster dump\n--\n\nCOPY public.t (x) FROM stdin;\n"
+                .to_vec();
+        dump.extend_from_slice(rows);
+        dump.extend_from_slice(b"DROP DATABASE shop;\n");
+        let (_, script) = adapt_postgres_cluster_dump(&plan, &dump).unwrap();
+        let copy = b"COPY public.t (x) FROM stdin;\n";
+        let start = script.windows(copy.len()).position(|w| w == copy).unwrap() + copy.len();
+        assert_eq!(&script[start..start + rows.len()], rows);
+        assert!(script.ends_with(b"DROP DATABASE shop WITH (FORCE);\n"));
     }
 
     /// The backups taken before the cluster dump hold one database; they restore as before.
