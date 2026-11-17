@@ -7,7 +7,6 @@ use r3v3rs3_api::{
     port::UpstreamServer,
     proxy::{Proxy, ProxyEntry, ProxyKind, TcpProxy},
 };
-use std::time::Duration;
 
 /// Echoes every chunk back until the client closes the connection.
 async fn echo_upstream(mut socket: tokio::net::TcpStream) {
@@ -61,17 +60,18 @@ async fn check_drain(
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut buf = [0u8; 6];
 
-    // The old connection still streams after the shutdown.
-    open.write_all(b"after").await?;
-    open.read_exact(&mut buf[..5]).await?;
-    assert_eq!(&buf[..5], b"after");
-
-    // The listener is gone, so the kernel refuses the new connections.
+    // The listener is gone, so the kernel refuses the new connections. Once this holds, the
+    // shutdown has taken effect.
     wait_until(
         || async move { Ok(tokio::net::TcpStream::connect(proxy_addr).await.is_err()) },
         "the listener still accepts connections after the shutdown",
     )
     .await?;
+
+    // The old connection still streams after the shutdown took effect.
+    open.write_all(b"after").await?;
+    open.read_exact(&mut buf[..5]).await?;
+    assert_eq!(&buf[..5], b"after");
 
     // Dropping the old connection lets the drain end, so `with_server` returns.
     drop(open);
@@ -99,8 +99,6 @@ async fn shutdown_drains_the_open_connections() -> anyhow::Result<()> {
         let open = open_echo_connection(proxy_addr).await?;
 
         channels.shutdown();
-        tokio::time::sleep(Duration::from_millis(300)).await;
-
         check_drain(open, proxy_addr).await
     })
     .await
