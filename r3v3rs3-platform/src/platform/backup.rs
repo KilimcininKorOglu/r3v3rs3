@@ -996,6 +996,28 @@ impl Platform {
     }
 }
 
+/// The spec of a point-in-time branch: the image and settings of its source, with a data volume
+/// of its own, named like the volume of every new database. A branch that mounted the volume
+/// of its source would start a second server on the live data directory.
+fn branch_spec(
+    source: &r3v3rs3_api::platform::AppSpec,
+    new_name: &AppName,
+    host_port: u16,
+) -> anyhow::Result<r3v3rs3_api::platform::AppSpec> {
+    let info = r3v3rs3_api::platform::app_engine_info(source).context("engine not in catalog")?;
+    let mut spec = source.clone();
+    spec.host_port = Some(host_port);
+    spec.replica_of = None;
+    let volume: r3v3rs3_api::container::VolumeName =
+        format!("{}-data", new_name.as_str()).parse()?;
+    spec.volumes = vec![r3v3rs3_api::container::VolumeMount {
+        volume,
+        target: info.data_path.parse()?,
+        read_only: false,
+    }];
+    Ok(spec)
+}
+
 fn create_database_spec(
     new_name: &AppName,
     engine_key: &str,
@@ -1258,7 +1280,6 @@ impl Platform {
             .database
             .as_deref()
             .context("not a managed database")?;
-        // The branch copies the spec of its source, so both mount the same data directory.
         let info = r3v3rs3_api::platform::app_engine_info(&source.spec)
             .context("engine not in catalog")?;
         let created_app = self.create_pitr_app(source, new_name, host_port).await?;
@@ -1292,8 +1313,7 @@ impl Platform {
             Some(p) => p,
             None => self.allocate_host_port().await?,
         };
-        let mut app_spec = source.spec.clone();
-        app_spec.host_port = Some(resolved_port);
+        let app_spec = branch_spec(&source.spec, &new_name, resolved_port)?;
         let app_req = r3v3rs3_api::platform::AppRequest {
             name: new_name,
             target: source.target,
@@ -3218,6 +3238,28 @@ mod tests {
         assert!(
             adapt_postgres_cluster_dump(&mysql, b"-- PostgreSQL database cluster dump").is_none()
         );
+    }
+
+    /// Two servers on one data directory corrupt it: a point-in-time branch must mount a volume
+    /// of its own, named like the volume of every new database, and must not stay a replica.
+    #[test]
+    fn a_pitr_branch_gets_its_own_data_volume() {
+        catalog();
+        let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
+        let source_name: AppName = "shop-db".parse().unwrap();
+        let mut source =
+            create_database_spec(&source_name, "postgres", "postgres:17-alpine", &info, 5432)
+                .unwrap();
+        source.replica_of = Some("abc-def".parse().unwrap());
+        let branch_name: AppName = "shop-db-branch".parse().unwrap();
+        let branch = branch_spec(&source, &branch_name, 5440).unwrap();
+        assert_eq!(branch.volumes.len(), 1);
+        assert_eq!(branch.volumes[0].volume.as_str(), "shop-db-branch-data");
+        assert_ne!(branch.volumes[0].volume, source.volumes[0].volume);
+        assert_eq!(branch.volumes[0].target.as_str(), info.data_path);
+        assert_eq!(branch.host_port, Some(5440));
+        assert!(branch.replica_of.is_none());
+        assert_eq!(branch.database, source.database);
     }
 
     /// An archived segment is restored after the base backup and after the tenant accounts are
