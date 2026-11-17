@@ -2149,7 +2149,15 @@ pub(super) async fn restore_for_test(
     dump: Vec<u8>,
 ) -> anyhow::Result<()> {
     let plan = restore_plan(&info.engine, info, password)?;
-    run_restore(runtime, container, &plan, dump, &info.data_path).await
+    Platform::execute_and_validate_restore(
+        runtime,
+        container,
+        &plan,
+        &info.engine,
+        dump,
+        &info.data_path,
+    )
+    .await
 }
 
 /// Takes the dump of a database container, for the tests on a Docker Engine.
