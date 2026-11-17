@@ -63,10 +63,12 @@ struct History {
 }
 
 impl History {
+    /// A deployment runs its job until `finished_at`, also while it serves already and its old
+    /// container drains; until then the server refuses a rollback.
     fn is_busy(&self) -> bool {
         self.deployments
             .iter()
-            .any(|deployment| is_unfinished(deployment.status))
+            .any(|deployment| is_unfinished(deployment.status) || deployment.finished_at.is_none())
     }
 }
 
@@ -483,6 +485,27 @@ mod tests {
         for status in [DeploymentStatus::Running, DeploymentStatus::Building] {
             assert!(!can_roll_back(&image, &deployment(status, true, true)));
         }
+    }
+
+    /// The server holds the app until the job of a deployment ends, including the drain of the
+    /// old container after the new one serves, and answers a rollback with `app_busy` meanwhile.
+    #[test]
+    fn a_serving_deployment_whose_job_runs_keeps_the_app_busy() {
+        let image = app(json!({"type": "image", "image": "nginx:1.27"}));
+        let draining = DeploymentEntry {
+            finished_at: None,
+            ..deployment(DeploymentStatus::Running, false, true)
+        };
+        let history = History {
+            app: image.clone(),
+            deployments: vec![draining],
+        };
+        assert!(history.is_busy());
+        let done = History {
+            app: image,
+            deployments: vec![deployment(DeploymentStatus::Running, false, true)],
+        };
+        assert!(!done.is_busy());
     }
 
     #[test]

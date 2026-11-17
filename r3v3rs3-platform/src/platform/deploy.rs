@@ -1294,9 +1294,7 @@ impl Platform {
     /// containers after the drain period. A Compose deployment has no drain period, because
     /// Compose stopped the old container already.
     async fn switch(&self, job: &Job, name: &ContainerName) -> anyhow::Result<()> {
-        self.store
-            .finish_deployment(job.app, job.deployment, unix_ms())
-            .await?;
+        self.store.serve_deployment(job.app, job.deployment).await?;
         self.publish().await;
         let compose = matches!(job.image, JobImage::Compose(_));
         if !compose {
@@ -1316,7 +1314,7 @@ impl Platform {
                 }
             }
         }
-        Ok(())
+        self.store.end_deployment(job.deployment, unix_ms()).await
     }
 
     /// Removes the containers of the earlier deployments, also those of another source kind
@@ -3044,6 +3042,46 @@ mod tests {
         let err = setup.platform.rollback(failed.id, "bob").await.unwrap_err();
         let err = err.downcast::<Error>()?;
         assert!(matches!(err, Error::RollbackUnavailable { .. }));
+        Ok(())
+    }
+
+    /// `finished_at` tells a client that the job of a deployment ended. The job still holds the
+    /// app while the old container drains, and refuses a rollback or a deployment with
+    /// `AppBusy` until then, so a deployment that serves already shows no `finished_at` yet.
+    #[tokio::test]
+    async fn a_deployment_ends_only_after_its_old_container_drains() -> anyhow::Result<()> {
+        let (command, _) = mpsc::channel(1);
+        let (mut platform, runtime, _dir) =
+            platform_with(&PlatformConfig::default(), command).await?;
+        platform.fetcher = Arc::new(FakeFetcher::default());
+        platform.compose = Arc::new(FakeCompose::new(runtime.clone()));
+        platform.timing.drain = Duration::from_millis(500);
+        let platform = Arc::new(platform);
+        runtime.state().host_port = app_server(200).await?;
+        let mut shop = request("shop");
+        shop.spec.health_check_path = Some("/healthz".into());
+        let app = platform.add_app(shop, 1).await?;
+        let queued = platform
+            .deploy(app.id, "alice", DeploymentTrigger::Manual)
+            .await?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        let serving = loop {
+            let entry = platform
+                .store
+                .deployment(queued.id)
+                .await?
+                .context("entry")?;
+            if entry.status == DeploymentStatus::Running {
+                break entry;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "never ran");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert!(platform.busy_apps().contains(&app.id));
+        assert_eq!(serving.finished_at, None);
+        let done = settled(&platform, &[app.id], queued.id).await?;
+        assert_eq!(done.status, DeploymentStatus::Running);
+        assert!(done.finished_at.is_some());
         Ok(())
     }
 

@@ -918,14 +918,30 @@ impl PlatformStore {
         Ok(())
     }
 
-    /// Marks a deployment `running` and the running deployment of the same app `superseded`, in
-    /// one transaction.
+    /// Marks a deployment `running` and ends its job at `now`.
     pub async fn finish_deployment(
         &self,
         app: ShortId,
         id: ShortId,
         now: u64,
     ) -> anyhow::Result<()> {
+        self.serve_deployment(app, id).await?;
+        self.end_deployment(id, now).await
+    }
+
+    /// Ends the job of a deployment at `now`, after the old containers of its app are gone.
+    pub async fn end_deployment(&self, id: ShortId, now: u64) -> anyhow::Result<()> {
+        sqlx::query("UPDATE deployments SET finished_at = ? WHERE id = ?")
+            .bind(sql_int(now))
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Marks a deployment `running` and the running deployment of the same app `superseded`, in
+    /// one transaction. Its job goes on until `end_deployment`.
+    pub async fn serve_deployment(&self, app: ShortId, id: ShortId) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             "UPDATE deployments SET status = 'superseded'
@@ -935,8 +951,7 @@ impl PlatformStore {
         .bind(id.to_string())
         .execute(&mut *tx)
         .await?;
-        sqlx::query("UPDATE deployments SET status = 'running', finished_at = ? WHERE id = ?")
-            .bind(sql_int(now))
+        sqlx::query("UPDATE deployments SET status = 'running' WHERE id = ?")
             .bind(id.to_string())
             .execute(&mut *tx)
             .await?;
@@ -961,6 +976,14 @@ impl PlatformStore {
         )
         .bind(sql_int(now))
         .bind(UNFINISHED_MESSAGE)
+        .execute(&mut *tx)
+        .await?;
+        // A deployment that served already when the server stopped keeps serving; only the
+        // cleanup of its old containers did not end.
+        sqlx::query(
+            "UPDATE deployments SET finished_at = ? WHERE status = 'running' AND finished_at IS NULL",
+        )
+        .bind(sql_int(now))
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -1657,6 +1680,23 @@ mod tests {
         assert_eq!(entry.status, DeploymentStatus::Failed);
         assert_eq!(entry.finished_at, Some(8));
         assert!(store.running_deployments().await?.is_empty());
+        Ok(())
+    }
+
+    /// A server that stopped while a serving deployment drained its old container leaves the
+    /// job without an end; the next start ends it and keeps the deployment serving.
+    #[tokio::test]
+    async fn a_restart_ends_a_serving_deployment_whose_cleanup_stopped() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let shop = app("abc-def", "shop");
+        store.insert_app(&shop).await?;
+        let deployment = new_deployment("fff-bcd", &shop, &[]);
+        store.insert_deployment(&deployment).await?;
+        store.serve_deployment(shop.id, deployment.id).await?;
+        store.fail_unfinished(8).await?;
+        let entry = store.deployment(deployment.id).await?.context("entry")?;
+        assert_eq!(entry.status, DeploymentStatus::Running);
+        assert_eq!(entry.finished_at, Some(8));
         Ok(())
     }
 
