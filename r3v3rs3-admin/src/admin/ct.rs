@@ -18,7 +18,21 @@ use tracing::warn;
 
 static CT_STATES: Mutex<Option<HashMap<PathBuf, Arc<CtMonitorState>>>> = Mutex::new(None);
 const MAX_ENTRIES_CAPACITY: usize = 500;
-const HTTP_TIMEOUT: Duration = Duration::from_secs(12);
+/// The time limits of a CT log query.
+#[derive(Debug, Clone, Copy)]
+struct CtHttpLimits {
+    /// The whole query, up to the end of the JSON body.
+    total: Duration,
+    /// The connection to the CT log server, which fails fast when the server is unreachable.
+    connect: Duration,
+}
+
+/// crt.sh needed 20.29 s for one query when measured from a test host, so the limit leaves
+/// room for a slow answer and its large JSON body.
+const CT_LIMITS: CtHttpLimits = CtHttpLimits {
+    total: Duration::from_secs(120),
+    connect: Duration::from_secs(10),
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CtPersistedData {
@@ -298,8 +312,13 @@ fn current_unix_timestamp() -> i64 {
 }
 
 fn build_http_client() -> Result<reqwest::Client, String> {
+    build_http_client_with(CT_LIMITS)
+}
+
+fn build_http_client_with(limits: CtHttpLimits) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .timeout(HTTP_TIMEOUT)
+        .timeout(limits.total)
+        .connect_timeout(limits.connect)
         .user_agent("r3v3rs3-ct-monitor/1.0")
         .build()
         .map_err(|e| e.to_string())
@@ -507,6 +526,57 @@ async fn check_scheduled_tick(state: &AppState, config_dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A CT log server that answers `[]` after `delay`, on a local port.
+    async fn slow_ct_log(delay: Duration) -> CtMonitorConfig {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        r3v3rs3_api::ct::allow_local_ct_urls_for_tests();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            tokio::time::sleep(delay).await;
+            let response =
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n[]";
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+        CtMonitorConfig {
+            ct_api_url: Some(format!("http://127.0.0.1:{port}/?q={{domain}}")),
+            ..Default::default()
+        }
+    }
+
+    /// crt.sh answered a query in 20.29 s when measured from a test host, so the limit of a
+    /// query must be longer than that, and the client must apply the limit it is given.
+    #[tokio::test]
+    async fn a_ct_query_waits_for_a_slow_log_within_its_limit() {
+        // The server installs the provider at start; another test may have installed it already.
+        let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider().install_default();
+        assert!(CT_LIMITS.total > Duration::from_millis(20_290));
+        let slow = Duration::from_millis(300);
+        let patient = CtHttpLimits {
+            total: Duration::from_secs(5),
+            connect: Duration::from_secs(1),
+        };
+        let client = build_http_client_with(patient).unwrap();
+        let config = slow_ct_log(slow).await;
+        let entries = fetch_entries_for_domain(&client, "example.com", &config).await;
+        assert_eq!(entries, Ok(Vec::new()));
+
+        let hasty = CtHttpLimits {
+            total: Duration::from_millis(100),
+            connect: Duration::from_secs(1),
+        };
+        let client = build_http_client_with(hasty).unwrap();
+        let config = slow_ct_log(slow).await;
+        assert!(
+            fetch_entries_for_domain(&client, "example.com", &config)
+                .await
+                .is_err()
+        );
+    }
 
     #[test]
     fn test_is_check_in_progress() {
