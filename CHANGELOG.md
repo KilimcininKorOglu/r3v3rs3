@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.5] - 2026-11-17
+
+### Changed
+- The proxy drops the UDP packets of a quarantined client and refuses a quarantined source that a PROXY protocol header names on TCP ports.
+- A client behind a trusted proxy can no longer send `PURGE`, and its `Forwarded` header is dropped.
+- A viewer account is refused with `403 forbidden` for every state change before the request body is read.
+- The access log hides secrets in query strings, headers and encoded form bodies.
+- The background stream limit counts per client.
+- The SSRF check of the CT log URL can no longer be turned off by an environment variable.
+- The integration tests take their expected values from the RFCs and the attacks the code must stop, and each changed test was shown to fail on broken code.
+
+### Fixed
+- Every new id was all zeros, so all tracked connections shared one id: a closed connection removed the entry of an open one, and the panel listed and terminated the wrong connection. Registries, scheduled commands and outbound webhooks also took this id. New ids are now random.
+- A server started with `--no-webui` read the closed panel upgrade channel as an upgrade request and handed its listeners over again and again.
+- An untrusted upstream certificate, a failed upstream TLS handshake and a failed upstream connection are answered with `502`.
+- An oversized certificate upload is answered with `413`, and a gRPC target outside the proxy with `403`.
+- UDP packets above `max_datagram_size` are dropped instead of cut.
+- SRV routes drop their targets on NXDOMAIN (RFC 8767) and use higher priorities only as backups (RFC 2782).
+- A priority rule with an urgency above 7 is refused, and invalid `Priority` members are ignored (RFC 9218).
+- Compression dictionaries are used only on secure connections, `dcz` and `dcb` bodies start with the RFC 9842 header, and the `Content-Dictionary` header is dropped outside RFC 9842.
+- HTTP requests sent in TLS 0-RTT early data are answered, and the `Early-Data` header of a client is kept.
+
 ## [3.4.4] - 2026-11-16
 
 ### Changed
