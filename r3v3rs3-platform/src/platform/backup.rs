@@ -2138,6 +2138,20 @@ fn cluster_dump_line(line: &str, root: &str) -> Option<String> {
     }
 }
 
+/// Restores a dump into a database container the way a restore of the platform does, for the
+/// tests on a Docker Engine.
+#[cfg(test)]
+pub(super) async fn restore_for_test(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    info: &EngineInfo,
+    password: &str,
+    dump: Vec<u8>,
+) -> anyhow::Result<()> {
+    let plan = restore_plan(&info.engine, info, password)?;
+    run_restore(runtime, container, &plan, dump, &info.data_path).await
+}
+
 /// Takes the dump of a database container, for the tests on a Docker Engine.
 #[cfg(test)]
 pub(super) async fn dump_for_test(

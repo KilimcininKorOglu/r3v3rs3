@@ -357,11 +357,102 @@ async fn check_restart(
     Ok(())
 }
 
+/// The query of `read_command` for the SQL engines: it fails when the table is missing.
+const READ_ENV: &str = "Q=SELECT count(*) FROM t";
+
+/// The shell command that reads what `write_command` wrote into `database` as `login`. It
+/// fails when the data or the account is missing.
+fn read_command(info: &EngineInfo, login: &Login<'_>, database: &str) -> String {
+    let Login {
+        user,
+        password,
+        auth,
+    } = login;
+    let command = match info.engine.as_str() {
+        // The query comes from the fixed `Q` variable of `READ_ENV`.
+        "postgres" => format!(
+            "psql -v ON_ERROR_STOP=1 postgresql://{user}:{password}@$H/{database} -c \"$Q\""
+        ),
+        "mysql" | "mariadb" => format!(
+            "{} -h$H -u{user} -p{password} {database} -e \"$Q\"",
+            info.engine
+        ),
+        "mongodb" => format!(
+            "mongosh \"mongodb://{user}:{password}@$H/{database}?authSource={auth}\" --quiet --eval 'if (db.t.countDocuments() < 1) {{ quit(1); }}'"
+        ),
+        _ => format!(
+            "redis-cli -h $H --no-auth-warning --user {user} --pass {password} get {database}:k | grep -qx 1"
+        ),
+    };
+    format!("{HOST}; {command}")
+}
+
+async fn can_read(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    info: &EngineInfo,
+    login: &Login<'_>,
+    database: &str,
+) -> bool {
+    let command = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        read_command(info, login, database),
+    ];
+    runtime
+        .exec_capture(container, command, vec![READ_ENV.to_string()])
+        .await
+        .is_ok()
+}
+
+/// A backup of a shared server holds the data of its tenants: restored into a new server,
+/// whose users the platform then sets from its stored passwords, the tenant reads its data
+/// again with its own password.
+async fn check_backup_round_trip(
+    runtime: &Arc<dyn ContainerRuntime>,
+    name: &ContainerName,
+    info: &EngineInfo,
+    image: &str,
+) -> anyhow::Result<()> {
+    let dump = super::backup::dump_for_test(runtime, name, info, "rootpw9876").await?;
+    let copy: ContainerName = format!("{name}-restore").parse()?;
+    runtime.create_container(&spec(info, &copy, image)?).await?;
+    let result = restore_and_read(runtime, &copy, info, dump).await;
+    let removed = runtime.remove_container(&copy).await;
+    result?;
+    removed
+}
+
+async fn restore_and_read(
+    runtime: &Arc<dyn ContainerRuntime>,
+    copy: &ContainerName,
+    info: &EngineInfo,
+    dump: Vec<u8>,
+) -> anyhow::Result<()> {
+    runtime.start_container(copy).await?;
+    wait_ready(runtime, copy, info, ROOT_PASSWORD).await?;
+    super::backup::restore_for_test(runtime, copy, info, ROOT_PASSWORD, dump).await?;
+    wait_ready(runtime, copy, info, ROOT_PASSWORD).await?;
+    run_script(
+        runtime,
+        copy,
+        create_script(info, ROOT_PASSWORD, "p_one", "pwone2")?,
+    )
+    .await?;
+    ensure!(
+        can_read(runtime, copy, info, &tenant("p_one", "pwone2"), "p_one").await,
+        "the {} backup did not bring back the data of the tenant",
+        info.engine
+    );
+    Ok(())
+}
+
 /// Starts the server and runs every check on it.
 async fn run_checks(
     runtime: &Arc<dyn ContainerRuntime>,
     name: &ContainerName,
     info: &EngineInfo,
+    image: &str,
 ) -> anyhow::Result<()> {
     runtime.start_container(name).await?;
     wait_ready(runtime, name, info, ROOT_PASSWORD).await?;
@@ -369,7 +460,8 @@ async fn run_checks(
     check_postgres_system_databases(runtime, name, info).await?;
     check_reset_and_drop(runtime, name, info).await?;
     check_root_password(runtime, name, info).await?;
-    check_restart(runtime, name, info).await
+    check_restart(runtime, name, info).await?;
+    check_backup_round_trip(runtime, name, info, image).await
 }
 
 /// Runs every check on a fresh container of the image and removes it again.
@@ -382,7 +474,7 @@ async fn check_engine(key: &str, image: &str) -> anyhow::Result<()> {
     runtime
         .create_container(&spec(&info, &name, image)?)
         .await?;
-    let result = run_checks(&runtime, &name, &info).await;
+    let result = run_checks(&runtime, &name, &info, image).await;
     let removed = runtime.remove_container(&name).await;
     result?;
     removed
