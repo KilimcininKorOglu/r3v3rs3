@@ -306,9 +306,43 @@ impl DockerRuntime {
         Ok((count, space))
     }
 
+    /// Removes the dangling layers and, unless `dangling_only`, every unused image except the
+    /// builds of the platform. `prune_builds` keeps the newest builds of each app for a
+    /// rollback, and a Docker image prune would delete them, because no container uses them.
     async fn prune_docker_images(&self, dangling_only: bool) -> anyhow::Result<(u64, u64)> {
-        let dangling_str = if dangling_only { "true" } else { "false" };
-        let filters = json!({ "dangling": [dangling_str] }).to_string();
+        let (mut count, mut space) = self.prune_dangling_images().await?;
+        if !dangling_only {
+            let (removed, freed) = self.remove_unused_images().await?;
+            count += removed;
+            space += freed;
+        }
+        Ok((count, space))
+    }
+
+    /// Deletes each tagged image that no container uses, except the platform builds. Docker
+    /// refuses an image that a container uses with 409, and the image stays.
+    async fn remove_unused_images(&self) -> anyhow::Result<(u64, u64)> {
+        let images: Vec<ListImage> = self.get("/images/json").await?;
+        let (mut count, mut space) = (0, 0);
+        for image in images
+            .iter()
+            .filter(|image| prunable_image(&image.repo_tags))
+        {
+            let path = format!("/images/{}", image.id);
+            let allowed = [StatusCode::NOT_FOUND, StatusCode::CONFLICT];
+            let res = self
+                .send(Method::DELETE, &path, None, &allowed, RESPONSE_TIMEOUT)
+                .await?;
+            if res.status().is_success() {
+                count += 1;
+                space += image.size;
+            }
+        }
+        Ok((count, space))
+    }
+
+    async fn prune_dangling_images(&self) -> anyhow::Result<(u64, u64)> {
+        let filters = json!({ "dangling": ["true"] }).to_string();
         let path = format!("/images/prune?filters={}", encode(&filters));
         let allowed = [StatusCode::CONFLICT];
         let res = self
@@ -1801,6 +1835,24 @@ fn health_of(status: &str) -> Option<ContainerHealth> {
     }
 }
 
+/// One image of `GET /images/json`.
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ListImage {
+    id: String,
+    #[serde(default)]
+    repo_tags: Option<Vec<String>>,
+    #[serde(default)]
+    size: u64,
+}
+
+/// Whether a full image prune may delete an image with these tags: a build of the platform
+/// stays, because `prune_builds` keeps it for a rollback.
+fn prunable_image(tags: &Option<Vec<String>>) -> bool {
+    let prefix = crate::agent::executor::BUILD_REPOSITORY_PREFIX;
+    !tags.iter().flatten().any(|tag| tag.starts_with(prefix))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct ListContainer {
@@ -1841,6 +1893,21 @@ mod tests {
         frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
         frame.extend_from_slice(payload.as_bytes());
         frame
+    }
+
+    /// A rollback starts the build image of an older deployment, which no container uses, so
+    /// a full image prune must keep every image of the `r3v3rs3/` builds and delete the others.
+    #[test]
+    fn a_full_image_prune_keeps_the_builds_of_the_platform() {
+        let tags = |tags: &[&str]| Some(tags.iter().map(|tag| tag.to_string()).collect());
+        assert!(!prunable_image(&tags(&["r3v3rs3/shop:abc-def"])));
+        assert!(!prunable_image(&tags(&[
+            "nginx:1.27",
+            "r3v3rs3/shop:abc-def"
+        ])));
+        assert!(prunable_image(&tags(&["nginx:1.27"])));
+        assert!(prunable_image(&tags(&["r3v3rs3-shop-web:latest"])));
+        assert!(prunable_image(&None));
     }
 
     #[test]
