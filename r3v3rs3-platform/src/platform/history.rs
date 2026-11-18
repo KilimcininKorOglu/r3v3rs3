@@ -63,9 +63,11 @@ fn history_end(name: &str) -> Option<u64> {
 
 /// The history directories to remove when the retention keeps `keep` base backups over all
 /// timelines, newest first: a history goes when none of its bases is among the kept ones.
-/// `histories` holds the base count of each history, oldest first.
+/// `histories` holds the base count of each history, oldest first. The first base of the
+/// current timeline does not count: a recovery takes it at once, and with `keep = 1` it would
+/// remove the history of the recovery in the same call.
 fn expired_histories(current_bases: usize, histories: &[usize], keep: usize) -> Vec<usize> {
-    let mut left = keep.max(1).saturating_sub(current_bases);
+    let mut left = keep.max(1).saturating_sub(current_bases.saturating_sub(1));
     let mut expired = Vec::new();
     for (index, &count) in histories.iter().enumerate().rev() {
         if left == 0 {
@@ -202,13 +204,22 @@ mod tests {
         assert_eq!(timeline_for(&[], 9_000), 0);
     }
 
-    /// The retention keeps `keep` base backups over all timelines, newest first. With three
-    /// kept and two current bases, the newest history keeps its bases and the older ones go.
+    /// The retention keeps `keep` base backups over all timelines, newest first, without the
+    /// first base of the current timeline. With three kept and two current bases, the two
+    /// newest histories keep their bases and the oldest one goes.
     #[test]
     fn a_history_goes_when_none_of_its_bases_is_kept() {
-        assert_eq!(expired_histories(2, &[1, 2, 1], 3), vec![1, 0]);
-        assert_eq!(expired_histories(3, &[1, 1], 3), vec![1, 0]);
+        assert_eq!(expired_histories(2, &[1, 2, 1], 3), vec![0]);
+        assert_eq!(expired_histories(4, &[1, 1], 3), vec![1, 0]);
         assert!(expired_histories(0, &[1, 1], 5).is_empty());
+    }
+
+    /// With `keep = 1`, the base that a recovery takes right after the move leaves the history
+    /// of that recovery in place; the next base of the new timeline removes it.
+    #[test]
+    fn the_first_base_after_a_recovery_keeps_its_history() {
+        assert!(expired_histories(1, &[1], 1).is_empty());
+        assert_eq!(expired_histories(2, &[1], 1), vec![0]);
     }
 
     /// Only finished history directories count: an unfinished move and other names do not.
