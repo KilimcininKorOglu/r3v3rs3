@@ -593,7 +593,8 @@ async fn upload_and_list(
     runtime
         .upload_file(&names.container, ROUND_TRIP_PATH, content.to_vec())
         .await?;
-    let entries = runtime.list_dir(&names.container, "/data").await?;
+    // The platform reaches the runtime only through the trait, as the file browser does.
+    let entries = ContainerRuntime::list_dir(runtime, &names.container, "/data").await?;
     let found = entries
         .iter()
         .find(|FileEntry { name, .. }| name == "r3v3rs3-test.txt")
@@ -609,7 +610,7 @@ async fn remove_and_list(runtime: &DockerRuntime, names: &Names) -> anyhow::Resu
     runtime
         .remove_path(&names.container, ROUND_TRIP_PATH)
         .await?;
-    let entries = runtime.list_dir(&names.container, "/data").await?;
+    let entries = ContainerRuntime::list_dir(runtime, &names.container, "/data").await?;
     ensure!(
         entries
             .iter()

@@ -1150,6 +1150,14 @@ impl ContainerRuntime for DockerRuntime {
         DockerRuntime::exec_capture(self, name, command, env).await
     }
 
+    async fn list_dir(
+        &self,
+        name: &ContainerName,
+        path: &str,
+    ) -> anyhow::Result<Vec<r3v3rs3_api::platform::FileEntry>> {
+        DockerRuntime::list_dir(self, name, path).await
+    }
+
     async fn download_file(&self, name: &ContainerName, path: &str) -> anyhow::Result<Vec<u8>> {
         DockerRuntime::download_file(self, name, path).await
     }
