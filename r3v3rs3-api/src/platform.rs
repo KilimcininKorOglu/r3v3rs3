@@ -58,11 +58,21 @@ pub struct EngineInfo {
     pub version_data_paths: BTreeMap<String, String>,
 }
 
+/// The catalog name of an official Docker Hub image: `postgres:18-alpine` for the same image
+/// under `docker.io/library/`, `library/` or the Docker Hub mirror `mirror.gcr.io/library/`.
+/// Any other name stays as it is.
+fn official_image_name(image: &str) -> &str {
+    ["docker.io/library/", "mirror.gcr.io/library/", "library/"]
+        .iter()
+        .find_map(|prefix| image.strip_prefix(prefix))
+        .unwrap_or(image)
+}
+
 impl EngineInfo {
     /// The directory that the data volume mounts for one image tag of the engine.
     pub fn data_path_for(&self, image: &str) -> &str {
         self.version_data_paths
-            .get(image)
+            .get(official_image_name(image))
             .map_or(self.data_path.as_str(), String::as_str)
     }
 
@@ -2836,6 +2846,34 @@ mod tests {
         let mut spec = database_spec("postgres:18-alpine");
         spec.database = None;
         assert!(app_engine_info(&spec).is_none());
+    }
+
+    /// An official Docker Hub image has the same content under `docker.io/library/`, its
+    /// short `library/` form and the Docker Hub mirror of Google (`mirror.gcr.io/library/`),
+    /// so each name mounts the data directory of the catalog tag. An image of another
+    /// repository with the same last name is a different image and keeps the default.
+    #[test]
+    fn an_official_image_under_a_registry_prefix_gets_its_version_path() {
+        let info: EngineInfo = serde_json::from_value(json!({
+            "engine": "postgres", "label": "PostgreSQL", "versions": ["postgres:18-alpine"],
+            "container_port": 5432, "password_env": "", "user": "", "default_db": "",
+            "url_scheme": "postgres", "env_prefix": "POSTGRES", "url_database": true,
+            "data_path": "/var/lib/postgresql/data",
+            "version_data_paths": {"postgres:18-alpine": "/var/lib/postgresql"},
+        }))
+        .unwrap();
+        for image in [
+            "postgres:18-alpine",
+            "library/postgres:18-alpine",
+            "docker.io/library/postgres:18-alpine",
+            "mirror.gcr.io/library/postgres:18-alpine",
+        ] {
+            assert_eq!(info.data_path_for(image), "/var/lib/postgresql", "{image}");
+        }
+        assert_eq!(
+            info.data_path_for("example.com/team/postgres:18-alpine"),
+            "/var/lib/postgresql/data"
+        );
     }
 
     #[test]
