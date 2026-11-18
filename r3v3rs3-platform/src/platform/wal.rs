@@ -45,6 +45,9 @@ const PULL_ROUND: Duration = Duration::from_secs(60);
 /// How long a recovery may replay the WAL before it counts as failed.
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// How long the database container may take to answer on the recovered data.
+const READY_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// The directory of the physical base backups under the backup directory of a database.
 const BASE_DIR: &str = "base";
 
@@ -216,7 +219,10 @@ fn data_mount<'a>(spec: &'a AppSpec, data_directory: &str) -> anyhow::Result<&'a
 }
 
 /// The shell script that replaces the data of the server with the base backup and the WAL to
-/// replay. It first moves the current data aside, so `ROLLBACK_SCRIPT` can put it back.
+/// replay, then replays it. It first moves the current data aside, so `rollback_script` can
+/// put it back. The replay runs here, in a container without a restart policy: a server that
+/// stops with FATAL makes the script fail at once, where the database container would be
+/// started again and again by Docker.
 fn recovery_script(mount: &str, data_directory: &str, target: &str) -> String {
     format!(
         "set -e; M='{mount}'; D='{data_directory}'; P=\"$M/{PREVIOUS_DIR}\"; \
@@ -228,9 +234,19 @@ touch \"$D/recovery.signal\"; \
 printf '%s\\n' \"restore_command = 'cp {WAL_ARCHIVE_PATH}/%f %p'\" \
 \"recovery_target_time = '{target}'\" \"recovery_target_action = 'promote'\" \
 >> \"$D/postgresql.auto.conf\"; \
-chown -R postgres:postgres \"$M\" {WAL_ARCHIVE_PATH}; chmod 700 \"$D\""
+chown -R postgres:postgres \"$M\" {WAL_ARCHIVE_PATH}; chmod 700 \"$D\"; {REPLAY}"
     )
 }
+
+/// Starts the server on the prepared data, waits until it left recovery and stops it. The
+/// log of the server goes to the output of the helper, so a FATAL line reaches the error.
+const REPLAY: &str = "G=$(command -v gosu || command -v su-exec); L=/tmp/recovery.log; \
+fail() { cat \"$L\"; exit 1; }; \
+$G postgres pg_ctl -D \"$D\" -w -t 600 -l \"$L\" start || fail; i=0; \
+until [ \"$($G postgres psql -tAc 'SELECT pg_is_in_recovery()')\" = f ]; do \
+$G postgres pg_ctl -D \"$D\" status >/dev/null || fail; \
+i=$((i+1)); [ $i -lt 600 ] || fail; sleep 1; done; \
+$G postgres pg_ctl -D \"$D\" -w -t 120 stop";
 
 /// The shell script that puts the data that `recovery_script` moved aside back in place.
 fn rollback_script(mount: &str) -> String {
@@ -545,13 +561,42 @@ impl Platform {
         let _lock = self.lock_app(&app)?;
         let pg = self.pg_session(db_id).await?;
         archive_names(&pg.runtime, &pg.container).await?;
-        let closed = pg.switch_wal().await?;
+        let (closed, mark) = pg.switch_wal().await?;
         self.wait_archived(db_id, &pg, closed.as_deref()).await?;
         self.pull_wal_locked(db_id).await?;
         // The first base backup starts after the closed file, so its retention removes that
         // file; the segment is read before the backup.
-        let segment = self.archived_file(db_id, closed.as_deref()).await?;
+        let segment = self.closed_segment(db_id, closed.as_deref(), mark).await?;
         self.ensure_base_locked(db_id).await?;
+        Ok(segment)
+    }
+
+    /// The stored segment of the file that the switch closed, ending before its own commit.
+    async fn closed_segment(
+        &self,
+        db_id: ShortId,
+        closed: Option<&str>,
+        mark: u64,
+    ) -> anyhow::Result<WalSegment> {
+        let segment = self.archived_file(db_id, closed).await?;
+        if closed.is_none() {
+            return Ok(segment);
+        }
+        self.end_segment_at(db_id, segment, mark).await
+    }
+
+    /// Sets the end of a segment to the time before the commit that closed it. A target after
+    /// that commit would need WAL that the archive does not hold yet.
+    async fn end_segment_at(
+        &self,
+        db_id: ShortId,
+        mut segment: WalSegment,
+        mark: u64,
+    ) -> anyhow::Result<WalSegment> {
+        segment.end_time = mark.min(segment.end_time);
+        let dir = self.wal_dir(db_id).await?;
+        let manifest = serde_json::to_vec(&segment)?;
+        write_atomic(&dir.join(format!("{}.json", segment.id)), &manifest).await?;
         Ok(segment)
     }
 
@@ -705,7 +750,14 @@ impl Platform {
         )
         .await?;
         let deadline = tokio::time::Instant::now() + RECOVERY_TIMEOUT;
-        while self.database_container(branch.id).await.is_err() {
+        // The recovery takes the lock of the branch, which the deployment holds until its
+        // job ends, after the container already runs.
+        loop {
+            // The guard of the busy set is released before the next await.
+            let busy = self.busy_apps().contains(&branch.id);
+            if !busy && self.database_container(branch.id).await.is_ok() {
+                break;
+            }
             ensure!(
                 tokio::time::Instant::now() < deadline,
                 "the branch database {} did not start",
@@ -735,7 +787,7 @@ impl Platform {
             .run_db_helper(&runtime, &app, script, Some(upload))
             .await;
         let replayed = match replaced {
-            Ok(()) => replay(&runtime, &container).await,
+            Ok(()) => wait_ready(&runtime, &container).await,
             Err(err) => Err(err),
         };
         match replayed {
@@ -811,46 +863,36 @@ impl Platform {
         self.run_db_helper(runtime, app, rollback_script(mount), None)
             .await
             .context("the old data of the database could not be put back")?;
-        runtime.start_container(container).await
+        // The caller reports the failure only once the database answers again.
+        wait_ready(runtime, container)
+            .await
+            .context("the database did not answer on its old data")
     }
 }
 
-/// Starts the server on the replaced data and waits until it left recovery.
-async fn replay(
+/// Starts the database container on the recovered data and waits until it answers. The
+/// wait is bounded: Docker restarts a server that stops, so the container can look running
+/// while it never answers.
+async fn wait_ready(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
 ) -> anyhow::Result<()> {
     runtime.start_container(container).await?;
-    let deadline = tokio::time::Instant::now() + RECOVERY_TIMEOUT;
-    let command: Vec<String> = [
-        "psql",
-        "-U",
-        "postgres",
-        "-tAc",
-        "SELECT pg_is_in_recovery()",
-    ]
-    .map(str::to_string)
-    .to_vec();
+    let deadline = tokio::time::Instant::now() + READY_TIMEOUT;
+    let command: Vec<String> = ["psql", "-U", "postgres", "-tAc", "SELECT 1"]
+        .map(str::to_string)
+        .to_vec();
     loop {
-        let running = runtime
-            .inspect_container(container)
-            .await?
-            .is_some_and(|info| info.running);
-        if !running {
-            bail!("{}", fatal_line(runtime, container).await);
-        }
         if let Ok(out) = runtime
             .exec_capture(container, command.clone(), Vec::new())
             .await
-            && String::from_utf8_lossy(&out).trim() == "f"
+            && String::from_utf8_lossy(&out).trim() == "1"
         {
             return Ok(());
         }
-        ensure!(
-            tokio::time::Instant::now() < deadline,
-            "the recovery did not finish in {} seconds",
-            RECOVERY_TIMEOUT.as_secs()
-        );
+        if tokio::time::Instant::now() >= deadline {
+            bail!("{}", fatal_line(runtime, container).await);
+        }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
@@ -909,12 +951,19 @@ impl PgSession {
     /// Closes the current WAL file and returns its name. Without a write since the last switch,
     /// `pg_switch_wal()` closes nothing and `pg_walfile_name` of its answer names the open
     /// file, which is never archived; so the name is read before and after the switch.
-    async fn switch_wal(&self) -> anyhow::Result<Option<String>> {
+    ///
+    /// A recovery stops only on a commit record later than its target, and ends with FATAL
+    /// when the WAL runs out first. So the switch first commits a transaction of its own: the
+    /// closed file then holds a commit at or after the returned time, and every target up to
+    /// that time can be reached.
+    async fn switch_wal(&self) -> anyhow::Result<(Option<String>, u64)> {
+        let mark = unix_ms();
+        self.value("SELECT pg_current_xact_id()").await?;
         let current = "SELECT pg_walfile_name(pg_current_wal_insert_lsn())";
         let before = self.value(current).await?;
         self.value("SELECT pg_switch_wal()").await?;
         let after = self.value(current).await?;
-        Ok((before != after).then_some(before))
+        Ok(((before != after).then_some(before), mark))
     }
 
     /// The tar archive of the data directory that `pg_basebackup` writes to stdout.

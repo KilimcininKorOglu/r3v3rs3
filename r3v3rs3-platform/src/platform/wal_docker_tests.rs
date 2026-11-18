@@ -35,17 +35,26 @@ async fn docker_platform() -> anyhow::Result<(Arc<Platform>, TempDir)> {
     Ok((Arc::new(platform), dir))
 }
 
-/// Adds a PostgreSQL database with its own data volume and deploys it until it runs.
-async fn running_postgres(platform: &Arc<Platform>, name: &str) -> anyhow::Result<AppEntry> {
+/// The image tag of the tests; PostgreSQL 18 mounts its volume above the data directory.
+const PG17: &str = "17-alpine";
+
+/// Adds a PostgreSQL database with its own data volume at the path of the catalog and
+/// deploys it until it runs.
+async fn running_postgres(
+    platform: &Arc<Platform>,
+    name: &str,
+    tag: &str,
+) -> anyhow::Result<AppEntry> {
+    let info = r3v3rs3_api::platform::engine_info("postgres").context("the catalog")?;
     let mut req = request(name);
     req.spec.source = AppSource::Image {
-        image: "mirror.gcr.io/library/postgres:17-alpine".parse()?,
+        image: format!("mirror.gcr.io/library/postgres:{tag}").parse()?,
     };
     req.spec.port = 5432;
     req.spec.database = Some("postgres".into());
     req.spec.volumes = vec![VolumeMount {
         volume: format!("{name}-data").parse()?,
-        target: "/var/lib/postgresql/data".parse()?,
+        target: info.data_path_for(&format!("postgres:{tag}")).parse()?,
         read_only: false,
     }];
     let app = platform.add_app(req, 1).await?;
@@ -104,8 +113,12 @@ const ROWS: &str = "SELECT string_agg(i::text, ',' ORDER BY i) FROM t";
 
 /// A running database with six rows committed about a second apart after its first archive
 /// call, and the time between the commits of rows 3 and 4.
-async fn six_rows(platform: &Arc<Platform>, name: &str) -> anyhow::Result<(AppEntry, u64)> {
-    let db = running_postgres(platform, name).await?;
+async fn six_rows(
+    platform: &Arc<Platform>,
+    name: &str,
+    tag: &str,
+) -> anyhow::Result<(AppEntry, u64)> {
+    let db = running_postgres(platform, name, tag).await?;
     let table = "CREATE TABLE t (i int, at timestamptz DEFAULT clock_timestamp())";
     sql(platform, db.id, table).await?;
     // The first archive call takes the base backup that the recovery starts from.
@@ -116,8 +129,12 @@ async fn six_rows(platform: &Arc<Platform>, name: &str) -> anyhow::Result<(AppEn
 }
 
 /// Recovers a branch to the middle between rows 3 and 4.
-async fn recover_between_two_rows(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
-    let (db, target_time) = six_rows(platform, name).await?;
+async fn recover_between_two_rows(
+    platform: &Arc<Platform>,
+    name: &str,
+    tag: &str,
+) -> anyhow::Result<()> {
+    let (db, target_time) = six_rows(platform, name, tag).await?;
     let request = PitrRestoreRequest {
         target_time,
         new_name: Some(format!("{name}-branch").parse()?),
@@ -138,7 +155,7 @@ async fn recover_between_two_rows(platform: &Arc<Platform>, name: &str) -> anyho
 
 /// Recovers the database itself to the middle between rows 3 and 4.
 async fn recover_in_place(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
-    let (db, target_time) = six_rows(platform, name).await?;
+    let (db, target_time) = six_rows(platform, name, PG17).await?;
     let request = PitrRestoreRequest {
         target_time,
         new_name: None,
@@ -156,7 +173,7 @@ async fn recover_in_place(platform: &Arc<Platform>, name: &str) -> anyhow::Resul
 /// A recovery that misses one archived WAL file fails, names the file and leaves the data of
 /// the database as it was.
 async fn refuse_a_gap_in_the_archive(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
-    let (db, target_time) = six_rows(platform, name).await?;
+    let (db, target_time) = six_rows(platform, name, PG17).await?;
     // The rows sit in the current WAL file; closing it puts them into the archive.
     let lost = platform.archive_wal(db.id).await?;
     let dir = platform.wal_dir(db.id).await?;
@@ -177,6 +194,48 @@ async fn refuse_a_gap_in_the_archive(platform: &Arc<Platform>, name: &str) -> an
     Ok(())
 }
 
+/// A target in an idle period after the last commit lies inside the archive: the recovery
+/// keeps every commit and the server answers afterwards. PostgreSQL stops a recovery only on
+/// a commit record, and ends with FATAL when the WAL runs out before the target.
+async fn recover_into_an_idle_period(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let db = running_postgres(platform, name, PG17).await?;
+    let table = "CREATE TABLE t (i int, at timestamptz DEFAULT clock_timestamp())";
+    sql(platform, db.id, table).await?;
+    platform.archive_wal(db.id).await?;
+    let commits = commit_six_rows(platform, db.id).await?;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let request = PitrRestoreRequest {
+        target_time: commits[5] + 1000,
+        new_name: None,
+        host_port: None,
+    };
+    platform.restore_pitr(db.id, request).await?;
+    let rows = sql(platform, db.id, ROWS).await?;
+    ensure!(rows == "1,2,3,4,5,6", "the database holds the rows {rows}");
+    Ok(())
+}
+
+/// A recovery whose replay fails half way, here on a damaged WAL file, puts the data that
+/// it moved aside back, and the server answers and takes writes again.
+async fn roll_back_a_failed_replay(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let (db, target_time) = six_rows(platform, name, PG17).await?;
+    let damaged = platform.archive_wal(db.id).await?;
+    let dir = platform.wal_dir(db.id).await?;
+    let broken = super::backup::gzip(b"not a WAL file").await?;
+    tokio::fs::write(dir.join(format!("{}.wal.gz", damaged.id)), broken).await?;
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: None,
+        host_port: None,
+    };
+    let err = platform.restore_pitr(db.id, request).await.unwrap_err();
+    ensure!(format!("{err:#}").contains("FATAL"), "{err:#}");
+    let rows = sql(platform, db.id, ROWS).await?;
+    ensure!(rows == "1,2,3,4,5,6", "the database holds the rows {rows}");
+    sql(platform, db.id, "INSERT INTO t (i) VALUES (7)").await?;
+    Ok(())
+}
+
 async fn remove_apps(platform: &Arc<Platform>) -> anyhow::Result<()> {
     for app in platform.store.apps().await? {
         platform.delete_app(app.id).await?;
@@ -190,9 +249,24 @@ async fn postgres_recovers_to_a_second_on_the_docker_engine() -> anyhow::Result<
     catalog();
     let (platform, _dir) = docker_platform().await?;
     let name = format!("pitr{}", hex::encode(rand::random::<[u8; 3]>()));
-    let run = recover_between_two_rows(&platform, &name)
+    let run = recover_between_two_rows(&platform, &name, PG17)
         .await
         .context("the recovery between two rows");
+    let cleanup = remove_apps(&platform).await;
+    run.and(cleanup)
+}
+
+/// PostgreSQL 18 keeps its data directory below the mount point of its volume, so the base
+/// backup goes into a subdirectory of the volume.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn postgres_18_recovers_to_a_second_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let name = format!("pitr{}", hex::encode(rand::random::<[u8; 3]>()));
+    let run = recover_between_two_rows(&platform, &name, "18-alpine")
+        .await
+        .context("the recovery between two rows on PostgreSQL 18");
     let cleanup = remove_apps(&platform).await;
     run.and(cleanup)
 }
@@ -220,6 +294,33 @@ async fn postgres_keeps_its_data_when_a_wal_file_is_missing_on_the_docker_engine
     let run = refuse_a_gap_in_the_archive(&platform, &name)
         .await
         .context("the recovery with a missing WAL file");
+    let cleanup = remove_apps(&platform).await;
+    run.and(cleanup)
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn postgres_puts_its_data_back_when_the_replay_fails_on_the_docker_engine()
+-> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let name = format!("pitr{}", hex::encode(rand::random::<[u8; 3]>()));
+    let run = roll_back_a_failed_replay(&platform, &name)
+        .await
+        .context("the recovery with a damaged WAL file");
+    let cleanup = remove_apps(&platform).await;
+    run.and(cleanup)
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn postgres_recovers_into_an_idle_period_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let name = format!("pitr{}", hex::encode(rand::random::<[u8; 3]>()));
+    let run = recover_into_an_idle_period(&platform, &name)
+        .await
+        .context("the recovery into an idle period");
     let cleanup = remove_apps(&platform).await;
     run.and(cleanup)
 }
