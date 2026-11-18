@@ -19,6 +19,7 @@ pub mod disaster_recovery;
 #[cfg(test)]
 pub(crate) mod fake;
 mod github_app;
+mod history;
 pub mod hooks;
 pub mod image_check;
 mod metrics;

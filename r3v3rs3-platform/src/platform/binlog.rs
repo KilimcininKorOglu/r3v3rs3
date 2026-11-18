@@ -9,6 +9,7 @@
 
 use super::Platform;
 use super::backup::ungzip;
+use super::history::{Archive, timeline_for};
 use super::wal::{
     BaseBackup, BaseStart, PREVIOUS_DIR, data_mount, is_archive_name, pick_base, replay_files,
     rollback_script, store_native_segment,
@@ -284,6 +285,7 @@ impl Platform {
         force: bool,
     ) -> anyhow::Result<Vec<WalSegment>> {
         let session = self.my_session(db_id).await?;
+        self.finish_history_moves(db_id).await?;
         self.drop_legacy_segments(db_id).await?;
         let first = self.first_needed_log(db_id).await?;
         let logs = flush_if_grew(&session, db_id, force).await?;
@@ -378,9 +380,12 @@ impl Platform {
 
     /// The recovery window: from the end of the oldest base backup to the newest pulled file.
     pub(super) async fn binlog_pitr_range(&self, db_id: ShortId) -> anyhow::Result<PitrRange> {
-        let bases = self.list_base_backups(db_id).await?;
-        let segments = self.native_segments(db_id).await?;
-        let earliest = bases.first().map(|base| base.created_at);
+        let (mut bases, mut segments) = (Vec::new(), Vec::new());
+        for archive in self.archives(db_id).await? {
+            bases.extend(archive.bases().await?);
+            segments.extend(archive.segments().await?);
+        }
+        let earliest = bases.iter().map(|base| base.created_at).min();
         let latest = segments.iter().map(|s| s.end_time).max();
         let archiving = match self.my_session(db_id).await {
             Ok(session) => session
@@ -430,39 +435,42 @@ impl Platform {
         db_id: ShortId,
         target: u64,
     ) -> anyhow::Result<(BaseBackup, Vec<WalSegment>, Vec<(String, Vec<u8>)>)> {
+        self.finish_history_moves(db_id).await?;
         if self.store.running_deployment(db_id).await?.is_some() {
             self.archive_binlog(db_id).await?;
         }
-        let bases = self.list_base_backups(db_id).await?;
-        let segments = self.native_segments(db_id).await?;
+        let mut archives = self.archives(db_id).await?;
+        let ends: Vec<u64> = archives.iter().filter_map(|a| a.end).collect();
+        let archive = archives.swap_remove(timeline_for(&ends, target));
+        let bases = archive.bases().await?;
+        let segments = archive.segments().await?;
         let base = pick_base(&bases, &segments, target)?.clone();
         let files = replay_files(&segments, &base.start_wal);
-        let upload = self.binlog_upload(db_id, &base, &files).await?;
+        let upload = binlog_upload(&archive, &base, &files).await?;
         Ok((base, files, upload))
     }
+}
 
-    /// The dump and the log files that a recovery uploads, read before anything stops, so a
-    /// missing file fails the recovery while the database still runs on its data.
-    async fn binlog_upload(
-        &self,
-        db_id: ShortId,
-        base: &BaseBackup,
-        files: &[WalSegment],
-    ) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
-        let base_dir = self.base_dir(db_id).await?;
-        let dump = tokio::fs::read(base_dir.join(format!("{}.tar.gz", base.id))).await?;
-        let mut upload = vec![("base.sql".to_string(), ungzip(&dump).await?)];
-        let wal_dir = self.wal_dir(db_id).await?;
-        for segment in files {
-            let path = wal_dir.join(format!("{}.wal.gz", segment.id));
-            let compressed = tokio::fs::read(&path)
-                .await
-                .with_context(|| format!("the binary log {} is missing", segment.filename))?;
-            upload.push((segment.filename.clone(), ungzip(&compressed).await?));
-        }
-        Ok(upload)
+/// The dump and the log files that a recovery uploads, read before anything stops, so a
+/// missing file fails the recovery while the database still runs on its data.
+async fn binlog_upload(
+    archive: &Archive,
+    base: &BaseBackup,
+    files: &[WalSegment],
+) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    let dump = tokio::fs::read(archive.base.join(format!("{}.tar.gz", base.id))).await?;
+    let mut upload = vec![("base.sql".to_string(), ungzip(&dump).await?)];
+    for segment in files {
+        let path = archive.wal.join(format!("{}.wal.gz", segment.id));
+        let compressed = tokio::fs::read(&path)
+            .await
+            .with_context(|| format!("the binary log {} is missing", segment.filename))?;
+        upload.push((segment.filename.clone(), ungzip(&compressed).await?));
     }
+    Ok(upload)
+}
 
+impl Platform {
     /// Replaces the data of the database with a fresh server that holds the base dump and the
     /// replayed binary log. A failed recovery puts the old data back.
     async fn recover_binlog_into(
@@ -488,7 +496,11 @@ impl Platform {
             .replay_into_fresh_server(&runtime, &app, &mount, (base, upload, stop))
             .await;
         match replayed {
-            Ok(()) => self.finish_binlog_recovery(db_id, &mount).await,
+            Ok(()) => {
+                // The archive moves while the lock keeps every pull of the new server out.
+                self.start_history(db_id).await?;
+                self.finish_binlog_recovery(db_id, &mount).await
+            }
             Err(err) => {
                 self.roll_back_binlog(&runtime, &app, &container, &mount)
                     .await?;
@@ -614,31 +626,13 @@ impl Platform {
     }
 
     /// The recovered server starts its binary log again at its first file, and the replay is
-    /// not in it. The archive of the old history would mix with the new one under the same
-    /// file names, so it is removed and a new base backup starts the new history.
+    /// not in it. The recovery moved the old archive into a history, so a new base backup
+    /// starts the new one.
     async fn start_new_history(&self, db_id: ShortId) -> anyhow::Result<()> {
-        self.remove_history(db_id).await?;
         remember_flush(db_id, None);
         self.archive_binlog(db_id)
             .await
             .context("the recovered database took no new base backup")?;
-        Ok(())
-    }
-}
-
-impl Platform {
-    /// Removes the archived log files and the base backups of a database.
-    async fn remove_history(&self, db_id: ShortId) -> anyhow::Result<()> {
-        let wal_dir = self.wal_dir(db_id).await?;
-        for segment in self.native_segments(db_id).await? {
-            super::wal::remove_segment(&wal_dir, &segment.id).await?;
-        }
-        let base_dir = self.base_dir(db_id).await?;
-        for base in self.list_base_backups(db_id).await? {
-            for name in [format!("{}.tar.gz", base.id), format!("{}.json", base.id)] {
-                tokio::fs::remove_file(base_dir.join(name)).await?;
-            }
-        }
         Ok(())
     }
 }

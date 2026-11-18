@@ -1125,6 +1125,27 @@ async fn resolve_s3_restore_app(
     Ok((app_req, engine_key, info))
 }
 
+/// The archived segments in the directory `dir`, sorted by start time.
+pub(super) async fn segments_in(dir: &std::path::Path) -> anyhow::Result<Vec<WalSegment>> {
+    let mut segments = Vec::new();
+    let mut reader = match tokio::fs::read_dir(dir).await {
+        Ok(reader) => reader,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(segments),
+        Err(err) => return Err(err.into()),
+    };
+    while let Some(file) = reader.next_entry().await? {
+        let path = file.path();
+        if path.extension().is_some_and(|ext| ext == "json")
+            && let Ok(json) = tokio::fs::read(&path).await
+            && let Ok(segment) = serde_json::from_slice::<WalSegment>(&json)
+        {
+            segments.push(segment);
+        }
+    }
+    segments.sort_by_key(|s| s.start_time);
+    Ok(segments)
+}
+
 impl Platform {
     /// The directory under the config directory that holds WAL / binary log segments.
     pub async fn wal_dir(&self, db_id: ShortId) -> anyhow::Result<std::path::PathBuf> {
@@ -1134,24 +1155,7 @@ impl Platform {
 
     /// Lists the archived WAL / binary log segments of a database, sorted by start time.
     pub async fn list_wal_segments(&self, db_id: ShortId) -> anyhow::Result<Vec<WalSegment>> {
-        let dir = self.wal_dir(db_id).await?;
-        let mut segments = Vec::new();
-        let mut reader = match tokio::fs::read_dir(&dir).await {
-            Ok(reader) => reader,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(segments),
-            Err(err) => return Err(err.into()),
-        };
-        while let Some(file) = reader.next_entry().await? {
-            let path = file.path();
-            if path.extension().is_some_and(|ext| ext == "json")
-                && let Ok(json) = tokio::fs::read(&path).await
-                && let Ok(segment) = serde_json::from_slice::<WalSegment>(&json)
-            {
-                segments.push(segment);
-            }
-        }
-        segments.sort_by_key(|s| s.start_time);
-        Ok(segments)
+        segments_in(&self.wal_dir(db_id).await?).await
     }
 
     async fn wal_capture_target(

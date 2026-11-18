@@ -413,6 +413,25 @@ struct Recovery<'a> {
     target: String,
 }
 
+/// The base backups in the directory `dir`, oldest first.
+pub(super) async fn bases_in(dir: &Path) -> anyhow::Result<Vec<BaseBackup>> {
+    let mut bases = Vec::new();
+    let mut reader = match tokio::fs::read_dir(dir).await {
+        Ok(reader) => reader,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(bases),
+        Err(err) => return Err(err.into()),
+    };
+    while let Some(file) = reader.next_entry().await? {
+        let path = file.path();
+        if path.extension().is_some_and(|ext| ext == "json") {
+            let json = tokio::fs::read(&path).await?;
+            bases.push(serde_json::from_slice::<BaseBackup>(&json)?);
+        }
+    }
+    bases.sort_by_key(|base| base.created_at);
+    Ok(bases)
+}
+
 impl Platform {
     pub(super) async fn base_dir(&self, db_id: ShortId) -> anyhow::Result<PathBuf> {
         Ok(self.backup_dir(db_id).await?.join(BASE_DIR))
@@ -423,22 +442,7 @@ impl Platform {
         &self,
         db_id: ShortId,
     ) -> anyhow::Result<Vec<BaseBackup>> {
-        let dir = self.base_dir(db_id).await?;
-        let mut bases = Vec::new();
-        let mut reader = match tokio::fs::read_dir(&dir).await {
-            Ok(reader) => reader,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(bases),
-            Err(err) => return Err(err.into()),
-        };
-        while let Some(file) = reader.next_entry().await? {
-            let path = file.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                let json = tokio::fs::read(&path).await?;
-                bases.push(serde_json::from_slice::<BaseBackup>(&json)?);
-            }
-        }
-        bases.sort_by_key(|base| base.created_at);
-        Ok(bases)
+        bases_in(&self.base_dir(db_id).await?).await
     }
 
     /// The archived files of the database that the engine wrote itself.
@@ -517,6 +521,8 @@ impl Platform {
     /// the removed backups needed.
     pub(super) async fn prune_base_backups(&self, db_id: ShortId) -> anyhow::Result<()> {
         self.remove_expired_bases(db_id).await?;
+        let keep = self.backup_config().await?.keep as usize;
+        self.prune_histories(db_id, keep).await?;
         let Some(oldest) = self.list_base_backups(db_id).await?.into_iter().next() else {
             return Ok(());
         };

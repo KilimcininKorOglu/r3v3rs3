@@ -163,6 +163,7 @@ async fn recover_in_place(
     image: &str,
 ) -> anyhow::Result<()> {
     let (db, target_time) = six_rows(platform, name, engine, image).await?;
+    let fifth = row_time(platform, db.id, 5).await?;
     let request = PitrRestoreRequest {
         target_time,
         new_name: None,
@@ -174,8 +175,52 @@ async fn recover_in_place(
     ensure!(rows == "1,2,3", "the database holds the rows {rows}");
     // The recovered server takes writes, and its new history can be archived again.
     sql_on(platform, db.id, "INSERT INTO app.t (i) VALUES (7)").await?;
+    let seventh = row_time(platform, db.id, 7).await?;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
     platform.archive_wal(db.id).await?;
+    // The history before the recovery stays reachable: a branch to after row 5 holds the rows
+    // that the recovery discarded, and a branch to after row 7 holds the new timeline.
+    let old = branch_rows(platform, db.id, &format!("{name}-old"), fifth + 1000).await?;
+    ensure!(
+        old == "1,2,3,4,5",
+        "the branch of the old history holds {old}"
+    );
+    let new = branch_rows(platform, db.id, &format!("{name}-new"), seventh + 1000).await?;
+    ensure!(
+        new == "1,2,3,7",
+        "the branch of the new history holds {new}"
+    );
     Ok(())
+}
+
+/// The commit time of row `i` in Unix milliseconds.
+async fn row_time(platform: &Arc<Platform>, id: ShortId, i: u32) -> anyhow::Result<u64> {
+    let query = "SELECT i, ROUND(UNIX_TIMESTAMP(at) * 1000) FROM app.t";
+    let rows = sql_on(platform, id, query).await?;
+    let wanted = i.to_string();
+    let at = rows
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .find(|(row, _)| *row == wanted)
+        .with_context(|| format!("row {i} is not in the table"))?
+        .1;
+    Ok(at.parse()?)
+}
+
+/// The rows of a new branch of `id` recovered to `target_time`.
+async fn branch_rows(
+    platform: &Arc<Platform>,
+    id: ShortId,
+    name: &str,
+    target_time: u64,
+) -> anyhow::Result<String> {
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: Some(name.parse()?),
+        host_port: None,
+    };
+    let response = platform.restore_pitr(id, request).await?;
+    sql_on(platform, response.app.id, ROWS).await
 }
 
 /// A recovery that misses one archived log file fails, names the file and leaves the data of
