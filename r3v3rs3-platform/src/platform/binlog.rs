@@ -285,18 +285,31 @@ impl Platform {
     ) -> anyhow::Result<Vec<WalSegment>> {
         let session = self.my_session(db_id).await?;
         self.drop_legacy_segments(db_id).await?;
+        let first = self.first_needed_log(db_id).await?;
         let logs = flush_if_grew(&session, db_id, force).await?;
-        let pulled = self.store_closed_logs(db_id, &session, &logs).await?;
+        let stored = self.native_segments(db_id).await?;
+        let names = files_to_fetch(&logs, &stored, &first);
+        let pulled = self.store_logs(db_id, &session, &names).await?;
         purge_closed(&session, &logs).await?;
         Ok(pulled)
     }
 
-    /// Stores every closed log file that the archive does not hold yet.
-    async fn store_closed_logs(
+    /// The log file where the replay from the oldest base backup starts. A database without a
+    /// base backup gets one first: a MySQL server keeps its binary log by default, often for
+    /// weeks, and the files before the first base are never needed.
+    async fn first_needed_log(&self, db_id: ShortId) -> anyhow::Result<String> {
+        if let Some(base) = self.list_base_backups(db_id).await?.into_iter().next() {
+            return Ok(base.start_wal);
+        }
+        Ok(self.take_binlog_base_locked(db_id).await?.start_wal)
+    }
+
+    /// Stores the given closed log files.
+    async fn store_logs(
         &self,
         db_id: ShortId,
         session: &MySession,
-        logs: &[(String, u64)],
+        names: &[String],
     ) -> anyhow::Result<Vec<WalSegment>> {
         let stored = self.native_segments(db_id).await?;
         let dir = self.wal_dir(db_id).await?;
@@ -304,11 +317,7 @@ impl Platform {
         let datadir = session.datadir().await?;
         let mut start = stored.iter().map(|s| s.end_time).max().unwrap_or(0);
         let mut pulled = Vec::new();
-        let closed = logs.split_last().map_or(&[][..], |(_, closed)| closed);
-        for (name, _) in closed {
-            if stored.iter().any(|s| &s.filename == name) {
-                continue;
-            }
+        for name in names {
             let path = format!("{datadir}/{name}");
             let bytes = session
                 .runtime
@@ -634,6 +643,20 @@ impl Platform {
     }
 }
 
+/// The closed log files that the archive needs and does not hold yet: the open file (the last
+/// one) is still written, and a file before `first` precedes every base backup.
+fn files_to_fetch(logs: &[(String, u64)], stored: &[WalSegment], first: &str) -> Vec<String> {
+    let first = super::wal::log_order(first);
+    let closed = logs.split_last().map_or(&[][..], |(_, closed)| closed);
+    closed
+        .iter()
+        .map(|(name, _)| name)
+        .filter(|name| super::wal::log_order(name) >= first)
+        .filter(|name| !stored.iter().any(|s| &&s.filename == name))
+        .cloned()
+        .collect()
+}
+
 /// Lists the log files of the server, after closing the open one when it grew since the last
 /// flush (or always with `force`).
 async fn flush_if_grew(
@@ -747,6 +770,35 @@ mod tests {
             assert!(script.contains(tool) && script.contains(flag), "{script}");
             assert!(script.contains("--single-transaction"), "{script}");
         }
+    }
+
+    /// A default mysql:9 writes its binary log from the start (`@@log_bin = 1`, measured) and
+    /// keeps weeks of files. The first pull after an upgrade must fetch none of the files before
+    /// the first base backup, nor the open file, nor a file it already holds.
+    #[test]
+    fn only_the_closed_files_from_the_first_base_are_fetched() {
+        let logs: Vec<(String, u64)> = [
+            "binlog.000001",
+            "binlog.000002",
+            "binlog.000003",
+            "binlog.000004",
+            "binlog.000005",
+        ]
+        .map(|name| (name.to_string(), 100))
+        .to_vec();
+        let stored = WalSegment {
+            id: "a".into(),
+            app: "abc-def".parse().unwrap(),
+            filename: "binlog.000003".into(),
+            size: 1,
+            sha256: String::new(),
+            start_time: 0,
+            end_time: 1,
+            created_at: 1,
+            native: true,
+        };
+        let names = files_to_fetch(&logs, &[stored], "binlog.000003");
+        assert_eq!(names, ["binlog.000004"]);
     }
 
     /// `date -u -r 1795000123` gives 2026-11-18 11:08:43; the milliseconds are dropped.
