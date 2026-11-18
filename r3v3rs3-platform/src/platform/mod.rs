@@ -39,6 +39,9 @@ pub mod tenant;
 mod tenant_docker_tests;
 pub mod terminal;
 pub mod volume_backup;
+mod wal;
+#[cfg(test)]
+mod wal_docker_tests;
 pub mod webhook;
 
 use crate::agent::compose::RemoteCompose;
@@ -171,6 +174,7 @@ impl PlatformHandle {
                 let platform = Arc::new(platform);
                 tokio::spawn(publish::refresh(Arc::downgrade(&platform)));
                 backup::spawn_scheduler(&platform);
+                wal::spawn_puller(&platform);
                 metrics::spawn_collector(&platform);
                 image_check::spawn_checker(&platform);
                 scheduler::spawn_command_scheduler(&platform);

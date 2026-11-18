@@ -465,6 +465,10 @@ pub struct WalSegment {
     pub start_time: u64,
     pub end_time: u64,
     pub created_at: u64,
+    /// Whether the file is one that the engine wrote into its own archive. Older segments were
+    /// dumps of the database and cannot be replayed as a log.
+    #[serde(default)]
+    pub native: bool,
 }
 
 /// Point-in-time recovery range and statistics for a database.
@@ -480,6 +484,10 @@ pub struct PitrRange {
     pub wal_segments_count: usize,
     /// Whether point-in-time recovery is available.
     pub active: bool,
+    /// Whether the running container writes its log into the archive. A database that ran
+    /// before continuous archiving starts it on its next deployment.
+    #[serde(default)]
+    pub archiving: bool,
 }
 
 /// Request to restore a database to a specific point in time.

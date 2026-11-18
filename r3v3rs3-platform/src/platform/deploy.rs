@@ -908,6 +908,9 @@ impl Platform {
     ) -> anyhow::Result<ContainerSpec> {
         let mut env = self.effective_env(job).await?;
         env.extend(self.database_env(job, runtime).await?);
+        // The archive is derived at deploy time, so a database that ran before archiving gets
+        // it on its next deployment without a change of its stored spec.
+        let archive = super::wal::archives(job.spec.database.as_deref(), job.app_target);
         Ok(ContainerSpec {
             name: name.clone(),
             image: digest.parse()?,
@@ -917,7 +920,7 @@ impl Platform {
                 (DEPLOYMENT_LABEL.to_string(), job.deployment.to_string()),
             ]),
             network: Some(network.clone()),
-            volumes: job.spec.volumes.clone(),
+            volumes: super::wal::container_volumes(job.app, &job.spec, archive)?,
             restart: job.spec.restart,
             limits: job.spec.limits,
             publish: Some(job.spec.port),
@@ -926,7 +929,7 @@ impl Platform {
             extra_networks: Vec::new(),
             log_max_size: None,
             log_max_file: None,
-            command: database_command(job.spec.database.as_deref()),
+            command: database_command(job.spec.database.as_deref(), archive),
         })
     }
 
@@ -1540,11 +1543,17 @@ echo \"user default on #$(printf %s \"$REDIS_PASSWORD\" | sha256sum | cut -d' ' 
 else echo 'user default on nopass ~* &* +@all'; fi >> \"$f\"; fi && \
 chown redis:redis \"$f\" && exec docker-entrypoint.sh redis-server --aclfile \"$f\"";
 
-/// The start command of a database container, when the image does not read its password
-/// from the environment. The shell reads the password, so the container spec never holds it.
-pub(crate) fn database_command(engine: Option<&str>) -> Option<Vec<String>> {
-    (engine == Some("redis"))
-        .then(|| vec!["sh".to_string(), "-c".to_string(), REDIS_START.to_string()])
+/// The start command of a database container. Redis reads its password in the shell, so the
+/// container spec never holds it. PostgreSQL archives its WAL when `archive` is set: the
+/// archive volume belongs to root when Docker creates it, so the shell gives it to the
+/// `postgres` user before the entrypoint drops its rights.
+pub(crate) fn database_command(engine: Option<&str>, archive: bool) -> Option<Vec<String>> {
+    let script = match engine {
+        Some("redis") => REDIS_START,
+        Some("postgres") if archive => super::wal::POSTGRES_ARCHIVE_START,
+        _ => return None,
+    };
+    Some(vec!["sh".to_string(), "-c".to_string(), script.to_string()])
 }
 
 /// The environment entries of a database connection: the variables of the engine,
@@ -2602,7 +2611,7 @@ mod tests {
 
     #[test]
     fn only_redis_reads_its_password_on_the_start_command() {
-        let command = database_command(Some("redis")).expect("the redis command");
+        let command = database_command(Some("redis"), true).expect("the redis command");
         let shell = command.join(" ");
         assert!(shell.contains("--aclfile \"$f\""), "{shell}");
         // A file without a default user would open the server without a password.
@@ -2612,8 +2621,23 @@ mod tests {
             shell.contains("printf %s \"$REDIS_PASSWORD\" | sha256sum"),
             "{shell}"
         );
-        assert_eq!(database_command(Some("postgres")), None);
-        assert_eq!(database_command(None), None);
+        assert_eq!(database_command(None, true), None);
+    }
+
+    /// The archive of a PostgreSQL server lives in a volume that only the local target pulls;
+    /// on an agent the command must leave archiving off, or the files fill the agent disk.
+    #[test]
+    fn postgres_archives_its_wal_only_on_the_local_target() {
+        assert_eq!(database_command(Some("postgres"), false), None);
+        let command = database_command(Some("postgres"), true).expect("the archive command");
+        let shell = command.join(" ");
+        // A fresh named volume belongs to root, and the server runs as postgres.
+        assert!(
+            shell.contains("chown postgres:postgres /wal-archive"),
+            "{shell}"
+        );
+        // The pull loop must never read a file that is still being copied.
+        assert!(shell.contains("%f.tmp && mv"), "{shell}");
     }
 
     /// `setup_with_database` with the app deployed once.

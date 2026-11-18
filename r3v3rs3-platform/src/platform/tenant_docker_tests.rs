@@ -68,7 +68,8 @@ fn spec(info: &EngineInfo, name: &ContainerName, image: &str) -> anyhow::Result<
         extra_networks: Vec::new(),
         log_max_size: None,
         log_max_file: None,
-        command: super::deploy::database_command(Some(&info.engine)),
+        // The container has no archive volume, so the server runs without WAL archiving.
+        command: super::deploy::database_command(Some(&info.engine), false),
     })
 }
 

@@ -1179,7 +1179,16 @@ impl Platform {
     /// Archives the current WAL or binary log segment from the running database container.
     pub async fn archive_wal(&self, db_id: ShortId) -> anyhow::Result<WalSegment> {
         let app = self.app(db_id).await?;
-        let _lock = self.lock_app(&app)?;
+        if app.spec.database.as_deref() == Some("postgres") {
+            return self.archive_postgres_wal(db_id).await;
+        }
+        self.archive_dump_segment(&app).await
+    }
+
+    /// Stores a dump of the database as a segment, for an engine without a log archive.
+    async fn archive_dump_segment(&self, app: &AppEntry) -> anyhow::Result<WalSegment> {
+        let db_id = app.id;
+        let _lock = self.lock_app(app)?;
         let (container, runtime, engine, info, password) = self.wal_capture_target(db_id).await?;
 
         let now = unix_ms();
@@ -1202,6 +1211,7 @@ impl Platform {
             start_time,
             end_time: now,
             created_at: now,
+            native: false,
         };
 
         let dir = self.wal_dir(db_id).await?;
@@ -1211,6 +1221,9 @@ impl Platform {
 
     /// Calculates the point-in-time recovery window and statistics for a database.
     pub async fn pitr_range(&self, db_id: ShortId) -> anyhow::Result<PitrRange> {
+        if self.app(db_id).await?.spec.database.as_deref() == Some("postgres") {
+            return self.postgres_pitr_range(db_id).await;
+        }
         let backups = self.list_backups(db_id).await?;
         let segments = self.list_wal_segments(db_id).await?;
         let running = self.store.running_deployment(db_id).await?.is_some();
@@ -1230,6 +1243,7 @@ impl Platform {
             base_backups_count: backups.len(),
             wal_segments_count: segments.len(),
             active: running && earliest.is_some(),
+            archiving: false,
         })
     }
 
@@ -1243,6 +1257,9 @@ impl Platform {
         request: PitrRestoreRequest,
     ) -> anyhow::Result<PitrRestoreResponse> {
         let app = self.app(db_id).await?;
+        if app.spec.database.as_deref() == Some("postgres") {
+            return self.restore_postgres_pitr(db_id, &app, request).await;
+        }
         let backups = self.list_backups(db_id).await?;
         let base_backup = find_base_backup(&backups, app.name.as_str(), request.target_time)?;
 
@@ -1339,7 +1356,7 @@ impl Platform {
             .await
     }
 
-    async fn create_pitr_app(
+    pub(super) async fn create_pitr_app(
         &self,
         source: &AppEntry,
         new_name: AppName,
@@ -1358,7 +1375,7 @@ impl Platform {
         self.add_app(app_req, unix_ms()).await
     }
 
-    async fn sync_pitr_password(
+    pub(super) async fn sync_pitr_password(
         &self,
         source_id: ShortId,
         dest_id: ShortId,
@@ -1749,7 +1766,7 @@ impl Platform {
     }
 
     /// The backup directory of one database, named after the app.
-    async fn backup_dir(&self, db_id: ShortId) -> anyhow::Result<std::path::PathBuf> {
+    pub(super) async fn backup_dir(&self, db_id: ShortId) -> anyhow::Result<std::path::PathBuf> {
         let app = self.app(db_id).await?;
         Ok(self.backup_dir.join(app.name.as_str()))
     }
@@ -1970,9 +1987,9 @@ async fn store_wal_segment(
     compressed: &[u8],
 ) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(dir).await?;
-    tokio::fs::write(dir.join(format!("{}.wal.gz", segment.id)), compressed).await?;
+    super::wal::write_atomic(&dir.join(format!("{}.wal.gz", segment.id)), compressed).await?;
     let manifest = serde_json::to_vec(segment)?;
-    tokio::fs::write(dir.join(format!("{}.json", segment.id)), manifest).await?;
+    super::wal::write_atomic(&dir.join(format!("{}.json", segment.id)), &manifest).await?;
     Ok(())
 }
 
@@ -2359,7 +2376,7 @@ pub(super) fn redis_auth(password: &str) -> Vec<String> {
 }
 
 /// The id of a new backup: the time and four random bytes, both in hex.
-fn backup_id() -> String {
+pub(super) fn backup_id() -> String {
     format!("{:x}-{:08x}", unix_ms(), rand::random::<u32>())
 }
 
@@ -2528,6 +2545,13 @@ impl Platform {
             Ok(_) => {
                 self.record_backup_success(app.id);
                 ping_heartbeat(&config.heartbeat_url);
+                // A new base backup shortens the WAL that a recovery replays, and lets the
+                // retention drop the older WAL.
+                if super::wal::archives(app.spec.database.as_deref(), app.target)
+                    && let Err(err) = self.take_base_backup(app.id).await
+                {
+                    tracing::error!(err = format!("{err:#}"), database = %app.name, "the base backup failed");
+                }
             }
             Err(err) => {
                 self.record_backup_failure(app.id, slot, now);
@@ -2816,7 +2840,7 @@ fn scheduled_slot_ms(schedule: &str, now_ms: i64) -> Option<i64> {
 }
 
 /// The gzipped content.
-async fn gzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
+pub(super) async fn gzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut encoder = GzipEncoder::new(content);
     let mut compressed = Vec::new();
     encoder.read_to_end(&mut compressed).await?;
@@ -2826,7 +2850,7 @@ async fn gzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
 pub const MAX_DB_BACKUP_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// The content behind the gzip, bounded to prevent gzip decompression bombs.
-async fn ungzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
+pub(super) async fn ungzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
     ungzip_limited(content, MAX_DB_BACKUP_UNCOMPRESSED_BYTES).await
 }
 
@@ -3643,6 +3667,7 @@ mod tests {
                 start_time: 1000,
                 end_time: 1500,
                 created_at: 1500,
+                native: false,
             },
             WalSegment {
                 id: "w2".into(),
@@ -3653,6 +3678,7 @@ mod tests {
                 start_time: 1500,
                 end_time: 2000,
                 created_at: 2000,
+                native: false,
             },
             WalSegment {
                 id: "w3".into(),
@@ -3663,6 +3689,7 @@ mod tests {
                 start_time: 2000,
                 end_time: 2500,
                 created_at: 2500,
+                native: false,
             },
         ];
 
