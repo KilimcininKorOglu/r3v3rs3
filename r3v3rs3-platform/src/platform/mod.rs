@@ -23,6 +23,9 @@ mod history;
 pub mod hooks;
 pub mod image_check;
 mod metrics;
+mod mongo;
+#[cfg(test)]
+mod mongo_docker_tests;
 mod notices;
 pub mod oauth;
 pub mod projects;

@@ -890,7 +890,14 @@ impl Platform {
             .await?;
         runtime.create_container(&spec).await?;
         runtime.start_container(name).await?;
-        let healthy = self.wait_healthy(runtime, name, &job.spec).await;
+        let mut healthy = self.wait_healthy(runtime, name, &job.spec).await;
+        if healthy.is_ok()
+            && super::mongo::replica_set(job.spec.database.as_deref(), job.app_target)
+        {
+            healthy = self
+                .ensure_replica_set(job.app, runtime, name, job.spec.port)
+                .await;
+        }
         if healthy.is_err() {
             let _ = runtime.remove_container(name).await;
         }
@@ -910,7 +917,9 @@ impl Platform {
         env.extend(self.database_env(job, runtime).await?);
         // The archive is derived at deploy time, so a database that ran before archiving gets
         // it on its next deployment without a change of its stored spec.
-        let archive = super::wal::archives(job.spec.database.as_deref(), job.app_target);
+        let engine = job.spec.database.as_deref();
+        let archive = super::wal::archives(engine, job.app_target)
+            || super::mongo::replica_set(engine, job.app_target);
         Ok(ContainerSpec {
             name: name.clone(),
             image: digest.parse()?,
@@ -1552,6 +1561,7 @@ pub(crate) fn database_command(engine: Option<&str>, archive: bool) -> Option<Ve
         Some("redis") => REDIS_START,
         Some("postgres") if archive => super::wal::POSTGRES_ARCHIVE_START,
         Some("mysql" | "mariadb") if archive => return Some(super::binlog::binlog_command()),
+        Some("mongodb") if archive => super::mongo::MONGO_REPLICA_START,
         _ => return None,
     };
     Some(vec!["sh".to_string(), "-c".to_string(), script.to_string()])
@@ -1635,13 +1645,25 @@ pub(crate) fn format_url(
         database_in_url,
         ..
     } = credentials;
-    match (user.is_empty(), *database_in_url) {
+    let url = match (user.is_empty(), *database_in_url) {
         (true, _) => format!("{}://{host}:{port}", info.url_scheme),
         (false, true) => format!(
             "{}://{user}:{password}@{host}:{port}/{database}",
             info.url_scheme
         ),
         (false, false) => format!("{}://{user}:{password}@{host}:{port}", info.url_scheme),
+    };
+    with_direct_connection(&info.url_scheme, url, *database_in_url)
+}
+
+/// A MongoDB URL connects to the named member only. A driver that discovers the replica set
+/// follows the member name, the alias on the shared network, which a client outside that
+/// network cannot resolve (MongoDB connection string option `directConnection`).
+fn with_direct_connection(scheme: &str, url: String, has_path: bool) -> String {
+    match (scheme, has_path) {
+        ("mongodb", true) => format!("{url}?directConnection=true"),
+        ("mongodb", false) => format!("{url}/?directConnection=true"),
+        _ => url,
     }
 }
 
@@ -2623,6 +2645,38 @@ mod tests {
             "{shell}"
         );
         assert_eq!(database_command(None, true), None);
+    }
+
+    /// A MongoDB replica set names its member by the alias on the shared network, which a
+    /// client through the published port cannot resolve; with `directConnection=true` the
+    /// driver stays on the host it was given (measured with mongosh against mongo:8). The
+    /// other engines keep their plain URL.
+    #[test]
+    fn a_mongodb_url_connects_to_the_given_host_only() {
+        catalog();
+        let mongo = r3v3rs3_api::platform::engine_info("mongodb").unwrap();
+        let mut credentials = super::super::tenant::Credentials {
+            user: "root".into(),
+            password: "pw".into(),
+            database: "admin".into(),
+            database_in_url: true,
+            key_prefix: None,
+        };
+        assert_eq!(
+            format_url(&mongo, "127.0.0.1", 27017, &credentials),
+            "mongodb://root:pw@127.0.0.1:27017/admin?directConnection=true"
+        );
+        credentials.database_in_url = false;
+        assert_eq!(
+            format_url(&mongo, "127.0.0.1", 27017, &credentials),
+            "mongodb://root:pw@127.0.0.1:27017/?directConnection=true"
+        );
+        let postgres = r3v3rs3_api::platform::engine_info("postgres").unwrap();
+        credentials.database_in_url = true;
+        assert_eq!(
+            format_url(&postgres, "db", 5432, &credentials),
+            "postgres://root:pw@db:5432/admin"
+        );
     }
 
     /// The archive of a PostgreSQL server lives in a volume that only the local target pulls;

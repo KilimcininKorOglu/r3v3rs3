@@ -315,14 +315,15 @@ fn connection(app: &AppEntry, engines: &[EngineInfo]) -> String {
     };
     let port = port_of(app);
     let host = format!("127.0.0.1:{port}");
-    match (info.user.is_empty(), info.default_db.is_empty()) {
+    let url = match (info.user.is_empty(), info.default_db.is_empty()) {
         (true, _) => format!("{}://{host}", info.url_scheme),
         (false, true) => format!("{}://{}:***@{host}", info.url_scheme, info.user),
         (false, false) => format!(
             "{}://{}:***@{host}/{}",
             info.url_scheme, info.user, info.default_db
         ),
-    }
+    };
+    crate::format::database_url(&info.url_scheme, url, !info.default_db.is_empty())
 }
 
 struct RowContext<'a> {
@@ -574,7 +575,8 @@ fn created_view(
         Some(info) => {
             let scheme = info.url_scheme.clone();
             let database = created.database.clone();
-            match (info.user.is_empty(), database.is_empty()) {
+            let has_path = !database.is_empty();
+            let url = match (info.user.is_empty(), database.is_empty()) {
                 (true, true) => format!("{scheme}://127.0.0.1:{}", created.host_port),
                 (false, true) => format!(
                     "{scheme}://{}:{password}@127.0.0.1:{}",
@@ -585,7 +587,8 @@ fn created_view(
                     created.user, created.host_port
                 ),
                 (true, false) => format!("{scheme}://127.0.0.1:{}/{database}", created.host_port),
-            }
+            };
+            crate::format::database_url(&scheme, url, has_path)
         }
         None => String::new(),
     };

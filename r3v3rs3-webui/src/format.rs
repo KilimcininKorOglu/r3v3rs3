@@ -219,6 +219,18 @@ pub fn format_disk_bytes(bytes: u64) -> String {
     }
 }
 
+/// A database connection string as the server gives it: a MongoDB URL carries
+/// `directConnection=true`, because the replica set names its member by an alias that a
+/// client outside the Docker network cannot resolve. `has_path` tells whether the URL ends in
+/// a database name.
+pub fn database_url(scheme: &str, url: String, has_path: bool) -> String {
+    match (scheme, has_path) {
+        ("mongodb", true) => format!("{url}?directConnection=true"),
+        ("mongodb", false) => format!("{url}/?directConnection=true"),
+        _ => url,
+    }
+}
+
 /// Formats passkey authentication or registration errors into localized user messages.
 #[allow(dead_code)]
 pub fn format_passkey_error(locale: Locale, err: &str) -> String {
@@ -251,6 +263,29 @@ pub fn format_uptime(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The panel shows the MongoDB URL that a client outside the Docker network can use: a
+    /// replica set member is named by its network alias, so the driver must stay on the given
+    /// host (`directConnection=true`). Other engines keep their URL.
+    #[test]
+    fn a_mongodb_url_carries_direct_connection() {
+        assert_eq!(
+            database_url(
+                "mongodb",
+                "mongodb://root:***@127.0.0.1:27017/admin".into(),
+                true
+            ),
+            "mongodb://root:***@127.0.0.1:27017/admin?directConnection=true"
+        );
+        assert_eq!(
+            database_url("mongodb", "mongodb://127.0.0.1:27017".into(), false),
+            "mongodb://127.0.0.1:27017/?directConnection=true"
+        );
+        assert_eq!(
+            database_url("postgres", "postgres://p@127.0.0.1:5432/db".into(), true),
+            "postgres://p@127.0.0.1:5432/db"
+        );
+    }
 
     #[test]
     fn time_left_names_the_exact_days_and_hours() {
