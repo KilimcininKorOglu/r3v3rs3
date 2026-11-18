@@ -1179,10 +1179,11 @@ impl Platform {
     /// Archives the current WAL or binary log segment from the running database container.
     pub async fn archive_wal(&self, db_id: ShortId) -> anyhow::Result<WalSegment> {
         let app = self.app(db_id).await?;
-        if app.spec.database.as_deref() == Some("postgres") {
-            return self.archive_postgres_wal(db_id).await;
+        match app.spec.database.as_deref() {
+            Some("postgres") => self.archive_postgres_wal(db_id).await,
+            Some("mysql" | "mariadb") => self.archive_binlog(db_id).await,
+            _ => self.archive_dump_segment(&app).await,
         }
-        self.archive_dump_segment(&app).await
     }
 
     /// Stores a dump of the database as a segment, for an engine without a log archive.
@@ -1221,8 +1222,10 @@ impl Platform {
 
     /// Calculates the point-in-time recovery window and statistics for a database.
     pub async fn pitr_range(&self, db_id: ShortId) -> anyhow::Result<PitrRange> {
-        if self.app(db_id).await?.spec.database.as_deref() == Some("postgres") {
-            return self.postgres_pitr_range(db_id).await;
+        match self.app(db_id).await?.spec.database.as_deref() {
+            Some("postgres") => return self.postgres_pitr_range(db_id).await,
+            Some("mysql" | "mariadb") => return self.binlog_pitr_range(db_id).await,
+            _ => {}
         }
         let backups = self.list_backups(db_id).await?;
         let segments = self.list_wal_segments(db_id).await?;
@@ -1257,8 +1260,12 @@ impl Platform {
         request: PitrRestoreRequest,
     ) -> anyhow::Result<PitrRestoreResponse> {
         let app = self.app(db_id).await?;
-        if app.spec.database.as_deref() == Some("postgres") {
-            return self.restore_postgres_pitr(db_id, &app, request).await;
+        match app.spec.database.as_deref() {
+            Some("postgres") => return self.restore_postgres_pitr(db_id, &app, request).await,
+            Some("mysql" | "mariadb") => {
+                return self.restore_binlog_pitr(db_id, &app, request).await;
+            }
+            _ => {}
         }
         let backups = self.list_backups(db_id).await?;
         let base_backup = find_base_backup(&backups, app.name.as_str(), request.target_time)?;
@@ -1842,7 +1849,8 @@ async fn take_dump(
     }
 }
 
-/// Captures a Write-Ahead Log or binary log segment from the running database container.
+/// Captures a dump segment of an engine without a log archive yet. PostgreSQL, MySQL and
+/// MariaDB archive their own log (`wal.rs`, `binlog.rs`).
 async fn capture_engine_wal(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
@@ -1851,77 +1859,10 @@ async fn capture_engine_wal(
     password: &str,
 ) -> anyhow::Result<(String, Vec<u8>)> {
     match engine {
-        "postgres" => capture_postgres_wal(runtime, container, info, password).await,
-        "mariadb" | "mysql" => capture_mysql_wal(runtime, container, engine, info, password).await,
         "mongodb" => capture_mongodb_oplog(runtime, container, info, password).await,
         "redis" => capture_redis_aof(runtime, container, info, password).await,
         other => anyhow::bail!("engine {other} does not support WAL archiving"),
     }
-}
-
-async fn capture_postgres_wal(
-    runtime: &Arc<dyn ContainerRuntime>,
-    container: &ContainerName,
-    info: &EngineInfo,
-    password: &str,
-) -> anyhow::Result<(String, Vec<u8>)> {
-    let cmd = vec![
-        "psql".into(),
-        "-U".into(),
-        info.user.clone(),
-        "-d".into(),
-        info.default_db.clone(),
-        "-t".into(),
-        "-A".into(),
-        "-c".into(),
-        "SELECT pg_walfile_name(pg_switch_wal());".into(),
-    ];
-    let env = vec![format!("PGPASSWORD={password}")];
-    let out = runtime.exec_capture(container, cmd, env).await;
-    let filename = match out {
-        Ok(bytes) => {
-            let s = String::from_utf8_lossy(&bytes).trim().to_string();
-            if s.is_empty() || s.contains("ERROR") {
-                format!("wal-{}.sql", unix_ms())
-            } else {
-                s
-            }
-        }
-        Err(_) => format!("wal-{}.sql", unix_ms()),
-    };
-    let dump = runtime
-        .exec_capture(
-            container,
-            vec![
-                "pg_dump".into(),
-                "-U".into(),
-                info.user.clone(),
-                info.default_db.clone(),
-            ],
-            vec![format!("PGPASSWORD={password}")],
-        )
-        .await?;
-    if dump.is_empty() {
-        bail!("pg_dump captured empty database dump");
-    }
-    Ok((filename, dump))
-}
-
-/// The segment of a MySQL or MariaDB server is a dump of its user databases, the same as its
-/// backup, so a replay cannot bring back the accounts of the `mysql` schema.
-async fn capture_mysql_wal(
-    runtime: &Arc<dyn ContainerRuntime>,
-    container: &ContainerName,
-    engine: &str,
-    info: &EngineInfo,
-    password: &str,
-) -> anyhow::Result<(String, Vec<u8>)> {
-    let filename = format!("binlog-{}.sql", unix_ms());
-    let dump = take_dump(runtime, container, dump_plan(engine, info, password)?).await?;
-    if dump.is_empty() {
-        bail!("mysqldump captured empty database dump");
-    }
-    Ok((filename, dump))
 }
 
 /// The local connection string of a MongoDB container, with the user and the password
@@ -3481,33 +3422,6 @@ mod tests {
         assert_eq!(branch.host_port, Some(5440));
         assert!(branch.replica_of.is_none());
         assert_eq!(branch.database, source.database);
-    }
-
-    /// An archived segment is restored after the base backup and after the tenant accounts are
-    /// set again, so it must not carry the `mysql` schema with old passwords either; MariaDB
-    /// takes its dump with its own tool.
-    #[tokio::test]
-    async fn mysql_wal_segments_leave_the_account_schema_out() {
-        catalog();
-        for engine in ["mysql", "mariadb"] {
-            let info = r3v3rs3_api::platform::engine_info(engine).unwrap();
-            let fake = Arc::new(super::super::fake::FakeRuntime::default());
-            let name: ContainerName = "r3v3rs3-db-0".parse().unwrap();
-            fake.set(&name, true, &[]);
-            let runtime: Arc<dyn ContainerRuntime> = fake.clone();
-            capture_engine_wal(&runtime, &name, engine, &info, "pass")
-                .await
-                .unwrap();
-            let execs = fake.state().execs.clone();
-            let expected = dump_plan(engine, &info, "pass").unwrap().command;
-            assert!(
-                execs.iter().any(|(_, command, _)| *command == expected),
-                "{engine}"
-            );
-            for (_, command, _) in execs {
-                assert!(!command.iter().any(|arg| arg.contains("--all-databases")));
-            }
-        }
     }
 
     /// The `mysql` schema holds every account with its password hash; a restore of it would

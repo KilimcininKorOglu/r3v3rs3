@@ -6,6 +6,9 @@
 mod agents;
 mod app_hooks;
 mod backup;
+mod binlog;
+#[cfg(test)]
+mod binlog_docker_tests;
 mod build;
 mod compose;
 mod connections;

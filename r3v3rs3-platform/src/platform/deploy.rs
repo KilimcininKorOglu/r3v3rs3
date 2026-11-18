@@ -1551,6 +1551,7 @@ pub(crate) fn database_command(engine: Option<&str>, archive: bool) -> Option<Ve
     let script = match engine {
         Some("redis") => REDIS_START,
         Some("postgres") if archive => super::wal::POSTGRES_ARCHIVE_START,
+        Some("mysql" | "mariadb") if archive => return Some(super::binlog::binlog_command()),
         _ => return None,
     };
     Some(vec!["sh".to_string(), "-c".to_string(), script.to_string()])

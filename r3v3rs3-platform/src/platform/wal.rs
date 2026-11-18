@@ -53,7 +53,7 @@ const BASE_DIR: &str = "base";
 
 /// The directory under the data volume that keeps the data of the server while a recovery
 /// replaces it, so a failed recovery can put it back.
-const PREVIOUS_DIR: &str = ".pitr-previous";
+pub(super) const PREVIOUS_DIR: &str = ".pitr-previous";
 
 /// The length of a WAL file name: timeline, log and segment, 8 hex digits each.
 const WAL_NAME_LEN: usize = 24;
@@ -61,7 +61,7 @@ const WAL_NAME_LEN: usize = 24;
 /// Whether the containers of the database archive their WAL. Only the local target runs the
 /// pull loop, so a database on an agent leaves archiving off instead of filling its disk.
 pub(super) fn archives(engine: Option<&str>, target: ShortId) -> bool {
-    engine == Some("postgres") && super::is_local(target)
+    matches!(engine, Some("postgres" | "mysql" | "mariadb")) && super::is_local(target)
 }
 
 fn wal_volume(app: ShortId) -> anyhow::Result<VolumeMount> {
@@ -73,31 +73,43 @@ fn wal_volume(app: ShortId) -> anyhow::Result<VolumeMount> {
 }
 
 /// The volumes of a container of the app: the volumes of its spec, and the archive volume of
-/// a database that archives its WAL.
+/// a PostgreSQL database that archives its WAL. MySQL and MariaDB keep their binary log in
+/// the data directory, where the platform reads it.
 pub(super) fn container_volumes(
     app: ShortId,
     spec: &AppSpec,
     archive: bool,
 ) -> anyhow::Result<Vec<VolumeMount>> {
     let mut volumes = spec.volumes.clone();
-    if archive {
+    if archive && spec.database.as_deref() == Some("postgres") {
         volumes.push(wal_volume(app)?);
     }
     Ok(volumes)
 }
 
-/// One physical base backup: a `pg_basebackup` tar archive of the data directory.
+/// One base backup: a `pg_basebackup` tar archive of the data directory, or a dump of a MySQL
+/// or MariaDB server with the binary log coordinates of its snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct BaseBackup {
     pub id: String,
     /// Unix milliseconds after the backup ended; a recovery can stop at this time or later.
     pub created_at: u64,
-    /// The WAL file that was current when the backup started; a recovery replays from it.
+    /// The log file that was current when the backup started; a recovery replays from it.
     pub start_wal: String,
+    /// The position in `start_wal` where the replay of a binary log starts.
+    #[serde(default)]
+    pub start_position: Option<u64>,
     /// The data directory of the server, which the archive holds.
     pub data_directory: String,
     pub size: u64,
     pub sha256: String,
+}
+
+/// Where the replay from a new base backup starts.
+pub(super) struct BaseStart {
+    pub log: String,
+    pub position: Option<u64>,
+    pub data_directory: String,
 }
 
 /// Writes a file through a temporary file in the same directory, so a crash leaves either
@@ -123,9 +135,21 @@ fn wal_order(name: &str) -> Option<&str> {
     head.chars().all(|c| c.is_ascii_hexdigit()).then_some(head)
 }
 
+/// The order of an archived log file: the timeline, log and segment of a WAL file, or the
+/// number of a binary log file (`binlog.000003`), zero-padded so that the strings sort like
+/// the numbers. A timeline history file has none.
+pub(super) fn log_order(name: &str) -> Option<String> {
+    if let Some(order) = wal_order(name) {
+        return Some(order.to_string());
+    }
+    let (_, number) = name.rsplit_once('.')?;
+    let number: u64 = number.parse().ok()?;
+    Some(format!("{number:020}"))
+}
+
 /// A file name that the archive of the server can hold, and nothing that could leave the
 /// archive directory.
-fn is_archive_name(name: &str) -> bool {
+pub(super) fn is_archive_name(name: &str) -> bool {
     !name.is_empty()
         && !name.ends_with(".tmp")
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')
@@ -133,22 +157,22 @@ fn is_archive_name(name: &str) -> bool {
 
 /// The archived files that a recovery from a base backup replays: every WAL file from the
 /// segment that was current when the backup started, and every timeline history file.
-fn replay_files(segments: &[WalSegment], start_wal: &str) -> Vec<WalSegment> {
-    let start = wal_order(start_wal).unwrap_or(start_wal);
+pub(super) fn replay_files(segments: &[WalSegment], start_wal: &str) -> Vec<WalSegment> {
+    let start = log_order(start_wal).unwrap_or_else(|| start_wal.to_string());
     let mut files: Vec<WalSegment> = segments
         .iter()
         .filter(|s| s.native)
-        .filter(|s| wal_order(&s.filename).is_none_or(|order| order >= start))
+        .filter(|s| log_order(&s.filename).is_none_or(|order| order >= start))
         .cloned()
         .collect();
-    files.sort_by(|a, b| a.filename.cmp(&b.filename));
+    files.sort_by_key(|s| log_order(&s.filename));
     files
 }
 
 /// The base backup that a recovery to `target` starts from: the newest one that ended before
 /// the target. PostgreSQL stops with a fatal error when the target lies past the archived
 /// WAL, so a target later than the newest archived file is refused before anything changes.
-fn pick_base<'a>(
+pub(super) fn pick_base<'a>(
     bases: &'a [BaseBackup],
     segments: &[WalSegment],
     target: u64,
@@ -182,12 +206,12 @@ fn expired_bases(bases: &[BaseBackup], keep: usize) -> Vec<BaseBackup> {
 /// The archived WAL files that no kept base backup needs: the files before the start of the
 /// oldest kept base. History files stay, since every later timeline needs them.
 fn expired_wal(segments: &[WalSegment], oldest_start: &str) -> Vec<WalSegment> {
-    let Some(start) = wal_order(oldest_start) else {
+    let Some(start) = log_order(oldest_start) else {
         return Vec::new();
     };
     segments
         .iter()
-        .filter(|s| wal_order(&s.filename).is_some_and(|order| order < start))
+        .filter(|s| log_order(&s.filename).is_some_and(|order| order < start))
         .cloned()
         .collect()
 }
@@ -210,7 +234,10 @@ fn recovery_time(unix_ms: u64) -> anyhow::Result<String> {
 }
 
 /// The volume mount of the spec that holds the data directory of the server.
-fn data_mount<'a>(spec: &'a AppSpec, data_directory: &str) -> anyhow::Result<&'a VolumeMount> {
+pub(super) fn data_mount<'a>(
+    spec: &'a AppSpec,
+    data_directory: &str,
+) -> anyhow::Result<&'a VolumeMount> {
     spec.volumes
         .iter()
         .filter(|mount| data_directory.starts_with(mount.target.as_str()))
@@ -249,7 +276,7 @@ i=$((i+1)); [ $i -lt 600 ] || fail; sleep 1; done; \
 $G postgres pg_ctl -D \"$D\" -w -t 120 stop";
 
 /// The shell script that puts the data that `recovery_script` moved aside back in place.
-fn rollback_script(mount: &str) -> String {
+pub(super) fn rollback_script(mount: &str) -> String {
     format!(
         "set -e; M='{mount}'; P=\"$M/{PREVIOUS_DIR}\"; [ -d \"$P\" ] || exit 0; \
 find \"$M\" -mindepth 1 -maxdepth 1 ! -name {PREVIOUS_DIR} -exec rm -rf {{}} +; \
@@ -387,7 +414,7 @@ struct Recovery<'a> {
 }
 
 impl Platform {
-    async fn base_dir(&self, db_id: ShortId) -> anyhow::Result<PathBuf> {
+    pub(super) async fn base_dir(&self, db_id: ShortId) -> anyhow::Result<PathBuf> {
         Ok(self.backup_dir(db_id).await?.join(BASE_DIR))
     }
 
@@ -415,7 +442,7 @@ impl Platform {
     }
 
     /// The archived files of the database that the engine wrote itself.
-    async fn native_segments(&self, db_id: ShortId) -> anyhow::Result<Vec<WalSegment>> {
+    pub(super) async fn native_segments(&self, db_id: ShortId) -> anyhow::Result<Vec<WalSegment>> {
         let mut segments = self.list_wal_segments(db_id).await?;
         segments.retain(|s| s.native);
         Ok(segments)
@@ -441,27 +468,30 @@ impl Platform {
         let pg = self.pg_session(db_id).await?;
         let (start_wal, data_directory) = pg.base_start().await?;
         let archive = pg.basebackup().await?;
-        let base = self
-            .store_base(db_id, start_wal, data_directory, &archive)
-            .await?;
+        let start = BaseStart {
+            log: start_wal,
+            position: None,
+            data_directory,
+        };
+        let base = self.store_base(db_id, start, &archive).await?;
         self.prune_base_backups(db_id).await?;
         Ok(base)
     }
 
     /// Stores the archive of a base backup with its manifest.
-    async fn store_base(
+    pub(super) async fn store_base(
         &self,
         db_id: ShortId,
-        start_wal: String,
-        data_directory: String,
+        start: BaseStart,
         archive: &[u8],
     ) -> anyhow::Result<BaseBackup> {
         let compressed = gzip(archive).await?;
         let base = BaseBackup {
             id: backup_id(),
             created_at: unix_ms(),
-            start_wal,
-            data_directory,
+            start_wal: start.log,
+            start_position: start.position,
+            data_directory: start.data_directory,
             size: compressed.len() as u64,
             sha256: hex::encode(Sha256::digest(&compressed)),
         };
@@ -473,16 +503,19 @@ impl Platform {
         Ok(base)
     }
 
-    /// Takes a physical base backup of a database that archives its WAL.
+    /// Takes a base backup of a database that archives its log.
     pub(super) async fn take_base_backup(&self, db_id: ShortId) -> anyhow::Result<BaseBackup> {
         let app = self.app(db_id).await?;
         let _lock = self.lock_app(&app)?;
+        if super::binlog::is_binlog_engine(app.spec.database.as_deref()) {
+            return self.take_binlog_base_locked(db_id).await;
+        }
         self.take_base_backup_locked(db_id).await
     }
 
     /// Keeps the newest base backups of the retention, and removes the archived WAL that only
     /// the removed backups needed.
-    async fn prune_base_backups(&self, db_id: ShortId) -> anyhow::Result<()> {
+    pub(super) async fn prune_base_backups(&self, db_id: ShortId) -> anyhow::Result<()> {
         self.remove_expired_bases(db_id).await?;
         let Some(oldest) = self.list_base_backups(db_id).await?.into_iter().next() else {
             return Ok(());
@@ -506,7 +539,7 @@ impl Platform {
     }
 
     /// Removes the segments of the older archive, which held dumps instead of the WAL.
-    async fn drop_legacy_segments(&self, db_id: ShortId) -> anyhow::Result<()> {
+    pub(super) async fn drop_legacy_segments(&self, db_id: ShortId) -> anyhow::Result<()> {
         let dir = self.wal_dir(db_id).await?;
         let legacy: Vec<WalSegment> = self
             .list_wal_segments(db_id)
@@ -551,6 +584,9 @@ impl Platform {
     pub(super) async fn pull_wal(&self, db_id: ShortId) -> anyhow::Result<Vec<WalSegment>> {
         let app = self.app(db_id).await?;
         let _lock = self.lock_app(&app)?;
+        if super::binlog::is_binlog_engine(app.spec.database.as_deref()) {
+            return self.pull_binlog_locked(db_id, false).await;
+        }
         self.pull_wal_locked(db_id).await
     }
 
@@ -602,7 +638,7 @@ impl Platform {
 
     /// The stored segment of the WAL file `name`, or the newest stored file when the switch
     /// closed none.
-    async fn archived_file(
+    pub(super) async fn archived_file(
         &self,
         db_id: ShortId,
         name: Option<&str>,
@@ -612,8 +648,8 @@ impl Platform {
             Some(name) => segments.into_iter().rfind(|s| s.filename == name),
             None => segments
                 .into_iter()
-                .filter(|s| wal_order(&s.filename).is_some())
-                .max_by(|a, b| a.filename.cmp(&b.filename)),
+                .filter(|s| log_order(&s.filename).is_some())
+                .max_by_key(|s| log_order(&s.filename)),
         };
         found.with_context(|| format!("the WAL file {name:?} is not in the archive"))
     }
@@ -715,7 +751,7 @@ impl Platform {
 
     /// The database that a recovery fills: a new branch when the request names one, else the
     /// source itself. The flag tells whether a branch was created.
-    async fn recovery_target(
+    pub(super) async fn recovery_target(
         self: &Arc<Self>,
         db_id: ShortId,
         app: &AppEntry,
@@ -822,7 +858,7 @@ impl Platform {
     }
 
     /// Runs a one-off container of the database image on the volumes of the database.
-    async fn run_db_helper(
+    pub(super) async fn run_db_helper(
         &self,
         runtime: &Arc<dyn ContainerRuntime>,
         app: &AppEntry,
@@ -999,7 +1035,7 @@ async fn pull_file(
     Ok(segment)
 }
 
-async fn remove_segment(dir: &Path, id: &str) -> anyhow::Result<()> {
+pub(super) async fn remove_segment(dir: &Path, id: &str) -> anyhow::Result<()> {
     for name in [format!("{id}.wal.gz"), format!("{id}.json")] {
         match tokio::fs::remove_file(dir.join(name)).await {
             Ok(()) => {}
@@ -1011,7 +1047,7 @@ async fn remove_segment(dir: &Path, id: &str) -> anyhow::Result<()> {
 }
 
 /// Stores one WAL file that the server archived, with its manifest.
-async fn store_native_segment(
+pub(super) async fn store_native_segment(
     dir: &Path,
     db_id: ShortId,
     filename: String,
@@ -1121,6 +1157,7 @@ mod tests {
             id: id.to_string(),
             created_at,
             start_wal: start_wal.to_string(),
+            start_position: None,
             data_directory: "/var/lib/postgresql/data".to_string(),
             size: 1,
             sha256: String::new(),
@@ -1273,6 +1310,7 @@ mod tests {
         let spec: AppSpec = serde_json::from_value(serde_json::json!({
             "source": {"type": "image", "image": "postgres:17-alpine"},
             "port": 5432,
+            "database": "postgres",
             "volumes": [{"volume": "shop-db-data", "target": "/var/lib/postgresql/data"}],
         }))
         .unwrap();
@@ -1282,5 +1320,9 @@ mod tests {
         assert_eq!(volumes.len(), 2);
         assert_eq!(volumes[1].volume.as_str(), "r3v3rs3-wal-abc-def");
         assert_eq!(volumes[1].target.as_str(), WAL_ARCHIVE_PATH);
+        // MySQL keeps its binary log in the data directory and gets no archive volume.
+        let mut mysql = spec.clone();
+        mysql.database = Some("mysql".into());
+        assert_eq!(container_volumes(app, &mysql, true).unwrap(), mysql.volumes);
     }
 }
