@@ -206,6 +206,52 @@ async fn refuse_a_gap(
     Ok(())
 }
 
+/// A recovery whose replay fails half way, here on a damaged binary log, puts the data that it
+/// moved aside back, and the server answers and takes writes again.
+async fn roll_back_a_failed_replay(
+    platform: &Arc<Platform>,
+    name: &str,
+    engine: &str,
+    image: &str,
+) -> anyhow::Result<()> {
+    let (db, target_time) = six_rows(platform, name, engine, image).await?;
+    let damaged = platform.archive_wal(db.id).await?;
+    let dir = platform.wal_dir(db.id).await?;
+    let broken = super::backup::gzip(b"not a binary log").await?;
+    tokio::fs::write(dir.join(format!("{}.wal.gz", damaged.id)), broken).await?;
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: None,
+        host_port: None,
+    };
+    let err = platform.restore_pitr(db.id, request).await.unwrap_err();
+    ensure!(format!("{err:#}").contains("restore failed"), "{err:#}");
+    let rows = sql_on(platform, db.id, ROWS).await?;
+    ensure!(rows == "1,2,3,4,5,6", "the database holds the rows {rows}");
+    sql_on(platform, db.id, "INSERT INTO app.t (i) VALUES (7)").await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn mysql_puts_its_data_back_when_the_replay_fails_on_the_docker_engine() -> anyhow::Result<()>
+{
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = roll_back_a_failed_replay(&platform, &name(), "mysql", "mysql:9").await;
+    run.and(remove_apps(&platform).await)
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn mariadb_puts_its_data_back_when_the_replay_fails_on_the_docker_engine()
+-> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = roll_back_a_failed_replay(&platform, &name(), "mariadb", "mariadb:11.8-noble").await;
+    run.and(remove_apps(&platform).await)
+}
+
 async fn remove_apps(platform: &Arc<Platform>) -> anyhow::Result<()> {
     for app in platform.store.apps().await? {
         platform.delete_app(app.id).await?;
