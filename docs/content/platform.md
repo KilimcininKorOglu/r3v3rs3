@@ -403,6 +403,8 @@ On the **Databases** page, each database row includes a direct **Web UI** action
 
 The **Backups** action button on a database row opens its backups. **Back up now** runs the dump of the engine inside the container (`pg_dumpall` for PostgreSQL, `mariadb-dump` or `mysqldump` over every user schema, `mongodump`; Redis runs `SAVE` and takes its dump file), gzips it and stores it in the `backups` directory of the config directory, one folder per database, with a JSON manifest that carries the SHA-256 of the file. A backup holds every tenant database of the server but no password: the dump leaves the role passwords, the MySQL account schema (and its GTID set) and the MongoDB `admin` database out. After a restore, r3v3rs3 sets the stored password of every tenant again, so the tenants sign in as before. A restore that fails reports the error of its last attempt. A database on an agent target takes no backup, because the dump runs in the container itself.
 
+Deleting a database keeps its backups: its folder is renamed to `<name>.deleted-<unix ms>`, so a new database with the same name starts with an empty backup folder and never restores or replays the backups of the deleted one. Remove a renamed folder by hand when its backups are no longer needed.
+
 Centralized backup settings (managed under the **Backups** console or via the direct storage settings link) configure the daily time in UTC that every database is backed up at, the number of backups per database that survive (the oldest go first), remote upload destinations, and heartbeat health checks:
 
 - **S3**: An S3-compatible bucket endpoint with region, path prefix, access key, and secret key.

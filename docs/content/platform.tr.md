@@ -403,6 +403,8 @@ Görsel veri inceleme, sorgulama ve şema yönetimi için r3v3rs3, **App Store**
 
 Veritabanı satırındaki **Yedekler** eylem butonu o veritabanının yedeklerini açar. **Şimdi yedekle**, engine'in dump'ını container'ın içinde çalıştırır (PostgreSQL için `pg_dumpall`, bütün kullanıcı şemaları için `mariadb-dump` veya `mysqldump`, `mongodump`; Redis `SAVE` çalıştırır ve dump dosyasını alır), gzip'ler ve config dizinindeki `backups` dizinine kaydeder; veritabanı başına bir klasör, dosyanın SHA-256'sını taşıyan bir JSON manifest ile birlikte. Yedek, sunucunun bütün tenant veritabanlarını içerir ama parola içermez: dump, rol parolalarını, MySQL hesap şemasını (ve GTID kümesini) ve MongoDB `admin` veritabanını dışarıda bırakır. Geri yüklemeden sonra r3v3rs3 her tenant'ın kayıtlı parolasını yeniden atar; tenant'lar eskisi gibi oturum açar. Başarısız bir geri yükleme son denemesinin hatasını bildirir. Agent target üzerindeki bir veritabanı yedek alamaz; çünkü dump container'ın içinde çalışır.
 
+Bir veritabanı silindiğinde yedekleri korunur: klasörünün adı `<ad>.deleted-<unix ms>` olarak değiştirilir. Böylece aynı adla oluşturulan yeni bir veritabanı boş bir yedek klasörüyle başlar ve silinen veritabanının yedeklerini geri yüklemez. Yedeklere artık ihtiyacınız yoksa adı değiştirilen klasörü elle silin.
+
 Merkezi yedekleme ayarları (**Yedekler** konsolunda veya doğrudan depolama bağlantısıyla yönetilir), her veritabanının yedeklendiği UTC'deki günlük saati, veritabanı başına kalacak yedek sayısını (en eskiler önce gider), uzak depolama hedeflerini ve nabız (heartbeat) izleme kontrolünü yapılandırır:
 
 - **S3**: Bucket'ı yolunda taşıyan bir `http` veya `https` endpoint, bir region, bir key prefix, bir access key ve secret key.

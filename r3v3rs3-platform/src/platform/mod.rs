@@ -677,7 +677,26 @@ impl Platform {
         if !self.store.delete_app(id).await? {
             return Err(not_found(id));
         }
+        if app.spec.database.is_some() {
+            self.retire_backup_dir(app.name.as_str()).await?;
+        }
         Ok(app.clone())
+    }
+
+    /// Renames the backup directory of a deleted database to `<name>.deleted-<unix ms>`. The
+    /// directory is named after the app, so a new database with the same name would take the
+    /// archive of the deleted one as its own; the backups stay on the disk under the new name.
+    async fn retire_backup_dir(&self, name: &str) -> anyhow::Result<()> {
+        let dir = self.backup_dir.join(name);
+        if !tokio::fs::try_exists(&dir).await? {
+            return Ok(());
+        }
+        let retired = self
+            .backup_dir
+            .join(format!("{name}.deleted-{}", crate::clock::unix_ms()));
+        tokio::fs::rename(&dir, &retired)
+            .await
+            .with_context(|| format!("the backups of {name} could not be set aside"))
     }
 
     async fn cleanup_app_targets(&self, app: &AppEntry, id: ShortId) -> anyhow::Result<()> {
@@ -2490,6 +2509,49 @@ mod tests {
         assert!(token.is_cancelled());
         assert!(platform.shutdown_token().is_cancelled());
         assert_eq!(platform.active_job_count(), 0);
+        Ok(())
+    }
+
+    /// A PostgreSQL database named `name` with one file in its archive, and its request.
+    async fn database_with_archive(
+        platform: &Arc<Platform>,
+        name: &str,
+    ) -> anyhow::Result<(AppEntry, AppRequest)> {
+        let catalog: r3v3rs3_api::platform::EnginesCatalog =
+            serde_json::from_str(include_str!("../../../r3v3rs3/data/engines.json"))?;
+        r3v3rs3_api::platform::install_engines(catalog);
+        let mut req = request(name);
+        req.spec.database = Some("postgres".into());
+        let app = platform.add_app(req.clone(), 1).await?;
+        let wal = platform.wal_dir(app.id).await?;
+        tokio::fs::create_dir_all(&wal).await?;
+        tokio::fs::write(wal.join("a.json"), b"{}").await?;
+        Ok((app, req))
+    }
+
+    /// A new database with the name of a deleted one starts with an empty archive: a recovery
+    /// must never replay the log files of another database. The backups of the deleted
+    /// database stay on the disk.
+    #[tokio::test]
+    async fn a_deleted_database_leaves_its_archive_to_no_new_database() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let (old, req) = database_with_archive(&platform, "orders").await?;
+        platform.delete_app(old.id).await?;
+
+        let new = platform.add_app(req, 2).await?;
+        let dir = platform.backup_dir(new.id).await?;
+        assert!(
+            !tokio::fs::try_exists(&dir).await?,
+            "{dir:?} still holds the old archive"
+        );
+        let kept = std::fs::read_dir(&platform.backup_dir)?
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            kept.iter().any(|name| name.starts_with("orders.deleted-")),
+            "{kept:?}"
+        );
         Ok(())
     }
 }
