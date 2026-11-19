@@ -92,59 +92,6 @@ pub(crate) async fn upload_key(
     Ok(())
 }
 
-/// Downloads the content of `{prefix}/{key}` from the configured S3 endpoint.
-pub(crate) async fn download_key(
-    client: &HttpClient,
-    config: &S3Config,
-    key: &str,
-) -> anyhow::Result<Vec<u8>> {
-    let url = url::Url::parse(&config.endpoint).context("the S3 endpoint is not a URL")?;
-    let scheme = url.scheme();
-    if scheme != "https" && scheme != "http" {
-        bail!("the S3 endpoint must be an http or https URL");
-    }
-    let host = host(&url);
-    let path = object_key_path(&url, config, key);
-
-    let amz_date = sigv4::amz_date(OffsetDateTime::now_utc());
-    let empty_payload: &[u8] = b"";
-    let payload_hash = hex::encode(Sha256::digest(empty_payload));
-    let authorization = sigv4::authorization(
-        &config.access_key,
-        &config.secret_key,
-        &SigningInput {
-            method: "GET",
-            host: &host,
-            path: &path,
-            query: "",
-            amz_date: &amz_date,
-            payload: empty_payload,
-            region: &config.region,
-            service: "s3",
-        },
-    )?;
-    let base = format!("{scheme}://{host}");
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri(format!("{base}{path}"))
-        .header("host", &host)
-        .header("x-amz-date", &amz_date)
-        .header("x-amz-content-sha256", &payload_hash)
-        .header("authorization", authorization)
-        .body(Full::new(Bytes::new()))?;
-    let response = tokio::time::timeout(UPLOAD_TIMEOUT, client.request(request)).await??;
-    let status = response.status();
-    if !status.is_success() {
-        bail!("the S3 bucket answered {status}");
-    }
-    let body = BodyExt::collect(response.into_body())
-        .await
-        .map_err(|err| anyhow::anyhow!("{err}"))?
-        .to_bytes()
-        .to_vec();
-    Ok(body)
-}
-
 /// The size of one part of a multipart upload. S3 needs at least 5 MiB for every part but the
 /// last, and allows 10,000 parts; the panel holds one part in memory at a time.
 pub(crate) const PART_SIZE: u64 = 16 * 1024 * 1024;

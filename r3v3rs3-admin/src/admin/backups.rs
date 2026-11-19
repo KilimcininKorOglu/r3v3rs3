@@ -9,7 +9,7 @@ use crate::audit::AuditRecord;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
-    http::header::CONTENT_DISPOSITION,
+    http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH},
     response::IntoResponse,
 };
 use r3v3rs3_api::{
@@ -83,19 +83,30 @@ pub async fn download(
     Path((id, backup_id)): Path<(ShortId, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     let platform = state.platform(&caller, Permission::Admin).await?;
-    let content = platform
-        .download_backup(id, &backup_id)
+    let file = platform
+        .open_backup(id, &backup_id)
         .await
         .map_err(platform_error)?;
     let filename = format!("{backup_id}.dump.gz");
+    Ok(file_response(file, &filename))
+}
+
+/// A download of an opened backup file, sent in pieces as it is read, so a backup of any size
+/// passes without being held in memory.
+fn file_response(
+    (file, size): (tokio::fs::File, u64),
+    filename: &str,
+) -> ([(&'static str, String); 3], axum::body::Body) {
     let headers = [
         ("content-type", "application/octet-stream".to_string()),
+        (CONTENT_LENGTH.as_str(), size.to_string()),
         (
             CONTENT_DISPOSITION.as_str(),
-            super::content_disposition_attachment(&filename, "backup.dump.gz"),
+            super::content_disposition_attachment(filename, "backup.dump.gz"),
         ),
     ];
-    Ok((headers, content))
+    let body = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(file));
+    (headers, body)
 }
 
 /// Deletes one backup.
@@ -374,18 +385,11 @@ pub async fn download_s3(
     Query(query): Query<S3DownloadQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let platform = state.platform(&caller, Permission::Admin).await?;
-    let content = platform
-        .download_s3_backup(&query.key)
+    let file = platform
+        .open_s3_backup(&query.key)
         .await
         .map_err(platform_error)?;
-    let headers = [
-        ("content-type", "application/octet-stream".to_string()),
-        (
-            CONTENT_DISPOSITION.as_str(),
-            super::content_disposition_attachment(&query.key, "backup.dump.gz"),
-        ),
-    ];
-    Ok((headers, content))
+    Ok(file_response(file, &query.key))
 }
 
 /// Restores a database from an S3 remote backup snapshot.

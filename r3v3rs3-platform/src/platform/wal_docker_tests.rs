@@ -495,6 +495,16 @@ async fn back_up_and_restore_a_large_dump(
                   FROM generate_series(1, 800000)";
     sql(platform, db.id, filler).await?;
     let backup = platform.run_backup(db.id).await?;
+    // A download hands out the stored backup as its manifest records it.
+    let (mut file, size) = platform.open_backup(db.id, &backup.id).await?;
+    let mut downloaded = Vec::new();
+    tokio::io::AsyncReadExt::read_to_end(&mut file, &mut downloaded).await?;
+    ensure!(size == backup.size, "the download is {size} bytes");
+    let sha256 = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&downloaded));
+    ensure!(
+        sha256 == backup.sha256,
+        "the download is not the stored backup"
+    );
     sql(platform, db.id, "DROP TABLE f").await?;
     platform.restore_backup(db.id, &backup.id).await?;
     let filled = sql(platform, db.id, "SELECT count(*) FROM f").await?;

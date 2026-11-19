@@ -527,10 +527,7 @@ async fn s3_restore_on_the_aof(platform: &Arc<Platform>, name: &str) -> anyhow::
     let db = add_db(platform, name).await?;
     deploy(platform, db.id).await?;
     let backup = back_up_then_replace(platform, db.id).await?;
-    let compressed = platform.download_backup(db.id, &backup).await?;
-    let tmp = std::env::temp_dir();
-    let compressed = super::backup::DumpFile::from_bytes(&compressed, &tmp).await?;
-    let dump = super::backup::DumpFile::gunzip(&compressed.path, &tmp).await?;
+    let dump = platform.restore_dump_file(db.id, &backup).await?;
     platform
         .restore_s3_into_existing(db.id, dump, Some("redis"))
         .await?;

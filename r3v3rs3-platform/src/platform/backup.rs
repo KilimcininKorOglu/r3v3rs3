@@ -639,19 +639,26 @@ impl Platform {
         Ok(())
     }
 
-    /// The content of one backup.
-    pub async fn download_backup(
+    /// One stored backup, opened for reading, and its size. A download reads it in pieces,
+    /// so a backup of any size passes without being held in memory.
+    pub async fn open_backup(
         &self,
         db_id: ShortId,
         backup_id: &str,
-    ) -> anyhow::Result<Vec<u8>> {
+    ) -> anyhow::Result<(tokio::fs::File, u64)> {
         let entry = self.backup_entry(db_id, backup_id).await?;
         let dir = self.backup_dir(db_id).await?;
-        Ok(tokio::fs::read(dir.join(format!("{}.dump.gz", entry.id))).await?)
+        let file = tokio::fs::File::open(dir.join(format!("{}.dump.gz", entry.id))).await?;
+        let size = file.metadata().await?.len();
+        Ok((file, size))
     }
 
     /// The decompressed dump of one stored backup.
-    async fn restore_dump_file(&self, db_id: ShortId, backup_id: &str) -> anyhow::Result<DumpFile> {
+    pub(super) async fn restore_dump_file(
+        &self,
+        db_id: ShortId,
+        backup_id: &str,
+    ) -> anyhow::Result<DumpFile> {
         let entry = self.backup_entry(db_id, backup_id).await?;
         let dir = self.backup_dir(db_id).await?;
         DumpFile::gunzip(&dir.join(format!("{}.dump.gz", entry.id)), &self.backup_dir).await
@@ -903,28 +910,14 @@ impl Platform {
         Ok(snapshots)
     }
 
-    /// Downloads the content of one S3 backup snapshot.
-    pub async fn download_s3_backup(&self, key: &str) -> anyhow::Result<Vec<u8>> {
-        let config = self.backup_config().await?;
-        let Some(s3) = config.s3 else {
-            return Err(Error::S3NotConfigured.into());
-        };
-        let Some(secret) = self.s3_secret().await? else {
-            return Err(Error::S3NotConfigured.into());
-        };
-        let s3 = r3v3rs3_api::platform::S3Config {
-            secret_key: secret,
-            ..s3
-        };
-        let http_client = self.http().await?;
-        super::s3::download_key(http_client, &s3, key)
-            .await
-            .map_err(|err| {
-                Error::S3OperationFailed {
-                    reason: err.to_string(),
-                }
-                .into()
-            })
+    /// One S3 backup snapshot, downloaded into a file under the backup directory and opened
+    /// for reading, and its size. The file is removed at once; the open handle keeps its
+    /// content until the download to the caller ends.
+    pub async fn open_s3_backup(&self, key: &str) -> anyhow::Result<(tokio::fs::File, u64)> {
+        let dump = self.download_s3_dump(key).await?;
+        let file = tokio::fs::File::open(&dump.path).await?;
+        let size = file.metadata().await?.len();
+        Ok((file, size))
     }
 
     /// Downloads one S3 backup snapshot into a dump file under the backup directory. The
