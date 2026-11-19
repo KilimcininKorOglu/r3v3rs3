@@ -1705,7 +1705,7 @@ async fn run_restore(
                     Vec::new(),
                 )
                 .await?;
-            runtime.upload_file(container, path, bytes).await?;
+            upload_in_pieces(runtime, container, path, bytes).await?;
             Some(
                 runtime
                     .exec_capture(container, plan.command.clone(), plan.env.clone())
@@ -1724,6 +1724,20 @@ async fn run_restore(
     Ok(())
 }
 
+/// Writes a dump into the container in pieces below the upload limit of the runtime: a single
+/// upload refuses more than 16 MiB, and a production MySQL dump holds 72 MB.
+async fn upload_in_pieces(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    path: &str,
+    bytes: Vec<u8>,
+) -> anyhow::Result<()> {
+    let scratch = super::transfer::Scratch::new(&std::env::temp_dir()).await?;
+    let local = scratch.path("dump");
+    tokio::fs::write(&local, bytes).await?;
+    super::transfer::push_file(runtime, container, &local, path).await
+}
+
 /// Writes the dump into the data volume and stops the server without a save, so its next start
 /// loads the dump. The `SHUTDOWN` ends the process that the exec of the command runs in, so the
 /// exec reports a failure even when the server stopped. The restore therefore counts as done
@@ -1736,9 +1750,7 @@ async fn restore_redis(
     data_path: &str,
 ) -> anyhow::Result<()> {
     let before = redis_run_id(runtime, container, plan).await?;
-    runtime
-        .upload_file(container, &format!("{data_path}/dump.rdb"), bytes)
-        .await?;
+    upload_in_pieces(runtime, container, &format!("{data_path}/dump.rdb"), bytes).await?;
     let shutdown = runtime
         .exec_capture(container, plan.command.clone(), plan.env.clone())
         .await;

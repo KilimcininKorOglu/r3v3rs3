@@ -431,6 +431,38 @@ async fn recover_a_large_log(
     Ok(())
 }
 
+/// A backup restores whatever its size: the production MySQL dump holds 72 MB, and the single
+/// upload of the runtime refused more than 16 MiB.
+async fn restore_a_large_backup(
+    platform: &Arc<Platform>,
+    name: &str,
+    engine: &str,
+    image: &str,
+) -> anyhow::Result<()> {
+    let db = running_db(platform, name, engine, image).await?;
+    fill_one_log(platform, db.id).await?;
+    let backup = platform.run_backup(db.id).await?;
+    sql_on(platform, db.id, "DELETE FROM app.t").await?;
+    platform.restore_backup(db.id, &backup.id).await?;
+    let rows = "SELECT concat(count(*), ',', sum(length(b))) FROM app.t";
+    let restored = sql_on(platform, db.id, rows).await?;
+    let expected = format!("{LARGE_ROWS},{}", u64::from(LARGE_ROWS) * 4_194_304);
+    ensure!(
+        restored == expected,
+        "the database holds {restored}, not {expected}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn mysql_restores_a_backup_over_16_mib_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = restore_a_large_backup(&platform, &name(), "mysql", "mysql:9").await;
+    run.and(remove_apps(&platform).await)
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn mysql_recovers_from_a_binary_log_over_64_mib_on_the_docker_engine() -> anyhow::Result<()> {
