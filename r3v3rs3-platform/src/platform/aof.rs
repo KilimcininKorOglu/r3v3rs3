@@ -581,11 +581,29 @@ impl Platform {
     }
 
     async fn finish_aof_recovery(&self, db_id: ShortId, mount: &str) -> anyhow::Result<()> {
+        self.close_archive(db_id).await?;
         self.start_history(db_id).await?;
         self.redis_session(db_id)
             .await?
             .text(&format!("rm -rf '{mount}/{PREVIOUS_DIR}'"))
             .await?;
+        Ok(())
+    }
+
+    /// Stores an empty piece after the newest one, so the old history reaches the stop of the
+    /// database and not only its last pull: a target in the last second before the recovery
+    /// is then in range. The piece adds nothing to a replayed file.
+    async fn close_archive(&self, db_id: ShortId) -> anyhow::Result<()> {
+        let newest = self
+            .native_segments(db_id)
+            .await?
+            .into_iter()
+            .max_by_key(|s| s.end_time);
+        let Some(newest) = newest else {
+            return Ok(());
+        };
+        let dir = self.wal_dir(db_id).await?;
+        store_marker_segment(&dir, db_id, newest.filename, newest.end_time).await?;
         Ok(())
     }
 

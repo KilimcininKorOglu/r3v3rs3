@@ -189,6 +189,41 @@ async fn recover_in_place(platform: &Arc<Platform>, name: &str) -> anyhow::Resul
     Ok(())
 }
 
+/// An in-place recovery right after a write must keep that write reachable in the old history,
+/// because the old data of the database is gone after the recovery and the history is the
+/// only copy. A recovery cuts at whole seconds, so the history must reach past the second of
+/// the last write, up to the stop of the database.
+async fn keep_the_last_write(
+    platform: &Arc<Platform>,
+    name: &str,
+    burst: &[u32],
+) -> anyhow::Result<()> {
+    let (db, target_time) = six_items(platform, name).await?;
+    let mut last = 0;
+    for &i in burst {
+        last = push(platform, db.id, i).await?;
+    }
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: None,
+        host_port: None,
+    };
+    let response = platform.restore_pitr(db.id, request).await?;
+    ensure!(!response.branched, "{response:?}");
+    // A recovery cuts at whole seconds before the target, so one second after the last write
+    // keeps it.
+    let old = branch_items(platform, db.id, &format!("{name}-o"), last + 1000).await?;
+    let expected: Vec<String> = (1..=6)
+        .chain(burst.iter().copied())
+        .map(|i| i.to_string())
+        .collect();
+    ensure!(
+        old == expected.join(","),
+        "the branch of the old history holds {old}"
+    );
+    Ok(())
+}
+
 /// A target after the base backup but before the first write of its incr file recovers the
 /// data of the base backup alone.
 async fn recover_an_idle_target(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
@@ -668,6 +703,28 @@ async fn redis_recovers_a_branch_to_a_second_on_the_docker_engine() -> anyhow::R
     catalog();
     let (platform, _dir) = docker_platform().await?;
     let run = recover_branch(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn redis_keeps_the_last_write_of_an_in_place_recovery_on_the_docker_engine()
+-> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = keep_the_last_write(&platform, &name(), &[8]).await;
+    run.and(remove_apps(&platform).await)
+}
+
+/// Writes in quick succession reach the AOF file late, so only the stop of the database
+/// writes them; the old history must still hold every one.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn redis_keeps_a_burst_of_writes_of_an_in_place_recovery_on_the_docker_engine()
+-> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = keep_the_last_write(&platform, &name(), &[8, 9, 10, 11, 12]).await;
     run.and(remove_apps(&platform).await)
 }
 
