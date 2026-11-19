@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.1] - 2026-11-19
+
+### Fixed
+- A MySQL or MariaDB binary log of any size is archived and recovered: the archive read a log file in one download, which the runtime refuses above 64 MiB, so the archive stopped.
+- A database backup over 16 MiB restores: the restore uploaded the dump in one piece, which the runtime refuses above 16 MiB.
+- A Redis backup over 64 MiB is taken.
+- A file pushed into a container replaces the old one in a single rename; a Redis restore into the live server could leave an empty `dump.rdb`.
+- A Redis backup restores on a server that writes its AOF, and the archive starts a new timeline after it.
+- A command that prints nothing for more than 30 seconds, such as a large dump written to a file, runs to its end instead of failing.
+- A failed archive pull of the archive loop is logged as an error.
+
+### Changed
+- The `create_database` MCP tool names a version example of the engine catalog.
+- The docs describe the Redis AOF restore and transfers of any size.
+
 ## [3.5.0] - 2026-11-19
 
 ### Added
