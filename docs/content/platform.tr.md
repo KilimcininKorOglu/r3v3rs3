@@ -418,7 +418,7 @@ S3 endpoint'i ve heartbeat URL'si private ve loopback adresler dahil herhangi bi
 
 Her yeni yedek yapılandırılan uzak hedeflere aktarılır; başarısız bir yükleme yalnız sunucu log'una geçer, çünkü yerel kopya vardır. Uzak kimlik bilgileri `r3v3rs3.key` ile şifrelenir.
 
-Yedeklerin boyut sınırı yoktur. Yedek alma, geri yükleme ve indirme işlemleri veriyi diskteki dosyalar üzerinden sınırlı parçalar hâlinde taşır. Bu yüzden sunucunun belleği veritabanının boyutuyla birlikte büyümez. Diskte 1 GiB'tan az boş alan kalacaksa sıkıştırılmış dosyanın açılması ve S3 indirmesi durur. Yarım kalan dosya silinir. S3'teki bir yedek dışarıdan gelen veridir. Açıldığında diske sığmayacak kadar büyüyen küçük bir arşiv de aynı noktada durur ve diski doldurmaz.
+Yedeklerin boyut sınırı yoktur. Yedek alma, geri yükleme ve indirme işlemleri veriyi diskteki dosyalar üzerinden sınırlı parçalar hâlinde taşır. Bu yüzden sunucunun belleği veritabanının boyutuyla birlikte büyümez. Diskte 1 GiB'tan az boş alan kalacaksa sıkıştırılmış dosyanın açılması ve S3 indirmesi durur. Yarım kalan dosya silinir. S3'teki bir yedek dışarıdan gelen veridir. Açıldığında diske sığmayacak kadar büyüyen küçük bir arşiv de aynı noktada durur ve diski doldurmaz. 16 MiB'tan büyük bir yedek S3'e 16 MiB'lık parçalar hâlinde multipart upload ile gönderilir. Bir parça başarısız olursa yükleme iptal edilir. Bu yüzden bucket'ta yarım nesne kalmaz. r3v3rs3'ün bir container içinde çalıştırdığı dump, geri yükleme ve diğer komutlar altı saat sonra sonlandırılır. Bu yüzden takılan bir komut veritabanını süresiz olarak meşgul etmez.
 
 #### Geri Yükleme & Periyodik Doğrulama Testi
 
@@ -426,9 +426,9 @@ Yedeklerin boyut sınırı yoktur. Yedek alma, geri yükleme ve indirme işlemle
 
 Yedekler, arşivlenen log dosyaları ve dump'lar boyutları ne olursa olsun sunucu ile container arasında parça parça taşınır. Bir dosya container'a geçici bir adla ulaşır ve eski dosyanın yerine tek bir yeniden adlandırma ile geçer.
 
-Yedeklerin bozulmadan saklandığını ve geri yüklenebilir olduğunu garanti etmek için r3v3rs3 otomatik periyodik geri yükleme doğrulama testi ve kurtarma simülasyonu içerir. Sistem gzipped dump'ların hatasız açıldığını, veritabanı format imzalarını ve bellek içi simülasyon bütünlüğünü doğrular:
+Yedeklerin bozulmadan saklandığını ve geri yüklenebilir olduğunu garanti etmek için r3v3rs3 otomatik periyodik geri yükleme doğrulama testi ve kurtarma simülasyonu içerir. Sistem gzipped dump'ların hatasız açıldığını, veritabanı format imzalarını ve simülasyon bütünlüğünü doğrular:
 
-- **Şema ve Veri Simülasyonu (Restore Drill)**: Canlı veritabanını kirletmeden ve ek container ayağa kaldırmadan bellek içinde dump akışını ayrıştırır:
+- **Şema ve Veri Simülasyonu (Restore Drill)**: Canlı veritabanını kirletmeden ve ek container ayağa kaldırmadan dump'ı akış hâlinde açar ve okurken ayrıştırır. Bu yüzden her boyuttaki dump belleğe alınmadan doğrulanır:
   - **SQL Dump'ları (PostgreSQL / MySQL / MariaDB)**: `CREATE TABLE` tanımlarını inceler, tablo adlarını çıkarır, veri yüklerini (`COPY ... FROM stdin` veya `INSERT INTO`) tespit eder ve dump aracının en son yazdığı bitiş satırını arar: `pg_dumpall` dump'ında `-- PostgreSQL database cluster dump complete`, `pg_dump` dump'ında `-- PostgreSQL database dump complete`, MySQL veya MariaDB dump'ında `-- Dump completed on ...`. Başarısız bir çalıştırmanın yarıda kestiği dump'ta bu satır yoktur ve kontrol başarısız olur. Kullanıcı verisi olmayan bir sunucunun eksiksiz dump'ı kontrolden geçer.
   - **Redis RDB**: İkili `REDIS` sihirli baytlarını, dosya sonundaki EOF opcode'unu ve CRC-64 sağlama toplamını doğrular.
   - **MongoDB arşivi**: Arşivin sihirli baytlarını ve `mongodump --archive` komutunun son koleksiyondan sonra yazdığı bitiş baytlarını doğrular.
@@ -966,7 +966,7 @@ Admin hesap, uygulama sayfasında bir **Dosyalar** linki de görür. Link, çal�
 
 #### Volume Yedekleri, Snapshot'lar ve Doğrudan Arşiv Dışa/İçe Aktarma
 
-Dosyalar sayfası kalıcı volume'ler için kapsamlı yedekleme ve snapshot yönetimi sunar:
+Dosyalar sayfası kalıcı volume'ler için kapsamlı yedekleme ve snapshot yönetimi sunar. Kısa ömürlü bir BusyBox yardımcı container'ı volume'ü bağlar ve `tar` çalıştırır. Bu yüzden her adım, shell veya `tar` içermeyen bir uygulama image'ında da çalışır. Arşiv, volume'ün boyutundan bağımsız olarak sınırlı parçalar hâlinde taşınır. Arşiv her dosyanın sahibini, iznini ve sembolik linklerini korur. Geri yükleme her dosyayı volume içindeki kendi yerine koyar. Eski bir sürümün aldığı ve ilk girdisi bağlama dizini olan snapshot da volume'ün içine geri yüklenir:
 
 - **Snapshot Oluştur**: Çalışan container üzerinden volume'ün tam sıkıştırılmış `.tar.gz` snapshot'ını alır, yerel diskte saklar ve yedekleme ayarlarında S3 yapılandırılmışsa otomatik olarak harici S3 depolamasına yükler.
 - **Snapshot'tan Geri Yükle**: Alınmış bir snapshot'ı tek tıkla doğrudan container volume'ünün içine açarak geri yükler.

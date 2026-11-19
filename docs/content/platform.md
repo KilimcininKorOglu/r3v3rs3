@@ -418,7 +418,7 @@ The S3 endpoint and the heartbeat URL may point at any address, including privat
 
 Every new backup uploads to the configured remote targets; a failed upload only goes into the server log, because the local copy exists. Remote credentials are encrypted with `r3v3rs3.key`.
 
-A backup has no size limit. Backups, restores and downloads move in bounded pieces through files on the disk, so the memory of the server does not grow with the size of the database. A decompression and an S3 download stop when the disk would keep less than 1 GiB free, and the partial file is deleted. A backup from S3 is outside input, so a small archive that decompresses to more than the disk holds stops at the same point and does not fill the disk.
+A backup has no size limit. Backups, restores and downloads move in bounded pieces through files on the disk, so the memory of the server does not grow with the size of the database. A decompression and an S3 download stop when the disk would keep less than 1 GiB free, and the partial file is deleted. A backup from S3 is outside input, so a small archive that decompresses to more than the disk holds stops at the same point and does not fill the disk. A backup larger than 16 MiB goes to S3 as a multipart upload in 16 MiB parts, and a failed part cancels the upload, so no partial object stays in the bucket. A dump, restore or other command that r3v3rs3 runs in a container ends after six hours, so a hung command does not hold the database forever.
 
 #### Restore & Periodic Verification Test
 
@@ -426,9 +426,9 @@ A backup has no size limit. Backups, restores and downloads move in bounded piec
 
 Backups, archived log files and dumps of any size move between the server and the container in pieces, and a file reaches the container under a temporary name and replaces the old one in a single rename.
 
-To ensure that backups remain uncorrupted and recoverable, r3v3rs3 includes an automated periodic restore testing and dry-run simulation mechanism. The system verifies that gzipped dumps decompress cleanly, matches expected database format signatures, and conducts in-memory restore drill simulations:
+To ensure that backups remain uncorrupted and recoverable, r3v3rs3 includes an automated periodic restore testing and dry-run simulation mechanism. The system verifies that gzipped dumps decompress cleanly, matches expected database format signatures, and conducts restore drill simulations:
 
-- **Schema & Data Drill Simulation**: Without starting auxiliary containers or polluting production databases, the engine decompresses the dump in memory and parses schema objects:
+- **Schema & Data Drill Simulation**: Without starting auxiliary containers or polluting production databases, the engine decompresses the dump as a stream and parses schema objects while it reads, so a dump of any size passes without being held in memory:
   - **SQL Dumps (PostgreSQL / MySQL / MariaDB)**: Parses `CREATE TABLE` definitions, extracts declared table names, detects data payloads (`COPY ... FROM stdin` or `INSERT INTO`), and requires the trailer that the dump tool writes last: `-- PostgreSQL database cluster dump complete` after a `pg_dumpall` dump, `-- PostgreSQL database dump complete` after a `pg_dump` dump, `-- Dump completed on ...` after a MySQL or MariaDB dump. A dump that a failed run cut short has no trailer and fails the check. A complete dump of a server without user data passes.
   - **Redis RDB**: Validates the binary magic (`REDIS`), the EOF opcode and the CRC-64 checksum at the end of the file.
   - **MongoDB archive**: Validates the archive magic and the terminator that `mongodump --archive` writes after its last collection.
@@ -966,7 +966,7 @@ An admin account also sees a **Files** link on the page of an app. It opens the 
 
 #### Volume Backups, Snapshots and Direct Archive Export/Import
 
-The Files page provides complete volume backup and snapshot management for persistent volumes:
+The Files page provides complete volume backup and snapshot management for persistent volumes. A short-lived BusyBox helper container mounts the volume and runs `tar`, so every step works for an app image without a shell or `tar`, and the archive moves in bounded pieces whatever the size of the volume. The archive keeps the owner, the mode and the symbolic links of every file. A restore puts every file back to its place in the volume; a snapshot of an older release, which holds the mount directory as its first entry, restores into the volume too:
 
 - **Create Snapshot**: Captures a full compressed `.tar.gz` snapshot of the volume from the running container, saves it locally, and automatically replicates it to remote S3 storage if configured in the backup settings.
 - **Restore Snapshot**: Restores a previously captured volume snapshot with a single click, unpacking the snapshot archive directly back into the container's volume.
