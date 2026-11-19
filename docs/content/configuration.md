@@ -1292,6 +1292,8 @@ upstream_servers = [{ addr = "/dns/db.internal/tcp/5433/tls" }]
 
 ## Sending PROXY Protocol
 
+A TCP / TCP over TLS proxy opens a new connection to its upstream server, so without a PROXY protocol header the upstream server sees the address of r3v3rs3 as the client: `127.0.0.1` for a platform app on the same server. A server that needs the real client address, for example a TURN server behind a TLS port of r3v3rs3, must read PROXY protocol.
+
 A TCP / TCP over TLS proxy can send the client address to its upstream servers. Select the version in "Send PROXY Protocol". Each upstream connection then starts with a PROXY protocol header, before the TLS handshake of a TLS upstream server.
 
 - The source address is the client address of the connection. When the port receives PROXY protocol, it is the address from that header. See "PROXY Protocol".

@@ -1292,6 +1292,8 @@ upstream_servers = [{ addr = "/dns/db.internal/tcp/5433/tls" }]
 
 ## PROXY protocol gönderme
 
+TCP / TLS üzerinden TCP proxy'si upstream sunucusuna yeni bir bağlantı açar. Bu yüzden PROXY protocol header'ı olmadan upstream sunucusu istemci olarak r3v3rs3'ün adresini görür: aynı sunucudaki bir platform uygulaması için bu adres `127.0.0.1` olur. Gerçek istemci adresine ihtiyaç duyan bir sunucu PROXY protocol okumalıdır. Örneğin r3v3rs3'ün bir TLS portunun arkasındaki TURN sunucusu böyledir.
+
 TCP / TLS üzerinden TCP proxy'si istemci adresini upstream sunuculara gönderebilir. Sürümü "PROXY Protocol Gönder" alanında seçin. Bundan sonra her upstream bağlantısı bir PROXY protocol header'ı ile başlar. TLS upstream sunucusunda header TLS handshake'ten önce gider.
 
 - Kaynak adres bağlantının istemci adresidir. Port PROXY protocol alıyorsa bu adres o header'daki adrestir. "PROXY protocol" bölümüne bakın.
