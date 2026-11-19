@@ -460,7 +460,7 @@ A session closes when no packet passes in either direction for `session_idle_tim
 r3v3rs3 limits the time that it waits for an upstream server. A timeout is a duration such as `500ms`, `10s` or `1m`.
 
 - `timeouts.connect` of an HTTP / HTTPS proxy and `connect_timeout` of a TCP / TCP over TLS proxy limit the DNS lookup, the TCP connection and the TLS handshake of a new upstream connection. The default is `10s`.
-- `timeouts.request` of an HTTP / HTTPS proxy limits the time from the start of a request until the response headers arrive, including a new connection. The default is `60s`, and `0s` disables the limit. The response body, WebSocket and other upgraded connections have no limit.
+- `timeouts.request` of an HTTP / HTTPS proxy limits the time from the start of a request until the response headers arrive, including a new connection. The default is `60s`, and `0s` disables the limit. The response body, WebSocket and other upgraded connections have no limit. A route that points at the WebUI address of r3v3rs3 itself has no request limit either: the panel runs in the same process, and a backup, a restore or another long job of the panel answers when it ends.
 - A route can replace the proxy timeouts with its own `timeouts`. A value that the route does not set uses its default, not the proxy value.
 - `session_idle_timeout` of a UDP proxy closes an idle client session. See "UDP Sessions".
 

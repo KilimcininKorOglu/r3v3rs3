@@ -460,7 +460,7 @@ UDP proxy her istemci adresi için ayrı bir oturum açar. Her oturumun upstream
 r3v3rs3 upstream sunucuyu sınırlı bir süre bekler. Timeout değerlerini `500ms`, `10s` veya `1m` gibi yazın.
 
 - HTTP / HTTPS proxy'sinde `timeouts.connect`, TCP / TLS üzerinden TCP proxy'sinde `connect_timeout` değeri yeni bir upstream bağlantısının DNS sorgusunu, TCP bağlantısını ve TLS handshake'ini sınırlar. Varsayılan değer `10s`'dir.
-- HTTP / HTTPS proxy'sinde `timeouts.request` değeri, istek başladıktan yanıt header'ları gelene kadar geçen süreyi sınırlar. Yeni bağlantının kurulma süresi de buna dahildir. Varsayılan değer `60s`'dir. `0s` limiti kapatır. Yanıt gövdesi, WebSocket ve diğer upgrade edilmiş bağlantılar için limit yoktur.
+- HTTP / HTTPS proxy'sinde `timeouts.request` değeri, istek başladıktan yanıt header'ları gelene kadar geçen süreyi sınırlar. Yeni bağlantının kurulma süresi de buna dahildir. Varsayılan değer `60s`'dir. `0s` limiti kapatır. Yanıt gövdesi, WebSocket ve diğer upgrade edilmiş bağlantılar için limit yoktur. r3v3rs3'ün kendi WebUI adresine giden route'ta da istek limiti yoktur. Panel aynı process içinde çalışır. Bu yüzden yedek alma, geri yükleme veya panelin başka uzun bir işi, iş bitince yanıt verir.
 - Bir route, proxy'nin timeout'ları yerine kendi `timeouts` değerini kullanabilir. Route'ta yazılmayan değer proxy değerini değil, varsayılan değeri alır.
 - UDP proxy'sinde `session_idle_timeout` değeri boşta kalan istemci oturumunu kapatır. "UDP oturumları" bölümüne bakın.
 

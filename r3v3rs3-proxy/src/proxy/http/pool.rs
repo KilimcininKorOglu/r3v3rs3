@@ -247,7 +247,7 @@ impl ConnectionPool {
         request_timeout: Duration,
     ) -> Result<Response<ProxyBody>, SendError> {
         if let Some(panel) = req.uri().authority().and_then(crate::proxy::panel::matches) {
-            return panel_send(panel, req, request_timeout).await;
+            return panel_send(panel, req).await;
         }
         let is_ws = is_websocket_upgrade_request(&req);
         let upgrading_req = if is_ws {
@@ -320,7 +320,6 @@ impl ConnectionPool {
 async fn panel_send(
     mut panel: axum::Router,
     mut req: Request<ProxyBody>,
-    request_timeout: Duration,
 ) -> Result<Response<ProxyBody>, SendError> {
     let client = req.extensions().get::<ProxiedClient>().cloned();
     let ip = client
@@ -333,21 +332,14 @@ async fn panel_send(
     }
     // The panel saw HTTP/1.1 over the loopback connection, and an upgrade needs it.
     *req.version_mut() = hyper::Version::HTTP_11;
-    let sending = async move {
-        let Ok(()) = std::future::poll_fn(|cx| {
-            tower_service::Service::<Request<ProxyBody>>::poll_ready(&mut panel, cx)
-        })
-        .await;
-        let Ok(res) = tower_service::Service::call(&mut panel, req).await;
-        res
-    };
-    let res = if request_timeout.is_zero() {
-        sending.await
-    } else {
-        tokio::time::timeout(request_timeout, sending)
-            .await
-            .map_err(|_| SendError::other(ProxyError::UpstreamTimeout))?
-    };
+    // The request timeout of the route does not apply: the panel is part of this process, and
+    // its long jobs, such as a backup or a restore, carry limits of their own. A gateway timeout
+    // would report a failure for a job that goes on running.
+    let Ok(()) = std::future::poll_fn(|cx| {
+        tower_service::Service::<Request<ProxyBody>>::poll_ready(&mut panel, cx)
+    })
+    .await;
+    let Ok(res) = tower_service::Service::call(&mut panel, req).await;
     Ok(res.map(|body| BoxBody::new(SyncBody::new(body).map_err(anyhow::Error::from))))
 }
 

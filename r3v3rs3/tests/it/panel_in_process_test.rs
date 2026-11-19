@@ -91,6 +91,51 @@ async fn the_proxy_serves_a_registered_panel_in_process() -> anyhow::Result<()> 
     result
 }
 
+/// Answers after three seconds, like a backup or a restore of the panel that takes longer than
+/// the request timeout of the proxy.
+async fn slow() -> &'static str {
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    "done"
+}
+
+/// The panel is part of this process, and its long jobs carry limits of their own: a request
+/// to it must get the answer of the panel, not a gateway timeout of the proxy after the
+/// request timeout of the panel route, which the CLI and the WebUI would report as a failure
+/// of a job that went on running.
+#[tokio::test]
+async fn a_slow_panel_answer_outlasts_the_request_timeout() -> anyhow::Result<()> {
+    let panel_addr = alloc_tcp_port().await?.socket_addr();
+    let proxy_port = alloc_tcp_port().await?;
+    panel::install(panel_addr, Router::new().route("/slow", get(slow)));
+    let timeouts = r3v3rs3_api::upstream::UpstreamTimeouts {
+        request: Duration::from_secs(1),
+        ..Default::default()
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("slw-prt", &proxy_port)])
+        .proxies(vec![http_proxy_entry(
+            "slw-prx",
+            "slw-prt",
+            HttpProxy {
+                vhosts: vec!["localhost".parse().unwrap()],
+                routes: vec![http_route("/", &format!("http://{panel_addr}/"), None)],
+                timeouts,
+                ..Default::default()
+            },
+        )])
+        .build();
+    let port = proxy_port.socket_addr().port();
+    let result = common::with_server(config, |_| async move {
+        let response = reqwest::get(format!("http://localhost:{port}/slow")).await?;
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.text().await?, "done");
+        Ok(())
+    })
+    .await;
+    panel::clear(panel_addr);
+    result
+}
+
 /// Checks that the panel gets the `Host` of the client and the client that the proxy resolved,
 /// also when the client forges the client address headers: the proxy trusts no peer here, so
 /// the client is the address of the connection, and the plain HTTP connection is not secure.
