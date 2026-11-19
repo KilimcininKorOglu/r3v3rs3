@@ -642,6 +642,7 @@
   "error.invalid_mime_type": "Invalid media type: {mime}",
   "error.invalid_mirror_percent": "Mirror percent must be a whole number from 1 to 100: {percent}",
   "error.invalid_multiaddr": "Invalid multiaddr: {addr}",
+  "error.invalid_host_port": "Invalid host port {value}: use tcp/<port> or udp/<first>-<last> with ports 1-65535",
   "error.invalid_path_prefix": "Path prefix must start with / and cannot contain ? or #: {prefix}",
   "error.invalid_path_regex": "Invalid path regex: {pattern}",
   "error.invalid_redirect_rule": "Invalid redirect rule: {rule}. Write the status, the regex and the target, separated by spaces.",

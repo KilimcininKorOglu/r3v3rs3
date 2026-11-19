@@ -14,6 +14,7 @@ pub mod discovery;
 pub mod dns_credential;
 pub mod engines;
 pub mod fdmanifest;
+pub mod firewall;
 pub mod grpc;
 pub mod hyper_tls;
 pub mod ipc;

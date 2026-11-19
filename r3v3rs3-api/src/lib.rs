@@ -25,6 +25,7 @@ pub mod error;
 pub mod error_page_templates;
 pub mod error_page_theme;
 pub mod event;
+pub mod firewall;
 pub mod fixed_response;
 pub mod geoip;
 pub mod git;

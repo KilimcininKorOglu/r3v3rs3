@@ -642,6 +642,7 @@
   "error.invalid_mime_type": "Geçersiz medya türü: {mime}",
   "error.invalid_mirror_percent": "Yansıtma yüzdesi 1 ile 100 arasında bir tam sayı olmalıdır: {percent}",
   "error.invalid_multiaddr": "Geçersiz multiaddr: {addr}",
+  "error.invalid_host_port": "Geçersiz host portu {value}: 1-65535 aralığındaki portlarla tcp/<port> veya udp/<ilk>-<son> biçimini kullanın",
   "error.invalid_path_prefix": "Yol öneki / ile başlamalıdır ve ? veya # içeremez: {prefix}",
   "error.invalid_path_regex": "Geçersiz yol regex'i: {pattern}",
   "error.invalid_redirect_rule": "Geçersiz yönlendirme kuralı: {rule}. Durum kodu, regex ve hedef değerlerini boşlukla ayırarak yazın.",

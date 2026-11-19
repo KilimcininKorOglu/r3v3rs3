@@ -61,6 +61,9 @@ pub enum Error {
     #[error("invalid multiaddr: {addr}")]
     InvalidMultiaddr { addr: String },
 
+    #[error("invalid host port {value}: use tcp/<port> or udp/<first>-<last> with ports 1-65535")]
+    InvalidHostPort { value: String },
+
     #[error("missing TLS termination config")]
     TlsTerminationConfigMissing,
 

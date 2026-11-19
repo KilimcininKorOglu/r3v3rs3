@@ -221,6 +221,7 @@ mod tests {
             Error::UpgradeFailed,
             Error::FailedToBuildDnsResolver { reason: text() },
             Error::InvalidMultiaddr { addr: text() },
+            Error::InvalidHostPort { value: text() },
             Error::TlsTerminationConfigMissing,
             Error::ProxyProtocolNotSupported,
             Error::ProxyProtocolTrustedMissing,
