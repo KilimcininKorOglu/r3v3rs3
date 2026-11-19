@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.2] - 2026-11-19
+
+### Fixed
+- Backups have no fixed size limit: logical backups, PITR base backups and recoveries, Redis dumps and volume snapshots move in bounded pieces through files on the disk, so the memory of the server does not grow with the size of the data.
+- A backup over 16 MiB goes to S3 as a multipart upload, and a failed part cancels the upload; an S3 download lands in a file instead of memory.
+- An S3 restore over 2 GiB and a volume import over 512 MiB now work: both are bounded by the free disk less a 1 GiB reserve, which still stops a decompression bomb before the disk fills.
+- Database backup downloads stream from the file.
+- A volume restore puts every file back to its place in the volume instead of a directory of the same name inside it, and keeps the owner, the mode and the symbolic links; a BusyBox helper container packs and unpacks the volume, so an app image without a shell or `tar` works.
+- A container command that runs past six hours is killed, so a hung dump or restore does not hold the database forever.
+- A panel request that takes longer than the proxy request timeout, such as a backup or a restore from the CLI, gets its answer instead of 504.
+- MCP tools that run long send their response headers at once.
+- A Redis clone or S3 restore writes its AOF again.
+- After an in-place Redis recovery, the old history reaches the stop of the database and keeps the writes made during the recovery.
+
+### Changed
+- Test fixes: the UDP spoof test binds its upstream before it picks the proxy port, and several tests wait for background work instead of a fixed time.
+
 ## [3.5.1] - 2026-11-19
 
 ### Fixed
