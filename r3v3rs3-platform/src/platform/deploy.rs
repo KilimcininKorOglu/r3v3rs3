@@ -891,17 +891,33 @@ impl Platform {
         runtime.create_container(&spec).await?;
         runtime.start_container(name).await?;
         let mut healthy = self.wait_healthy(runtime, name, &job.spec).await;
-        if healthy.is_ok()
-            && super::mongo::replica_set(job.spec.database.as_deref(), job.app_target)
-        {
-            healthy = self
-                .ensure_replica_set(job.app, runtime, name, job.spec.port)
-                .await;
+        if healthy.is_ok() {
+            healthy = self.prepare_database(backend, job, name).await;
         }
         if healthy.is_err() {
             let _ = runtime.remove_container(name).await;
         }
         healthy
+    }
+
+    /// The step of a database engine between the health check of a new container and its
+    /// switch: MongoDB joins its replica set, and an archiving Redis turns its AOF on.
+    async fn prepare_database(
+        &self,
+        backend: &Backend,
+        job: &Job,
+        name: &ContainerName,
+    ) -> anyhow::Result<()> {
+        let engine = job.spec.database.as_deref();
+        if super::mongo::replica_set(engine, job.app_target) {
+            return self
+                .ensure_replica_set(job.app, &*backend.runtime, name, job.spec.port)
+                .await;
+        }
+        if engine == Some("redis") && super::wal::archives(engine, job.app_target) {
+            return self.ensure_aof(job.app, &backend.runtime, name).await;
+        }
+        Ok(())
     }
 
     async fn build_container_spec(
@@ -1556,6 +1572,7 @@ chown redis:redis \"$f\" && exec docker-entrypoint.sh redis-server --aclfile \"$
 /// `postgres` user before the entrypoint drops its rights.
 pub(crate) fn database_command(engine: Option<&str>, archive: bool) -> Option<Vec<String>> {
     let script = match engine {
+        Some("redis") if archive => super::aof::AOF_START,
         Some("redis") => REDIS_START,
         Some("postgres") if archive => super::wal::POSTGRES_ARCHIVE_START,
         Some("mysql" | "mariadb") if archive => return Some(super::binlog::binlog_command()),

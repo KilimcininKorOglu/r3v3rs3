@@ -61,7 +61,10 @@ const WAL_NAME_LEN: usize = 24;
 /// Whether the containers of the database archive their WAL. Only the local target runs the
 /// pull loop, so a database on an agent leaves archiving off instead of filling its disk.
 pub(super) fn archives(engine: Option<&str>, target: ShortId) -> bool {
-    matches!(engine, Some("postgres" | "mysql" | "mariadb" | "mongodb")) && super::is_local(target)
+    matches!(
+        engine,
+        Some("postgres" | "mysql" | "mariadb" | "mongodb" | "redis")
+    ) && super::is_local(target)
 }
 
 fn wal_volume(app: ShortId) -> anyhow::Result<VolumeMount> {
@@ -514,6 +517,7 @@ impl Platform {
         match app.spec.database.as_deref() {
             Some("mysql" | "mariadb") => self.take_binlog_base_locked(db_id).await,
             Some("mongodb") => self.take_oplog_base_locked(db_id).await,
+            Some("redis") => self.take_aof_base_locked(db_id).await,
             _ => self.take_base_backup_locked(db_id).await,
         }
     }
@@ -594,6 +598,7 @@ impl Platform {
         match app.spec.database.as_deref() {
             Some("mysql" | "mariadb") => self.pull_binlog_locked(db_id, false).await,
             Some("mongodb") => self.pull_oplog_locked(db_id).await,
+            Some("redis") => self.pull_aof_locked(db_id).await,
             _ => self.pull_wal_locked(db_id).await,
         }
     }
@@ -1085,6 +1090,28 @@ pub(super) async fn store_native_segment(
         !bytes.is_empty(),
         "the archived WAL file {filename} is empty"
     );
+    write_segment(dir, db_id, filename, bytes, start_time).await
+}
+
+/// Stores an empty piece that marks how far the archive of an append-only log reaches when no
+/// write followed the base backup. Only the Redis AOF archive uses it: an empty file of the
+/// other engines is a damaged one.
+pub(super) async fn store_marker_segment(
+    dir: &Path,
+    db_id: ShortId,
+    filename: String,
+    start_time: u64,
+) -> anyhow::Result<WalSegment> {
+    write_segment(dir, db_id, filename, &[], start_time).await
+}
+
+async fn write_segment(
+    dir: &Path,
+    db_id: ShortId,
+    filename: String,
+    bytes: &[u8],
+    start_time: u64,
+) -> anyhow::Result<WalSegment> {
     let compressed = gzip(bytes).await?;
     let now = unix_ms();
     let segment = WalSegment {

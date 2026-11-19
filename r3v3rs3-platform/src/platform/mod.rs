@@ -4,6 +4,7 @@
 //! database query or a Docker call must not hold up the ports and the other RPC methods.
 
 mod agents;
+mod aof;
 mod app_hooks;
 mod backup;
 mod binlog;
@@ -34,6 +35,8 @@ mod provider;
 pub mod proxy;
 pub mod prune;
 mod publish;
+#[cfg(test)]
+mod redis_docker_tests;
 pub mod registries;
 #[cfg(test)]
 mod remote_tests;

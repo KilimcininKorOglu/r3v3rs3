@@ -1187,6 +1187,7 @@ impl Platform {
             Some("postgres") => self.archive_postgres_wal(db_id).await,
             Some("mysql" | "mariadb") => self.archive_binlog(db_id).await,
             Some("mongodb") => self.archive_oplog(db_id).await,
+            Some("redis") => self.archive_aof(db_id).await,
             _ => self.archive_dump_segment(&app).await,
         }
     }
@@ -1231,6 +1232,7 @@ impl Platform {
             Some("postgres") => return self.postgres_pitr_range(db_id).await,
             Some("mysql" | "mariadb") => return self.binlog_pitr_range(db_id).await,
             Some("mongodb") => return self.oplog_pitr_range(db_id).await,
+            Some("redis") => return self.aof_pitr_range(db_id).await,
             _ => {}
         }
         let backups = self.list_backups(db_id).await?;
@@ -1272,6 +1274,7 @@ impl Platform {
                 return self.restore_binlog_pitr(db_id, &app, request).await;
             }
             Some("mongodb") => return self.restore_oplog_pitr(db_id, &app, request).await,
+            Some("redis") => return self.restore_aof_pitr(db_id, &app, request).await,
             _ => {}
         }
         let backups = self.list_backups(db_id).await?;
