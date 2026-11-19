@@ -356,6 +356,72 @@ async fn back_up_a_large_dataset(platform: &Arc<Platform>, name: &str) -> anyhow
     Ok(())
 }
 
+/// Every key of the database, sorted.
+async fn sorted_keys(platform: &Arc<Platform>, id: ShortId) -> anyhow::Result<Vec<String>> {
+    let out = cli(platform, id, "--scan").await?;
+    let mut keys: Vec<String> = out.lines().map(str::to_string).collect();
+    keys.sort_unstable();
+    Ok(keys)
+}
+
+/// Writes the keys `a` and `b`, backs them up, then replaces them with the key `late`, and
+/// returns the id of the backup.
+async fn back_up_then_replace(platform: &Arc<Platform>, id: ShortId) -> anyhow::Result<String> {
+    cli(platform, id, "SET a 1").await?;
+    cli(platform, id, "SET b 2").await?;
+    let backup = platform.run_backup(id).await?;
+    cli(platform, id, "FLUSHALL").await?;
+    cli(platform, id, "SET late 3").await?;
+    Ok(backup.id)
+}
+
+/// A backup restores on a Redis that writes its AOF, and the archive keeps working after it.
+/// The server loads the AOF when one exists, so a restore that only writes `dump.rdb` left the
+/// database as it was before (measured: 0 keys after a restore of 2).
+async fn restore_on_the_aof(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let db = add_db(platform, name).await?;
+    deploy(platform, db.id).await?;
+    let backup = back_up_then_replace(platform, db.id).await?;
+    platform.restore_backup(db.id, &backup).await?;
+    let keys = sorted_keys(platform, db.id).await?;
+    ensure!(keys == ["a", "b"], "the database holds {keys:?}");
+    let aof = cli(platform, db.id, "CONFIG GET appendonly").await?;
+    ensure!(
+        aof.ends_with("yes"),
+        "the AOF is off after the restore: {aof}"
+    );
+    branch_after_restore(platform, db.id, name).await
+}
+
+/// The archive follows the restored data: a write after the restore reaches a branch.
+async fn branch_after_restore(
+    platform: &Arc<Platform>,
+    id: ShortId,
+    name: &str,
+) -> anyhow::Result<()> {
+    let db = platform.app(id).await?;
+    cli(platform, db.id, "SET c 3").await?;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let request = PitrRestoreRequest {
+        target_time: crate::clock::unix_ms(),
+        new_name: Some(format!("{name}-b").parse()?),
+        host_port: None,
+    };
+    let branch = platform.restore_pitr(db.id, request).await?;
+    let count = cli(platform, branch.app.id, "DBSIZE").await?;
+    ensure!(count == "3", "the branch holds {count} keys");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn redis_restores_a_backup_on_the_aof_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = restore_on_the_aof(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn redis_backs_up_a_dataset_over_64_mib_on_the_docker_engine() -> anyhow::Result<()> {

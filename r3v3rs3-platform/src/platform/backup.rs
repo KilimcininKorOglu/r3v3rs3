@@ -730,13 +730,45 @@ impl Platform {
             &info.data_path,
         )
         .await?;
-        // The dumps hold no account passwords; Redis keeps its users in the ACL file of its
-        // volume, which a restore does not touch.
-        if engine != "redis" {
-            self.reapply_tenants(db_id).await?;
-        }
+        self.after_restore(db_id, &engine, &app, (&runtime, &container))
+            .await?;
         self.dispatch_backup_restored(db_id, app.name.as_str(), &engine, backup_id)
             .await;
+        Ok(())
+    }
+
+    /// Brings the accounts and the archive of a restored database up to date. The dumps hold
+    /// no account passwords; Redis keeps its users in the ACL file of its volume, which a
+    /// restore does not touch.
+    async fn after_restore(
+        &self,
+        db_id: ShortId,
+        engine: &str,
+        app: &AppEntry,
+        (runtime, container): (&Arc<dyn ContainerRuntime>, &ContainerName),
+    ) -> anyhow::Result<()> {
+        if engine != "redis" {
+            return self.reapply_tenants(db_id).await;
+        }
+        if super::wal::archives(Some("redis"), app.target) {
+            self.archive_restored_redis(db_id, runtime, container)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// A restored Redis runs without the AOF that it set aside: the AOF is written again from
+    /// the restored data, and the archive closes its old history, which the restore left, and
+    /// takes a new base.
+    async fn archive_restored_redis(
+        &self,
+        db_id: ShortId,
+        runtime: &Arc<dyn ContainerRuntime>,
+        container: &ContainerName,
+    ) -> anyhow::Result<()> {
+        self.ensure_aof(db_id, runtime, container).await?;
+        self.start_history(db_id).await?;
+        self.take_aof_base_locked(db_id).await?;
         Ok(())
     }
 
@@ -1742,6 +1774,26 @@ async fn upload_in_pieces(
     super::transfer::push_file(runtime, container, &local, path).await
 }
 
+/// Runs `script` with `$d` set to the AOF directory of the volume and `$p` to the place it is
+/// kept aside. A server with an AOF loads the AOF and ignores `dump.rdb`, so a restore moves
+/// the AOF aside before the restart, and removes it once the new server runs. A failed restore
+/// leaves it on the volume.
+async fn aof_aside(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    data_path: &str,
+    script: &str,
+) -> anyhow::Result<()> {
+    let script = format!(
+        "d='{data_path}/appendonlydir'; p='{data_path}/appendonlydir.restore-prev'; {script}"
+    );
+    let command = vec!["sh".into(), "-c".into(), script];
+    runtime
+        .exec_capture(container, command, Vec::new())
+        .await
+        .map(|_| ())
+}
+
 /// Writes the dump into the data volume and stops the server without a save, so its next start
 /// loads the dump. The `SHUTDOWN` ends the process that the exec of the command runs in, so the
 /// exec reports a failure even when the server stopped. The restore therefore counts as done
@@ -1755,6 +1807,8 @@ async fn restore_redis(
 ) -> anyhow::Result<()> {
     let before = redis_run_id(runtime, container, plan).await?;
     upload_in_pieces(runtime, container, &format!("{data_path}/dump.rdb"), bytes).await?;
+    let aside = "rm -rf \"$p\"; [ ! -d \"$d\" ] || mv \"$d\" \"$p\"";
+    aof_aside(runtime, container, data_path, aside).await?;
     let shutdown = runtime
         .exec_capture(container, plan.command.clone(), plan.env.clone())
         .await;
@@ -1763,7 +1817,7 @@ async fn restore_redis(
         if let Ok(after) = redis_run_id(runtime, container, plan).await
             && after != before
         {
-            return Ok(());
+            return aof_aside(runtime, container, data_path, "rm -rf \"$p\"").await;
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
