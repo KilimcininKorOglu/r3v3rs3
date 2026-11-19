@@ -121,18 +121,24 @@ async fn push(platform: &Arc<Platform>, id: ShortId, i: u32) -> anyhow::Result<u
 /// A running database with the base backup of its first archive call and then items 1 to 6
 /// written 1.2 seconds apart; the target time is one second after item 3.
 async fn six_items(platform: &Arc<Platform>, name: &str) -> anyhow::Result<(AppEntry, u64)> {
+    let (db, times) = six_items_at(platform, name).await?;
+    Ok((db, times[2] + 1000))
+}
+
+/// The database of `six_items` and the server time of each write.
+async fn six_items_at(
+    platform: &Arc<Platform>,
+    name: &str,
+) -> anyhow::Result<(AppEntry, Vec<u64>)> {
     let db = add_db(platform, name).await?;
     deploy(platform, db.id).await?;
     platform.archive_wal(db.id).await?;
-    let mut third = 0;
+    let mut times = Vec::new();
     for i in 1..=6 {
-        let at = push(platform, db.id, i).await?;
-        if i == 3 {
-            third = at;
-        }
+        times.push(push(platform, db.id, i).await?);
         tokio::time::sleep(Duration::from_millis(1200)).await;
     }
-    Ok((db, third + 1000))
+    Ok((db, times))
 }
 
 async fn branch_items(
@@ -161,8 +167,11 @@ async fn recover_branch(platform: &Arc<Platform>, name: &str) -> anyhow::Result<
 }
 
 async fn recover_in_place(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
-    let (db, target_time) = six_items(platform, name).await?;
-    let fifth_target = target_time + 2400;
+    let (db, times) = six_items_at(platform, name).await?;
+    let target_time = times[2] + 1000;
+    // A recovery cuts at whole seconds before the target, so one second after the write of
+    // item 5 keeps it, and item 6, written 1.2 seconds later, stays out.
+    let fifth_target = times[4] + 1000;
     let request = PitrRestoreRequest {
         target_time,
         new_name: None,
