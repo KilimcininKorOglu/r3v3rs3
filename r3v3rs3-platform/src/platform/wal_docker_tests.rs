@@ -159,6 +159,7 @@ async fn recover_between_two_rows(
 /// Recovers the database itself to the middle between rows 3 and 4.
 async fn recover_in_place(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
     let (db, target_time) = six_rows(platform, name, PG17).await?;
+    let fifth = row_time(platform, db.id, 5).await?;
     let request = PitrRestoreRequest {
         target_time,
         new_name: None,
@@ -168,9 +169,51 @@ async fn recover_in_place(platform: &Arc<Platform>, name: &str) -> anyhow::Resul
     ensure!(!response.branched, "{response:?}");
     let rows = sql(platform, db.id, ROWS).await?;
     ensure!(rows == "1,2,3", "the database holds the rows {rows}");
-    // The promoted server takes new writes.
+    // The promoted server takes new writes, and its new timeline is archived.
     sql(platform, db.id, "INSERT INTO t (i) VALUES (7)").await?;
+    let seventh = row_time(platform, db.id, 7).await?;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    platform.archive_wal(db.id).await?;
+    // Both timelines stay reachable: a target before the recovery takes the old one.
+    let old = branch_rows(platform, db.id, &format!("{name}-o"), fifth + 500).await?;
+    ensure!(
+        old == "1,2,3,4,5",
+        "the branch of the old timeline holds {old}"
+    );
+    let new = branch_rows(platform, db.id, &format!("{name}-n"), seventh + 500).await?;
+    ensure!(
+        new == "1,2,3,7",
+        "the branch of the new timeline holds {new}"
+    );
     Ok(())
+}
+
+/// The commit time of row `i` in Unix milliseconds.
+async fn row_time(platform: &Arc<Platform>, id: ShortId, i: u32) -> anyhow::Result<u64> {
+    let query = "SELECT i || ' ' || (extract(epoch FROM at) * 1000)::bigint FROM t";
+    let rows = sql(platform, id, query).await?;
+    let time = rows
+        .lines()
+        .find_map(|row| row.strip_prefix(&format!("{i} ")))
+        .with_context(|| format!("no row {i} in {rows:?}"))?;
+    Ok(time.parse()?)
+}
+
+/// The rows of a new branch of `id` recovered to `target_time`.
+async fn branch_rows(
+    platform: &Arc<Platform>,
+    id: ShortId,
+    name: &str,
+    target_time: u64,
+) -> anyhow::Result<String> {
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: Some(name.parse()?),
+        host_port: None,
+    };
+    let response = platform.restore_pitr(id, request).await?;
+    ensure!(response.branched, "{response:?}");
+    sql(platform, response.app.id, ROWS).await
 }
 
 /// A recovery that misses one archived WAL file fails, names the file and leaves the data of

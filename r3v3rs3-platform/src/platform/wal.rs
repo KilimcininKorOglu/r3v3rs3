@@ -753,6 +753,12 @@ impl Platform {
         };
         self.recover_into(target.id, &recovery).await?;
         self.reapply_tenants(target.id).await?;
+        // The promoted server writes a new timeline, and a replay from an older base backup
+        // cannot follow it without the history file of the timeline. A base backup of the new
+        // timeline makes the writes after the recovery recoverable.
+        self.take_base_backup(target.id)
+            .await
+            .context("the recovered database took no new base backup")?;
         Ok(PitrRestoreResponse {
             app: target,
             target_time: request.target_time,
