@@ -531,6 +531,37 @@ async fn a_command_silent_past_the_response_timeout_finishes_on_the_docker_engin
     run.and(remove_apps(&platform).await)
 }
 
+/// A command that runs past its limit is an error that returns at the limit: the caller holds the
+/// lock of the database while it waits, so a hanging command must not keep it for ever.
+async fn give_up_on_a_hanging_command(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let db = add_db(platform, name).await?;
+    deploy(platform, db.id).await?;
+    let (_, container, _) = platform.database_container(db.id).await?;
+    let host = std::env::var("DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());
+    let runtime = super::docker_runtime(&host)?;
+    let command = vec!["sh".into(), "-c".into(), "sleep 60; echo done".into()];
+    let started = tokio::time::Instant::now();
+    let result = runtime
+        .exec_capture_within(&container, command, Vec::new(), Duration::from_secs(3))
+        .await;
+    let took = started.elapsed();
+    ensure!(result.is_err(), "the hanging command returned {result:?}");
+    ensure!(
+        took < Duration::from_secs(15),
+        "the limit ended the wait after {took:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_command_past_its_limit_fails_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = give_up_on_a_hanging_command(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn redis_restores_a_backup_on_the_aof_on_the_docker_engine() -> anyhow::Result<()> {

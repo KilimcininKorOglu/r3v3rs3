@@ -55,6 +55,11 @@ const MAX_DOWNLOAD_SIZE: usize = 64 * 1024 * 1024;
 /// The largest file that an upload accepts.
 const MAX_UPLOAD_SIZE: usize = 16 * 1024 * 1024;
 
+/// The longest a command run inside a container may take. A dump or a recovery of a large
+/// database runs for hours, and a command that hangs must not hold the lock of its database
+/// for ever.
+const EXEC_LIMIT: Duration = Duration::from_secs(6 * 60 * 60);
+
 /// Percent-encodes a query value.
 fn encode_path(value: &str) -> String {
     percent_encoding::percent_encode(value.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
@@ -530,6 +535,18 @@ impl DockerRuntime {
         command: Vec<String>,
         env: Vec<String>,
     ) -> anyhow::Result<Vec<u8>> {
+        self.exec_capture_within(name, command, env, EXEC_LIMIT)
+            .await
+    }
+
+    /// [`Self::exec_capture`] that gives up once the command has run for `limit`.
+    pub async fn exec_capture_within(
+        &self,
+        name: &ContainerName,
+        command: Vec<String>,
+        env: Vec<String>,
+        limit: Duration,
+    ) -> anyhow::Result<Vec<u8>> {
         let container = self.container_id(name).await?;
         let env: Vec<Value> = env.iter().map(|entry| json!(entry)).collect();
         let command: Vec<Value> = command.into_iter().map(|word| json!(word)).collect();
@@ -548,7 +565,7 @@ impl DockerRuntime {
             )
             .await?;
         let exec: ExecCreateResponse = read_json(response).await?;
-        let frames = self.read_exec(&exec.id).await?;
+        let frames = self.read_exec(&exec.id, limit).await?;
         let exit_code = self.exec_exit_code(&exec.id).await?;
         let (stdout, stderr) = split_exec_stream(&frames)?;
         if exit_code != 0 {
@@ -749,20 +766,26 @@ impl DockerRuntime {
             .await?;
         let exec: ExecCreateResponse = read_json(response).await?;
         // The output is not shown, but the session has to run to its end.
-        self.read_exec(&exec.id).await?;
+        self.read_exec(&exec.id, EXEC_LIMIT).await?;
         self.exec_exit_code(&exec.id).await
     }
 
-    /// Starts a created exec and returns its duplex stream.
     /// Reads the output stream of an exec to its end. A command may stay silent for longer than
     /// the response timeout, as a dump written to a file does, so a read that times out ends
-    /// the stream only when the exec no longer runs.
-    async fn read_exec(&self, id: &str) -> anyhow::Result<Vec<u8>> {
+    /// the stream only when the exec no longer runs. A command that still runs after `limit`
+    /// is an error: the callers hold the lock of a database while it runs.
+    async fn read_exec(&self, id: &str, limit: Duration) -> anyhow::Result<Vec<u8>> {
+        let deadline = tokio::time::Instant::now() + limit;
         let mut stream = self.start_exec(id).await?;
         let mut frames = Vec::new();
         let mut chunk = [0u8; 16 * 1024];
         loop {
-            match tokio::time::timeout(RESPONSE_TIMEOUT, stream.read(&mut chunk)).await {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if left.is_zero() {
+                bail!("the exec {id} still runs after {limit:?}");
+            }
+            let wait = left.min(RESPONSE_TIMEOUT);
+            match tokio::time::timeout(wait, stream.read(&mut chunk)).await {
                 Ok(read) => match read? {
                     0 => return Ok(frames),
                     read => frames.extend_from_slice(&chunk[..read]),
