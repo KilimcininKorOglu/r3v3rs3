@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] - 2026-11-19
+
+### Added
+- Point-in-time recovery to any second for PostgreSQL: a continuous WAL archive with physical base backups, replayed with `recovery_target_time`.
+- Point-in-time recovery to any second for MySQL and MariaDB from the binary log.
+- Point-in-time recovery to any second for MongoDB from a continuous oplog archive; MongoDB now runs as a single-member replica set.
+- Point-in-time recovery to any second for Redis from a continuous AOF archive with timestamps.
+- An existing database starts archiving on its next deployment and keeps its data.
+
+### Changed
+- The dump segments that only faked a point-in-time recovery are gone; an engine without a log archive answers with a clear error.
+- The docs describe the log archive and the timelines of each engine.
+
+### Fixed
+- A PostgreSQL in-place recovery takes a base backup on its new timeline, so later recoveries reach it.
+- A failed WAL replay rolls back to the data from before the recovery.
+- A recovery keeps the archive of the old history, also with a retention of one base backup.
+- MongoDB starts a new timeline after a gap in the oplog archive and stores no file for the periodic noops of an idle server.
+- The backups of a deleted database are set aside under a new name, so a new database of the same name does not mix with them.
+- The binary log from before the first base backup is not fetched.
+- The data path of an official image under a registry prefix is found.
+- The files of a local container are listed through the runtime trait.
+
 ## [3.4.6] - 2026-11-18
 
 ### Added
