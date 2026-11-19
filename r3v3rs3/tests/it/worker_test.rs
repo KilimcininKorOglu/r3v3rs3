@@ -200,16 +200,19 @@ async fn check_new_config(
     let mut new_config = config.clone();
     new_config.proxies[0].proxy = tcp_proxy_to(&second_port.socket_addr());
     write_frame(master, &WorkerCommand::Config(Box::new(new_config)))?;
-    // The worker answers the commands in order, so the pong follows the applied configuration.
     expect_pong(master)?;
 
-    // The first upstream echoes the payload, so only the new upstream answers "second" to it.
-    let mut client = wait_for_proxy(&proxy_addr).await?;
-    let mut buf = [0u8; 6];
-    client.write_all(b"xxxxxx").await?;
-    client.read_exact(&mut buf).await?;
-    assert_eq!(&buf, b"second");
-    Ok(())
+    // The worker hands the configuration to its server loop and answers the next command at
+    // once, so the switch can land after the pong. The first upstream echoes the payload, so
+    // only the new upstream answers "second" to it.
+    let reaches_second = || async {
+        let mut client = wait_for_proxy(&proxy_addr).await?;
+        let mut buf = [0u8; 6];
+        client.write_all(b"xxxxxx").await?;
+        client.read_exact(&mut buf).await?;
+        Ok(&buf == b"second")
+    };
+    common::wait_until(reaches_second, "the proxy never moved to the new upstream").await
 }
 
 /// Binds the listener that the test hands to the worker and returns it with its address.
