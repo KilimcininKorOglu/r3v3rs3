@@ -1335,6 +1335,77 @@ async fn change_admin_password(addr: SocketAddr, cookie: &str) -> anyhow::Result
     Ok(())
 }
 
+/// The JSON-RPC messages of one stateless `tools/call` (MCP `2026-07-28`), in the order of the
+/// SSE events of the answer. `meta` adds keys to the `_meta` of the request.
+async fn stateless_call_events(
+    addr: SocketAddr,
+    access: &str,
+    meta: Value,
+) -> anyhow::Result<Vec<Value>> {
+    let mut request_meta = json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+    });
+    if let (Some(base), Some(extra)) = (request_meta.as_object_mut(), meta.as_object()) {
+        base.extend(extra.clone());
+    }
+    let response = Client::new()
+        .post(format!("http://{addr}/api/mcp"))
+        .header("Authorization", format!("Bearer {access}"))
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", "2026-07-28")
+        .header("Mcp-Method", "tools/call")
+        .header("Mcp-Name", "server_status")
+        .json(&json!({
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": { "name": "server_status", "arguments": {}, "_meta": request_meta },
+        }))
+        .send()
+        .await?;
+    let status = response.status();
+    let body = response.text().await?;
+    let mut events = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .filter(|data| !data.trim().is_empty())
+        .map(|data| serde_json::from_str(data.trim()))
+        .collect::<Result<Vec<Value>, _>>()?;
+    // A reply that is a single message comes as plain JSON instead of an event stream.
+    if events.is_empty() {
+        events.push(serde_json::from_str(&body).with_context(|| format!("{status}: {body}"))?);
+    }
+    Ok(events)
+}
+
+/// A tool call answers with a notification before its result, so the response headers leave at
+/// once: a reverse proxy in front of the panel refuses an upstream that sends no headers within
+/// its request timeout (60 s by default), and a PITR restore or a deployment runs longer. The
+/// client sends a progress token, as Claude Code does with every call, so the first event is a
+/// progress notification for that token (MCP `notifications/progress`).
+#[tokio::test]
+async fn a_tool_call_announces_itself_before_its_result() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-announce")?;
+    with_admin(&dir.0, |addr| async move {
+        let token = access_token(&addr).await?;
+        let events = stateless_call_events(addr, &token, json!({ "progressToken": "p-2" })).await?;
+        let last = events.last().context("no event")?;
+        assert_eq!(last["id"], json!(7), "{events:?}");
+        assert!(last.get("result").is_some(), "{events:?}");
+        assert_eq!(
+            events[0]["method"],
+            json!("notifications/progress"),
+            "{events:?}"
+        );
+        assert_eq!(
+            events[0]["params"]["progressToken"],
+            json!("p-2"),
+            "{events:?}"
+        );
+        Ok(())
+    })
+    .await
+}
+
 /// The HTTP status of a `tools/list` call with the access token.
 async fn tools_list_status(addr: SocketAddr, access: &str) -> anyhow::Result<StatusCode> {
     Ok(Client::new()

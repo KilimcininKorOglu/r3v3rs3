@@ -5324,7 +5324,45 @@ fn parse_webhook_event(name: &str) -> Result<r3v3rs3_api::webhook::WebhookEvent,
 }
 
 #[tool_handler(router = self.tool_router)]
-impl rmcp::ServerHandler for McpServer {}
+impl rmcp::ServerHandler for McpServer {
+    fn get_info(&self) -> rmcp::model::ServerConfig {
+        rmcp::model::ServerConfig::new(
+            rmcp::model::ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
+        )
+        .with_server_info(rmcp::model::Implementation::from_build_env())
+    }
+
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
+        announce_call(&request.name, &context).await;
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
+}
+
+/// Sends one notification before a tool runs. A stateless MCP request sends its response
+/// headers only with the first message of the handler, and a deployment, a backup or a PITR
+/// restore runs for minutes: a reverse proxy in front of the panel ends such a request once its
+/// request timeout passes without headers (60 s by default). The notification starts the event
+/// stream at once, and the transport then keeps it open with its keep-alive. The notification is
+/// a progress one, so it goes only to a client that sent a progress token (MCP clients such as
+/// Claude Code send one with every call); log messages are deprecated by the protocol. A
+/// notification that cannot be sent only loses the early start, so the tool runs anyway.
+async fn announce_call(tool: &str, context: &RequestContext<RoleServer>) {
+    let Some(token) = context.meta.get_progress_token() else {
+        return;
+    };
+    let param = rmcp::model::ProgressNotificationParam::new(token, 0.0)
+        .with_message(format!("{tool} started"));
+    if let Err(err) = context.peer.notify_progress(param).await {
+        tracing::warn!(tool, %err, "the start notification of an MCP tool was not sent");
+    }
+}
 
 fn apply_quarantine_overrides(
     config: &mut r3v3rs3_api::quarantine::AutoQuarantineConfig,
