@@ -233,6 +233,49 @@ async fn keep_the_last_write(
     Ok(())
 }
 
+/// A client can still write while an in-place recovery runs, after its last pull and before
+/// the database stops. That write is in the old data only, so the old history must keep it.
+async fn keep_a_write_during_the_recovery(
+    platform: &Arc<Platform>,
+    name: &str,
+) -> anyhow::Result<()> {
+    let (db, target_time) = six_items(platform, name).await?;
+    super::aof::WRITES_BEFORE_STOP
+        .lock()
+        .map_err(|_| anyhow::anyhow!("the test hook lock is poisoned"))?
+        .insert(db.id, "RPUSH t 9".to_string());
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: None,
+        host_port: None,
+    };
+    let response = platform.restore_pitr(db.id, request).await?;
+    ensure!(!response.branched, "{response:?}");
+    let latest = old_history_end(platform, db.id).await?;
+    let old = branch_items(platform, db.id, &format!("{name}-o"), latest).await?;
+    ensure!(
+        old == "1,2,3,4,5,6,9",
+        "the branch of the old history holds {old}"
+    );
+    Ok(())
+}
+
+/// The time of the newest piece of the history that the last in-place recovery closed.
+async fn old_history_end(platform: &Arc<Platform>, id: ShortId) -> anyhow::Result<u64> {
+    let archives = platform.archives(id).await?;
+    let old = archives
+        .iter()
+        .filter(|archive| archive.end.is_some())
+        .max_by_key(|archive| archive.end)
+        .context("no history")?;
+    let segments = old.segments().await?;
+    segments
+        .iter()
+        .map(|segment| segment.end_time)
+        .max()
+        .context("the history holds no piece")
+}
+
 /// A target after the base backup but before the first write of its incr file recovers the
 /// data of the base backup alone.
 async fn recover_an_idle_target(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
@@ -734,6 +777,16 @@ async fn redis_keeps_a_burst_of_writes_of_an_in_place_recovery_on_the_docker_eng
     catalog();
     let (platform, _dir) = docker_platform().await?;
     let run = keep_the_last_write(&platform, &name(), &[8, 9, 10, 11, 12]).await;
+    run.and(remove_apps(&platform).await)
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn redis_keeps_a_write_during_an_in_place_recovery_on_the_docker_engine() -> anyhow::Result<()>
+{
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = keep_a_write_during_the_recovery(&platform, &name()).await;
     run.and(remove_apps(&platform).await)
 }
 

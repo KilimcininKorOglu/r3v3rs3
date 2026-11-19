@@ -53,6 +53,13 @@ const MANIFEST: &str = "/data/appendonlydir/appendonly.aof.manifest";
 /// The hard link that keeps the incr file of a rewrite until its last bytes are archived.
 const KEPT_INCR: &str = "/data/r3v3rs3-incr.kept";
 
+/// `redis-cli` arguments that a test runs against a database right before its in-place
+/// recovery stops it, one entry for each database.
+#[cfg(test)]
+pub(super) static WRITES_BEFORE_STOP: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<ShortId, String>>,
+> = std::sync::LazyLock::new(Default::default);
+
 /// The prefix of an archived AOF piece. The suffix packs the sequence of the incr file into the
 /// upper bits and the end offset of the piece into the lower 40 bits, so the pieces sort in the
 /// order of the AOF.
@@ -412,11 +419,26 @@ impl Platform {
     }
 
     /// Archives the bytes of the old incr file after the newest piece of its sequence, then
-    /// removes the link. A database without an archive of that sequence needs none of them.
+    /// removes the link.
     async fn archive_kept_incr(
         &self,
         session: &RedisSession,
         db_id: ShortId,
+        seq: u64,
+    ) -> anyhow::Result<()> {
+        self.archive_incr_file(session, db_id, KEPT_INCR, seq)
+            .await?;
+        session.text(&format!("rm -f {KEPT_INCR}")).await?;
+        Ok(())
+    }
+
+    /// Archives the bytes of the incr file `path` of sequence `seq` after the newest piece of
+    /// that sequence. A database without an archive of that sequence needs none of them.
+    async fn archive_incr_file(
+        &self,
+        session: &RedisSession,
+        db_id: ShortId,
+        path: &str,
         seq: u64,
     ) -> anyhow::Result<()> {
         let bases = self.list_base_backups(db_id).await?;
@@ -433,11 +455,11 @@ impl Platform {
                 .map(|packed| unpack(packed).1)
                 .max()
                 .unwrap_or(0);
-            let size = session.size(KEPT_INCR).await?;
+            let size = session.size(path).await?;
             let mut done = offset;
             while done < size {
                 let stored = self
-                    .store_tail(session, db_id, KEPT_INCR, (seq, done), size)
+                    .store_tail(session, db_id, path, (seq, done), size)
                     .await?;
                 done = stored
                     .first()
@@ -445,7 +467,6 @@ impl Platform {
                     .map_or(size, |packed| unpack(packed).1);
             }
         }
-        session.text(&format!("rm -f {KEPT_INCR}")).await?;
         Ok(())
     }
 
@@ -557,9 +578,7 @@ impl Platform {
         let mount = mount_of(&app)?;
         let restore = format!("{mount}/{RESTORE_NAME}");
         push_upload(&runtime, &container, &upload, &restore).await?;
-        runtime
-            .stop_container(&container, Duration::from_secs(60))
-            .await?;
+        self.stop_for_recovery(db_id, &runtime, &container).await?;
         let rebuilt = self
             .run_db_helper(&runtime, &app, rebuild_script(&mount, until), None)
             .await;
@@ -580,13 +599,65 @@ impl Platform {
         }
     }
 
+    /// Stops the database for a recovery. On the stop, Redis writes every write it acknowledged.
+    async fn stop_for_recovery(
+        &self,
+        db_id: ShortId,
+        runtime: &Arc<dyn ContainerRuntime>,
+        container: &ContainerName,
+    ) -> anyhow::Result<()> {
+        #[cfg(test)]
+        self.write_before_stop(db_id).await?;
+        #[cfg(not(test))]
+        let _ = db_id;
+        runtime
+            .stop_container(container, Duration::from_secs(60))
+            .await
+    }
+
     async fn finish_aof_recovery(&self, db_id: ShortId, mount: &str) -> anyhow::Result<()> {
+        let session = self.redis_session(db_id).await?;
+        self.archive_previous_incr(&session, db_id, mount).await?;
         self.close_archive(db_id).await?;
         self.start_history(db_id).await?;
-        self.redis_session(db_id)
-            .await?
+        session
             .text(&format!("rm -rf '{mount}/{PREVIOUS_DIR}'"))
             .await?;
+        Ok(())
+    }
+
+    /// Archives the last bytes of the incr file that the database wrote before the recovery
+    /// stopped it. A client can still write between the last pull and the stop, and the old
+    /// data is the only copy of such a write until this call.
+    async fn archive_previous_incr(
+        &self,
+        session: &RedisSession,
+        db_id: ShortId,
+        mount: &str,
+    ) -> anyhow::Result<()> {
+        let dir = format!("{mount}/{PREVIOUS_DIR}/appendonlydir");
+        let manifest = session
+            .text(&format!("cat '{dir}/appendonly.aof.manifest'"))
+            .await?;
+        let (incr, seq) = incr_of(&manifest)?;
+        self.archive_incr_file(session, db_id, &format!("{dir}/{incr}"), seq)
+            .await
+    }
+
+    /// Runs the `redis-cli` arguments that a test set for `db_id` right before the recovery
+    /// stops the database, as a client that writes between the last pull and the stop. It
+    /// waits a second after the write, so the stop, and the end of the old history, lie in a
+    /// later second than the write, which a recovery cut at whole seconds keeps.
+    #[cfg(test)]
+    async fn write_before_stop(&self, db_id: ShortId) -> anyhow::Result<()> {
+        let args = WRITES_BEFORE_STOP
+            .lock()
+            .map_err(|_| anyhow::anyhow!("the test hook lock is poisoned"))?
+            .remove(&db_id);
+        if let Some(args) = args {
+            self.redis_session(db_id).await?.cli(&args).await?;
+            tokio::time::sleep(Duration::from_millis(1100)).await;
+        }
         Ok(())
     }
 
