@@ -1186,6 +1186,7 @@ impl Platform {
         match app.spec.database.as_deref() {
             Some("postgres") => self.archive_postgres_wal(db_id).await,
             Some("mysql" | "mariadb") => self.archive_binlog(db_id).await,
+            Some("mongodb") => self.archive_oplog(db_id).await,
             _ => self.archive_dump_segment(&app).await,
         }
     }
@@ -1229,6 +1230,7 @@ impl Platform {
         match self.app(db_id).await?.spec.database.as_deref() {
             Some("postgres") => return self.postgres_pitr_range(db_id).await,
             Some("mysql" | "mariadb") => return self.binlog_pitr_range(db_id).await,
+            Some("mongodb") => return self.oplog_pitr_range(db_id).await,
             _ => {}
         }
         let backups = self.list_backups(db_id).await?;
@@ -1269,6 +1271,7 @@ impl Platform {
             Some("mysql" | "mariadb") => {
                 return self.restore_binlog_pitr(db_id, &app, request).await;
             }
+            Some("mongodb") => return self.restore_oplog_pitr(db_id, &app, request).await,
             _ => {}
         }
         let backups = self.list_backups(db_id).await?;
@@ -1396,12 +1399,10 @@ impl Platform {
             return Ok(String::new());
         }
         let pass = self.database_password(source_id, info).await?;
-        let entry = r3v3rs3_api::platform::EnvEntry {
-            key: info.password_env.parse()?,
-            value: Some(pass.clone()),
-            secret: true,
-        };
-        self.set_env(dest_id, vec![entry]).await?;
+        // The whole first environment of the engine: MongoDB creates its root user only with
+        // both the user and the password variable.
+        let entries = super::database_env::initial_db_env_entries(info, &pass)?;
+        self.set_env(dest_id, entries).await?;
         Ok(pass)
     }
 
@@ -1853,8 +1854,8 @@ async fn take_dump(
     }
 }
 
-/// Captures a dump segment of an engine without a log archive yet. PostgreSQL, MySQL and
-/// MariaDB archive their own log (`wal.rs`, `binlog.rs`).
+/// Captures a dump segment of an engine without a log archive yet. PostgreSQL, MySQL,
+/// MariaDB and MongoDB archive their own log (`wal.rs`, `binlog.rs`, `oplog.rs`).
 async fn capture_engine_wal(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
@@ -1863,7 +1864,6 @@ async fn capture_engine_wal(
     password: &str,
 ) -> anyhow::Result<(String, Vec<u8>)> {
     match engine {
-        "mongodb" => capture_mongodb_oplog(runtime, container, info, password).await,
         "redis" => capture_redis_aof(runtime, container, info, password).await,
         other => anyhow::bail!("engine {other} does not support WAL archiving"),
     }
@@ -1878,30 +1878,6 @@ pub(super) fn mongodb_uri(user: &str, password: &str) -> anyhow::Result<String> 
     uri.set_password(Some(password))
         .map_err(|()| anyhow::anyhow!("the MongoDB password cannot go into a connection string"))?;
     Ok(uri.to_string())
-}
-
-async fn capture_mongodb_oplog(
-    runtime: &Arc<dyn ContainerRuntime>,
-    container: &ContainerName,
-    info: &EngineInfo,
-    password: &str,
-) -> anyhow::Result<(String, Vec<u8>)> {
-    let filename = format!("oplog-{}.archive", unix_ms());
-    let dump = runtime
-        .exec_capture(
-            container,
-            vec![
-                "sh".into(),
-                "-c".into(),
-                "mongodump --uri=\"$MONGO_URI\" --archive --oplog".into(),
-            ],
-            vec![format!("MONGO_URI={}", mongodb_uri(&info.user, password)?)],
-        )
-        .await?;
-    if dump.is_empty() {
-        bail!("mongodump captured empty oplog archive");
-    }
-    Ok((filename, dump))
 }
 
 async fn capture_redis_aof(

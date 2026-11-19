@@ -14,7 +14,9 @@ use r3v3rs3_api::container::{
     ContainerName, ContainerSpec, EnvVar, ResourceLimits, RestartPolicy, VolumeMount,
 };
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::platform::{AppEntry, AppSource, DeploymentTrigger, PlatformConfig};
+use r3v3rs3_api::platform::{
+    AppEntry, AppSource, DeploymentTrigger, PitrRestoreRequest, PlatformConfig,
+};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -262,6 +264,190 @@ async fn a_mongodb_replica_set_restores_a_backup_on_the_docker_engine() -> anyho
     catalog();
     let (platform, _dir) = docker_platform().await?;
     let run = backup_and_restore(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
+const DOCS: &str =
+    "print(db.getSiblingDB('app').t.find().sort({i: 1}).toArray().map(d => d.i).join(','))";
+
+const INSERT: &str = "const t = db.getSiblingDB('app').t; \
+const last = t.find().sort({i: -1}).limit(1).toArray(); \
+print(t.insertOne({i: last.length ? last[0].i + 1 : 1, at: new Date()}).acknowledged)";
+
+/// The users of the `admin` database other than root.
+const USERS: &str = "print(db.getSiblingDB('admin').getUsers().users.map(u => u.user).filter(u => u !== 'root').join(','))";
+
+/// The commit time of document `i` in Unix milliseconds.
+async fn doc_time(platform: &Arc<Platform>, id: ShortId, i: u32) -> anyhow::Result<u64> {
+    let script = format!("print(db.getSiblingDB('app').t.findOne({{i: {i}}}).at.getTime())");
+    Ok(eval(platform, id, &script).await?.parse()?)
+}
+
+/// A running database with six documents written about 1.2 seconds apart after its first
+/// archive call, and the target time one second after document 3. An account that exists at
+/// the base backup is dropped after it, and another one is created before the target: the
+/// platform owns the accounts, so a replay must neither stop on them nor bring one back.
+async fn six_docs(platform: &Arc<Platform>, name: &str) -> anyhow::Result<(AppEntry, u64)> {
+    let db = add_db(platform, name).await?;
+    deploy(platform, db.id).await?;
+    let user = |name: &str| {
+        format!(
+            "db.getSiblingDB('admin').createUser({{user: '{name}', pwd: 'x0123456789', roles: []}})"
+        )
+    };
+    eval(platform, db.id, &user("old")).await?;
+    // The first archive call takes the base backup that the recovery starts from.
+    platform.archive_wal(db.id).await?;
+    eval(platform, db.id, "db.getSiblingDB('admin').dropUser('old')").await?;
+    eval(platform, db.id, &user("late")).await?;
+    for _ in 1..=6 {
+        eval(platform, db.id, INSERT).await?;
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+    }
+    let third = doc_time(platform, db.id, 3).await?;
+    Ok((db, third + 1000))
+}
+
+/// The documents and the extra accounts of a new branch of `id` recovered to `target_time`.
+async fn branch_docs(
+    platform: &Arc<Platform>,
+    id: ShortId,
+    name: &str,
+    target_time: u64,
+) -> anyhow::Result<(String, String)> {
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: Some(name.parse()?),
+        host_port: None,
+    };
+    let response = platform.restore_pitr(id, request).await?;
+    ensure!(response.branched, "{response:?}");
+    let docs = eval(platform, response.app.id, DOCS).await?;
+    let users = eval(platform, response.app.id, USERS).await?;
+    Ok((docs, users))
+}
+
+async fn recover_branch(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let (db, target_time) = six_docs(platform, name).await?;
+    let (docs, users) = branch_docs(platform, db.id, &format!("{name}-b"), target_time).await?;
+    ensure!(docs == "1,2,3", "the branch holds the documents {docs}");
+    ensure!(users.is_empty(), "the branch holds the accounts {users}");
+    let source = eval(platform, db.id, DOCS).await?;
+    ensure!(source == "1,2,3,4,5,6", "the source holds {source}");
+    Ok(())
+}
+
+async fn recover_in_place(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let (db, target_time) = six_docs(platform, name).await?;
+    let fifth = doc_time(platform, db.id, 5).await?;
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: None,
+        host_port: None,
+    };
+    let response = platform.restore_pitr(db.id, request).await?;
+    ensure!(!response.branched, "{response:?}");
+    let docs = eval(platform, db.id, DOCS).await?;
+    ensure!(docs == "1,2,3", "the database holds the documents {docs}");
+    // The recovered set takes writes, and its new history can be archived again.
+    eval(platform, db.id, INSERT).await?;
+    let fourth = doc_time(platform, db.id, 4).await?;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    platform.archive_wal(db.id).await?;
+    // The history before the recovery stays reachable.
+    let (old, _) = branch_docs(platform, db.id, &format!("{name}-o"), fifth + 1000).await?;
+    ensure!(
+        old == "1,2,3,4,5",
+        "the branch of the old history holds {old}"
+    );
+    let (new, _) = branch_docs(platform, db.id, &format!("{name}-n"), fourth + 1000).await?;
+    ensure!(
+        new == "1,2,3,4",
+        "the branch of the new history holds {new}"
+    );
+    Ok(())
+}
+
+/// A recovery that misses one archived oplog file fails, names the file and leaves the data
+/// of the database as it was.
+async fn refuse_a_gap(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let (db, target_time) = six_docs(platform, name).await?;
+    let lost = platform.archive_wal(db.id).await?;
+    let dir = platform.wal_dir(db.id).await?;
+    tokio::fs::remove_file(dir.join(format!("{}.wal.gz", lost.id))).await?;
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: None,
+        host_port: None,
+    };
+    let err = platform.restore_pitr(db.id, request).await.unwrap_err();
+    ensure!(
+        format!("{err:#}").contains(&lost.filename),
+        "the error does not name {}: {err:#}",
+        lost.filename
+    );
+    let docs = eval(platform, db.id, DOCS).await?;
+    ensure!(docs == "1,2,3,4,5,6", "the database holds {docs}");
+    Ok(())
+}
+
+/// A recovery whose replay fails half way, here on a damaged oplog file, puts the data that
+/// it moved aside back, and the set takes writes again.
+async fn roll_back_a_failed_replay(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let (db, target_time) = six_docs(platform, name).await?;
+    let damaged = platform.archive_wal(db.id).await?;
+    let dir = platform.wal_dir(db.id).await?;
+    let broken = super::backup::gzip(b"not an oplog").await?;
+    tokio::fs::write(dir.join(format!("{}.wal.gz", damaged.id)), broken).await?;
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: None,
+        host_port: None,
+    };
+    let err = platform.restore_pitr(db.id, request).await.unwrap_err();
+    ensure!(format!("{err:#}").contains("restore failed"), "{err:#}");
+    let docs = eval(platform, db.id, DOCS).await?;
+    ensure!(docs == "1,2,3,4,5,6", "the database holds {docs}");
+    let written = eval(platform, db.id, INSERT).await?;
+    ensure!(written == "true", "the database took no write: {written}");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn mongodb_recovers_a_branch_to_a_second_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = recover_branch(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn mongodb_recovers_in_place_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = recover_in_place(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn mongodb_keeps_its_data_when_an_oplog_file_is_missing_on_the_docker_engine()
+-> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = refuse_a_gap(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn mongodb_puts_its_data_back_when_the_replay_fails_on_the_docker_engine()
+-> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = roll_back_a_failed_replay(&platform, &name()).await;
     run.and(remove_apps(&platform).await)
 }
 

@@ -61,7 +61,7 @@ const WAL_NAME_LEN: usize = 24;
 /// Whether the containers of the database archive their WAL. Only the local target runs the
 /// pull loop, so a database on an agent leaves archiving off instead of filling its disk.
 pub(super) fn archives(engine: Option<&str>, target: ShortId) -> bool {
-    matches!(engine, Some("postgres" | "mysql" | "mariadb")) && super::is_local(target)
+    matches!(engine, Some("postgres" | "mysql" | "mariadb" | "mongodb")) && super::is_local(target)
 }
 
 fn wal_volume(app: ShortId) -> anyhow::Result<VolumeMount> {
@@ -511,10 +511,11 @@ impl Platform {
     pub(super) async fn take_base_backup(&self, db_id: ShortId) -> anyhow::Result<BaseBackup> {
         let app = self.app(db_id).await?;
         let _lock = self.lock_app(&app)?;
-        if super::binlog::is_binlog_engine(app.spec.database.as_deref()) {
-            return self.take_binlog_base_locked(db_id).await;
+        match app.spec.database.as_deref() {
+            Some("mysql" | "mariadb") => self.take_binlog_base_locked(db_id).await,
+            Some("mongodb") => self.take_oplog_base_locked(db_id).await,
+            _ => self.take_base_backup_locked(db_id).await,
         }
-        self.take_base_backup_locked(db_id).await
     }
 
     /// Keeps the newest base backups of the retention, and removes the archived WAL that only
@@ -581,7 +582,7 @@ impl Platform {
     }
 
     /// The end time of the newest archived WAL file, or zero for an empty archive.
-    async fn archive_end(&self, db_id: ShortId) -> anyhow::Result<u64> {
+    pub(super) async fn archive_end(&self, db_id: ShortId) -> anyhow::Result<u64> {
         let segments = self.native_segments(db_id).await?;
         Ok(segments.iter().map(|s| s.end_time).max().unwrap_or(0))
     }
@@ -590,10 +591,11 @@ impl Platform {
     pub(super) async fn pull_wal(&self, db_id: ShortId) -> anyhow::Result<Vec<WalSegment>> {
         let app = self.app(db_id).await?;
         let _lock = self.lock_app(&app)?;
-        if super::binlog::is_binlog_engine(app.spec.database.as_deref()) {
-            return self.pull_binlog_locked(db_id, false).await;
+        match app.spec.database.as_deref() {
+            Some("mysql" | "mariadb") => self.pull_binlog_locked(db_id, false).await,
+            Some("mongodb") => self.pull_oplog_locked(db_id).await,
+            _ => self.pull_wal_locked(db_id).await,
         }
-        self.pull_wal_locked(db_id).await
     }
 
     /// Closes the current WAL file of the server, pulls the archive and returns the closed
@@ -800,6 +802,9 @@ impl Platform {
             if !busy && self.database_container(branch.id).await.is_ok() {
                 break;
             }
+            if !busy {
+                self.fail_on_failed_deployment(&branch).await?;
+            }
             ensure!(
                 tokio::time::Instant::now() < deadline,
                 "the branch database {} did not start",
@@ -808,6 +813,22 @@ impl Platform {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
         Ok(branch)
+    }
+
+    /// Fails with the reason of the newest deployment of `branch` when it failed, so a branch
+    /// that cannot start reports why instead of waiting for the timeout.
+    async fn fail_on_failed_deployment(&self, branch: &AppEntry) -> anyhow::Result<()> {
+        let latest = self.deployments(branch.id).await?.into_iter().next();
+        if let Some(deployment) = latest
+            && deployment.status == r3v3rs3_api::platform::DeploymentStatus::Failed
+        {
+            bail!(
+                "the branch database {} did not start: {}",
+                branch.name,
+                deployment.message.unwrap_or_default()
+            );
+        }
+        Ok(())
     }
 
     /// Replaces the data of the database with the base backup, replays the WAL up to the

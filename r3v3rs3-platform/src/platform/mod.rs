@@ -28,6 +28,7 @@ mod mongo;
 mod mongo_docker_tests;
 mod notices;
 pub mod oauth;
+mod oplog;
 pub mod projects;
 mod provider;
 pub mod proxy;

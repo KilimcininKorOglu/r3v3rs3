@@ -917,9 +917,7 @@ impl Platform {
         env.extend(self.database_env(job, runtime).await?);
         // The archive is derived at deploy time, so a database that ran before archiving gets
         // it on its next deployment without a change of its stored spec.
-        let engine = job.spec.database.as_deref();
-        let archive = super::wal::archives(engine, job.app_target)
-            || super::mongo::replica_set(engine, job.app_target);
+        let archive = super::wal::archives(job.spec.database.as_deref(), job.app_target);
         Ok(ContainerSpec {
             name: name.clone(),
             image: digest.parse()?,

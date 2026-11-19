@@ -32,7 +32,7 @@ use std::time::Duration;
 const BINLOG_ARGS: [&str; 3] = ["--log-bin=binlog", "--server-id=1", "--binlog-format=ROW"];
 
 /// The directory inside the container that a recovery uploads its files to.
-const WORK_DIR: &str = "/tmp/r3v3rs3-pitr";
+pub(super) const WORK_DIR: &str = "/tmp/r3v3rs3-pitr";
 
 /// How long a fresh server may take to initialise and answer.
 const READY_TIMEOUT: Duration = Duration::from_secs(180);
@@ -40,11 +40,6 @@ const READY_TIMEOUT: Duration = Duration::from_secs(180);
 /// The open log file and its size after the last flush of each database, so the pull loop
 /// closes a file only when the server wrote into it.
 static FLUSHED: Mutex<Option<HashMap<ShortId, (String, u64)>>> = Mutex::new(None);
-
-/// Whether the engine keeps a binary log that the platform archives.
-pub(super) fn is_binlog_engine(engine: Option<&str>) -> bool {
-    matches!(engine, Some("mysql" | "mariadb"))
-}
 
 /// The start command of a MySQL or MariaDB server that writes its binary log.
 pub(super) fn binlog_command() -> Vec<String> {
@@ -682,7 +677,7 @@ async fn purge_closed(session: &MySession, logs: &[(String, u64)]) -> anyhow::Re
 
 /// The shell script that moves the data of the server aside, leaving an empty data directory
 /// that the entrypoint of the image initialises again.
-fn aside_script(mount: &str) -> String {
+pub(super) fn aside_script(mount: &str) -> String {
     format!(
         "set -e; M='{mount}'; P=\"$M/{PREVIOUS_DIR}\"; rm -rf \"$P\"; mkdir \"$P\"; \
 find \"$M\" -mindepth 1 -maxdepth 1 ! -name {PREVIOUS_DIR} -exec mv {{}} \"$P\"/ \\;"
@@ -690,7 +685,7 @@ find \"$M\" -mindepth 1 -maxdepth 1 ! -name {PREVIOUS_DIR} -exec mv {{}} \"$P\"/
 }
 
 /// A tar archive of the work directory with the given files.
-fn tar_files(files: &[(String, Vec<u8>)]) -> anyhow::Result<Vec<u8>> {
+pub(super) fn tar_files(files: &[(String, Vec<u8>)]) -> anyhow::Result<Vec<u8>> {
     let mut builder = tar::Builder::new(Vec::new());
     for (name, bytes) in files {
         let mut header = tar::Header::new_gnu();
