@@ -491,7 +491,7 @@ pub struct InstallStoreAppParams {
 /// The `{ "request": {...} }` argument of `create_database`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateDatabaseParams {
-    /// Database creation request (`{"name": "mydb", "engine": "postgres", "version": "17-alpine", "host_port": 5432}`).
+    /// Database creation request (`{"name": "mydb", "engine": "postgres", "version": "postgres:17-alpine", "host_port": 5432}`).
     pub request: r3v3rs3_api::platform::DatabaseRequest,
 }
 
@@ -5421,6 +5421,32 @@ fn parse_project_env_params(
 mod tests {
     use super::*;
     use r3v3rs3_api::webhook::WebhookEvent;
+
+    /// An agent copies the example of a tool description, so the example of `create_database`
+    /// must pass the catalog check of the handler: the version is a full image tag of the engine.
+    #[test]
+    fn the_create_database_example_names_a_version_of_the_catalog() -> anyhow::Result<()> {
+        use anyhow::Context as _;
+        crate::engines::install_embedded();
+        let schema = serde_json::to_value(schemars::schema_for!(CreateDatabaseParams))?;
+        let text = schema["properties"]["request"]["description"]
+            .as_str()
+            .context("the request has no description")?;
+        let example = text
+            .split('`')
+            .nth(1)
+            .context("the description has no example")?;
+        let request: r3v3rs3_api::platform::DatabaseRequest = serde_json::from_str(example)?;
+        let info = r3v3rs3_api::platform::engine_info(&request.engine)
+            .context("the example engine is not in the catalog")?;
+        assert!(
+            info.versions.contains(&request.version),
+            "{} is not one of {:?}",
+            request.version,
+            info.versions
+        );
+        Ok(())
+    }
 
     #[test]
     fn webhook_events_accept_the_underscore_form_of_the_group() {
