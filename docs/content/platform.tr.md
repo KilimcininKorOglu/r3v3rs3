@@ -420,7 +420,9 @@ Her yeni yedek yapılandırılan uzak hedeflere aktarılır; başarısız bir y�
 
 #### Geri Yükleme & Periyodik Doğrulama Testi
 
-**Geri yükle**, kayıtlı dump'ı çalışan container'a yazar ve engine'in restore komutunu çalıştırır (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis dump dosyasını data volume'üne alır ve yeniden başlar; bu yüzden restore, sunucu geri geldikten sonra tamamlanır. Geri yükleme veritabanının verisinin yerine geçer.
+**Geri yükle**, kayıtlı dump'ı çalışan container'a yazar ve engine'in restore komutunu çalıştırır (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis dump dosyasını data volume'üne alır ve yeniden başlar; bu yüzden restore, sunucu geri geldikten sonra tamamlanır. AOF yazan bir Redis'te AOF, yeniden başlatma süresince kenara alınır. Ardından geri yüklenen veriden yeniden yazılır. Arşiv de yeni bir temel yedek ile yeni bir zaman çizgisine başlar. Geri yükleme veritabanının verisinin yerine geçer.
+
+Yedekler, arşivlenen log dosyaları ve dump'lar boyutları ne olursa olsun sunucu ile container arasında parça parça taşınır. Bir dosya container'a geçici bir adla ulaşır ve eski dosyanın yerine tek bir yeniden adlandırma ile geçer.
 
 Yedeklerin bozulmadan saklandığını ve geri yüklenebilir olduğunu garanti etmek için r3v3rs3 otomatik periyodik geri yükleme doğrulama testi ve kurtarma simülasyonu içerir. Sistem gzipped dump'ların hatasız açıldığını, veritabanı format imzalarını ve bellek içi simülasyon bütünlüğünü doğrular:
 

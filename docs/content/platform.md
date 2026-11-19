@@ -420,7 +420,9 @@ Every new backup uploads to the configured remote targets; a failed upload only 
 
 #### Restore & Periodic Verification Test
 
-**Restore** writes the stored dump back into the running container and runs the restore command of the engine (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis takes the dump file into its data volume and restarts, so the restore answers after the server is back. A restore replaces the data of the database.
+**Restore** writes the stored dump back into the running container and runs the restore command of the engine (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis takes the dump file into its data volume and restarts, so the restore answers after the server is back. A Redis that writes its AOF sets the AOF aside for the restart, writes it again from the restored data and starts a new archive timeline with a fresh base backup. A restore replaces the data of the database.
+
+Backups, archived log files and dumps of any size move between the server and the container in pieces, and a file reaches the container under a temporary name and replaces the old one in a single rename.
 
 To ensure that backups remain uncorrupted and recoverable, r3v3rs3 includes an automated periodic restore testing and dry-run simulation mechanism. The system verifies that gzipped dumps decompress cleanly, matches expected database format signatures, and conducts in-memory restore drill simulations:
 
