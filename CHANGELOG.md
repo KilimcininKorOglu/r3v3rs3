@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.3] - 2026-11-19
+
+### Changed
+- Security: SQLite is updated to the release of `libsqlite3-sys` 0.40 through sqlx 0.9.1, which fixes RUSTSEC-2026-0459 (a crafted database and WAL pair could leak page-cache memory), and `rustix` is updated to 1.1.6, which fixes RUSTSEC-2026-0486.
+
 ## [3.5.2] - 2026-11-19
 
 ### Fixed
