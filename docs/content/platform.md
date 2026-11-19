@@ -435,20 +435,26 @@ To ensure that backups remain uncorrupted and recoverable, r3v3rs3 includes an a
 
 #### Point-in-Time Recovery (PITR) & Continuous Archiving
 
-Beyond nightly or periodic full dumps, r3v3rs3 provides Point-in-Time Recovery (PITR) via continuous Write-Ahead Logging (WAL) and binary log archiving:
+Beyond nightly or periodic full dumps, r3v3rs3 recovers every local managed database to any second inside its recovery window. Each engine writes its own change log, and the platform copies the new part of it into `<config-dir>/backups/<db_id>/wal/` once a minute:
+
+- **PostgreSQL**: the server archives its closed WAL files (`archive_mode`, `archive_timeout` of 60 seconds). A base backup is a `pg_basebackup`, and a recovery replays the WAL with `recovery_target_time`.
+- **MySQL / MariaDB**: the server writes a row-based binary log. A base backup is a dump with its binary log coordinates, and a recovery replays the log with `mysqlbinlog` or `mariadb-binlog --stop-datetime`.
+- **MongoDB**: the database runs as a single-member replica set (`rs0`), because only a replica set writes an oplog. A base backup is a `mongodump --oplog` archive, and a recovery replays the archived oplog with `mongorestore --oplogLimit`. Connection URLs carry `directConnection=true`.
+- **Redis**: the server keeps an append-only file with timestamps. A base backup rewrites the AOF, and a recovery cuts the archived AOF at the target with `redis-check-aof --truncate-to-timestamp`.
+
+The replay stops before the second of the target, and the account records of the platform stay out of every replay: a recovery never brings back a deleted user or an old password. A database that ran before archiving keeps its data and starts archiving on its next deployment. A database on an agent target does not archive its log.
 
 - **Recovery Window**: The backups page displays the exact active recovery timeline (from the earliest base backup to the latest recorded change log segment) along with total base backups and archived WAL count.
 - **Archived WAL Inspection Modal**: Operators can click the **WAL Segments** action button or the inline WAL counter badge in the recovery window banner to open an interactive segments inspector modal (`GET /api/databases/{id}/wal/segments`). The inspector provides summary KPI metrics (total segment count, aggregated retained size, and log timestamp coverage), along with a searchable segment table displaying filename, compressed size, sequence start/end range, SHA-256 integrity checksum, and archival timestamp, plus an on-demand **Archive Current Segment** action.
-- **WAL & Log Archiving**: Rotating transaction logs are archived in `<config-dir>/backups/<db_id>/wal/`. Users can trigger manual segment archiving with **Archive WAL Now** or use automated background checkpoints (`POST /api/databases/{id}/wal/archive`):
-  - **PostgreSQL**: Archives WAL segments using transaction log rotation (`pg_switch_wal()`) and continuous WAL capture.
-  - **MySQL / MariaDB**: Archives rotated binary logs (`FLUSH BINARY LOGS;`).
-  - **MongoDB**: Archives oplog mutation archives (`mongodump --oplog`).
-  - **Redis**: Captures point-in-time state and Append-Only File (AOF) journals.
+- **Archive Now**: **Archive WAL Now** (`POST /api/databases/{id}/wal/archive`) copies the change log up to the present at once, so the recovery window reaches now. The first call takes the first base backup.
 - **Precision Recovery**: The **PITR Restore** action prompts for an exact target timestamp (in RFC3339 format, e.g. `2026-10-21T04:30:00Z` or unix milliseconds). r3v3rs3 automatically:
-  1. Identifies the latest base backup created prior to the target timestamp and restores it.
-  2. Selects all subsequent archived WAL/log segments between the base backup and the recovery moment.
-  3. Replays transactions sequentially up to the requested second or millisecond.
-- **Safe Branching (PITR Clone)**: If a new branch name is specified, r3v3rs3 provisions an entirely new, isolated database with its own host port, data volume, and root credentials, letting developers inspect past state or extract lost rows without overwriting production. The branch gets its own `{name}-data` volume and the tenant records of its source with the same passwords. Leaving the branch name blank performs an in-place restore after confirmation. A segment that cannot be replayed fails the restore with its error.
+  1. Archives the newest change log of the running database.
+  2. Picks the newest base backup that ended before the target, on the timeline that holds the target.
+  3. Replays the archived log after that base backup up to the second before the target.
+- **Timelines**: After an in-place recovery the database writes a new history. The archive before the recovery stays reachable for targets before the recovery, and the recovery takes a new base backup at once, so the writes after it can be recovered too. When an engine log loses entries that the archive did not copy yet (a MongoDB oplog that wrapped, a Redis AOF that was rewritten by hand), a new timeline starts and a target inside the gap is refused.
+- **Failures**: A recovery that misses an archived file names it and leaves the database as it was. A replay that fails half way puts the old data back and starts the database on it.
+- **Safe Branching (PITR Clone)**: If a new branch name is specified, r3v3rs3 provisions an entirely new, isolated database with its own host port, data volume, and root credentials, letting developers inspect past state or extract lost rows without overwriting production. The branch gets its own `{name}-data` volume and the tenant records of its source with the same passwords. Leaving the branch name blank performs an in-place restore after confirmation.
+- **Retention**: The backup retention keeps that many base backups over all timelines, and the archived log that only removed base backups needed goes with them.
 
 #### Remote S3 Backup Browser & Disaster Recovery
 

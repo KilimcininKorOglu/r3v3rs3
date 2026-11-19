@@ -582,9 +582,10 @@ pub enum BackupCommand {
         database_id: String,
         backup_id: String,
     },
-    /// Shows available Point-in-Time Recovery window and WAL boundaries.
+    /// Shows the point-in-time recovery window of a database over every timeline of its archive.
     PitrRange { database_id: String },
-    /// Restores a database to a specific point in time (PITR).
+    /// Restores a database to a point in time, to the second, from its base backup and its
+    /// archived change log (WAL, binary log, oplog or AOF).
     PitrRestore {
         database_id: String,
         target_time: u64,
@@ -593,9 +594,10 @@ pub enum BackupCommand {
         #[arg(long)]
         host_port: Option<u16>,
     },
-    /// Forces immediate WAL segment archival from the running database container.
+    /// Archives the change log of the running database now, so the recovery window reaches the
+    /// present.
     WalArchive { database_id: String },
-    /// Lists archived WAL segments for a database.
+    /// Lists the archived log files of a database.
     WalSegments { database_id: String },
     /// Manages full platform disaster recovery (.r3bundle) snapshots.
     #[command(subcommand)]

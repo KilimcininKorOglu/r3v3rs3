@@ -3585,7 +3585,7 @@ impl McpServer {
 
     /// Get the point-in-time recovery (PITR) window and available WAL segments for a database.
     #[tool(
-        description = "Show the point-in-time recovery window of a managed database (`id`): the earliest and latest restorable time (Unix milliseconds), the number of base backups and archived WAL or binlog segments, and whether archiving is active. Pick `target_time` for `restore_database_pitr` inside this window. Read-only; any account without a proxy list."
+        description = "Show the point-in-time recovery window of a managed database (`id`): the earliest and latest restorable time (Unix milliseconds), the number of base backups and archived log files (PostgreSQL WAL, MySQL and MariaDB binary log, MongoDB oplog, Redis AOF) over every timeline, and whether the running server archives its log; a database that ran before archiving starts it on its next deployment. Pick `target_time` for `restore_database_pitr` inside this window. Read-only; any account without a proxy list."
     )]
     async fn get_database_pitr_range(
         &self,
@@ -3605,7 +3605,7 @@ impl McpServer {
 
     /// Restore a database to a specific point in time (PITR).
     #[tool(
-        description = "Restore a managed database (`id`) to the state at `target_time` (Unix milliseconds, inside the window of `get_database_pitr_range`) from a base backup plus the archived WAL segments. Without `new_name` the running database is overwritten in place; with `new_name` (and optional `host_port`) a new database is created from that point and the original stays untouched. Returns the restored app, the base backup used and the number of segments replayed. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+        description = "Restore a managed database (`id`) to the state at `target_time` (Unix milliseconds, inside the window of `get_database_pitr_range`) from a base backup plus the archived change log, replayed up to the second before the target. Without `new_name` the running database is overwritten in place, and the archive before the recovery stays reachable for later targets; with `new_name` (and optional `host_port`) a new database is created from that point and the original stays untouched. Returns the restored app, the base backup used and the number of segments replayed. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn restore_database_pitr(
         &self,

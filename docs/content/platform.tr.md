@@ -435,20 +435,26 @@ Yedeklerin bozulmadan saklandığını ve geri yüklenebilir olduğunu garanti e
 
 #### Zaman Noktasına Geri Dönüş (PITR) ve Sürekli Günlük Arşivleme
 
-Gecelik veya periyodik tam dump'ların ötesinde r3v3rs3, sürekli Write-Ahead Logging (WAL) ve ikili günlük (binary log) arşivleme ile Zaman Noktasına Geri Dönüş (Point-in-Time Recovery - PITR) yeteneği sunar:
+Gecelik veya periyodik tam dump'ların ötesinde r3v3rs3, yerel her yönetilen veritabanını kurtarma penceresi içindeki herhangi bir saniyeye geri döndürür. Her motor kendi değişiklik günlüğünü yazar. Platform, bu günlüğün yeni kısmını dakikada bir `<config-dir>/backups/<db_id>/wal/` dizinine kopyalar:
+
+- **PostgreSQL**: Sunucu, kapanan WAL dosyalarını arşivler (`archive_mode`, 60 saniyelik `archive_timeout`). Temel yedek bir `pg_basebackup` çıktısıdır. Kurtarma, WAL'ı `recovery_target_time` ile yeniden uygular.
+- **MySQL / MariaDB**: Sunucu satır tabanlı bir binary log yazar. Temel yedek, binary log koordinatlarını taşıyan bir dump'tır. Kurtarma, günlüğü `mysqlbinlog` veya `mariadb-binlog --stop-datetime` ile yeniden uygular.
+- **MongoDB**: Veritabanı tek üyeli bir replica set (`rs0`) olarak çalışır, çünkü oplog'u yalnız bir replica set yazar. Temel yedek bir `mongodump --oplog` arşividir. Kurtarma, arşivlenmiş oplog'u `mongorestore --oplogLimit` ile yeniden uygular. Bağlantı adresleri `directConnection=true` taşır.
+- **Redis**: Sunucu, zaman damgalı bir append-only dosyası (AOF) tutar. Temel yedek AOF'u yeniden yazar. Kurtarma, arşivlenmiş AOF'u `redis-check-aof --truncate-to-timestamp` ile hedefte keser.
+
+Yeniden uygulama, hedefin saniyesinden önce durur. Platformun hesap kayıtları hiçbir yeniden uygulamaya girmez. Bu yüzden bir kurtarma, silinmiş bir kullanıcıyı veya eski bir parolayı geri getirmez. Arşivlemeden önce çalışan bir veritabanı verisini korur ve bir sonraki deployment'ında arşivlemeye başlar. Agent hedefindeki bir veritabanı günlüğünü arşivlemez.
 
 - **Kurtarma Penceresi (Recovery Window)**: Yedekler sayfasında en eski temel (base) yedekten en son kaydedilen değişiklik günlüğü segmentine kadar olan etkin zaman aralığı, toplam temel yedek ve arşivlenmiş WAL sayısı net bir özetle gösterilir.
 - **Arşivlenmiş WAL Segmentleri İnceleme Modal'ı**: Operatörler kurtarma penceresi banner'ındaki **WAL Segmentleri** butonuna veya satır içi WAL sayaç etiketine tıklayarak interaktif segment denetleme modal'ını açabilir (`GET /api/databases/{id}/wal/segments`). Denetleyici, özet KPI metrikleri (toplam segment adedi, birikmiş saklama boyutu ve log zaman aralığı) ile dosya adı, sıkıştırılmış boyut, sıra başlama/bitiş aralığı, SHA-256 bütünlük sağlaması ve arşivlenme zamanını listeleyen bir tablo ve isteğe bağlı **Güncel Segmenti Arşivle** aksiyonu sunar.
-- **WAL ve Günlük Arşivleme**: Dönen işlem günlükleri `<config-dir>/backups/<db_id>/wal/` dizininde arşivlenir. Kullanıcılar **WAL Günlüğünü Arşivle** butonuyla anında manuel arşiv tetikleyebilir veya arka plan kontrol noktalarını kullanabilir (`POST /api/databases/{id}/wal/archive`):
-  - **PostgreSQL**: İşlem günlüğü rotasyonu (`pg_switch_wal()`) ve sürekli WAL yakalamasıyla segmentleri arşivler.
-  - **MySQL / MariaDB**: Döndürülen ikili günlükleri (`FLUSH BINARY LOGS;`) arşivler.
-  - **MongoDB**: Oplog mutasyon arşivlerini (`mongodump --oplog`) depolar.
-  - **Redis**: Anlık durum görüntüsünü ve Yalnızca-Ekleme Günlüğü (AOF) kayıtlarını yakalar.
-- **Hassas Dakikaya Geri Dönüş**: **Zaman Noktasına Geri Yükle (PITR)** işlemi hedeflenen kesin zaman damgasını sorar (RFC3339 biçimi, örn. `2026-10-21T04:30:00Z` veya unix milisaniyesi). r3v3rs3 otomatik olarak:
-  1. Hedef zamandan önceki en güncel temel yedeği belirler ve geri yükler.
-  2. Temel yedek ile hedef an arasındaki tüm arşivlenmiş WAL/günlük segmentlerini sıralı biçimde seçer.
-  3. İşlemleri istenen saniyeye veya milisaniyeye kadar artımlı olarak yeniden uygular (replay).
-- **Güvenli Dal Oluşturma (PITR Clone)**: İsteğe bağlı olarak yeni bir dal (branch) adı girilirse, r3v3rs3 mevcut canlı veritabanını bozmadan tamamen ayrı bir host portu, data volume'ü ve yetkileriyle yeni bir veritabanı kurar. Böylece geliştiriciler canlı ortamı kesintiye uğratmadan geçmiş veriyi inceleyebilir veya silinen tabloları kurtarabilir. Dal kendi `{name}-data` volume'ünü ve kaynağın tenant kayıtlarını aynı parolalarla alır. Dal adı boş bırakıldığında onay ile mevcut veritabanı üzerinde geri yükleme yapılır. Uygulanamayan bir segment, geri yüklemeyi kendi hatasıyla başarısız kılar.
+- **Hemen Arşivleme**: **Şimdi WAL Arşivle** (`POST /api/databases/{id}/wal/archive`), değişiklik günlüğünü o ana kadar hemen kopyalar. Böylece kurtarma penceresi şimdiye ulaşır. İlk çağrı, ilk temel yedeği alır.
+- **Saniye Hassasiyetinde Geri Dönüş**: **PITR Geri Yükle** işlemi hedeflenen kesin zaman damgasını sorar (RFC3339 biçimi, örn. `2026-10-21T04:30:00Z` veya unix milisaniyesi). r3v3rs3 otomatik olarak:
+  1. Çalışan veritabanının en yeni değişiklik günlüğünü arşivler.
+  2. Hedefi içeren zaman çizgisinde, hedeften önce biten en yeni temel yedeği seçer.
+  3. O temel yedekten sonraki arşivlenmiş günlüğü hedeften önceki saniyeye kadar yeniden uygular.
+- **Zaman Çizgileri**: Yerinde bir kurtarmadan sonra veritabanı yeni bir geçmiş yazar. Kurtarmadan önceki arşiv, kurtarmadan önceki hedefler için erişilebilir kalır. Kurtarma hemen yeni bir temel yedek alır. Böylece kurtarmadan sonraki yazmalar da kurtarılabilir. Bir motorun günlüğü, arşivin henüz kopyalamadığı kayıtları kaybederse (dolup başa dönen bir MongoDB oplog'u veya elle yeniden yazılan bir Redis AOF'u), yeni bir zaman çizgisi başlar ve boşluğun içindeki bir hedef reddedilir.
+- **Hatalar**: Arşivlenmiş bir dosyası eksik olan kurtarma, o dosyanın adını verir ve veritabanını olduğu gibi bırakır. Yarıda başarısız olan bir yeniden uygulama, eski veriyi geri koyar ve veritabanını onunla başlatır.
+- **Güvenli Dal Oluşturma (PITR Clone)**: İsteğe bağlı olarak yeni bir dal (branch) adı girilirse, r3v3rs3 mevcut canlı veritabanını bozmadan tamamen ayrı bir host portu, data volume'ü ve yetkileriyle yeni bir veritabanı kurar. Böylece geliştiriciler canlı ortamı kesintiye uğratmadan geçmiş veriyi inceleyebilir veya silinen tabloları kurtarabilir. Dal kendi `{name}-data` volume'ünü ve kaynağın tenant kayıtlarını aynı parolalarla alır. Dal adı boş bırakıldığında onay ile mevcut veritabanı üzerinde geri yükleme yapılır.
+- **Saklama**: Yedek saklama ayarı, bütün zaman çizgileri boyunca o sayıda temel yedek tutar. Yalnız silinen temel yedeklerin ihtiyaç duyduğu arşivlenmiş günlük de onlarla birlikte silinir.
 
 #### Uzak S3 Yedek Gezgini & Felaket Kurtarma (Disaster Recovery)
 
