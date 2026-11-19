@@ -141,9 +141,10 @@ async fn standalone_with_a_document(
 ) -> anyhow::Result<()> {
     let runtime = platform.local.clone();
     let container: ContainerName = format!("{name}-standalone").parse()?;
-    runtime
-        .create_container(&standalone_spec(&container, name, image)?)
-        .await?;
+    let spec = standalone_spec(&container, name, image)?;
+    // A fresh Docker Engine, such as the one of CI, has no image yet.
+    runtime.pull_image(&spec.image).await?;
+    runtime.create_container(&spec).await?;
     runtime.start_container(&container).await?;
     let written = write_one(&*runtime, &container).await;
     runtime

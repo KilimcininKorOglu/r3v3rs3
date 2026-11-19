@@ -302,9 +302,10 @@ fn plain_spec(container: &ContainerName, name: &str) -> anyhow::Result<Container
 async fn plain_with_a_key(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
     let runtime = platform.local.clone();
     let container: ContainerName = format!("{name}-plain").parse()?;
-    runtime
-        .create_container(&plain_spec(&container, name)?)
-        .await?;
+    let spec = plain_spec(&container, name)?;
+    // A fresh Docker Engine, such as the one of CI, has no image yet.
+    runtime.pull_image(&spec.image).await?;
+    runtime.create_container(&spec).await?;
     runtime.start_container(&container).await?;
     let script = "until redis-cli PING | grep -q PONG; do sleep 0.2; done; \
 redis-cli SET old 1 && redis-cli SAVE";

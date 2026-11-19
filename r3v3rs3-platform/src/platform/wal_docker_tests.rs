@@ -9,9 +9,7 @@
 use super::Platform;
 use super::tests::{TempDir, platform_with, request};
 use anyhow::{Context as _, ensure};
-use r3v3rs3_api::container::{
-    ContainerName, ContainerSpec, EnvVar, ResourceLimits, RestartPolicy, VolumeMount,
-};
+use r3v3rs3_api::container::{ContainerSpec, EnvVar, ResourceLimits, RestartPolicy, VolumeMount};
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, AppSource, DeploymentTrigger, EnvEntry, PitrRestoreRequest, PlatformConfig,
@@ -282,20 +280,15 @@ async fn roll_back_a_failed_replay(platform: &Arc<Platform>, name: &str) -> anyh
     Ok(())
 }
 
-/// Runs `image` without a start command on the volume `<name>-data` at `mount`, as the platform
-/// started every database before it archived the log, runs `script` in it until it succeeds,
-/// and stops and removes the container again.
-pub(super) async fn plain_run(
-    platform: &Arc<Platform>,
+/// The container `<name>-plain` of `image` on the volume `<name>-data` at `mount`, without a
+/// start command.
+fn plain_spec(
     name: &str,
     (image, mount): (&str, &str),
     env: Vec<EnvVar>,
-    script: &str,
-) -> anyhow::Result<()> {
-    let runtime = platform.local.clone();
-    let container: ContainerName = format!("{name}-plain").parse()?;
-    let spec = ContainerSpec {
-        name: container.clone(),
+) -> anyhow::Result<ContainerSpec> {
+    Ok(ContainerSpec {
+        name: format!("{name}-plain").parse()?,
         image: image.parse()?,
         env,
         labels: BTreeMap::new(),
@@ -314,7 +307,24 @@ pub(super) async fn plain_run(
         log_max_size: None,
         log_max_file: None,
         command: None,
-    };
+    })
+}
+
+/// Runs `image` without a start command on the volume `<name>-data` at `mount`, as the platform
+/// started every database before it archived the log, runs `script` in it until it succeeds,
+/// and stops and removes the container again.
+pub(super) async fn plain_run(
+    platform: &Arc<Platform>,
+    name: &str,
+    (image, mount): (&str, &str),
+    env: Vec<EnvVar>,
+    script: &str,
+) -> anyhow::Result<()> {
+    let runtime = platform.local.clone();
+    let spec = plain_spec(name, (image, mount), env)?;
+    let container = spec.name.clone();
+    // A fresh Docker Engine, such as the one of CI, has no image yet.
+    runtime.pull_image(&spec.image).await?;
     runtime.create_container(&spec).await?;
     runtime.start_container(&container).await?;
     let command = vec![
