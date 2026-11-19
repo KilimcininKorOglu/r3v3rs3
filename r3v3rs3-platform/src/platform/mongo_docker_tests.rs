@@ -413,6 +413,57 @@ async fn roll_back_a_failed_replay(platform: &Arc<Platform>, name: &str) -> anyh
     Ok(())
 }
 
+/// Makes the archive look as if the capped oplog had dropped the entries after it: the base
+/// backup starts at the first possible timestamp and no oplog file follows it.
+async fn open_a_gap(platform: &Arc<Platform>, id: ShortId) -> anyhow::Result<()> {
+    let wal = platform.wal_dir(id).await?;
+    tokio::fs::remove_dir_all(&wal).await?;
+    let dir = platform.base_dir(id).await?;
+    for mut base in platform.list_base_backups(id).await? {
+        base.start_wal = "oplog.1".into();
+        let path = dir.join(format!("{}.json", base.id));
+        tokio::fs::write(path, serde_json::to_vec(&base)?).await?;
+    }
+    Ok(())
+}
+
+/// After a gap in the archive, a target inside the gap is refused: no archived oplog leads
+/// from a base backup to it. A target after the gap recovers from the new base.
+async fn refuse_a_target_in_a_gap(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let (db, target_time) = six_docs(platform, name).await?;
+    open_a_gap(platform, db.id).await?;
+    // The next pull finds the gap.
+    platform.pull_wal(db.id).await?;
+    eval(platform, db.id, INSERT).await?;
+    let seventh = doc_time(platform, db.id, 7).await?;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let request = PitrRestoreRequest {
+        target_time,
+        new_name: Some(format!("{name}-g").parse()?),
+        host_port: None,
+    };
+    let refused = platform.restore_pitr(db.id, request).await;
+    ensure!(
+        refused.is_err(),
+        "a target in the gap was served: {refused:?}"
+    );
+    let (docs, _) = branch_docs(platform, db.id, &format!("{name}-a"), seventh + 1000).await?;
+    ensure!(
+        docs == "1,2,3,4,5,6,7",
+        "the branch after the gap holds {docs}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn mongodb_refuses_a_target_in_an_oplog_gap_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = refuse_a_target_in_a_gap(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn mongodb_recovers_a_branch_to_a_second_on_the_docker_engine() -> anyhow::Result<()> {

@@ -176,8 +176,10 @@ impl Platform {
         Ok(vec![self.store_oplog(db_id, until, &bson).await?])
     }
 
-    /// Takes a new base backup when the capped oplog no longer holds the entry after `since`:
-    /// the archive has a gap, and a replay across it would miss changes.
+    /// Starts a new timeline when the capped oplog no longer holds the entry after `since`: the
+    /// archive has a gap, and a replay across it would miss changes. The old archive moves into
+    /// a history that ends now, so a target inside the gap is refused instead of being served
+    /// from a base before it.
     async fn restarted_after_gap(
         &self,
         session: &MongoSession,
@@ -187,7 +189,8 @@ impl Platform {
         if session.oldest().await? <= since {
             return Ok(false);
         }
-        tracing::error!(database = %db_id, "the oplog no longer holds the entries after the archive; a new base backup starts again");
+        tracing::error!(database = %db_id, "the oplog no longer holds the entries after the archive; a new timeline starts");
+        self.start_history(db_id).await?;
         self.take_oplog_base_locked(db_id).await?;
         Ok(true)
     }
