@@ -480,6 +480,21 @@ pub struct ContainerInfo {
     pub labels: BTreeMap<String, String>,
     /// The published TCP ports: the container port and its port on `127.0.0.1`.
     pub published: BTreeMap<u16, u16>,
+    /// The container shares the network of its host (`network_mode: host`), so Docker
+    /// publishes none of its ports and each one is the same port of `127.0.0.1`.
+    #[serde(default)]
+    pub host_network: bool,
+}
+
+impl ContainerInfo {
+    /// The port of `127.0.0.1` that reaches the container `port`: its published port, or the
+    /// port itself on the host network.
+    pub fn port_on_host(&self, port: u16) -> Option<u16> {
+        self.published
+            .get(&port)
+            .copied()
+            .or(self.host_network.then_some(port))
+    }
 }
 
 /// One entry of a container list.

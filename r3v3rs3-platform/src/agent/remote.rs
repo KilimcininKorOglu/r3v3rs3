@@ -86,8 +86,11 @@ impl RemoteRuntime {
         }
     }
 
-    /// Replaces the published ports of a container with the ports of their forwarders.
+    /// Replaces the published ports of a container with the ports of their forwarders. A port of
+    /// a host-network container on the agent is not the same port of the master, and only
+    /// published ports have forwarders, so such a container reports no port on the master.
     async fn forwarded(&self, mut info: ContainerInfo) -> anyhow::Result<ContainerInfo> {
+        info.host_network = false;
         let container: ContainerName = info.name.trim_start_matches('/').parse()?;
         for (port, published) in &mut info.published {
             let key = ForwardKey {

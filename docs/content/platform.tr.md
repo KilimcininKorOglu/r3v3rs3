@@ -236,6 +236,8 @@ Compose uygulaması `volumes`, `restart` ve `limits` ayarlarını Compose dosyas
 
 Compose deployment'ı `service` servisini yeniden oluşturur: Docker yeni container başlamadan önce eskisini durdurur. Bu yüzden uygulama, yeni container sağlık kontrolünden geçene kadar yanıt vermez. Sağlık kontrolünden geçemeyen bir deployment yeni container'ı log'u için saklar. Uygulamanın sonraki deployment'a veya geri almaya kadar sağlıklı bir container'ı olmaz. Çalışan deployment'ın checkout'u yapılandırma dizinindeki `compose/<app id>/` altında kalır, çünkü Compose dosyasındaki bir bind mount onu okuyabilir.
 
+Trafik servisi host ağında (`network_mode: host`) çalışabilir. Örneğin istemcinin gerçek adresini görmesi gereken bir TURN sunucusu böyle çalışır. Docker böyle bir container'ın hiçbir portunu publish etmez. Bu yüzden r3v3rs3 uygulama portunu doğrudan sunucunun `127.0.0.1` adresinde kontrol eder ve oraya yönlendirir. Servis host'un bu portunu dinlemelidir. Bu yalnız yerel hedefte çalışır: agent hedefi yalnız publish edilen portlar için forwarder açar. Bu yüzden agent üzerindeki host ağı servisi sağlık kontrolünden geçemez.
+
 r3v3rs3, Compose dosyasının diğer ayarlarını denetlemez. Bir Compose dosyası host üzerindeki bir yolu bağlayabilir, privileged container çalıştırabilir veya host'un ağını kullanabilir. Bu yüzden uygulama düzenleyebilen her hesap, bu yolla host'u ele geçirebilir. Edit iznini yalnız buna yetkisi olan hesaplara verin.
 
 #### Compose Servis Düzeyinde Sağlık ve Loglar

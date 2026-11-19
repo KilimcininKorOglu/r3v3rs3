@@ -236,6 +236,8 @@ A Compose app sets `volumes`, `restart` and `limits` in the Compose file, so its
 
 A Compose deployment recreates the service of `service`: Docker stops the old container before the new one starts, so the app does not answer until the new container passes its health check. A deployment that fails its health check keeps the new container for its log, and the app has no healthy container until the next deployment or rollback. The checkout of the running deployment stays in `compose/<app id>/` of the config directory, because a bind mount of the Compose file can read it.
 
+A traffic service can run on the host network (`network_mode: host`), for example a TURN server that must see the real client addresses. Docker publishes no port of such a container, so r3v3rs3 checks and routes the app port on `127.0.0.1` of the server directly. The service must listen on that port of the host. This works on the local target only: an agent target opens forwarders for published ports, and a host-network service on an agent fails its health check.
+
 r3v3rs3 does not check the other settings of a Compose file. A Compose file can mount a host path, run a privileged container or use the network of the host, so every account that can edit an app can take over the host through it. Give the Edit permission only to accounts that may do that.
 
 #### Compose Service-Level Health and Logs

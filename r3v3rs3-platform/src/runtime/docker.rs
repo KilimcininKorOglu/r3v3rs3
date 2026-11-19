@@ -1677,6 +1677,15 @@ struct InspectContainer {
     config: Option<InspectConfig>,
     #[serde(default)]
     network_settings: Option<InspectNetworkSettings>,
+    #[serde(default)]
+    host_config: Option<InspectHostConfig>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct InspectHostConfig {
+    #[serde(default)]
+    network_mode: String,
 }
 
 #[derive(Deserialize)]
@@ -1934,6 +1943,9 @@ impl InspectContainer {
                 .and_then(|config| config.labels)
                 .unwrap_or_default(),
             published,
+            host_network: self
+                .host_config
+                .is_some_and(|config| config.network_mode == "host"),
         }
     }
 }
@@ -2278,6 +2290,42 @@ mod tests {
         );
         assert_eq!(info.labels[APP_LABEL], "shop");
         assert_eq!(info.published, BTreeMap::from([(80, 49153)]));
+        // A port without a binding on 127.0.0.1 is not reachable from the host.
+        assert_eq!(info.port_on_host(80), Some(49153));
+        assert_eq!(info.port_on_host(443), None);
+    }
+
+    /// Docker documents that a container on the host network shares the network stack of the
+    /// host and that its published ports are discarded, so every port of the container is the
+    /// same port of 127.0.0.1 although `Ports` stays empty.
+    #[test]
+    fn a_host_network_container_serves_its_ports_on_the_host() {
+        let document = json!({
+            "Id": "0123abcd",
+            "Name": "/turn-1",
+            "Image": "sha256:feed",
+            "State": { "Running": true, "ExitCode": 0 },
+            "HostConfig": { "NetworkMode": "host" },
+            "NetworkSettings": { "Networks": { "host": { "IPAddress": "" } }, "Ports": {} },
+        });
+        let info = serde_json::from_value::<InspectContainer>(document)
+            .unwrap()
+            .into_info();
+        assert!(info.published.is_empty());
+        assert_eq!(info.port_on_host(3478), Some(3478));
+        // A container on its own network keeps the published ports only.
+        let bridge = json!({
+            "Id": "0123abcd",
+            "Name": "/shop-1",
+            "Image": "sha256:feed",
+            "State": { "Running": true, "ExitCode": 0 },
+            "HostConfig": { "NetworkMode": "r3v3rs3-shop" },
+            "NetworkSettings": { "Ports": {} },
+        });
+        let info = serde_json::from_value::<InspectContainer>(bridge)
+            .unwrap()
+            .into_info();
+        assert_eq!(info.port_on_host(3478), None);
     }
 
     #[test]

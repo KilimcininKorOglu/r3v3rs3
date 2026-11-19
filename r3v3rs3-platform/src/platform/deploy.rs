@@ -1299,7 +1299,7 @@ impl Platform {
                     info.exit_code
                 );
             }
-            let port = info.published.get(&spec.port).copied();
+            let port = info.port_on_host(spec.port);
             if let Some(port) = port
                 && probe(port, spec.health_check_path.as_deref(), &self.timing).await
             {
@@ -1947,6 +1947,11 @@ mod tests {
     /// The app `stack` on the real Docker Engine, with a checkout that holds
     /// [`DOCKER_COMPOSE_FILE`].
     async fn docker_setup() -> anyhow::Result<Setup> {
+        docker_setup_with(DOCKER_COMPOSE_FILE, 80).await
+    }
+
+    /// The app `stack` on the real Docker Engine, serving `port` of the service `web` of `file`.
+    async fn docker_setup_with(file: &str, port: u16) -> anyhow::Result<Setup> {
         let (command, _) = mpsc::channel(1);
         let (mut platform, runtime, dir) =
             platform_with(&PlatformConfig::default(), command).await?;
@@ -1955,11 +1960,12 @@ mod tests {
         platform.compose = Arc::new(DockerCompose::new(host));
         platform.timing.health_timeout = Duration::from_secs(60);
         let fetcher = Arc::new(FakeFetcher::default());
-        fetcher.state().compose_file = Some(DOCKER_COMPOSE_FILE.into());
+        fetcher.state().compose_file = Some(file.into());
         platform.fetcher = fetcher.clone();
         let compose = Arc::new(FakeCompose::new(runtime.clone()));
         let platform = Arc::new(platform);
         let mut app = compose_request()?;
+        app.spec.port = port;
         app.spec.health_check_path = Some("/health".into());
         let app = platform.add_app(app, 1).await?;
         Ok(Setup {
@@ -1982,6 +1988,27 @@ mod tests {
         deleted?;
         let app_dir = setup.platform.compose_dir.join(setup.app.id.to_string());
         assert!(!app_dir.exists());
+        Ok(())
+    }
+
+    /// A traffic service that needs the network of the host, such as a TURN server, runs with
+    /// `network_mode: host`. Docker publishes none of its ports, so the deployment must check
+    /// and route the app port on 127.0.0.1 itself.
+    const HOST_NETWORK_COMPOSE_FILE: &str = "services:\n  web:\n    image: ghcr.io/kilimcininkoroglu/r3v3rs3/whoami:v1.10.3\n    network_mode: host\n    command: [\"--port\", \"18181\"]\n";
+
+    #[tokio::test]
+    #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+    async fn a_host_network_compose_service_passes_its_health_check_on_the_docker_engine()
+    -> anyhow::Result<()> {
+        let setup = docker_setup_with(HOST_NETWORK_COMPOSE_FILE, 18181).await?;
+        let result = deploy(&setup).await;
+        let deleted = setup.platform.delete_app(setup.app.id).await;
+        let deployment = result?;
+        deleted?;
+        anyhow::ensure!(
+            deployment.status == DeploymentStatus::Running,
+            "{deployment:?}"
+        );
         Ok(())
     }
 

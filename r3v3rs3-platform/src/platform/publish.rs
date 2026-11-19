@@ -130,9 +130,7 @@ impl Platform {
         };
         Ok(match info {
             Some(info) if info.running => info
-                .published
-                .get(&port)
-                .copied()
+                .port_on_host(port)
                 .ok_or_else(|| format!("the container {name} does not publish port {port}")),
             Some(_) => Err(format!("the container {name} is not running")),
             None => Err(format!("the container {name} does not exist")),

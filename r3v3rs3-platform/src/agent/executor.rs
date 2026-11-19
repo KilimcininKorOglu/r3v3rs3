@@ -279,9 +279,7 @@ impl Executor {
     async fn connect(&self, container: &ContainerName, port: u16) -> anyhow::Result<TcpStream> {
         let info = self.owned(container).await?;
         let host_port = info
-            .published
-            .get(&port)
-            .copied()
+            .port_on_host(port)
             .filter(|_| info.running)
             .with_context(|| format!("the container {container} does not serve port {port}"))?;
         Ok(TcpStream::connect(("127.0.0.1", host_port)).await?)

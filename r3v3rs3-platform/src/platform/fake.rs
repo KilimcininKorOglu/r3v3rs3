@@ -322,6 +322,7 @@ fn container(
         addresses: BTreeMap::new(),
         labels,
         published: published.iter().copied().collect(),
+        host_network: false,
     }
 }
 
