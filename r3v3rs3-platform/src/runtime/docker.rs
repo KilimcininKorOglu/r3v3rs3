@@ -548,25 +548,7 @@ impl DockerRuntime {
         limit: Duration,
     ) -> anyhow::Result<Vec<u8>> {
         let container = self.container_id(name).await?;
-        let env: Vec<Value> = env.iter().map(|entry| json!(entry)).collect();
-        let command: Vec<Value> = command.into_iter().map(|word| json!(word)).collect();
-        let response = self
-            .send(
-                Method::POST,
-                &format!("/containers/{}/exec", container.id),
-                Some(&json!({
-                    "AttachStdout": true,
-                    "AttachStderr": true,
-                    "Cmd": command,
-                    "Env": env,
-                })),
-                &[],
-                RESPONSE_TIMEOUT,
-            )
-            .await?;
-        let exec: ExecCreateResponse = read_json(response).await?;
-        let frames = self.read_exec(&exec.id, limit).await?;
-        let exit_code = self.exec_exit_code(&exec.id).await?;
+        let (frames, exit_code) = self.run_exec(&container.id, &command, env, limit).await?;
         let (stdout, stderr) = split_exec_stream(&frames)?;
         if exit_code != 0 {
             bail!(
@@ -751,6 +733,26 @@ impl DockerRuntime {
 
     /// Runs a command in the container and returns its exit code.
     async fn exec_run(&self, id: &str, command: &[&str]) -> anyhow::Result<i64> {
+        let command: Vec<String> = command.iter().map(|word| word.to_string()).collect();
+        // The output is not shown, but the session has to run to its end.
+        let (_, code) = self.run_exec(id, &command, Vec::new(), EXEC_LIMIT).await?;
+        Ok(code)
+    }
+
+    /// Runs a command in the container with the ID `id` and returns its raw output frames and
+    /// its exit code. A command that still runs after `limit` is killed and is an error: the
+    /// callers hold the lock of a database while it runs, and a command left running would
+    /// write on under the next job. The engine has no call that ends an exec, so every process
+    /// of the command carries a marker in its environment, and the kill finds them by it.
+    async fn run_exec(
+        &self,
+        id: &str,
+        command: &[String],
+        mut env: Vec<String>,
+        limit: Duration,
+    ) -> anyhow::Result<(Vec<u8>, i64)> {
+        let marker = format!("R3V3RS3_EXEC={}", hex::encode(rand::random::<[u8; 16]>()));
+        env.push(marker.clone());
         let response = self
             .send(
                 Method::POST,
@@ -759,22 +761,52 @@ impl DockerRuntime {
                     "AttachStdout": true,
                     "AttachStderr": true,
                     "Cmd": command,
+                    "Env": env,
                 })),
                 &[],
                 RESPONSE_TIMEOUT,
             )
             .await?;
         let exec: ExecCreateResponse = read_json(response).await?;
-        // The output is not shown, but the session has to run to its end.
-        self.read_exec(&exec.id, EXEC_LIMIT).await?;
-        self.exec_exit_code(&exec.id).await
+        let Some(frames) = self.read_exec(&exec.id, limit).await? else {
+            self.kill_marked(id, &marker).await?;
+            bail!("the command {command:?} still ran after {limit:?} and was killed");
+        };
+        Ok((frames, self.exec_exit_code(&exec.id).await?))
+    }
+
+    /// Kills every process in the container whose environment holds `marker`.
+    async fn kill_marked(&self, id: &str, marker: &str) -> anyhow::Result<()> {
+        let script = format!(
+            "for p in /proc/[0-9]*; do \
+             tr '\\0' '\\n' < $p/environ 2>/dev/null | grep -qx '{marker}' && kill -9 ${{p#/proc/}}; \
+             done; true"
+        );
+        let response = self
+            .send(
+                Method::POST,
+                &format!("/containers/{id}/exec"),
+                Some(&json!({
+                    "AttachStdout": true,
+                    "AttachStderr": true,
+                    "Cmd": ["sh", "-c", script],
+                })),
+                &[],
+                RESPONSE_TIMEOUT,
+            )
+            .await?;
+        let exec: ExecCreateResponse = read_json(response).await?;
+        if self.read_exec(&exec.id, RESPONSE_TIMEOUT).await?.is_none() {
+            bail!("the kill of the processes with {marker} did not finish");
+        }
+        Ok(())
     }
 
     /// Reads the output stream of an exec to its end. A command may stay silent for longer than
     /// the response timeout, as a dump written to a file does, so a read that times out ends
-    /// the stream only when the exec no longer runs. A command that still runs after `limit`
-    /// is an error: the callers hold the lock of a database while it runs.
-    async fn read_exec(&self, id: &str, limit: Duration) -> anyhow::Result<Vec<u8>> {
+    /// the stream only when the exec no longer runs. `None` means the command still runs after
+    /// `limit`.
+    async fn read_exec(&self, id: &str, limit: Duration) -> anyhow::Result<Option<Vec<u8>>> {
         let deadline = tokio::time::Instant::now() + limit;
         let mut stream = self.start_exec(id).await?;
         let mut frames = Vec::new();
@@ -782,16 +814,15 @@ impl DockerRuntime {
         loop {
             let left = deadline.saturating_duration_since(tokio::time::Instant::now());
             if left.is_zero() {
-                bail!("the exec {id} still runs after {limit:?}");
+                return Ok(None);
             }
-            let wait = left.min(RESPONSE_TIMEOUT);
-            match tokio::time::timeout(wait, stream.read(&mut chunk)).await {
+            match tokio::time::timeout(left.min(RESPONSE_TIMEOUT), stream.read(&mut chunk)).await {
                 Ok(read) => match read? {
-                    0 => return Ok(frames),
+                    0 => return Ok(Some(frames)),
                     read => frames.extend_from_slice(&chunk[..read]),
                 },
                 Err(_) if self.exec_state(id).await?.running => {}
-                Err(_) => return Ok(frames),
+                Err(_) => return Ok(Some(frames)),
             }
         }
     }

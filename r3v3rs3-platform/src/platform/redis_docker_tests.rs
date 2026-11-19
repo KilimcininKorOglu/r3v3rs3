@@ -550,6 +550,16 @@ async fn give_up_on_a_hanging_command(platform: &Arc<Platform>, name: &str) -> a
         took < Duration::from_secs(15),
         "the limit ended the wait after {took:?}"
     );
+    // The command itself ends too: a dump that runs on after its caller gave up would write
+    // while the next job already holds the lock.
+    let list = "for p in /proc/[0-9]*; do tr '\\0' ' ' < $p/cmdline 2>/dev/null; echo; done";
+    let check = vec!["sh".into(), "-c".into(), list.into()];
+    let processes = runtime.exec_capture(&container, check, Vec::new()).await?;
+    let processes = String::from_utf8_lossy(&processes);
+    ensure!(
+        !processes.lines().any(|line| line.starts_with("sleep 60")),
+        "the command still runs after its limit:\n{processes}"
+    );
     Ok(())
 }
 
