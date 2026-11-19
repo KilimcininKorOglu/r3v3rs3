@@ -180,6 +180,15 @@ async fn read_name(addr: SocketAddr) -> anyhow::Result<String> {
     Ok(name)
 }
 
+/// Waits until the server listens on every port. The server binds its ports in a spawned task,
+/// so a request sent at once can find no listener yet.
+async fn wait_for_ports(ports: &[&TestPort]) -> anyhow::Result<()> {
+    for port in ports {
+        common::wait_for_listener(port.socket_addr()).await?;
+    }
+    Ok(())
+}
+
 /// Reads a server name `times` times, and counts the answers of each server.
 async fn count_names<F, Fut>(times: usize, read: F) -> anyhow::Result<HashMap<String, usize>>
 where
@@ -322,6 +331,7 @@ async fn http_load_balancing_policies() -> anyhow::Result<()> {
     ]);
 
     with_server(config, |_| async move {
+        wait_for_ports(&[&round_robin_port, &first_port]).await?;
         let round_robin = count_names(4, || get_body(round_robin_port.http_url("/"))).await?;
         assert_eq!(round_robin, counts(&[("a", 2), ("b", 2)]));
 
