@@ -53,8 +53,8 @@ const SHORT_IDLE: Duration = Duration::from_secs(2);
 #[tokio::test]
 async fn udp_proxy() -> anyhow::Result<()> {
     let upstream_port = alloc_udp_port().await?;
-    let proxy_port = alloc_udp_port().await?;
     let _sources = start_echo_upstream(&upstream_port).await?;
+    let proxy_port = alloc_udp_port().await?;
     let config = udp_storage(&proxy_port, &upstream_port, SHORT_IDLE);
 
     with_server(config, |_| async move {
@@ -83,8 +83,8 @@ async fn check_interleaved_clients(proxy_port: &TestPort) -> anyhow::Result<()> 
 #[tokio::test]
 async fn udp_session_closes_after_the_idle_timeout() -> anyhow::Result<()> {
     let upstream_port = alloc_udp_port().await?;
-    let proxy_port = alloc_udp_port().await?;
     let mut sources = start_echo_upstream(&upstream_port).await?;
+    let proxy_port = alloc_udp_port().await?;
     let config = udp_storage(&proxy_port, &upstream_port, Duration::from_millis(300));
 
     with_server(config, |_| async move {
@@ -141,8 +141,8 @@ const NO_PACKET_WAIT: Duration = Duration::from_millis(500);
 #[tokio::test]
 async fn udp_drops_a_client_packet_above_the_size_limit() -> anyhow::Result<()> {
     let upstream_port = alloc_udp_port().await?;
-    let proxy_port = alloc_udp_port().await?;
     let mut sources = start_echo_upstream(&upstream_port).await?;
+    let proxy_port = alloc_udp_port().await?;
     let config = udp_storage_with_size(&proxy_port, &upstream_port, SHORT_IDLE, 512);
 
     with_server(config, |_| async move {
@@ -164,12 +164,12 @@ async fn udp_drops_a_client_packet_above_the_size_limit() -> anyhow::Result<()> 
 #[tokio::test]
 async fn udp_drops_an_upstream_reply_above_the_size_limit() -> anyhow::Result<()> {
     let upstream_port = alloc_udp_port().await?;
-    let proxy_port = alloc_udp_port().await?;
     let reply = |packet: &[u8]| match packet {
         b"big" => vec![0x24; 513],
         other => other.to_vec(),
     };
     let _sources = start_upstream(&upstream_port, reply).await?;
+    let proxy_port = alloc_udp_port().await?;
     let config = udp_storage_with_size(&proxy_port, &upstream_port, SHORT_IDLE, 512);
 
     with_server(config, |_| async move {
@@ -189,9 +189,11 @@ async fn udp_drops_an_upstream_reply_above_the_size_limit() -> anyhow::Result<()
 /// so it never reaches the client; the reply of the upstream still does.
 #[tokio::test]
 async fn udp_drops_a_packet_that_does_not_come_from_the_upstream() -> anyhow::Result<()> {
+    // The upstream holds its port before the proxy port is picked, so the two never meet: a
+    // proxy without its own port would let the client reach the upstream directly.
     let upstream_port = alloc_udp_port().await?;
-    let proxy_port = alloc_udp_port().await?;
     let mut sources = start_echo_upstream(&upstream_port).await?;
+    let proxy_port = alloc_udp_port().await?;
     let config = udp_storage(&proxy_port, &upstream_port, SHORT_IDLE);
 
     with_server(config, |_| async move {
@@ -210,6 +212,13 @@ async fn check_spoofed_reply(
     let client = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
     send_and_expect_echo(&client, proxy, b"open").await?;
     let session = next_source(sources).await?;
+    // The packet must have passed the proxy: the upstream sees the session socket, never the
+    // client itself.
+    assert_ne!(
+        session,
+        client.local_addr()?,
+        "the client reached the upstream without the proxy"
+    );
 
     let attacker = UdpSocket::bind(SocketAddr::new(proxy.ip(), 0)).await?;
     attacker.send_to(b"spoofed", session).await?;
