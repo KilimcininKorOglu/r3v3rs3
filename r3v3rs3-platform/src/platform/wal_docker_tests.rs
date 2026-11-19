@@ -337,10 +337,14 @@ pub(super) async fn plain_run(
 
 /// Writes row 1 with a plain PostgreSQL on the volume of `name`. The temporary server of the
 /// first start listens on no TCP port, so the script waits for the final one.
-async fn seed_plain_postgres(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+async fn seed_plain_postgres(
+    platform: &Arc<Platform>,
+    name: &str,
+    tag: &str,
+) -> anyhow::Result<()> {
     let info = r3v3rs3_api::platform::engine_info("postgres").context("the catalog")?;
-    let image = format!("mirror.gcr.io/library/postgres:{PG17}");
-    let mount = info.data_path_for(&format!("postgres:{PG17}"));
+    let image = format!("mirror.gcr.io/library/postgres:{tag}");
+    let mount = info.data_path_for(&format!("postgres:{tag}"));
     let env = ["POSTGRES_PASSWORD", "PGPASSWORD"]
         .into_iter()
         .map(|key| {
@@ -357,9 +361,9 @@ async fn seed_plain_postgres(platform: &Arc<Platform>, name: &str) -> anyhow::Re
 
 /// A PostgreSQL that ran without the WAL archive keeps its data when the next deployment turns
 /// the archive on, and the archive then covers the writes after it.
-async fn convert(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
-    seed_plain_postgres(platform, name).await?;
-    let db = running_postgres(platform, name, PG17).await?;
+async fn convert(platform: &Arc<Platform>, name: &str, tag: &str) -> anyhow::Result<()> {
+    seed_plain_postgres(platform, name, tag).await?;
+    let db = running_postgres(platform, name, tag).await?;
     let rows = sql(platform, db.id, ROWS).await?;
     ensure!(rows == "1", "the converted database holds {rows:?}");
     platform.archive_wal(db.id).await?;
@@ -391,7 +395,20 @@ async fn a_postgres_without_the_archive_keeps_its_data_on_the_docker_engine() ->
     catalog();
     let (platform, _dir) = docker_platform().await?;
     let name = format!("pitr{}", hex::encode(rand::random::<[u8; 3]>()));
-    let run = convert(&platform, &name).await;
+    let run = convert(&platform, &name, PG17).await;
+    run.and(remove_apps(&platform).await)
+}
+
+/// PostgreSQL 18, the image of the production databases at the time of the release, keeps its
+/// data below the mount point of its volume.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_postgres_18_without_the_archive_keeps_its_data_on_the_docker_engine()
+-> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let name = format!("pitr{}", hex::encode(rand::random::<[u8; 3]>()));
+    let run = convert(&platform, &name, "18-alpine").await;
     run.and(remove_apps(&platform).await)
 }
 

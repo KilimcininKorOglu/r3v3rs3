@@ -64,9 +64,13 @@ fn root_env() -> anyhow::Result<Vec<EnvVar>> {
 /// Adds a MongoDB database app on the volume `<name>-data` with a host port, as
 /// `create_database` makes it, without deploying it.
 async fn add_db(platform: &Arc<Platform>, name: &str) -> anyhow::Result<AppEntry> {
+    add_db_on(platform, name, IMAGE).await
+}
+
+async fn add_db_on(platform: &Arc<Platform>, name: &str, image: &str) -> anyhow::Result<AppEntry> {
     let mut req = request(name);
     req.spec.source = AppSource::Image {
-        image: IMAGE.parse()?,
+        image: image.parse()?,
     };
     req.spec.port = 27017;
     req.spec.host_port = Some(platform.allocate_host_port().await?);
@@ -130,11 +134,15 @@ const WRITE: &str = "print(db.getSiblingDB('app').t.insertOne({i: 2}).acknowledg
 
 /// Runs a standalone mongod on the volume of `name`, as the platform started every MongoDB
 /// before, writes one document and removes the container again.
-async fn standalone_with_a_document(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+async fn standalone_with_a_document(
+    platform: &Arc<Platform>,
+    name: &str,
+    image: &str,
+) -> anyhow::Result<()> {
     let runtime = platform.local.clone();
     let container: ContainerName = format!("{name}-standalone").parse()?;
     runtime
-        .create_container(&standalone_spec(&container, name)?)
+        .create_container(&standalone_spec(&container, name, image)?)
         .await?;
     runtime.start_container(&container).await?;
     let written = write_one(&*runtime, &container).await;
@@ -146,10 +154,14 @@ async fn standalone_with_a_document(platform: &Arc<Platform>, name: &str) -> any
 }
 
 /// A plain mongod on the volume of `name`, without a start command.
-fn standalone_spec(container: &ContainerName, name: &str) -> anyhow::Result<ContainerSpec> {
+fn standalone_spec(
+    container: &ContainerName,
+    name: &str,
+    image: &str,
+) -> anyhow::Result<ContainerSpec> {
     Ok(ContainerSpec {
         name: container.clone(),
-        image: IMAGE.parse()?,
+        image: image.parse()?,
         env: root_env()?,
         labels: BTreeMap::new(),
         network: None,
@@ -199,16 +211,36 @@ async fn write_one(
     }
 }
 
-async fn convert(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
-    let db = add_db(platform, name).await?;
-    standalone_with_a_document(platform, name).await?;
+/// A standalone MongoDB on `image` becomes a replica set on its next deployment, keeps its
+/// documents, takes writes, and its archive covers the writes after the conversion.
+async fn convert(platform: &Arc<Platform>, name: &str, image: &str) -> anyhow::Result<()> {
+    let db = add_db_on(platform, name, image).await?;
+    standalone_with_a_document(platform, name, image).await?;
     deploy(platform, db.id).await?;
     let set = eval(platform, db.id, SET_NAME).await?;
     ensure!(set == "rs0", "the database runs in the replica set {set:?}");
     let count = eval(platform, db.id, COUNT).await?;
     ensure!(count == "1", "the database holds {count} documents");
-    let written = eval(platform, db.id, WRITE).await?;
+    archive_a_write(platform, db.id, name).await
+}
+
+/// Archives, writes a second document, and requires a branch to now to hold both.
+async fn archive_a_write(platform: &Arc<Platform>, id: ShortId, name: &str) -> anyhow::Result<()> {
+    platform.archive_wal(id).await?;
+    let written = eval(platform, id, WRITE).await?;
     ensure!(written == "true", "the database took no write: {written}");
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let request = PitrRestoreRequest {
+        target_time: crate::clock::unix_ms(),
+        new_name: Some(format!("{name}-b").parse()?),
+        host_port: None,
+    };
+    let branch = platform.restore_pitr(id, request).await?;
+    let count = eval(platform, branch.app.id, COUNT).await?;
+    ensure!(
+        count == "2",
+        "the branch of the converted database holds {count} documents"
+    );
     Ok(())
 }
 
@@ -554,7 +586,17 @@ fn name() -> String {
 async fn a_standalone_mongodb_becomes_a_replica_set_on_the_docker_engine() -> anyhow::Result<()> {
     catalog();
     let (platform, _dir) = docker_platform().await?;
-    let run = convert(&platform, &name()).await;
+    let run = convert(&platform, &name(), IMAGE).await;
+    run.and(remove_apps(&platform).await)
+}
+
+/// The image of the production databases at the time of the release.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_standalone_mongodb_9_becomes_a_replica_set_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = convert(&platform, &name(), "mirror.gcr.io/library/mongo:9").await;
     run.and(remove_apps(&platform).await)
 }
 
