@@ -3210,9 +3210,14 @@ mod tests {
         let err = restore.unwrap_err().downcast::<Error>()?;
         assert!(matches!(err, Error::AppBusy { .. }));
 
+        // An archive call reaches the lock only for an engine with a log archive; the app of
+        // the setup has no engine, so the stored record becomes a PostgreSQL database.
+        let mut database = setup.app.clone();
+        database.spec.database = Some("postgres".into());
+        setup.platform.store.update_app(&database).await?;
         let archive = setup.platform.archive_wal(setup.app.id).await;
         let err = archive.unwrap_err().downcast::<Error>()?;
-        assert!(matches!(err, Error::AppBusy { .. }));
+        assert!(matches!(err, Error::AppBusy { .. }), "{err:?}");
 
         drop(lock);
         assert!(setup.platform.lock_app(&setup.app).is_ok());
