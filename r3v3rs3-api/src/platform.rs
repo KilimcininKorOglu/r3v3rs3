@@ -1200,6 +1200,11 @@ pub struct AppSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag_trigger: Option<String>,
 
+    /// Repository paths that a branch push must change to deploy a Git or Compose app: a file,
+    /// or a directory with every file below it. Empty deploys on every push of the branch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub watch_paths: Vec<String>,
+
     /// Optional app store catalog entry id that this app was installed from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub store_app_id: Option<String>,
@@ -1480,7 +1485,32 @@ impl AppSpec {
     fn validate_build_options(&self) -> Result<(), Error> {
         self.validate_git_config()?;
         self.validate_buildkit()?;
-        self.validate_tag_trigger()
+        self.validate_tag_trigger()?;
+        self.validate_watch_paths()
+    }
+
+    fn validate_watch_paths(&self) -> Result<(), Error> {
+        if self.watch_paths.is_empty() {
+            return Ok(());
+        }
+        if matches!(self.source, AppSource::Image { .. }) {
+            return Err(invalid("watch_paths needs a Git or Compose app"));
+        }
+        if self.watch_paths.len() > MAX_WATCH_PATHS {
+            return Err(invalid(&format!(
+                "watch_paths holds at most {MAX_WATCH_PATHS} paths"
+            )));
+        }
+        match self
+            .watch_paths
+            .iter()
+            .find(|path| !is_valid_watch_path(path))
+        {
+            Some(path) => Err(invalid(&format!(
+                "the watch path {path:?} must be a relative repository path without `..`"
+            ))),
+            None => Ok(()),
+        }
     }
 
     fn validate_buildkit(&self) -> Result<(), Error> {
@@ -1725,6 +1755,35 @@ fn parse_window_minutes(s: &str) -> Option<u32> {
     let (h_str, m_str) = s.split_once(':')?;
     let (h, m) = (h_str.parse::<u32>().ok()?, m_str.parse::<u32>().ok()?);
     Some(h * 60 + m)
+}
+
+/// The most entries of [`AppSpec::watch_paths`].
+pub const MAX_WATCH_PATHS: usize = 50;
+
+/// The longest entry of [`AppSpec::watch_paths`], in bytes.
+const MAX_WATCH_PATH_LEN: usize = 256;
+
+/// A watch path is a relative repository path: no leading `/`, no `..` or empty segment, and
+/// no control character or backslash.
+fn is_valid_watch_path(path: &str) -> bool {
+    let trimmed = path.strip_suffix('/').unwrap_or(path);
+    !trimmed.is_empty()
+        && path.len() <= MAX_WATCH_PATH_LEN
+        && !path.chars().any(|c| c.is_control() || c == '\\')
+        && trimmed
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+/// Whether the repository file `changed` is a watched path or lies below one.
+pub fn is_watched(watch_paths: &[String], changed: &str) -> bool {
+    watch_paths.iter().any(|watched| {
+        let dir = watched.strip_suffix('/').unwrap_or(watched);
+        changed == dir
+            || changed
+                .strip_prefix(dir)
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
 }
 
 /// Validates a git tag pattern.
@@ -3131,6 +3190,51 @@ mod tests {
         assert!(is_within_deploy_window("09:00-17:00", 12, 0));
         assert!(!is_within_deploy_window("09:00-17:00", 8, 59));
         assert!(!is_within_deploy_window("09:00-17:00", 17, 0));
+    }
+
+    /// A watch path names a file or directory inside the repository. A path that leaves the
+    /// repository (`..`, absolute) or an image app, which has no repository push, is refused.
+    #[test]
+    fn watch_paths_accept_only_relative_repository_paths_of_git_apps() {
+        let git = |paths: serde_json::Value| {
+            spec(json!({
+                "source": {"type": "git", "repository": "https://github.com/owner/shop.git"},
+                "port": 8080,
+                "watch_paths": paths,
+            }))
+        };
+        assert!(git(json!(["turn/", "Dockerfile", "a/b.txt"])).is_ok());
+        for bad in ["", "/etc", "../x", "a/../b", "a//b", "./a", "a\\b", "a\nb"] {
+            assert!(git(json!([bad])).is_err(), "{bad:?}");
+        }
+        assert!(git(json!(["a".repeat(257)])).is_err());
+        let many: Vec<String> = (0..=MAX_WATCH_PATHS).map(|i| format!("d{i}")).collect();
+        assert!(git(json!(many)).is_err());
+        let image = spec(json!({
+            "source": {"type": "image", "image": "nginx:1.27"},
+            "port": 80,
+            "watch_paths": ["src/"],
+        }));
+        assert!(image.is_err());
+    }
+
+    /// A watched directory covers every file below it, and nothing outside it whose name only
+    /// starts the same way.
+    #[test]
+    fn a_watched_directory_covers_the_files_below_it() {
+        let watched = vec![
+            "turn".to_string(),
+            "api/".to_string(),
+            "Dockerfile".to_string(),
+        ];
+        assert!(is_watched(&watched, "turn/turnserver.conf"));
+        assert!(is_watched(&watched, "turn"));
+        assert!(is_watched(&watched, "api/src/main.rs"));
+        assert!(is_watched(&watched, "Dockerfile"));
+        assert!(!is_watched(&watched, "turnkey/a"));
+        assert!(!is_watched(&watched, "apiary/a"));
+        assert!(!is_watched(&watched, "web/Dockerfile"));
+        assert!(!is_watched(&watched, "README.md"));
     }
 
     #[test]

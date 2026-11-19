@@ -2055,6 +2055,8 @@
   "apps.deploy_window_hint": "Günlük UTC saat aralığı (örn. 22:00-04:00). Bu aralık dışındaki deployment'lar onay bekler.",
   "apps.tag_trigger": "Etiket Tetikleyici",
   "apps.tag_trigger_hint": "Eşleşen etiket (tag) push edildiğinde otomatik deploy kuralı (örn. v*, release-*).",
+  "apps.watch_paths": "İzlenen Yollar",
+  "apps.watch_paths_hint": "Virgülle ayrılmış dosyalar veya dizinler (örn. turn/, Dockerfile). Branch push'u yalnız bunlardan birini değiştirirse deploy eder. Boş bırakılırsa her push deploy eder.",
   "apps.preview_enabled": "Geçici Pull Request Önizleme Ortamları",
   "apps.preview_enabled_hint": "Pull Request açıldığında/güncellendiğinde izole bir önizleme ortamını otomatik dağıtın ve PR kapandığında yok edin.",
   "apps.preview_domain_template": "Önizleme Alan Adı Şablonu (İsteğe Bağlı)",

@@ -100,6 +100,7 @@ pub struct AppForm {
     pub require_approval: bool,
     pub deploy_window: String,
     pub tag_trigger: String,
+    pub watch_paths: String,
     pub store_app_id: Option<String>,
     pub targets: Vec<String>,
     pub load_balancing: String,
@@ -165,6 +166,7 @@ impl Default for AppForm {
             require_approval: false,
             deploy_window: String::new(),
             tag_trigger: String::new(),
+            watch_paths: String::new(),
             store_app_id: None,
             targets: Vec::new(),
             load_balancing: String::new(),
@@ -265,6 +267,7 @@ impl AppForm {
             require_approval: spec.require_approval,
             deploy_window: spec.deploy_window.clone().unwrap_or_default(),
             tag_trigger: spec.tag_trigger.clone().unwrap_or_default(),
+            watch_paths: spec.watch_paths.join(", "),
             store_app_id: spec.store_app_id.clone(),
             targets: spec.targets.iter().map(ToString::to_string).collect(),
             load_balancing: spec
@@ -464,6 +467,7 @@ impl AppForm {
             require_approval: self.require_approval,
             deploy_window: non_empty(&self.deploy_window).map(str::to_string),
             tag_trigger: non_empty(&self.tag_trigger).map(str::to_string),
+            watch_paths: split_list(&self.watch_paths),
             store_app_id: self.store_app_id.clone(),
             targets,
             load_balancing,
@@ -829,6 +833,15 @@ fn parse_lines<T>(
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(|line| parse_line(locale, line))
+        .collect()
+}
+
+/// Splits a comma-separated list and drops blank entries.
+fn split_list(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string)
         .collect()
 }
 
@@ -1209,6 +1222,7 @@ fn source_view(
             <>
                 { repository_view(locale, form, connections) }
                 { text_field(locale, form, "apps.tag_trigger", Some("apps.tag_trigger_hint"), |f| &mut f.tag_trigger) }
+                { text_field(locale, form, "apps.watch_paths", Some("apps.watch_paths_hint"), |f| &mut f.watch_paths) }
                 { preview_view(locale, form) }
                 { buildkit_view(locale, form) }
                 { text_field(locale, form, "apps.context", Some("apps.context_hint"), |f| &mut f.context) }
@@ -1300,6 +1314,7 @@ fn compose_git_view(
         <>
             { repository_view(locale, form, connections) }
             { text_field(locale, form, "apps.tag_trigger", Some("apps.tag_trigger_hint"), |f| &mut f.tag_trigger) }
+            { text_field(locale, form, "apps.watch_paths", Some("apps.watch_paths_hint"), |f| &mut f.watch_paths) }
             { preview_view(locale, form) }
             { text_field(locale, form, "apps.compose_file", Some("apps.compose_file_hint"), |f| &mut f.compose_file) }
             { text_field(locale, form, "apps.service", Some("apps.service_hint"), |f| &mut f.service) }

@@ -1136,6 +1136,7 @@ fn create_database_spec(
         require_approval: false,
         deploy_window: None,
         tag_trigger: None,
+        watch_paths: Vec::new(),
         store_app_id: None,
         targets: Vec::new(),
         load_balancing: None,

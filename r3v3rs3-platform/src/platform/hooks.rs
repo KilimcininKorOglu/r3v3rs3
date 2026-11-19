@@ -219,6 +219,45 @@ struct Push {
     deleted: bool,
     #[serde(default)]
     after: Option<String>,
+    /// The pushed commits with their changed files. GitHub and GitLab send at most 20 of them.
+    #[serde(default)]
+    commits: Vec<PushCommit>,
+    /// GitLab counts every pushed commit here, also those beyond the listed 20.
+    #[serde(default)]
+    total_commits_count: Option<usize>,
+}
+
+/// The files that one pushed commit changed.
+#[derive(Deserialize)]
+struct PushCommit {
+    #[serde(default)]
+    added: Vec<String>,
+    #[serde(default)]
+    modified: Vec<String>,
+    #[serde(default)]
+    removed: Vec<String>,
+}
+
+/// GitHub and GitLab list at most this many commits of a push, so a push of this many may
+/// hold more whose files the payload leaves out.
+const LISTED_COMMITS: usize = 20;
+
+impl Push {
+    /// Whether the push changed a watched path. A push whose changes the payload does not list
+    /// in full counts as one that did, so a filter never skips a needed deployment.
+    fn changes_watched(&self, watch_paths: &[String]) -> bool {
+        let listed = self.commits.len();
+        let complete = listed > 0
+            && listed < LISTED_COMMITS
+            && self.total_commits_count.is_none_or(|total| total == listed);
+        !complete
+            || self.commits.iter().any(|commit| {
+                [&commit.added, &commit.modified, &commit.removed]
+                    .into_iter()
+                    .flatten()
+                    .any(|file| r3v3rs3_api::platform::is_watched(watch_paths, file))
+            })
+    }
 }
 
 /// What a push request should deploy.
@@ -681,6 +720,13 @@ fn push_target(signature: &Signature, app: &AppEntry, body: &[u8]) -> Result<Pus
                     reason: err.to_string(),
                 })?;
             if push.deleted || is_empty_commit(push.after.as_deref()) {
+                return Ok(PushTarget::Ignore);
+            }
+            let is_branch = push.git_ref.starts_with("refs/heads/");
+            if is_branch
+                && !app.spec.watch_paths.is_empty()
+                && !push.changes_watched(&app.spec.watch_paths)
+            {
                 return Ok(PushTarget::Ignore);
             }
             check_push_ref(
@@ -1325,6 +1371,81 @@ mod tests {
         assert_eq!(deployment.trigger, DeploymentTrigger::Webhook);
         assert_eq!(deployment.username, HOOK_USERNAME);
         Ok(())
+    }
+
+    /// A push body in the GitHub form, with one commit per entry of `files`.
+    fn push_with_files(files: &[&[&str]]) -> Vec<u8> {
+        let commits: Vec<_> = files
+            .iter()
+            .map(|changed| serde_json::json!({ "added": [], "modified": changed, "removed": [] }))
+            .collect();
+        serde_json::json!({ "ref": "refs/heads/main", "after": "abc", "commits": commits })
+            .to_string()
+            .into_bytes()
+    }
+
+    /// With watch paths, a branch push deploys only when one of its commits changes a watched
+    /// file. A push whose payload does not list every change (no commits, or 20 listed) deploys,
+    /// so the filter never skips a needed deployment.
+    #[tokio::test]
+    async fn a_push_deploys_only_when_it_changes_a_watched_path() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let mut request = git_request("shop");
+        request.spec.watch_paths = vec!["turn/".to_string()];
+        let shop = platform.add_app(request, 1).await?;
+        let (_, secret) = platform.new_webhook_secret(shop.id).await?;
+        let send = |body: Vec<u8>| {
+            let platform = platform.clone();
+            let headers = github(&secret.secret, "push", &body);
+            async move { platform.hook(shop.id, &headers, &body).await }
+        };
+        let outside = push_with_files(&[&["api/main.go"], &["README.md"]]);
+        assert_eq!(send(outside).await?.2.outcome, HookOutcome::Ignored);
+        let similar = push_with_files(&[&["turnkey/a"]]);
+        assert_eq!(send(similar).await?.2.outcome, HookOutcome::Ignored);
+        let twenty: Vec<&[&str]> = vec![&["README.md"]; LISTED_COMMITS];
+        assert_eq!(
+            send(push_with_files(&twenty)).await?.2.outcome,
+            HookOutcome::Deployed
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_push_that_changes_a_watched_path_deploys() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let mut request = git_request("shop");
+        request.spec.watch_paths = vec!["turn/".to_string()];
+        let shop = platform.add_app(request, 1).await?;
+        let (_, secret) = platform.new_webhook_secret(shop.id).await?;
+        let body = push_with_files(&[&["README.md"], &["turn/turnserver.conf"]]);
+        let headers = github(&secret.secret, "push", &body);
+        let result = platform.hook(shop.id, &headers, &body).await?;
+        assert_eq!(result.2.outcome, HookOutcome::Deployed);
+        Ok(())
+    }
+
+    /// GitLab lists at most 20 commits and counts all of them in `total_commits_count`, so a
+    /// push with unlisted commits deploys, and one without a commit list deploys too.
+    #[test]
+    fn a_push_without_its_full_file_list_counts_as_a_watched_change() {
+        let watched = vec!["turn/".to_string()];
+        let parse = |body: serde_json::Value| -> Push { serde_json::from_value(body).unwrap() };
+        let readme = serde_json::json!([{ "modified": ["README.md"] }]);
+        let listed = parse(serde_json::json!({
+            "ref": "refs/heads/main", "commits": readme, "total_commits_count": 1
+        }));
+        assert!(!listed.changes_watched(&watched));
+        let unlisted = parse(serde_json::json!({
+            "ref": "refs/heads/main", "commits": readme, "total_commits_count": 30
+        }));
+        assert!(unlisted.changes_watched(&watched));
+        let bare = parse(serde_json::json!({ "ref": "refs/heads/main" }));
+        assert!(bare.changes_watched(&watched));
+        let removed = parse(serde_json::json!({
+            "ref": "refs/heads/main", "commits": [{ "removed": ["turn/old.conf"] }]
+        }));
+        assert!(removed.changes_watched(&watched));
     }
 
     #[tokio::test]

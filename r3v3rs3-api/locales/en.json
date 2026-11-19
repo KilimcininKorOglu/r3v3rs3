@@ -2055,6 +2055,8 @@
   "apps.deploy_window_hint": "Daily UTC hour range (e.g. 22:00-04:00). Deployments outside this window wait for approval.",
   "apps.tag_trigger": "Tag Trigger",
   "apps.tag_trigger_hint": "Pattern to automatically deploy on matching tag push (e.g. v*, release-*).",
+  "apps.watch_paths": "Watch Paths",
+  "apps.watch_paths_hint": "Comma-separated files or directories (e.g. turn/, Dockerfile). A branch push deploys only when it changes one of them. Empty deploys on every push.",
   "apps.preview_enabled": "Ephemeral Pull Request Previews",
   "apps.preview_enabled_hint": "Automatically create and deploy an isolated preview environment on pull request open/sync, and destroy it on close.",
   "apps.preview_domain_template": "Preview Domain Template (Optional)",
