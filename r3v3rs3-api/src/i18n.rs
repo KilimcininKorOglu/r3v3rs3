@@ -204,6 +204,7 @@ mod tests {
             Error::BackupFailed { reason: text() },
             Error::RestoreFailed { reason: text() },
             Error::PitrTargetOutOfRange { reason: text() },
+            Error::PitrUnsupported { engine: text() },
             Error::BackupNotFound { id: text() },
             Error::S3NotConfigured,
             Error::S3OperationFailed { reason: text() },

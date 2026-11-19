@@ -1158,28 +1158,6 @@ impl Platform {
         segments_in(&self.wal_dir(db_id).await?).await
     }
 
-    async fn wal_capture_target(
-        &self,
-        db_id: ShortId,
-    ) -> anyhow::Result<(
-        ContainerName,
-        Arc<dyn ContainerRuntime>,
-        String,
-        EngineInfo,
-        String,
-    )> {
-        let (app, container, runtime) = self.database_container(db_id).await?;
-        let engine = app
-            .spec
-            .database
-            .clone()
-            .context("the app is not a managed database")?;
-        let info = r3v3rs3_api::platform::app_engine_info(&app.spec)
-            .context("the engine is not in the database catalog")?;
-        let password = self.database_password(db_id, &info).await?;
-        Ok((container, runtime, engine, info, password))
-    }
-
     /// Archives the current WAL or binary log segment from the running database container.
     pub async fn archive_wal(&self, db_id: ShortId) -> anyhow::Result<WalSegment> {
         let app = self.app(db_id).await?;
@@ -1188,74 +1166,20 @@ impl Platform {
             Some("mysql" | "mariadb") => self.archive_binlog(db_id).await,
             Some("mongodb") => self.archive_oplog(db_id).await,
             Some("redis") => self.archive_aof(db_id).await,
-            _ => self.archive_dump_segment(&app).await,
+            _ => Err(pitr_unsupported(&app)),
         }
-    }
-
-    /// Stores a dump of the database as a segment, for an engine without a log archive.
-    async fn archive_dump_segment(&self, app: &AppEntry) -> anyhow::Result<WalSegment> {
-        let db_id = app.id;
-        let _lock = self.lock_app(app)?;
-        let (container, runtime, engine, info, password) = self.wal_capture_target(db_id).await?;
-
-        let now = unix_ms();
-        let segments = self.list_wal_segments(db_id).await?;
-        let start_time = segments
-            .last()
-            .map(|s| s.end_time)
-            .unwrap_or_else(|| now.saturating_sub(300_000));
-
-        let (filename, content) =
-            capture_engine_wal(&runtime, &container, &engine, &info, &password).await?;
-        let compressed = gzip(&content).await?;
-        let segment_id = backup_id();
-        let segment = WalSegment {
-            id: segment_id.clone(),
-            app: db_id,
-            filename,
-            size: compressed.len() as u64,
-            sha256: hex::encode(Sha256::digest(&compressed)),
-            start_time,
-            end_time: now,
-            created_at: now,
-            native: false,
-        };
-
-        let dir = self.wal_dir(db_id).await?;
-        store_wal_segment(&dir, &segment, &compressed).await?;
-        Ok(segment)
     }
 
     /// Calculates the point-in-time recovery window and statistics for a database.
     pub async fn pitr_range(&self, db_id: ShortId) -> anyhow::Result<PitrRange> {
-        match self.app(db_id).await?.spec.database.as_deref() {
-            Some("postgres") => return self.postgres_pitr_range(db_id).await,
-            Some("mysql" | "mariadb") => return self.binlog_pitr_range(db_id).await,
-            Some("mongodb") => return self.oplog_pitr_range(db_id).await,
-            Some("redis") => return self.aof_pitr_range(db_id).await,
-            _ => {}
+        let app = self.app(db_id).await?;
+        match app.spec.database.as_deref() {
+            Some("postgres") => self.postgres_pitr_range(db_id).await,
+            Some("mysql" | "mariadb") => self.binlog_pitr_range(db_id).await,
+            Some("mongodb") => self.oplog_pitr_range(db_id).await,
+            Some("redis") => self.aof_pitr_range(db_id).await,
+            _ => Err(pitr_unsupported(&app)),
         }
-        let backups = self.list_backups(db_id).await?;
-        let segments = self.list_wal_segments(db_id).await?;
-        let running = self.store.running_deployment(db_id).await?.is_some();
-        let earliest = backups.iter().map(|b| b.created_at as u64).min();
-        let max_backup = backups.iter().map(|b| b.created_at as u64).max();
-        let max_wal = segments.iter().map(|s| s.end_time).max();
-        let latest = match (max_backup, max_wal, running) {
-            (_, _, true) => Some(unix_ms()),
-            (Some(b), Some(w), false) => Some(b.max(w)),
-            (Some(b), None, false) => Some(b),
-            (None, Some(w), false) => Some(w),
-            (None, None, false) => None,
-        };
-        Ok(PitrRange {
-            earliest,
-            latest,
-            base_backups_count: backups.len(),
-            wal_segments_count: segments.len(),
-            active: running && earliest.is_some(),
-            archiving: false,
-        })
     }
 
     /// Performs point-in-time recovery to the requested timestamp.
@@ -1269,108 +1193,12 @@ impl Platform {
     ) -> anyhow::Result<PitrRestoreResponse> {
         let app = self.app(db_id).await?;
         match app.spec.database.as_deref() {
-            Some("postgres") => return self.restore_postgres_pitr(db_id, &app, request).await,
-            Some("mysql" | "mariadb") => {
-                return self.restore_binlog_pitr(db_id, &app, request).await;
-            }
-            Some("mongodb") => return self.restore_oplog_pitr(db_id, &app, request).await,
-            Some("redis") => return self.restore_aof_pitr(db_id, &app, request).await,
-            _ => {}
+            Some("postgres") => self.restore_postgres_pitr(db_id, &app, request).await,
+            Some("mysql" | "mariadb") => self.restore_binlog_pitr(db_id, &app, request).await,
+            Some("mongodb") => self.restore_oplog_pitr(db_id, &app, request).await,
+            Some("redis") => self.restore_aof_pitr(db_id, &app, request).await,
+            _ => Err(pitr_unsupported(&app)),
         }
-        let backups = self.list_backups(db_id).await?;
-        let base_backup = find_base_backup(&backups, app.name.as_str(), request.target_time)?;
-
-        let segments = self.list_wal_segments(db_id).await?;
-        let replayed =
-            filter_wal_segments(segments, base_backup.created_at as u64, request.target_time);
-        let wal_count = replayed.len();
-
-        let (target_app, branched) = self
-            .resolve_pitr_target(db_id, &app, &request, &base_backup)
-            .await?;
-
-        if !replayed.is_empty() {
-            self.replay_wal_to_target(db_id, target_app.id, &replayed, request.target_time)
-                .await?;
-        }
-
-        Ok(PitrRestoreResponse {
-            app: target_app,
-            target_time: request.target_time,
-            base_backup_id: base_backup.id,
-            wal_segments_replayed: wal_count,
-            branched,
-        })
-    }
-
-    async fn resolve_pitr_target(
-        self: &Arc<Self>,
-        db_id: ShortId,
-        app: &AppEntry,
-        request: &PitrRestoreRequest,
-        base_backup: &BackupEntry,
-    ) -> anyhow::Result<(AppEntry, bool)> {
-        match request.new_name.clone() {
-            Some(new_name) => {
-                let branched_app = self
-                    .restore_pitr_branch(db_id, app, new_name, request.host_port, base_backup)
-                    .await?;
-                Ok((branched_app, true))
-            }
-            None => {
-                self.restore_backup(db_id, &base_backup.id).await?;
-                Ok((app.clone(), false))
-            }
-        }
-    }
-
-    async fn restore_pitr_branch(
-        self: &Arc<Self>,
-        source_id: ShortId,
-        source: &AppEntry,
-        new_name: AppName,
-        host_port: Option<u16>,
-        base_backup: &BackupEntry,
-    ) -> anyhow::Result<AppEntry> {
-        let engine = source
-            .spec
-            .database
-            .as_deref()
-            .context("not a managed database")?;
-        let info = r3v3rs3_api::platform::app_engine_info(&source.spec)
-            .context("engine not in catalog")?;
-        let created_app = self.create_pitr_app(source, new_name, host_port).await?;
-        self.copy_tenants(source_id, created_app.id).await?;
-        let dest_password = self
-            .sync_pitr_password(source_id, created_app.id, &info)
-            .await?;
-
-        self.deploy(
-            created_app.id,
-            "pitr",
-            r3v3rs3_api::platform::DeploymentTrigger::Manual,
-        )
-        .await?;
-
-        let restore = restore_plan(engine, &info, &dest_password)?;
-        self.restore_base_into(source_id, created_app.id, base_backup, &restore, &info)
-            .await?;
-        Ok(created_app)
-    }
-
-    /// Restores the base backup of a source database into a new database container.
-    async fn restore_base_into(
-        &self,
-        source_id: ShortId,
-        dest_id: ShortId,
-        base_backup: &BackupEntry,
-        restore: &RestorePlan,
-        info: &EngineInfo,
-    ) -> anyhow::Result<()> {
-        let dump_bytes = self.download_backup(source_id, &base_backup.id).await?;
-        let uncompressed = ungzip(&dump_bytes).await?;
-        self.wait_and_restore(dest_id, restore, uncompressed, &info.data_path)
-            .await
     }
 
     pub(super) async fn create_pitr_app(
@@ -1407,30 +1235,6 @@ impl Platform {
         let entries = super::database_env::initial_db_env_entries(info, &pass)?;
         self.set_env(dest_id, entries).await?;
         Ok(pass)
-    }
-
-    async fn replay_wal_to_target(
-        &self,
-        source_db_id: ShortId,
-        target_db_id: ShortId,
-        segments: &[WalSegment],
-        target_time: u64,
-    ) -> anyhow::Result<()> {
-        let (app, container, runtime) = self.database_container(target_db_id).await?;
-        let engine = app.spec.database.clone().context("no database")?;
-        let info = r3v3rs3_api::platform::app_engine_info(&app.spec).context("no engine")?;
-        let password = self.database_password(target_db_id, &info).await?;
-        let restore = restore_plan(&engine, &info, &password)?;
-        let dir = self.wal_dir(source_db_id).await?;
-
-        for seg in segments {
-            if seg.start_time <= target_time {
-                let file_path = dir.join(format!("{}.wal.gz", seg.id));
-                replay_single_segment(&runtime, &container, &restore, &file_path, &info.data_path)
-                    .await?;
-            }
-        }
-        Ok(())
     }
 
     /// Uploads one backup to the configured S3 bucket. Does nothing without a target.
@@ -1857,21 +1661,6 @@ async fn take_dump(
     }
 }
 
-/// Captures a dump segment of an engine without a log archive yet. PostgreSQL, MySQL,
-/// MariaDB and MongoDB archive their own log (`wal.rs`, `binlog.rs`, `oplog.rs`).
-async fn capture_engine_wal(
-    runtime: &Arc<dyn ContainerRuntime>,
-    container: &ContainerName,
-    engine: &str,
-    info: &EngineInfo,
-    password: &str,
-) -> anyhow::Result<(String, Vec<u8>)> {
-    match engine {
-        "redis" => capture_redis_aof(runtime, container, info, password).await,
-        other => anyhow::bail!("engine {other} does not support WAL archiving"),
-    }
-}
-
 /// The local connection string of a MongoDB container, with the user and the password
 /// percent-encoded into it.
 pub(super) fn mongodb_uri(user: &str, password: &str) -> anyhow::Result<String> {
@@ -1883,100 +1672,13 @@ pub(super) fn mongodb_uri(user: &str, password: &str) -> anyhow::Result<String> 
     Ok(uri.to_string())
 }
 
-async fn capture_redis_aof(
-    runtime: &Arc<dyn ContainerRuntime>,
-    container: &ContainerName,
-    info: &EngineInfo,
-    password: &str,
-) -> anyhow::Result<(String, Vec<u8>)> {
-    let filename = format!("aof-{}.rdb", unix_ms());
-    runtime
-        .exec_capture(
-            container,
-            vec!["redis-cli".into(), "SAVE".into()],
-            redis_auth(password),
-        )
-        .await?;
-    let path = format!("{}/dump.rdb", info.data_path);
-    let bytes = runtime.download_file(container, &path).await?;
-    if bytes.is_empty() {
-        bail!("downloaded empty redis dump.rdb file");
+/// The error of an engine without a log archive: a recovery from dumps alone could reach only
+/// the moments of the dumps, so the platform offers none.
+fn pitr_unsupported(app: &AppEntry) -> anyhow::Error {
+    Error::PitrUnsupported {
+        engine: app.spec.database.clone().unwrap_or_default(),
     }
-    Ok((filename, bytes))
-}
-
-async fn store_wal_segment(
-    dir: &std::path::Path,
-    segment: &WalSegment,
-    compressed: &[u8],
-) -> anyhow::Result<()> {
-    tokio::fs::create_dir_all(dir).await?;
-    super::wal::write_atomic(&dir.join(format!("{}.wal.gz", segment.id)), compressed).await?;
-    let manifest = serde_json::to_vec(segment)?;
-    super::wal::write_atomic(&dir.join(format!("{}.json", segment.id)), &manifest).await?;
-    Ok(())
-}
-
-fn find_base_backup(
-    backups: &[BackupEntry],
-    db_name: &str,
-    target_time: u64,
-) -> anyhow::Result<BackupEntry> {
-    if backups.is_empty() {
-        bail!("no base backups found for database {db_name}");
-    }
-    let earliest = backups
-        .iter()
-        .map(|b| b.created_at as u64)
-        .min()
-        .unwrap_or(0);
-    if target_time < earliest {
-        return Err(Error::PitrTargetOutOfRange {
-            reason: format!("target time {target_time} is earlier than earliest backup {earliest}"),
-        }
-        .into());
-    }
-    backups
-        .iter()
-        .filter(|b| (b.created_at as u64) <= target_time)
-        .max_by_key(|b| b.created_at)
-        .cloned()
-        .ok_or_else(|| {
-            Error::PitrTargetOutOfRange {
-                reason: "no base backup found before target time".into(),
-            }
-            .into()
-        })
-}
-
-fn filter_wal_segments(
-    segments: Vec<WalSegment>,
-    base_time: u64,
-    target_time: u64,
-) -> Vec<WalSegment> {
-    segments
-        .into_iter()
-        .filter(|s| s.start_time <= target_time && s.end_time >= base_time)
-        .collect()
-}
-
-async fn replay_single_segment(
-    runtime: &Arc<dyn ContainerRuntime>,
-    container: &ContainerName,
-    restore: &RestorePlan,
-    file_path: &std::path::Path,
-    data_path: &str,
-) -> anyhow::Result<()> {
-    let segment = file_path.display();
-    let compressed = tokio::fs::read(file_path)
-        .await
-        .with_context(|| format!("failed to read the WAL segment {segment}"))?;
-    let uncompressed = ungzip(&compressed)
-        .await
-        .with_context(|| format!("failed to unpack the WAL segment {segment}"))?;
-    run_restore(runtime, container, restore, uncompressed, data_path)
-        .await
-        .with_context(|| format!("failed to replay the WAL segment {segment}"))
+    .into()
 }
 
 /// Uploads the dump into the container and runs the restore command of the engine. Redis takes
@@ -3351,40 +3053,6 @@ mod tests {
         assert!(done.await.is_ok());
     }
 
-    /// A point-in-time restore that skips a segment it cannot read or restore reports a state
-    /// the database never had: every failed segment must fail the replay.
-    #[tokio::test]
-    async fn a_segment_that_cannot_be_replayed_fails_the_replay() {
-        catalog();
-        let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
-        let plan = restore_plan("postgres", &info, "pass").unwrap();
-        let fake = Arc::new(super::super::fake::FakeRuntime::default());
-        let name: ContainerName = "r3v3rs3-db-0".parse().unwrap();
-        fake.set(&name, true, &[]);
-        let runtime: Arc<dyn ContainerRuntime> = fake.clone();
-        let dir =
-            std::env::temp_dir().join(format!("r3v3rs3-replay-{:08x}", rand::random::<u32>()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let missing = dir.join("missing.wal.gz");
-        let replay = replay_single_segment(&runtime, &name, &plan, &missing, &info.data_path);
-        assert!(replay.await.is_err());
-        let garbage = dir.join("garbage.wal.gz");
-        std::fs::write(&garbage, b"not gzip").unwrap();
-        let replay = replay_single_segment(&runtime, &name, &plan, &garbage, &info.data_path);
-        assert!(replay.await.is_err());
-        fake.state().hook_fail = true;
-        let segment = dir.join("segment.wal.gz");
-        std::fs::write(
-            &segment,
-            gzip(b"-- PostgreSQL database dump\n").await.unwrap(),
-        )
-        .unwrap();
-        let replay = replay_single_segment(&runtime, &name, &plan, &segment, &info.data_path);
-        let failed = replay.await.is_err();
-        std::fs::remove_dir_all(&dir).unwrap();
-        assert!(failed);
-    }
-
     /// Two servers on one data directory corrupt it: a point-in-time branch must mount a volume
     /// of its own, named like the volume of every new database, and must not stay a replica.
     #[test]
@@ -3512,88 +3180,41 @@ mod tests {
         assert_eq!(detect_dump_format("generic", b""), "empty");
     }
 
-    #[test]
-    fn find_base_backup_selects_closest_prior_backup() {
-        let app_id: ShortId = "app1".parse().unwrap();
-        let backups = vec![
-            BackupEntry {
-                id: "b1".into(),
-                app: app_id,
-                name: "db".into(),
-                engine: "postgres".into(),
-                size: 100,
-                sha256: "hash1".into(),
-                created_at: 1000,
-                verified_at: None,
-                verification_status: None,
-                drill: None,
-            },
-            BackupEntry {
-                id: "b2".into(),
-                app: app_id,
-                name: "db".into(),
-                engine: "postgres".into(),
-                size: 200,
-                sha256: "hash2".into(),
-                created_at: 2000,
-                verified_at: None,
-                verification_status: None,
-                drill: None,
-            },
-        ];
-
-        assert!(find_base_backup(&backups, "db", 500).is_err());
-        let res = find_base_backup(&backups, "db", 1000).unwrap();
-        assert_eq!(res.id, "b1");
-        let res = find_base_backup(&backups, "db", 1500).unwrap();
-        assert_eq!(res.id, "b1");
-        let res = find_base_backup(&backups, "db", 2500).unwrap();
-        assert_eq!(res.id, "b2");
-    }
-
-    #[test]
-    fn filter_wal_segments_finds_segments_in_range() {
-        let app_id: ShortId = "app1".parse().unwrap();
-        let segs = vec![
-            WalSegment {
-                id: "w1".into(),
-                app: app_id,
-                filename: "wal-1".into(),
-                size: 10,
-                sha256: "h1".into(),
-                start_time: 1000,
-                end_time: 1500,
-                created_at: 1500,
-                native: false,
-            },
-            WalSegment {
-                id: "w2".into(),
-                app: app_id,
-                filename: "wal-2".into(),
-                size: 10,
-                sha256: "h2".into(),
-                start_time: 1500,
-                end_time: 2000,
-                created_at: 2000,
-                native: false,
-            },
-            WalSegment {
-                id: "w3".into(),
-                app: app_id,
-                filename: "wal-3".into(),
-                size: 10,
-                sha256: "h3".into(),
-                start_time: 2000,
-                end_time: 2500,
-                created_at: 2500,
-                native: false,
-            },
-        ];
-
-        let filtered = filter_wal_segments(segs, 1200, 1800);
-        assert_eq!(filtered.len(), 2);
-        assert_eq!(filtered[0].id, "w1");
-        assert_eq!(filtered[1].id, "w2");
+    /// A recovery from dumps alone reaches only the moments of the dumps, not any second: an
+    /// engine without a log archive, such as one a later catalog adds, is refused with its name
+    /// and gets no segment, instead of a recovery to a state it never had at the target.
+    #[tokio::test]
+    async fn an_engine_without_a_log_archive_offers_no_recovery() {
+        let (command, _) = tokio::sync::mpsc::channel(1);
+        let config = r3v3rs3_api::platform::PlatformConfig::default();
+        let (platform, _fake, _dir) = super::super::tests::platform_with(&config, command)
+            .await
+            .unwrap();
+        let platform = Arc::new(platform);
+        // A stored database of an engine that no log archive covers; the catalog check of a new
+        // app would refuse an engine it does not list, so the record goes into the store.
+        let mut app = platform
+            .add_app(super::super::tests::request("cache"), 1)
+            .await
+            .unwrap();
+        app.spec.database = Some("keydb".into());
+        platform.store.update_app(&app).await.unwrap();
+        let unsupported = |err: anyhow::Error| {
+            matches!(
+                err.downcast_ref::<Error>(),
+                Some(Error::PitrUnsupported { engine }) if engine == "keydb"
+            )
+        };
+        assert!(unsupported(platform.archive_wal(app.id).await.unwrap_err()));
+        assert!(unsupported(platform.pitr_range(app.id).await.unwrap_err()));
+        let request = PitrRestoreRequest {
+            target_time: 1,
+            new_name: None,
+            host_port: None,
+        };
+        let restore = platform.restore_pitr(app.id, request).await;
+        assert!(unsupported(restore.unwrap_err()));
+        assert!(platform.list_wal_segments(app.id).await.unwrap().is_empty());
     }
 
     #[test]

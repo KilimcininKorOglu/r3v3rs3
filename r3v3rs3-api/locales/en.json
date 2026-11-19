@@ -576,6 +576,7 @@
   "error.backup_failed": "The backup failed: {reason}",
   "error.restore_failed": "The restore failed: {reason}",
   "error.pitr_target_out_of_range": "Point-in-time recovery target is out of range: {reason}",
+  "error.pitr_unsupported": "Point-in-time recovery is not available for the engine {engine}.",
   "error.backup_not_found": "The backup {id} does not exist.",
   "error.s3_not_configured": "The S3 backup target is not configured.",
   "error.s3_operation_failed": "The S3 operation failed: {reason}",

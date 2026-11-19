@@ -576,6 +576,7 @@
   "error.backup_failed": "Yedekleme başarısız oldu: {reason}",
   "error.restore_failed": "Geri yükleme başarısız oldu: {reason}",
   "error.pitr_target_out_of_range": "Zaman noktasına geri dönüş hedefi aralık dışında: {reason}",
+  "error.pitr_unsupported": "{engine} motoru için zaman noktasına geri dönüş kullanılamaz.",
   "error.backup_not_found": "{id} yedeği yok.",
   "error.s3_not_configured": "S3 yedekleme hedefi yapılandırılmamış.",
   "error.s3_operation_failed": "S3 işlemi başarısız oldu: {reason}",

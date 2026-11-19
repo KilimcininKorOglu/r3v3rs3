@@ -166,6 +166,9 @@ pub enum Error {
     #[error("point-in-time recovery target is out of range: {reason}")]
     PitrTargetOutOfRange { reason: String },
 
+    #[error("point-in-time recovery is not available for the engine {engine}")]
+    PitrUnsupported { engine: String },
+
     #[error("the backup does not exist: {id}")]
     BackupNotFound { id: String },
 
