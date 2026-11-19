@@ -9,7 +9,7 @@
 use super::Platform;
 use super::tests::{TempDir, platform_with, request};
 use anyhow::{Context as _, ensure};
-use r3v3rs3_api::container::VolumeMount;
+use r3v3rs3_api::container::{EnvVar, VolumeMount};
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, AppSource, DeploymentTrigger, EnvEntry, PitrRestoreRequest, PlatformConfig,
@@ -294,6 +294,64 @@ async fn mariadb_puts_its_data_back_when_the_replay_fails_on_the_docker_engine()
     catalog();
     let (platform, _dir) = docker_platform().await?;
     let run = roll_back_a_failed_replay(&platform, &name(), "mariadb", "mariadb:11.8-noble").await;
+    run.and(remove_apps(&platform).await)
+}
+
+/// Writes row 1 with a plain MariaDB on the volume of `name`. The temporary server of the
+/// first start listens on no TCP port, so the script waits for the final one.
+async fn seed_plain_mariadb(
+    platform: &Arc<Platform>,
+    name: &str,
+    image: &str,
+) -> anyhow::Result<()> {
+    let info = r3v3rs3_api::platform::engine_info("mariadb").context("the catalog")?;
+    let env = [info.password_env.as_str(), "MYSQL_PWD"]
+        .into_iter()
+        .map(|key| {
+            Ok(EnvVar {
+                key: key.parse()?,
+                value: PASSWORD.into(),
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let script = "mariadb -h 127.0.0.1 -u root -e \
+'CREATE DATABASE app; CREATE TABLE app.t (i int primary key, at datetime(3) DEFAULT now(3)); \
+INSERT INTO app.t (i) VALUES (1)'";
+    let full = format!("mirror.gcr.io/library/{image}");
+    super::wal_docker_tests::plain_run(platform, name, (&full, &info.data_path), env, script).await
+}
+
+/// A MariaDB that ran without the binary log keeps its data when the next deployment turns the
+/// log on, and the archive then covers the writes after it.
+async fn convert(platform: &Arc<Platform>, name: &str, image: &str) -> anyhow::Result<()> {
+    seed_plain_mariadb(platform, name, image).await?;
+    let db = running_db(platform, name, "mariadb", image).await?;
+    let rows = sql_on(platform, db.id, ROWS).await?;
+    ensure!(rows == "1", "the converted database holds {rows:?}");
+    platform.archive_wal(db.id).await?;
+    sql_on(platform, db.id, "INSERT INTO app.t (i) VALUES (2)").await?;
+    tokio::time::sleep(Duration::from_millis(2200)).await;
+    let request = PitrRestoreRequest {
+        target_time: crate::clock::unix_ms(),
+        new_name: Some(format!("{name}-b").parse()?),
+        host_port: None,
+    };
+    let branch = platform.restore_pitr(db.id, request).await?;
+    let rows = sql_on(platform, branch.app.id, ROWS).await?;
+    ensure!(
+        rows == "1,2",
+        "the branch of the converted database holds {rows:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_mariadb_without_the_binary_log_keeps_its_data_on_the_docker_engine() -> anyhow::Result<()>
+{
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = convert(&platform, &name(), "mariadb:11.8-noble").await;
     run.and(remove_apps(&platform).await)
 }
 

@@ -9,11 +9,14 @@
 use super::Platform;
 use super::tests::{TempDir, platform_with, request};
 use anyhow::{Context as _, ensure};
-use r3v3rs3_api::container::VolumeMount;
+use r3v3rs3_api::container::{
+    ContainerName, ContainerSpec, EnvVar, ResourceLimits, RestartPolicy, VolumeMount,
+};
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, AppSource, DeploymentTrigger, EnvEntry, PitrRestoreRequest, PlatformConfig,
 };
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -234,6 +237,119 @@ async fn roll_back_a_failed_replay(platform: &Arc<Platform>, name: &str) -> anyh
     ensure!(rows == "1,2,3,4,5,6", "the database holds the rows {rows}");
     sql(platform, db.id, "INSERT INTO t (i) VALUES (7)").await?;
     Ok(())
+}
+
+/// Runs `image` without a start command on the volume `<name>-data` at `mount`, as the platform
+/// started every database before it archived the log, runs `script` in it until it succeeds,
+/// and stops and removes the container again.
+pub(super) async fn plain_run(
+    platform: &Arc<Platform>,
+    name: &str,
+    (image, mount): (&str, &str),
+    env: Vec<EnvVar>,
+    script: &str,
+) -> anyhow::Result<()> {
+    let runtime = platform.local.clone();
+    let container: ContainerName = format!("{name}-plain").parse()?;
+    let spec = ContainerSpec {
+        name: container.clone(),
+        image: image.parse()?,
+        env,
+        labels: BTreeMap::new(),
+        network: None,
+        volumes: vec![VolumeMount {
+            volume: format!("{name}-data").parse()?,
+            target: mount.parse()?,
+            read_only: false,
+        }],
+        restart: RestartPolicy::No,
+        limits: ResourceLimits::default(),
+        publish: None,
+        host_port: None,
+        aliases: Vec::new(),
+        extra_networks: Vec::new(),
+        log_max_size: None,
+        log_max_file: None,
+        command: None,
+    };
+    runtime.create_container(&spec).await?;
+    runtime.start_container(&container).await?;
+    let command = vec![
+        "sh".into(),
+        "-c".into(),
+        format!("until {script}; do sleep 1; done"),
+    ];
+    let ran = tokio::time::timeout(
+        Duration::from_secs(180),
+        runtime.exec_capture(&container, command, Vec::new()),
+    )
+    .await;
+    let stopped = runtime
+        .stop_container(&container, Duration::from_secs(60))
+        .await;
+    runtime.remove_container(&container).await?;
+    ran.context("the plain database did not take the script in time")??;
+    stopped
+}
+
+/// Writes row 1 with a plain PostgreSQL on the volume of `name`. The temporary server of the
+/// first start listens on no TCP port, so the script waits for the final one.
+async fn seed_plain_postgres(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let info = r3v3rs3_api::platform::engine_info("postgres").context("the catalog")?;
+    let image = format!("mirror.gcr.io/library/postgres:{PG17}");
+    let mount = info.data_path_for(&format!("postgres:{PG17}"));
+    let env = ["POSTGRES_PASSWORD", "PGPASSWORD"]
+        .into_iter()
+        .map(|key| {
+            Ok(EnvVar {
+                key: key.parse()?,
+                value: PASSWORD.into(),
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let script = "psql -h 127.0.0.1 -U postgres -c \
+'CREATE TABLE t AS SELECT 1 AS i, clock_timestamp() AS at'";
+    plain_run(platform, name, (&image, mount), env, script).await
+}
+
+/// A PostgreSQL that ran without the WAL archive keeps its data when the next deployment turns
+/// the archive on, and the archive then covers the writes after it.
+async fn convert(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    seed_plain_postgres(platform, name).await?;
+    let db = running_postgres(platform, name, PG17).await?;
+    let rows = sql(platform, db.id, ROWS).await?;
+    ensure!(rows == "1", "the converted database holds {rows:?}");
+    platform.archive_wal(db.id).await?;
+    sql(
+        platform,
+        db.id,
+        "INSERT INTO t VALUES (2, clock_timestamp())",
+    )
+    .await?;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let request = PitrRestoreRequest {
+        target_time: crate::clock::unix_ms(),
+        new_name: Some(format!("{name}-b").parse()?),
+        host_port: None,
+    };
+    let branch = platform.restore_pitr(db.id, request).await?;
+    let rows = sql(platform, branch.app.id, ROWS).await?;
+    ensure!(
+        rows == "1,2",
+        "the branch of the converted database holds {rows:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_postgres_without_the_archive_keeps_its_data_on_the_docker_engine() -> anyhow::Result<()>
+{
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let name = format!("pitr{}", hex::encode(rand::random::<[u8; 3]>()));
+    let run = convert(&platform, &name).await;
+    run.and(remove_apps(&platform).await)
 }
 
 async fn remove_apps(platform: &Arc<Platform>) -> anyhow::Result<()> {
