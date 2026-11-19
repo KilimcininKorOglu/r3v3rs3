@@ -481,6 +481,43 @@ async fn recover_a_large_base(
     Ok(())
 }
 
+/// A logical backup larger than one transfer piece is taken and restored in bounded pieces:
+/// the dump of `pg_dumpall` goes to standard output, and a server of hundreds of megabytes must
+/// not pass through the memory of the panel. The restore brings back every row that the
+/// backup saw.
+async fn back_up_and_restore_a_large_dump(
+    platform: &Arc<Platform>,
+    bounded: &super::bounded_runtime::BoundedRuntime,
+    name: &str,
+) -> anyhow::Result<()> {
+    let db = running_postgres(platform, name, PG17).await?;
+    let filler = "CREATE TABLE f AS SELECT md5(random()::text) || md5(random()::text) AS x \
+                  FROM generate_series(1, 800000)";
+    sql(platform, db.id, filler).await?;
+    let backup = platform.run_backup(db.id).await?;
+    sql(platform, db.id, "DROP TABLE f").await?;
+    platform.restore_backup(db.id, &backup.id).await?;
+    let filled = sql(platform, db.id, "SELECT count(*) FROM f").await?;
+    ensure!(filled == "800000", "the restore holds {filled} filler rows");
+    let violations = bounded.violations();
+    ensure!(
+        violations.is_empty(),
+        "whole transfers in memory: {violations:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn postgres_backs_up_and_restores_a_large_dump_in_pieces_on_the_docker_engine()
+-> anyhow::Result<()> {
+    catalog();
+    let (platform, bounded, _dir) = bounded_platform().await?;
+    let name = format!("dump{}", hex::encode(rand::random::<[u8; 3]>()));
+    let run = back_up_and_restore_a_large_dump(&platform, &bounded, &name).await;
+    run.and(remove_apps(&platform).await)
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn postgres_recovers_a_large_base_in_pieces_on_the_docker_engine() -> anyhow::Result<()> {

@@ -503,8 +503,9 @@ impl Platform {
             .context("the engine is not in the database catalog")?;
         let password = self.database_password(db_id, &info).await?;
         let plan = dump_plan(&engine, &info, &password)?;
-        let dump = take_dump(&runtime, &container, plan).await?;
-        let (size, sha256) = write_compressed_dump(&dump, dump_path).await?;
+        let dump = DumpFile::new(&self.backup_dir).await?;
+        take_dump_to(&runtime, &container, plan, &dump.path).await?;
+        let (size, sha256) = super::transfer::gzip_file(&dump.path, dump_path).await?;
         Ok((app, engine, size, sha256))
     }
 
@@ -649,9 +650,11 @@ impl Platform {
         Ok(tokio::fs::read(dir.join(format!("{}.dump.gz", entry.id))).await?)
     }
 
-    async fn restore_dump_bytes(&self, db_id: ShortId, backup_id: &str) -> anyhow::Result<Vec<u8>> {
-        let raw = self.download_backup(db_id, backup_id).await?;
-        ungzip(&raw).await
+    /// The decompressed dump of one stored backup.
+    async fn restore_dump_file(&self, db_id: ShortId, backup_id: &str) -> anyhow::Result<DumpFile> {
+        let entry = self.backup_entry(db_id, backup_id).await?;
+        let dir = self.backup_dir(db_id).await?;
+        DumpFile::gunzip(&dir.join(format!("{}.dump.gz", entry.id)), &self.backup_dir).await
     }
 
     async fn dispatch_backup_restored(
@@ -699,13 +702,15 @@ impl Platform {
         container: &ContainerName,
         plan: &RestorePlan,
         engine: &str,
-        bytes: Vec<u8>,
+        dump: &DumpFile,
         data_path: &str,
     ) -> anyhow::Result<()> {
-        validate_backup_engine_format(engine, &bytes).map_err(|err| Error::RestoreFailed {
-            reason: format!("{err:#}"),
+        validate_backup_engine_format(engine, &dump.head().await?).map_err(|err| {
+            Error::RestoreFailed {
+                reason: format!("{err:#}"),
+            }
         })?;
-        run_restore(runtime, container, plan, bytes, data_path)
+        run_restore(runtime, container, plan, dump, data_path)
             .await
             .map_err(|err| Error::RestoreFailed {
                 reason: format!("{err:#}"),
@@ -720,13 +725,13 @@ impl Platform {
         let _lock = self.lock_app(&app)?;
         let (app, container, runtime) = self.database_container(db_id).await?;
         let (engine, info, plan) = self.database_restore_context(db_id, &app).await?;
-        let bytes = self.restore_dump_bytes(db_id, backup_id).await?;
+        let dump = self.restore_dump_file(db_id, backup_id).await?;
         Self::execute_and_validate_restore(
             &runtime,
             &container,
             &plan,
             &engine,
-            bytes,
+            &dump,
             &info.data_path,
         )
         .await?;
@@ -779,28 +784,31 @@ impl Platform {
         source_id: ShortId,
         engine: &str,
         info: &EngineInfo,
-    ) -> anyhow::Result<Vec<u8>> {
+    ) -> anyhow::Result<DumpFile> {
         if let Ok((_app, container, runtime)) = self.database_container(source_id).await {
             let password = self.database_password(source_id, info).await?;
             let plan = dump_plan(engine, info, &password)?;
-            if let Ok(dump) = take_dump(&runtime, &container, plan).await {
-                return Ok(dump);
+            let dump = DumpFile::new(&self.backup_dir).await?;
+            match take_dump_to(&runtime, &container, plan, &dump.path).await {
+                Ok(()) => return Ok(dump),
+                Err(err) => {
+                    tracing::warn!(%source_id, err = format!("{err:#}"), "the running source gave no dump; the clone uses its latest backup");
+                }
             }
         }
         let backups = self.list_backups(source_id).await?;
         if let Some(latest) = backups.first() {
-            let compressed = self.download_backup(source_id, &latest.id).await?;
-            return ungzip(&compressed).await;
+            return self.restore_dump_file(source_id, &latest.id).await;
         }
         bail!("source database is not running and has no backups to clone from");
     }
 
-    /// Waits for a cloned database container to be ready and restores the dump bytes into it.
+    /// Waits for a cloned database container to be ready and restores the dump into it.
     async fn wait_and_restore(
         &self,
         db_id: ShortId,
         plan: &RestorePlan,
-        dump: Vec<u8>,
+        dump: DumpFile,
         data_path: &str,
     ) -> anyhow::Result<()> {
         retry_until(
@@ -808,7 +816,7 @@ impl Platform {
             Duration::from_millis(1500),
             || async {
                 let (_app, container, runtime) = self.database_container(db_id).await?;
-                run_restore(&runtime, &container, plan, dump.clone(), data_path).await
+                run_restore(&runtime, &container, plan, &dump, data_path).await
             },
         )
         .await
@@ -838,7 +846,7 @@ impl Platform {
         let info = r3v3rs3_api::platform::app_engine_info(&source.spec)
             .context("the engine is not in the database catalog")?;
 
-        let dump_bytes = self.get_clone_dump(source_id, &engine, &info).await?;
+        let dump = self.get_clone_dump(source_id, &engine, &info).await?;
         self.copy_tenants(source_id, dest_id).await?;
         let restore = restore_plan(&engine, &info, dest_password)?;
         let platform = self.clone();
@@ -846,7 +854,7 @@ impl Platform {
 
         tokio::spawn(async move {
             if let Err(err) = platform
-                .wait_and_restore(dest_id, &restore, dump_bytes, &data_path)
+                .wait_and_restore(dest_id, &restore, dump, &data_path)
                 .await
             {
                 tracing::error!(%err, app = %dest_id, "failed to restore cloned data into new database");
@@ -925,17 +933,18 @@ impl Platform {
         req: RestoreFromS3Request,
         caller: &str,
     ) -> anyhow::Result<RestoreFromS3Response> {
-        let raw_bytes = self.download_s3_backup(&req.key).await?;
-        let dump_bytes = if is_gzipped(&raw_bytes) {
-            ungzip(&raw_bytes).await?
+        let raw = self.download_s3_backup(&req.key).await?;
+        let raw = DumpFile::from_bytes(&raw, &self.backup_dir).await?;
+        let dump = if is_gzipped(&raw.head().await?) {
+            DumpFile::gunzip(&raw.path, &self.backup_dir).await?
         } else {
-            raw_bytes
+            raw
         };
         if let Some(target_id) = req.target_db_id {
-            self.restore_s3_into_existing(target_id, dump_bytes, req.engine.as_deref())
+            self.restore_s3_into_existing(target_id, dump, req.engine.as_deref())
                 .await
         } else {
-            self.restore_s3_as_new(req, caller, dump_bytes).await
+            self.restore_s3_as_new(req, caller, dump).await
         }
     }
 
@@ -955,7 +964,7 @@ impl Platform {
     pub(super) async fn restore_s3_into_existing(
         &self,
         target_id: ShortId,
-        dump_bytes: Vec<u8>,
+        dump: DumpFile,
         requested_engine: Option<&str>,
     ) -> anyhow::Result<RestoreFromS3Response> {
         let app = self.app(target_id).await?;
@@ -968,7 +977,7 @@ impl Platform {
             &container,
             &plan,
             &engine,
-            dump_bytes,
+            &dump,
             &info.data_path,
         )
         .await?;
@@ -986,10 +995,10 @@ impl Platform {
         self: &Arc<Self>,
         req: RestoreFromS3Request,
         caller: &str,
-        dump_bytes: Vec<u8>,
+        dump: DumpFile,
     ) -> anyhow::Result<RestoreFromS3Response> {
         let (app_req, engine_key, info) = resolve_s3_restore_app(self, &req).await?;
-        validate_backup_engine_format(&engine_key, &dump_bytes).map_err(|err| {
+        validate_backup_engine_format(&engine_key, &dump.head().await?).map_err(|err| {
             Error::RestoreFailed {
                 reason: format!("{err:#}"),
             }
@@ -1009,7 +1018,7 @@ impl Platform {
 
         tokio::spawn(async move {
             if let Err(err) = platform
-                .wait_and_restore(app.id, &restore, dump_bytes, &data_path)
+                .wait_and_restore(app.id, &restore, dump, &data_path)
                 .await
             {
                 tracing::error!(%err, app = %app.id, "failed to restore S3 disaster recovery dump");
@@ -1676,30 +1685,41 @@ impl Platform {
     }
 }
 
-/// Runs the dump of the plan and returns the dump bytes. An engine that writes no dump to
-/// stdout, such as Redis, gets its file downloaded after the command.
-async fn take_dump(
+/// Runs the dump of the plan and writes the dump into the local file `dest`. The dump goes
+/// into a file in the container first, the standard output of the command or the file that an
+/// engine such as Redis writes itself, and leaves it in bounded pieces, so a dump of any size
+/// passes without being held in memory.
+async fn take_dump_to(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
     plan: DumpPlan,
-) -> anyhow::Result<Vec<u8>> {
-    match &plan.file {
-        Some(path) => {
-            runtime
-                .exec_capture(container, plan.command, plan.env)
-                .await?;
-            // A single download refuses more than 64 MiB, which a Redis dataset passes.
-            let scratch = super::transfer::Scratch::new(&std::env::temp_dir()).await?;
-            let local = scratch.path("dump");
-            super::transfer::fetch_to_file(runtime, container, (path, 0), &local).await?;
-            Ok(tokio::fs::read(&local).await?)
-        }
-        None => {
-            runtime
-                .exec_capture(container, plan.command, plan.env)
-                .await
-        }
+    dest: &std::path::Path,
+) -> anyhow::Result<()> {
+    if let Some(path) = &plan.file {
+        runtime
+            .exec_capture(container, plan.command, plan.env)
+            .await?;
+        super::transfer::fetch_to_file(runtime, container, (path, 0), dest).await?;
+        return Ok(());
     }
+    // A clone can dump a database while its backup runs, so every dump has a file of its own.
+    let remote = format!("/tmp/r3v3rs3-dump-{:016x}", rand::random::<u64>());
+    // The words of the command stay arguments of the shell, so none of them is parsed again.
+    let mut command = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        format!("exec \"$@\" > {remote}"),
+        "sh".to_string(),
+    ];
+    command.extend(plan.command);
+    let fetched = match runtime.exec_capture(container, command, plan.env).await {
+        Ok(_) => super::transfer::fetch_to_file(runtime, container, (&remote, 0), dest).await,
+        Err(err) => Err(err),
+    };
+    let removed = runtime.remove_path(container, &remote).await;
+    // The error of the dump tells more than the error of the cleanup after it.
+    fetched?;
+    removed
 }
 
 /// The local connection string of a MongoDB container, with the user and the password
@@ -1729,54 +1749,34 @@ async fn run_restore(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
     plan: &RestorePlan,
-    bytes: Vec<u8>,
+    dump: &DumpFile,
     data_path: &str,
 ) -> anyhow::Result<()> {
-    let (plan, bytes) = match adapt_postgres_cluster_dump(plan, &bytes) {
-        Some((plan, bytes)) => (plan, bytes),
-        None => (plan.clone(), bytes),
+    let adapted = adapt_postgres_cluster_dump(plan, dump).await?;
+    let (plan, dump) = match &adapted {
+        Some((plan, dump)) => (plan, dump),
+        None => (plan, dump),
     };
-    let plan = &plan;
-    let outcome = match &plan.upload {
-        Some(path) => {
-            runtime
-                .exec_capture(
-                    container,
-                    vec!["mkdir".into(), "-p".into(), RESTORE_DIR.into()],
-                    Vec::new(),
-                )
-                .await?;
-            upload_in_pieces(runtime, container, path, bytes).await?;
-            Some(
-                runtime
-                    .exec_capture(container, plan.command.clone(), plan.env.clone())
-                    .await
-                    .map(|_| ()),
-            )
-        }
-        None => Some(restore_redis(runtime, container, plan, bytes, data_path).await),
+    let Some(path) = &plan.upload else {
+        return restore_redis(runtime, container, plan, dump, data_path).await;
     };
-    if let Some(path) = &plan.upload {
-        runtime.remove_path(container, path).await.ok();
+    let mkdir = vec!["mkdir".into(), "-p".into(), RESTORE_DIR.into()];
+    runtime.exec_capture(container, mkdir, Vec::new()).await?;
+    // A single upload refuses more than 16 MiB, and a production MySQL dump holds 72 MB, so
+    // the dump goes in bounded pieces.
+    let outcome = match super::transfer::push_file(runtime, container, &dump.path, path).await {
+        Ok(()) => runtime
+            .exec_capture(container, plan.command.clone(), plan.env.clone())
+            .await
+            .map(|_| ()),
+        Err(err) => Err(err),
+    };
+    // A restore that ran must still reach `after_restore`, which sets the account passwords
+    // again; a dump left behind in the container does not undo it.
+    if let Err(err) = runtime.remove_path(container, path).await {
+        tracing::warn!(%container, path, err = format!("{err:#}"), "the uploaded dump stays in the container");
     }
-    if let Some(result) = outcome {
-        result?;
-    }
-    Ok(())
-}
-
-/// Writes a dump into the container in pieces below the upload limit of the runtime: a single
-/// upload refuses more than 16 MiB, and a production MySQL dump holds 72 MB.
-async fn upload_in_pieces(
-    runtime: &Arc<dyn ContainerRuntime>,
-    container: &ContainerName,
-    path: &str,
-    bytes: Vec<u8>,
-) -> anyhow::Result<()> {
-    let scratch = super::transfer::Scratch::new(&std::env::temp_dir()).await?;
-    let local = scratch.path("dump");
-    tokio::fs::write(&local, bytes).await?;
-    super::transfer::push_file(runtime, container, &local, path).await
+    outcome
 }
 
 /// Runs `script` with `$d` set to the AOF directory of the volume and `$p` to the place it is
@@ -1807,11 +1807,12 @@ async fn restore_redis(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
     plan: &RestorePlan,
-    bytes: Vec<u8>,
+    dump: &DumpFile,
     data_path: &str,
 ) -> anyhow::Result<()> {
     let before = redis_run_id(runtime, container, plan).await?;
-    upload_in_pieces(runtime, container, &format!("{data_path}/dump.rdb"), bytes).await?;
+    let target = format!("{data_path}/dump.rdb");
+    super::transfer::push_file(runtime, container, &dump.path, &target).await?;
     let aside = "rm -rf \"$p\"; [ ! -d \"$d\" ] || mv \"$d\" \"$p\"";
     aof_aside(runtime, container, data_path, aside).await?;
     let shutdown = runtime
@@ -1856,39 +1857,73 @@ const POSTGRES_CLUSTER_DUMP: &[u8] = b"PostgreSQL database cluster dump";
 /// first error, drops the old databases with `FORCE`, which ends their connections, and leaves
 /// out the lines that drop and create the root role, which cannot succeed. `None` for every
 /// other dump, such as the single-database dumps of older backups.
-fn adapt_postgres_cluster_dump(plan: &RestorePlan, bytes: &[u8]) -> Option<(RestorePlan, Vec<u8>)> {
-    let head = &bytes[..bytes.len().min(256)];
+async fn adapt_postgres_cluster_dump(
+    plan: &RestorePlan,
+    dump: &DumpFile,
+) -> anyhow::Result<Option<(RestorePlan, DumpFile)>> {
+    let head = dump.head().await?;
+    let head = &head[..head.len().min(256)];
     if plan.command.first().map(String::as_str) != Some("psql")
         || !head
             .windows(POSTGRES_CLUSTER_DUMP.len())
             .any(|w| w == POSTGRES_CLUSTER_DUMP)
     {
-        return None;
+        return Ok(None);
     }
-    let user = plan
+    let Some(user) = plan
         .command
         .iter()
         .position(|arg| arg == "-U")
-        .and_then(|index| plan.command.get(index + 1))?;
-    let mut script = Vec::with_capacity(bytes.len() + 64);
-    let mut in_copy = false;
-    for line in bytes.split_inclusive(|&byte| byte == b'\n') {
-        // The rows of a `COPY ... FROM stdin;` block run up to the `\.` line; they are data.
-        if in_copy {
-            in_copy = line.trim_ascii_end() != b"\\.";
-            script.extend_from_slice(line);
-            continue;
-        }
-        in_copy = line.starts_with(b"COPY ") && line.trim_ascii_end().ends_with(b"FROM stdin;");
-        script.extend_from_slice(&cluster_dump_line(line, user.as_bytes()));
-    }
+        .and_then(|index| plan.command.get(index + 1))
+    else {
+        return Ok(None);
+    };
+    let adapted = dump.sibling().await?;
+    adapt_cluster_lines(&dump.path, &adapted.path, user.as_bytes()).await?;
     let mut command = plan.command.clone();
     command.splice(1..1, ["-v".to_string(), "ON_ERROR_STOP=1".to_string()]);
     let plan = RestorePlan {
         command,
         ..plan.clone()
     };
-    Some((plan, script))
+    Ok(Some((plan, adapted)))
+}
+
+/// Writes the lines of the cluster dump `src` into `dest` as the restore runs them, one line
+/// at a time.
+async fn adapt_cluster_lines(
+    src: &std::path::Path,
+    dest: &std::path::Path,
+    root: &[u8],
+) -> anyhow::Result<()> {
+    use tokio::io::AsyncBufReadExt as _;
+    let mut reader = tokio::io::BufReader::new(tokio::fs::File::open(src).await?);
+    let mut out = tokio::io::BufWriter::new(tokio::fs::File::create(dest).await?);
+    let mut line = Vec::new();
+    let mut in_copy = false;
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).await? == 0 {
+            break;
+        }
+        let adapted;
+        (adapted, in_copy) = adapt_cluster_line(&line, root, in_copy);
+        out.write_all(adapted.as_deref().unwrap_or(&line)).await?;
+    }
+    out.flush().await?;
+    out.into_inner().sync_all().await?;
+    Ok(())
+}
+
+/// One line of a cluster dump as the restore runs it, `None` for the line unchanged, and
+/// whether the next line is a row of a `COPY` block. The rows of a `COPY ... FROM stdin;`
+/// block run up to the `\.` line; they are data and pass unchanged.
+fn adapt_cluster_line(line: &[u8], root: &[u8], in_copy: bool) -> (Option<Vec<u8>>, bool) {
+    if in_copy {
+        return (None, line.trim_ascii_end() != b"\\.");
+    }
+    let starts_copy = line.starts_with(b"COPY ") && line.trim_ascii_end().ends_with(b"FROM stdin;");
+    (Some(cluster_dump_line(line, root)), starts_copy)
 }
 
 /// One statement line of a `pg_dumpall` dump, with its line end, as the restore runs it; an
@@ -1924,12 +1959,13 @@ pub(super) async fn restore_for_test(
     dump: Vec<u8>,
 ) -> anyhow::Result<()> {
     let plan = restore_plan(&info.engine, info, password)?;
+    let dump = DumpFile::from_bytes(&dump, &std::env::temp_dir()).await?;
     Platform::execute_and_validate_restore(
         runtime,
         container,
         &plan,
         &info.engine,
-        dump,
+        &dump,
         &info.data_path,
     )
     .await
@@ -1943,7 +1979,10 @@ pub(super) async fn dump_for_test(
     info: &EngineInfo,
     password: &str,
 ) -> anyhow::Result<Vec<u8>> {
-    take_dump(runtime, container, dump_plan(&info.engine, info, password)?).await
+    let dump = DumpFile::new(&std::env::temp_dir()).await?;
+    let plan = dump_plan(&info.engine, info, password)?;
+    take_dump_to(runtime, container, plan, &dump.path).await?;
+    Ok(tokio::fs::read(&dump.path).await?)
 }
 
 /// The dump of a MySQL server: every database but the system schemas. The `mysql` schema holds
@@ -2550,23 +2589,83 @@ pub(super) async fn gzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
 
 pub const MAX_DB_BACKUP_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-/// The content behind the gzip, bounded to prevent gzip decompression bombs.
-pub(super) async fn ungzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
-    ungzip_limited(content, MAX_DB_BACKUP_UNCOMPRESSED_BYTES).await
+/// A dump on the local disk, in a directory of its own under `parent`. The directory goes away
+/// with the value. The platform puts its dumps under the backup directory: a decompressed dump
+/// in a temporary directory on tmpfs would sit in memory again.
+pub(super) struct DumpFile {
+    _scratch: super::transfer::Scratch,
+    parent: std::path::PathBuf,
+    pub(super) path: std::path::PathBuf,
 }
 
-async fn ungzip_limited(content: &[u8], max_bytes: u64) -> anyhow::Result<Vec<u8>> {
-    use tokio::io::AsyncReadExt;
-    let decoder = async_compression::tokio::bufread::GzipDecoder::new(content);
-    let mut reader = decoder.take(max_bytes + 1);
-    let mut plain = Vec::new();
-    reader.read_to_end(&mut plain).await?;
-    if plain.len() as u64 > max_bytes {
+impl DumpFile {
+    /// An empty place for a dump under `parent`.
+    pub(super) async fn new(parent: &std::path::Path) -> anyhow::Result<Self> {
+        let scratch = super::transfer::Scratch::new(parent).await?;
+        let path = scratch.path("dump");
+        Ok(Self {
+            _scratch: scratch,
+            parent: parent.to_path_buf(),
+            path,
+        })
+    }
+
+    /// An empty place for another dump beside this one.
+    async fn sibling(&self) -> anyhow::Result<Self> {
+        Self::new(&self.parent).await
+    }
+
+    /// The content behind the gzip file `src`, bounded to prevent gzip decompression bombs: an
+    /// uploaded or a remote backup is outside input.
+    pub(super) async fn gunzip(
+        src: &std::path::Path,
+        parent: &std::path::Path,
+    ) -> anyhow::Result<Self> {
+        let dump = Self::new(parent).await?;
+        ungzip_file_limited(src, &dump.path, MAX_DB_BACKUP_UNCOMPRESSED_BYTES).await?;
+        Ok(dump)
+    }
+
+    /// A dump with the given content.
+    pub(super) async fn from_bytes(bytes: &[u8], parent: &std::path::Path) -> anyhow::Result<Self> {
+        let dump = Self::new(parent).await?;
+        tokio::fs::write(&dump.path, bytes).await?;
+        Ok(dump)
+    }
+
+    /// The first bytes of the dump, which tell its format.
+    async fn head(&self) -> anyhow::Result<Vec<u8>> {
+        let mut head = Vec::new();
+        tokio::fs::File::open(&self.path)
+            .await?
+            .take(DUMP_HEAD)
+            .read_to_end(&mut head)
+            .await?;
+        Ok(head)
+    }
+}
+
+/// How much of a dump the format checks read.
+const DUMP_HEAD: u64 = 1024;
+
+/// Decompresses the gzip file `src` into `dest` in pieces, and fails once more than
+/// `max_bytes` came out.
+async fn ungzip_file_limited(
+    src: &std::path::Path,
+    dest: &std::path::Path,
+    max_bytes: u64,
+) -> anyhow::Result<()> {
+    let input = tokio::io::BufReader::new(tokio::fs::File::open(src).await?);
+    let mut reader = async_compression::tokio::bufread::GzipDecoder::new(input).take(max_bytes + 1);
+    let mut out = tokio::fs::File::create(dest).await?;
+    let copied = tokio::io::copy(&mut reader, &mut out).await?;
+    out.sync_all().await?;
+    if copied > max_bytes {
         anyhow::bail!(
             "decompressed database backup exceeds maximum allowed size of {max_bytes} bytes"
         );
     }
-    Ok(plain)
+    Ok(())
 }
 
 /// Calculates the SHA-256 hex checksum of a file without buffering it in memory.
@@ -2582,20 +2681,6 @@ async fn compute_file_sha256(path: &std::path::Path) -> anyhow::Result<String> {
         hasher.update(&buf[..n]);
     }
     Ok(hex::encode(hasher.finalize()))
-}
-
-/// Compresses a database dump directly to disk and computes its size and SHA-256.
-async fn write_compressed_dump(
-    dump: &[u8],
-    path: &std::path::Path,
-) -> anyhow::Result<(u64, String)> {
-    let file = tokio::fs::File::create(path).await?;
-    let mut encoder = async_compression::tokio::write::GzipEncoder::new(file);
-    encoder.write_all(dump).await?;
-    encoder.shutdown().await?;
-    let size = tokio::fs::metadata(path).await?.len();
-    let sha256 = compute_file_sha256(path).await?;
-    Ok((size, sha256))
 }
 
 async fn read_stream_header<R: tokio::io::AsyncRead + Unpin>(
@@ -2986,10 +3071,16 @@ mod tests {
     #[tokio::test]
     async fn gzip_round_trips() {
         let content = b"the dump content".to_vec();
-        let restored = ungzip(&gzip(&content).await.unwrap()).await.unwrap();
-        assert_eq!(restored, content);
+        let tmp = std::env::temp_dir();
+        let compressed = DumpFile::from_bytes(&gzip(&content).await.unwrap(), &tmp)
+            .await
+            .unwrap();
+        let restored = DumpFile::gunzip(&compressed.path, &tmp).await.unwrap();
+        assert_eq!(tokio::fs::read(&restored.path).await.unwrap(), content);
 
-        let err = ungzip_limited(&gzip(&content).await.unwrap(), 5)
+        // A backup is outside input: a gzip bomb must stop at the limit, not fill the disk.
+        let out = DumpFile::new(&tmp).await.unwrap();
+        let err = ungzip_file_limited(&compressed.path, &out.path, 5)
             .await
             .unwrap_err();
         assert!(
@@ -3046,13 +3137,22 @@ mod tests {
     /// A restore into a running server must end the connections of the databases it replaces,
     /// keep the root role of its own session and stop at the first error instead of reporting
     /// success over a half-restored server.
-    #[test]
-    fn a_postgres_cluster_dump_restores_over_open_connections_and_stops_on_error() {
+    /// The adapted plan and script of a dump with the given content.
+    async fn adapt(plan: &RestorePlan, dump: &[u8]) -> Option<(RestorePlan, Vec<u8>)> {
+        let dump = DumpFile::from_bytes(dump, &std::env::temp_dir())
+            .await
+            .unwrap();
+        let (plan, script) = adapt_postgres_cluster_dump(plan, &dump).await.unwrap()?;
+        Some((plan, tokio::fs::read(&script.path).await.unwrap()))
+    }
+
+    #[tokio::test]
+    async fn a_postgres_cluster_dump_restores_over_open_connections_and_stops_on_error() {
         catalog();
         let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
         let plan = restore_plan("postgres", &info, "pass").unwrap();
         let dump = b"--\n-- PostgreSQL database cluster dump\n--\n\nDROP DATABASE IF EXISTS p_shop;\nDROP ROLE IF EXISTS p_shop;\nDROP ROLE IF EXISTS postgres;\nCREATE ROLE p_shop;\nCREATE ROLE postgres;\n\\connect template1\nDROP DATABASE postgres;\n";
-        let (adapted, script) = adapt_postgres_cluster_dump(&plan, dump).unwrap();
+        let (adapted, script) = adapt(&plan, dump).await.unwrap();
         let script = String::from_utf8(script).unwrap();
         assert!(script.contains("DROP DATABASE IF EXISTS p_shop WITH (FORCE);"));
         assert!(script.contains("DROP DATABASE postgres WITH (FORCE);"));
@@ -3071,8 +3171,8 @@ mod tests {
 
     /// The rows of a table are user data: a row that reads like a statement of the dump and a
     /// byte that is not UTF-8 reach the restore exactly as the dump holds them.
-    #[test]
-    fn a_postgres_cluster_dump_keeps_table_rows_byte_for_byte() {
+    #[tokio::test]
+    async fn a_postgres_cluster_dump_keeps_table_rows_byte_for_byte() {
         catalog();
         let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
         let plan = restore_plan("postgres", &info, "pass").unwrap();
@@ -3082,7 +3182,7 @@ mod tests {
                 .to_vec();
         dump.extend_from_slice(rows);
         dump.extend_from_slice(b"DROP DATABASE shop;\n");
-        let (_, script) = adapt_postgres_cluster_dump(&plan, &dump).unwrap();
+        let (_, script) = adapt(&plan, &dump).await.unwrap();
         let copy = b"COPY public.t (x) FROM stdin;\n";
         let start = script.windows(copy.len()).position(|w| w == copy).unwrap() + copy.len();
         assert_eq!(&script[start..start + rows.len()], rows);
@@ -3090,16 +3190,18 @@ mod tests {
     }
 
     /// The backups taken before the cluster dump hold one database; they restore as before.
-    #[test]
-    fn a_single_database_dump_restores_unchanged() {
+    #[tokio::test]
+    async fn a_single_database_dump_restores_unchanged() {
         catalog();
         let info = r3v3rs3_api::platform::engine_info("postgres").unwrap();
         let plan = restore_plan("postgres", &info, "pass").unwrap();
         let dump = b"--\n-- PostgreSQL database dump\n--\n\nCREATE TABLE public.t (x integer);\n";
-        assert!(adapt_postgres_cluster_dump(&plan, dump).is_none());
+        assert!(adapt(&plan, dump).await.is_none());
         let mysql = restore_plan("mysql", &info, "pass").unwrap();
         assert!(
-            adapt_postgres_cluster_dump(&mysql, b"-- PostgreSQL database cluster dump").is_none()
+            adapt(&mysql, b"-- PostgreSQL database cluster dump")
+                .await
+                .is_none()
         );
     }
 
@@ -3472,7 +3574,8 @@ mod tests {
                              INSERT INTO users VALUES (1);\n\
                              -- PostgreSQL database dump complete\n";
 
-        let (size, sha256) = write_compressed_dump(postgres_dump, &dump_path)
+        let plain = DumpFile::from_bytes(postgres_dump, &temp.0).await.unwrap();
+        let (size, sha256) = super::super::transfer::gzip_file(&plain.path, &dump_path)
             .await
             .unwrap();
         assert!(size > 0);
@@ -3499,7 +3602,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("r3v3rs3-drill-{:08x}", rand::random::<u32>()));
         tokio::fs::create_dir_all(&dir).await.unwrap();
         let path = dir.join("b.dump.gz");
-        write_compressed_dump(bytes, &path).await.unwrap();
+        let plain = DumpFile::from_bytes(bytes, &dir).await.unwrap();
+        super::super::transfer::gzip_file(&plain.path, &path)
+            .await
+            .unwrap();
         let started = std::time::Instant::now();
         let (drill, _) = stream_verify_drill(engine, &path, started).await.unwrap();
         tokio::fs::remove_dir_all(&dir).await.unwrap();
