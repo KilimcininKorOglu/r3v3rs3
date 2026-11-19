@@ -88,21 +88,25 @@ pub async fn download(
         .await
         .map_err(platform_error)?;
     let filename = format!("{backup_id}.dump.gz");
-    Ok(file_response(file, &filename))
+    Ok(file_response(file, DUMP_DOWNLOAD, &filename))
 }
+
+/// The content type and the fallback file name of a database dump download.
+const DUMP_DOWNLOAD: (&str, &str) = ("application/octet-stream", "backup.dump.gz");
 
 /// A download of an opened backup file, sent in pieces as it is read, so a backup of any size
 /// passes without being held in memory.
-fn file_response(
+pub(super) fn file_response(
     (file, size): (tokio::fs::File, u64),
+    (content_type, fallback): (&str, &str),
     filename: &str,
 ) -> ([(&'static str, String); 3], axum::body::Body) {
     let headers = [
-        ("content-type", "application/octet-stream".to_string()),
+        ("content-type", content_type.to_string()),
         (CONTENT_LENGTH.as_str(), size.to_string()),
         (
             CONTENT_DISPOSITION.as_str(),
-            super::content_disposition_attachment(filename, "backup.dump.gz"),
+            super::content_disposition_attachment(filename, fallback),
         ),
     ];
     let body = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(file));
@@ -389,7 +393,7 @@ pub async fn download_s3(
         .open_s3_backup(&query.key)
         .await
         .map_err(platform_error)?;
-    Ok(file_response(file, &query.key))
+    Ok(file_response(file, DUMP_DOWNLOAD, &query.key))
 }
 
 /// Restores a database from an S3 remote backup snapshot.

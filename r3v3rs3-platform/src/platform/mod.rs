@@ -53,6 +53,8 @@ mod tenant_docker_tests;
 pub mod terminal;
 mod transfer;
 pub mod volume_backup;
+#[cfg(test)]
+mod volume_docker_tests;
 mod wal;
 #[cfg(test)]
 mod wal_docker_tests;

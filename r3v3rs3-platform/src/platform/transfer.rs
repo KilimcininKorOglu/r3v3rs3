@@ -226,13 +226,25 @@ pub(super) async fn gunzip_file(src: &Path, dest: &Path) -> anyhow::Result<()> {
 
 /// The first `limit` bytes of a local file as text, for the header of a dump.
 pub(super) async fn head_text(path: &Path, limit: u64) -> anyhow::Result<String> {
+    let bytes = head_bytes(path, limit).await?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// The first `limit` bytes of a local file.
+pub(super) async fn head_bytes(path: &Path, limit: u64) -> anyhow::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     tokio::fs::File::open(path)
         .await?
         .take(limit)
         .read_to_end(&mut bytes)
         .await?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    Ok(bytes)
+}
+
+/// The size and the SHA-256 of a local file, read in pieces off the async threads.
+pub(super) async fn sha256_file(path: &Path) -> anyhow::Result<(u64, String)> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || sha256_of(&path)).await?
 }
 
 fn temp_beside(dest: &Path) -> anyhow::Result<PathBuf> {

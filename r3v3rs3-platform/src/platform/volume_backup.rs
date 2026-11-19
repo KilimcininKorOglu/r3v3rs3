@@ -1,17 +1,48 @@
 //! Persistent volume backups and snapshots: tar.gz archives of volume mounts, local and S3 storage,
 //! snapshot listing, on-demand restoration, and direct archive export/import.
+//!
+//! A short-lived helper container of BusyBox mounts the volume and packs or unpacks it with
+//! `tar`, and the archive moves between the panel and the helper in bounded pieces. The image
+//! of the app needs no shell and no `tar`, and an archive of any size passes without being
+//! held in memory.
 
 use super::Platform;
+use super::transfer::{Scratch, fetch_to_file, push_file};
 use crate::clock::unix_ms;
-use anyhow::bail;
-use async_compression::tokio::bufread::{GzipDecoder, GzipEncoder};
-use r3v3rs3_api::container::VolumeMount;
+use crate::runtime::ContainerRuntime;
+use anyhow::{Context as _, bail};
+use r3v3rs3_api::container::{
+    ContainerName, ContainerSpec, ResourceLimits, RestartPolicy, VolumeMount,
+};
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, VolumeBackupEntry};
-use sha2::{Digest, Sha256};
-use std::path::PathBuf;
-use tokio::io::AsyncReadExt;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+/// The image of the helper container: BusyBox carries `tar`, `gzip` and `sleep`. The mirror
+/// of Google keeps every pull of a backup below the pull limit of Docker Hub.
+const HELPER_IMAGE: &str = "mirror.gcr.io/library/busybox:1.38.0";
+/// Where the helper mounts the volume.
+const HELPER_MOUNT: &str = "/volume";
+/// The archive inside the helper.
+const HELPER_ARCHIVE: &str = "/tmp/volume.tar.gz";
+/// How long the helper waits for its commands before it ends by itself: the limit of one
+/// container command, so a helper that the panel lost does not run forever.
+const HELPER_LIFETIME: &str = "21600";
+
+/// Packs the volume into the archive. The entries start with `./`, which a restore uses to
+/// tell them from the archives of the Docker archive API that older releases stored.
+const PACK: &str = "tar --numeric-owner -czf /tmp/volume.tar.gz -C /volume .";
+/// Unpacks the archive into the volume. An archive of an older release holds the mount
+/// directory itself as its first entry, which is dropped, so its files land in the volume
+/// and not in a directory of the same name inside it.
+const UNPACK_BACKUP: &str = "first=$(tar -tzf /tmp/volume.tar.gz | head -n 1) || exit 1; \
+     case \"$first\" in ./*) strip=0;; *) strip=1;; esac; \
+     tar --numeric-owner --strip-components=$strip -xzf /tmp/volume.tar.gz -C /volume";
+/// Unpacks an archive that a user imports: its entries land relative to the volume.
+const UNPACK_IMPORT: &str = "tar --numeric-owner -xzf /tmp/volume.tar.gz -C /volume";
 
 impl Platform {
     /// Directory that holds the snapshots and manifests of a volume.
@@ -68,68 +99,81 @@ impl Platform {
         volume: &str,
     ) -> anyhow::Result<VolumeBackupEntry> {
         let _guard = self.track_job();
-        let (app, name, runtime) = self.file_runtime(id).await?;
+        let (app, _, runtime) = self.file_runtime(id).await?;
         let mount = Self::find_volume_mount(&app, volume)?;
-        let tar_bytes = runtime
-            .download_archive(&name, mount.target.as_str())
-            .await?;
-        let compressed = gzip_bytes(&tar_bytes).await?;
+        let dir = self.volume_backup_dir(app.name.as_str(), volume);
+        tokio::fs::create_dir_all(&dir).await?;
+        let scratch = Scratch::new(&dir).await?;
+        let packed = scratch.path("volume.tar.gz");
+        pack_volume(&runtime, &app, &mount, &packed).await?;
         let backup_id = generate_backup_id();
+        let archive = dir.join(format!("{backup_id}.tar.gz"));
+        // The archive appears only complete, and before its manifest.
+        tokio::fs::rename(&packed, &archive).await?;
+        let (size, sha256) = super::transfer::sha256_file(&archive).await?;
         let entry = VolumeBackupEntry {
             id: backup_id.clone(),
             app: id,
             volume: volume.to_string(),
             path: mount.target.as_str().to_string(),
-            size: compressed.len() as u64,
-            sha256: hex::encode(Sha256::digest(&compressed)),
+            size,
+            sha256,
             created_at: unix_ms() as i64,
         };
-
-        let dir = self.volume_backup_dir(app.name.as_str(), volume);
-        tokio::fs::create_dir_all(&dir).await?;
-        tokio::fs::write(dir.join(format!("{backup_id}.tar.gz")), &compressed).await?;
         let manifest = serde_json::to_vec(&entry)?;
         tokio::fs::write(dir.join(format!("{backup_id}.json")), manifest).await?;
-
-        if let Err(err) = self
-            .upload_volume_to_s3(app.name.as_str(), volume, &entry, &compressed)
-            .await
-        {
-            tracing::error!(
-                err = format!("{err:#}"),
-                app = app.name.as_str(),
-                volume = volume,
-                "failed to upload volume backup to S3"
-            );
-            let summary = format!(
-                "Remote S3 volume backup upload failed for app '{}' volume '{}'",
-                app.name, volume
-            );
-            let data = serde_json::json!({
-                "backup_id": entry.id,
-                "app_id": id.to_string(),
-                "app_name": app.name.as_str(),
-                "volume": volume,
-                "target": "s3",
-                "error": err.to_string(),
-            });
-            self.dispatch_webhook_event(
-                r3v3rs3_api::webhook::WebhookEvent::BackupUploadFailed,
-                summary,
-                data,
-            )
+        self.report_volume_upload(&app, volume, &entry, &archive)
             .await;
-        }
         Ok(entry)
     }
 
-    /// Reads a compressed volume snapshot.
-    pub async fn download_volume_backup(
+    /// Uploads a new snapshot to S3 and reports a failure as a webhook event.
+    async fn report_volume_upload(
+        &self,
+        app: &AppEntry,
+        volume: &str,
+        entry: &VolumeBackupEntry,
+        archive: &Path,
+    ) {
+        let Err(err) = self
+            .upload_volume_to_s3(app.name.as_str(), volume, entry, archive)
+            .await
+        else {
+            return;
+        };
+        tracing::error!(
+            err = format!("{err:#}"),
+            app = app.name.as_str(),
+            volume = volume,
+            "failed to upload volume backup to S3"
+        );
+        let summary = format!(
+            "Remote S3 volume backup upload failed for app '{}' volume '{}'",
+            app.name, volume
+        );
+        let data = serde_json::json!({
+            "backup_id": entry.id,
+            "app_id": app.id.to_string(),
+            "app_name": app.name.as_str(),
+            "volume": volume,
+            "target": "s3",
+            "error": err.to_string(),
+        });
+        self.dispatch_webhook_event(
+            r3v3rs3_api::webhook::WebhookEvent::BackupUploadFailed,
+            summary,
+            data,
+        )
+        .await;
+    }
+
+    /// The path of a stored volume snapshot.
+    async fn volume_backup_path(
         &self,
         id: ShortId,
         volume: &str,
         backup_id: &str,
-    ) -> anyhow::Result<Vec<u8>> {
+    ) -> anyhow::Result<PathBuf> {
         validate_backup_id(backup_id)?;
         let app = self.app(id).await?;
         Self::find_volume_mount(&app, volume)?;
@@ -141,29 +185,31 @@ impl Platform {
                 id: backup_id.to_string()
             });
         }
-        Ok(tokio::fs::read(&path).await?)
+        Ok(path)
     }
 
-    /// Restores a volume snapshot into the container.
+    /// A compressed volume snapshot, opened for reading, and its size.
+    pub async fn open_volume_backup(
+        &self,
+        id: ShortId,
+        volume: &str,
+        backup_id: &str,
+    ) -> anyhow::Result<(tokio::fs::File, u64)> {
+        let path = self.volume_backup_path(id, volume, backup_id).await?;
+        open_sized(&path).await
+    }
+
+    /// Restores a volume snapshot into the volume.
     pub async fn restore_volume_backup(
         &self,
         id: ShortId,
         volume: &str,
         backup_id: &str,
     ) -> anyhow::Result<()> {
-        validate_backup_id(backup_id)?;
-        let (app, name, runtime) = self.file_runtime(id).await?;
-        let mount = Self::find_volume_mount(&app, volume)?;
-        if mount.read_only {
-            bail!(Error::VolumeReadOnly {
-                path: mount.target.as_str().to_string()
-            });
-        }
-        let compressed = self.download_volume_backup(id, volume, backup_id).await?;
-        let tar_bytes = ungzip_bytes(&compressed).await?;
-        runtime
-            .upload_archive(&name, mount.target.as_str(), tar_bytes)
-            .await
+        let path = self.volume_backup_path(id, volume, backup_id).await?;
+        let (app, _, runtime) = self.file_runtime(id).await?;
+        let mount = writable_mount(&app, volume)?;
+        unpack_volume(&runtime, &app, &mount, (&path, UNPACK_BACKUP)).await
     }
 
     /// Deletes a stored volume snapshot.
@@ -184,42 +230,49 @@ impl Platform {
         Ok(())
     }
 
-    /// Exports a volume as a `.tar.gz` archive directly from the running container.
+    /// Exports a volume as a `.tar.gz` archive, opened for reading, and its size. The file is
+    /// removed at once; the open handle keeps its content until the download ends.
     pub async fn export_volume_archive(
         &self,
         id: ShortId,
         volume: &str,
-    ) -> anyhow::Result<Vec<u8>> {
-        let (app, name, runtime) = self.file_runtime(id).await?;
+    ) -> anyhow::Result<(tokio::fs::File, u64)> {
+        let (app, _, runtime) = self.file_runtime(id).await?;
         let mount = Self::find_volume_mount(&app, volume)?;
-        let tar_bytes = runtime
-            .download_archive(&name, mount.target.as_str())
-            .await?;
-        gzip_bytes(&tar_bytes).await
+        let scratch = self.volume_scratch(&app, volume).await?;
+        let packed = scratch.path("volume.tar.gz");
+        pack_volume(&runtime, &app, &mount, &packed).await?;
+        open_sized(&packed).await
     }
 
-    /// Imports and unpacks a `.tar.gz` or `.tar` archive into the volume.
-    pub async fn import_volume_archive(
+    /// Imports a `.tar.gz` or `.tar` archive into the volume. The archive is outside input:
+    /// the body and its decompressed content are both bounded while they stream to disk.
+    pub async fn import_volume_archive<S, E>(
         &self,
         id: ShortId,
         volume: &str,
-        bytes: Vec<u8>,
-    ) -> anyhow::Result<()> {
-        let (app, name, runtime) = self.file_runtime(id).await?;
-        let mount = Self::find_volume_mount(&app, volume)?;
-        if mount.read_only {
-            bail!(Error::VolumeReadOnly {
-                path: mount.target.as_str().to_string()
-            });
-        }
-        let tar_bytes = if bytes.starts_with(&[0x1f, 0x8b]) {
-            ungzip_bytes(&bytes).await?
-        } else {
-            bytes
-        };
-        runtime
-            .upload_archive(&name, mount.target.as_str(), tar_bytes)
-            .await
+        body: S,
+    ) -> anyhow::Result<u64>
+    where
+        S: futures::Stream<Item = Result<bytes::Bytes, E>> + Unpin,
+        E: std::fmt::Display,
+    {
+        let (app, _, runtime) = self.file_runtime(id).await?;
+        let mount = writable_mount(&app, volume)?;
+        let scratch = self.volume_scratch(&app, volume).await?;
+        let received = scratch.path("import");
+        let size = receive(body, &received, MAX_VOLUME_ARCHIVE_UNCOMPRESSED_BYTES).await?;
+        let packed = scratch.path("volume.tar.gz");
+        gzip_bounded(&received, &packed, MAX_VOLUME_ARCHIVE_UNCOMPRESSED_BYTES).await?;
+        unpack_volume(&runtime, &app, &mount, (&packed, UNPACK_IMPORT)).await?;
+        Ok(size)
+    }
+
+    /// A directory for the files of one export or import, beside the snapshots of the volume.
+    async fn volume_scratch(&self, app: &AppEntry, volume: &str) -> anyhow::Result<Scratch> {
+        let dir = self.volume_backup_dir(app.name.as_str(), volume);
+        tokio::fs::create_dir_all(&dir).await?;
+        Scratch::new(&dir).await
     }
 
     async fn upload_volume_to_s3(
@@ -227,7 +280,7 @@ impl Platform {
         app_name: &str,
         volume: &str,
         entry: &VolumeBackupEntry,
-        compressed: &[u8],
+        archive: &Path,
     ) -> anyhow::Result<()> {
         let config = self.backup_config().await?;
         let Some(s3) = config.s3 else {
@@ -242,39 +295,187 @@ impl Platform {
         };
         let http_client = self.http().await?;
         let key = format!("volumes/{app_name}/{volume}/{}.tar.gz", entry.id);
-        super::s3::upload_key(http_client, &s3, &key, compressed.to_vec()).await
+        super::s3::upload_file(http_client, &s3, &key, archive).await
     }
 }
 
+/// The mount of `volume` for a restore, which writes into it.
+fn writable_mount(app: &AppEntry, volume: &str) -> anyhow::Result<VolumeMount> {
+    let mount = Platform::find_volume_mount(app, volume)?;
+    if mount.read_only {
+        bail!(Error::VolumeReadOnly {
+            path: mount.target.as_str().to_string()
+        });
+    }
+    Ok(mount)
+}
+
+/// A local file opened for reading, and its size.
+async fn open_sized(path: &Path) -> anyhow::Result<(tokio::fs::File, u64)> {
+    let file = tokio::fs::File::open(path).await?;
+    let size = file.metadata().await?.len();
+    Ok((file, size))
+}
+
+/// Packs the volume of `mount` into the local file `dest`.
+async fn pack_volume(
+    runtime: &Arc<dyn ContainerRuntime>,
+    app: &AppEntry,
+    mount: &VolumeMount,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    let helper = start_helper(runtime, app, mount, true).await?;
+    let packed = async {
+        run_in(runtime, &helper, PACK).await?;
+        fetch_to_file(runtime, &helper, (HELPER_ARCHIVE, 0), dest).await
+    }
+    .await;
+    finish_helper(runtime, &helper, packed.map(|_| ())).await
+}
+
+/// Unpacks the local archive `src` into the volume of `mount` with `script`.
+async fn unpack_volume(
+    runtime: &Arc<dyn ContainerRuntime>,
+    app: &AppEntry,
+    mount: &VolumeMount,
+    (src, script): (&Path, &str),
+) -> anyhow::Result<()> {
+    let helper = start_helper(runtime, app, mount, false).await?;
+    let unpacked = async {
+        push_file(runtime, &helper, src, HELPER_ARCHIVE).await?;
+        run_in(runtime, &helper, script).await
+    }
+    .await;
+    finish_helper(runtime, &helper, unpacked).await
+}
+
+/// Starts a helper container that mounts the volume of `mount` at `HELPER_MOUNT` and waits
+/// for its commands.
+async fn start_helper(
+    runtime: &Arc<dyn ContainerRuntime>,
+    app: &AppEntry,
+    mount: &VolumeMount,
+    read_only: bool,
+) -> anyhow::Result<ContainerName> {
+    let spec = helper_spec(app, mount, read_only)?;
+    runtime.pull_image(&spec.image).await?;
+    runtime.create_container(&spec).await?;
+    let started = runtime.start_container(&spec.name).await;
+    if started.is_err() {
+        finish_helper(runtime, &spec.name, started).await?;
+    }
+    Ok(spec.name)
+}
+
+/// The spec of a helper container: a name of its own, so two jobs of one app never meet.
+fn helper_spec(
+    app: &AppEntry,
+    mount: &VolumeMount,
+    read_only: bool,
+) -> anyhow::Result<ContainerSpec> {
+    let volume = VolumeMount {
+        volume: mount.volume.clone(),
+        target: HELPER_MOUNT.parse()?,
+        read_only,
+    };
+    Ok(ContainerSpec {
+        name: format!("r3v3rs3-volume-{}-{:08x}", app.id, rand::random::<u32>()).parse()?,
+        image: HELPER_IMAGE.parse()?,
+        env: Vec::new(),
+        labels: BTreeMap::new(),
+        network: None,
+        volumes: vec![volume],
+        restart: RestartPolicy::No,
+        limits: ResourceLimits::default(),
+        publish: None,
+        host_port: None,
+        aliases: Vec::new(),
+        extra_networks: Vec::new(),
+        log_max_size: None,
+        log_max_file: None,
+        command: Some(vec!["sleep".to_string(), HELPER_LIFETIME.to_string()]),
+    })
+}
+
+/// Runs a shell script in the helper.
+async fn run_in(
+    runtime: &Arc<dyn ContainerRuntime>,
+    helper: &ContainerName,
+    script: &str,
+) -> anyhow::Result<()> {
+    let command = vec!["sh".to_string(), "-c".to_string(), script.to_string()];
+    runtime
+        .exec_capture(helper, command, Vec::new())
+        .await
+        .map(|_| ())
+}
+
+/// Removes the helper and returns the outcome of its job; a helper that stays is an error
+/// of its own once the job succeeded.
+async fn finish_helper(
+    runtime: &Arc<dyn ContainerRuntime>,
+    helper: &ContainerName,
+    outcome: anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let removed = runtime
+        .remove_container(helper)
+        .await
+        .with_context(|| format!("the helper container {helper} could not be removed"));
+    outcome?;
+    removed
+}
+
+/// Writes a request body into `dest` and fails once more than `max_bytes` arrived.
+async fn receive<S, E>(mut body: S, dest: &Path, max_bytes: u64) -> anyhow::Result<u64>
+where
+    S: futures::Stream<Item = Result<bytes::Bytes, E>> + Unpin,
+    E: std::fmt::Display,
+{
+    use futures::StreamExt as _;
+    use tokio::io::AsyncWriteExt as _;
+    let mut out = tokio::fs::File::create(dest).await?;
+    let mut size = 0u64;
+    while let Some(piece) = body.next().await {
+        let piece = piece.map_err(|err| anyhow::anyhow!("the archive upload failed: {err}"))?;
+        size += piece.len() as u64;
+        if size > max_bytes {
+            bail!("the archive is larger than {max_bytes} bytes");
+        }
+        out.write_all(&piece).await?;
+    }
+    out.sync_all().await?;
+    Ok(size)
+}
+
+/// Writes the archive `src`, a `.tar` or a `.tar.gz`, as a `.tar.gz` into `dest`, and fails
+/// once its decompressed content passes `max_bytes`, which stops a decompression bomb.
+async fn gzip_bounded(src: &Path, dest: &Path, max_bytes: u64) -> anyhow::Result<()> {
+    let head = super::transfer::head_bytes(src, 2).await?;
+    if head.starts_with(&[0x1f, 0x8b]) {
+        let plain_size = gunzip_size(src, max_bytes).await?;
+        if plain_size > max_bytes {
+            bail!("the decompressed archive is larger than {max_bytes} bytes");
+        }
+        tokio::fs::copy(src, dest).await?;
+        return Ok(());
+    }
+    if tokio::fs::metadata(src).await?.len() > max_bytes {
+        bail!("the archive is larger than {max_bytes} bytes");
+    }
+    super::transfer::gzip_file(src, dest).await.map(|_| ())
+}
+
+/// The decompressed size of the gzip file `src`, counted up to one byte past `max_bytes`.
+async fn gunzip_size(src: &Path, max_bytes: u64) -> anyhow::Result<u64> {
+    use tokio::io::AsyncReadExt as _;
+    let input = tokio::io::BufReader::new(tokio::fs::File::open(src).await?);
+    let mut reader = async_compression::tokio::bufread::GzipDecoder::new(input)
+        .take(max_bytes.saturating_add(1));
+    Ok(tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?)
+}
+
+/// The largest archive that an import takes, compressed or decompressed.
 pub const MAX_VOLUME_ARCHIVE_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
-
-pub(crate) async fn gzip_bytes(content: &[u8]) -> anyhow::Result<Vec<u8>> {
-    let mut encoder = GzipEncoder::new(content);
-    let mut compressed = Vec::new();
-    encoder.read_to_end(&mut compressed).await?;
-    Ok(compressed)
-}
-
-pub(crate) async fn ungzip_bytes(content: &[u8]) -> anyhow::Result<Vec<u8>> {
-    ungzip_bytes_limited(content, MAX_VOLUME_ARCHIVE_UNCOMPRESSED_BYTES).await
-}
-
-pub(crate) async fn ungzip_bytes_limited(
-    content: &[u8],
-    max_bytes: u64,
-) -> anyhow::Result<Vec<u8>> {
-    use tokio::io::AsyncReadExt;
-    let decoder = GzipDecoder::new(content);
-    let mut reader = decoder.take(max_bytes + 1);
-    let mut plain = Vec::new();
-    reader.read_to_end(&mut plain).await?;
-    if plain.len() as u64 > max_bytes {
-        anyhow::bail!(
-            "decompressed volume archive exceeds maximum allowed size of {max_bytes} bytes"
-        );
-    }
-    Ok(plain)
-}
 
 pub fn validate_backup_id(backup_id: &str) -> anyhow::Result<()> {
     if !backup_id.is_empty()
@@ -307,20 +508,5 @@ mod tests {
         assert!(validate_backup_id("foo\\bar").is_err());
         assert!(validate_backup_id("").is_err());
         assert!(validate_backup_id("backup.tar.gz").is_err());
-    }
-
-    #[tokio::test]
-    async fn gzip_round_trip() {
-        let input = b"volume snapshot test content 1234567890";
-        let compressed = gzip_bytes(input).await.unwrap();
-        assert!(!compressed.is_empty());
-        let decompressed = ungzip_bytes(&compressed).await.unwrap();
-        assert_eq!(&decompressed, input);
-
-        let err = ungzip_bytes_limited(&compressed, 10).await.unwrap_err();
-        assert!(
-            err.to_string().contains("exceeds maximum allowed size"),
-            "{err}"
-        );
     }
 }

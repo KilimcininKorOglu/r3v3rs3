@@ -218,20 +218,14 @@ pub async fn download_volume_backup(
     Path((id, volume, backup_id)): Path<(ShortId, String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     let context = context(&state, &caller, id).await?;
-    let content = context
+    let file = context
         .platform
-        .download_volume_backup(id, &volume, &backup_id)
+        .open_volume_backup(id, &volume, &backup_id)
         .await
         .map_err(platform_error)?;
     let filename = format!("{volume}-{backup_id}.tar.gz");
-    let headers = [
-        ("content-type", "application/gzip".to_string()),
-        (
-            CONTENT_DISPOSITION.as_str(),
-            super::content_disposition_attachment(&filename, "backup.tar.gz"),
-        ),
-    ];
-    Ok((headers, content))
+    let kind = ("application/gzip", "backup.tar.gz");
+    Ok(super::backups::file_response(file, kind, &filename))
 }
 
 /// Restores a volume snapshot into the container.
@@ -320,20 +314,14 @@ pub async fn export_volume_archive(
     Path((id, volume)): Path<(ShortId, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     let context = context(&state, &caller, id).await?;
-    let content = context
+    let file = context
         .platform
         .export_volume_archive(id, &volume)
         .await
         .map_err(platform_error)?;
     let filename = format!("{volume}-export.tar.gz");
-    let headers = [
-        ("content-type", "application/gzip".to_string()),
-        (
-            CONTENT_DISPOSITION.as_str(),
-            super::content_disposition_attachment(&filename, "volume-export.tar.gz"),
-        ),
-    ];
-    Ok((headers, content))
+    let kind = ("application/gzip", "volume-export.tar.gz");
+    Ok(super::backups::file_response(file, kind, &filename))
 }
 
 /// Imports and extracts a `.tar.gz` or `.tar` archive into the volume.
@@ -353,19 +341,20 @@ pub async fn import_volume_archive(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path((id, volume)): Path<(ShortId, String)>,
-    body: Bytes,
+    body: axum::body::Body,
 ) -> Result<Json<()>, AppError> {
     let context = context(&state, &caller, id).await?;
-    context
+    // The body streams to disk; the platform bounds it while it arrives.
+    let size = context
         .platform
-        .import_volume_archive(id, &volume, body.to_vec())
+        .import_volume_archive(id, &volume, body.into_data_stream())
         .await
         .map_err(platform_error)?;
     audit(
         &state,
         &caller,
         id,
-        format!("import archive into volume {volume} ({} bytes)", body.len()),
+        format!("import archive into volume {volume} ({size} bytes)"),
     )
     .await;
     Ok(Json(()))
