@@ -427,12 +427,24 @@ async fn clone_on_the_aof(platform: &Arc<Platform>, name: &str) -> anyhow::Resul
         .restore_clone_data(source.id, dest.id, PASSWORD)
         .await?;
     wait_for_keys(platform, dest.id, &["a", "b"]).await?;
-    let aof = cli(platform, dest.id, "CONFIG GET appendonly").await?;
-    ensure!(
-        aof.ends_with("yes"),
-        "the clone runs without the AOF: {aof}"
-    );
-    Ok(())
+    wait_for_aof(platform, dest.id).await
+}
+
+/// Waits up to 90 s until the database writes its AOF. A clone restores in the background and
+/// turns the AOF on after the data is back, so the keys can show up before the AOF does.
+async fn wait_for_aof(platform: &Arc<Platform>, id: ShortId) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    loop {
+        let aof = cli(platform, id, "CONFIG GET appendonly").await?;
+        if aof.ends_with("yes") {
+            return Ok(());
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the clone runs without the AOF: {aof}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 /// Waits up to 90 s until the database holds exactly `expected`.
