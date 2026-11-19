@@ -101,7 +101,10 @@ async fn fetch_in_pieces(
     Ok(size - offset)
 }
 
-/// Writes the local file `src` into the container at `remote`, replacing it.
+/// Writes the local file `src` into the container at `remote`, replacing it in one rename. The
+/// pieces gather in a file beside the target, so the target never holds a part of the new
+/// file: a Redis that loaded `dump.rdb` left it empty at its shutdown when the file was
+/// truncated and refilled in place (measured on redis:8).
 pub(super) async fn push_file(
     runtime: &Arc<dyn ContainerRuntime>,
     container: &ContainerName,
@@ -119,9 +122,24 @@ async fn push_in_pieces(
     piece: usize,
 ) -> anyhow::Result<()> {
     let target = quoted(remote)?;
-    let part_path = format!("{remote}.part");
+    let gathered_path = format!("{remote}.new");
+    let gathered = quoted(&gathered_path)?;
+    shell.run(format!(": > {gathered}")).await?;
+    append_pieces(shell, src, &gathered_path, piece).await?;
+    shell.run(format!("mv -f {gathered} {target}")).await?;
+    Ok(())
+}
+
+/// Appends the local file `src` to the container file `gathered`, one upload per piece.
+async fn append_pieces(
+    shell: &dyn Shell,
+    src: &Path,
+    gathered: &str,
+    piece: usize,
+) -> anyhow::Result<()> {
+    let part_path = format!("{gathered}.part");
     let part = quoted(&part_path)?;
-    shell.run(format!(": > {target}")).await?;
+    let gathered = quoted(gathered)?;
     let mut input = tokio::fs::File::open(src).await?;
     let mut buffer = vec![0u8; piece];
     loop {
@@ -131,7 +149,7 @@ async fn push_in_pieces(
         }
         shell.write(&part_path, buffer[..read].to_vec()).await?;
         shell
-            .run(format!("cat {part} >> {target} && rm -f {part}"))
+            .run(format!("cat {part} >> {gathered} && rm -f {part}"))
             .await?;
     }
 }
@@ -270,6 +288,8 @@ mod tests {
     struct Files {
         files: Mutex<HashMap<String, Vec<u8>>>,
         largest_read: Mutex<usize>,
+        /// The number of uploads that succeed before every further one fails, when set.
+        uploads_left: Mutex<Option<usize>>,
     }
 
     fn unquote(word: &str) -> String {
@@ -303,6 +323,22 @@ mod tests {
             files.entry(unquote(target)).or_default().extend(piece);
             Ok(Vec::new())
         }
+
+        fn rename(&self, from: &str, to: &str) -> anyhow::Result<Vec<u8>> {
+            let mut files = self.files.lock().unwrap();
+            let file = files.remove(&unquote(from)).context("no such file")?;
+            files.insert(unquote(to), file);
+            Ok(Vec::new())
+        }
+
+        fn take_upload(&self) -> anyhow::Result<()> {
+            let mut left = self.uploads_left.lock().unwrap();
+            if let Some(n) = left.as_mut() {
+                ensure!(*n > 0, "the connection broke");
+                *n -= 1;
+            }
+            Ok(())
+        }
     }
 
     #[async_trait::async_trait]
@@ -322,12 +358,14 @@ mod tests {
                     Ok(Vec::new())
                 }
                 ["cat", part, ">>", target, "&&", "rm", "-f", _] => self.append(part, target),
+                ["mv", "-f", from, to] => self.rename(from, to),
                 _ => anyhow::bail!("unexpected script {script}"),
             }
         }
 
         async fn write(&self, path: &str, bytes: Vec<u8>) -> anyhow::Result<()> {
             ensure!(bytes.len() <= UPLOAD_LIMIT, "the upload is too large");
+            self.take_upload()?;
             self.files.lock().unwrap().insert(path.to_string(), bytes);
             Ok(())
         }
@@ -377,8 +415,24 @@ mod tests {
             tokio::fs::write(&src, content(len)).await?;
             push_in_pieces(&files, &src, "/t", 64).await?;
             assert_eq!(files.get("/t"), Some(content(len)), "len {len}");
-            assert_eq!(files.get("/t.part"), None);
+            assert_eq!(files.get("/t.new"), None);
+            assert_eq!(files.get("/t.new.part"), None);
         }
+        Ok(())
+    }
+
+    /// A push that breaks after its first piece leaves the target as it was: a file the server
+    /// reads must never hold a part of the new content (atomic replace).
+    #[tokio::test]
+    async fn a_broken_push_keeps_the_old_target() -> anyhow::Result<()> {
+        let dir = scratch().await?;
+        let files = Files::with("/t", b"old".to_vec());
+        *files.uploads_left.lock().unwrap() = Some(1);
+        let src = dir.path("in");
+        tokio::fs::write(&src, content(200)).await?;
+        let result = push_in_pieces(&files, &src, "/t", 64).await;
+        assert!(result.is_err());
+        assert_eq!(files.get("/t"), Some(b"old".to_vec()));
         Ok(())
     }
 
