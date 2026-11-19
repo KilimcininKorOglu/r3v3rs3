@@ -418,6 +418,8 @@ S3 endpoint'i ve heartbeat URL'si private ve loopback adresler dahil herhangi bi
 
 Her yeni yedek yapılandırılan uzak hedeflere aktarılır; başarısız bir yükleme yalnız sunucu log'una geçer, çünkü yerel kopya vardır. Uzak kimlik bilgileri `r3v3rs3.key` ile şifrelenir.
 
+Yedeklerin boyut sınırı yoktur. Yedek alma, geri yükleme ve indirme işlemleri veriyi diskteki dosyalar üzerinden sınırlı parçalar hâlinde taşır. Bu yüzden sunucunun belleği veritabanının boyutuyla birlikte büyümez. Diskte 1 GiB'tan az boş alan kalacaksa sıkıştırılmış dosyanın açılması ve S3 indirmesi durur. Yarım kalan dosya silinir. S3'teki bir yedek dışarıdan gelen veridir. Açıldığında diske sığmayacak kadar büyüyen küçük bir arşiv de aynı noktada durur ve diski doldurmaz.
+
 #### Geri Yükleme & Periyodik Doğrulama Testi
 
 **Geri yükle**, kayıtlı dump'ı çalışan container'a yazar ve engine'in restore komutunu çalıştırır (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis dump dosyasını data volume'üne alır ve yeniden başlar; bu yüzden restore, sunucu geri geldikten sonra tamamlanır. AOF yazan bir Redis'te AOF, yeniden başlatma süresince kenara alınır. Ardından geri yüklenen veriden yeniden yazılır. Arşiv de yeni bir temel yedek ile yeni bir zaman çizgisine başlar. Geri yükleme veritabanının verisinin yerine geçer.
@@ -970,7 +972,7 @@ Dosyalar sayfası kalıcı volume'ler için kapsamlı yedekleme ve snapshot yön
 - **Snapshot'tan Geri Yükle**: Alınmış bir snapshot'ı tek tıkla doğrudan container volume'ünün içine açarak geri yükler.
 - **Snapshot İndir**: Kayıtlı herhangi bir volume snapshot'ını `.tar.gz` formatında tarayıcıya indirir.
 - **Arşivi Dışa Aktar (.tar.gz)**: Volume'ün canlı içeriğini ayrı bir snapshot dosyası oluşturmadan doğrudan `.tar.gz` akışı olarak indirir.
-- **Arşiv İçe Aktar**: Yüklenen bir `.tar.gz` veya `.tar` arşivini doğrudan aktif volume içine çıkarır (extract eder).
+- **Arşiv İçe Aktar**: Yüklenen bir `.tar.gz` veya `.tar` arşivini doğrudan aktif volume içine çıkarır (extract eder). Her boyuttaki arşiv içe aktarılabilir. İçeriği açıldığında diskte 1 GiB'tan az boş alan bırakacak bir arşiv, volume'e ulaşmadan reddedilir.
 
 ### Zamanlanmış Komutlar
 

@@ -418,6 +418,8 @@ The S3 endpoint and the heartbeat URL may point at any address, including privat
 
 Every new backup uploads to the configured remote targets; a failed upload only goes into the server log, because the local copy exists. Remote credentials are encrypted with `r3v3rs3.key`.
 
+A backup has no size limit. Backups, restores and downloads move in bounded pieces through files on the disk, so the memory of the server does not grow with the size of the database. A decompression and an S3 download stop when the disk would keep less than 1 GiB free, and the partial file is deleted. A backup from S3 is outside input, so a small archive that decompresses to more than the disk holds stops at the same point and does not fill the disk.
+
 #### Restore & Periodic Verification Test
 
 **Restore** writes the stored dump back into the running container and runs the restore command of the engine (`psql`, `mariadb`, `mysql`, `mongorestore --drop`). Redis takes the dump file into its data volume and restarts, so the restore answers after the server is back. A Redis that writes its AOF sets the AOF aside for the restart, writes it again from the restored data and starts a new archive timeline with a fresh base backup. A restore replaces the data of the database.
@@ -970,7 +972,7 @@ The Files page provides complete volume backup and snapshot management for persi
 - **Restore Snapshot**: Restores a previously captured volume snapshot with a single click, unpacking the snapshot archive directly back into the container's volume.
 - **Download Snapshot**: Downloads any stored volume snapshot directly as a compressed `.tar.gz` archive.
 - **Export Volume (.tar.gz)**: Streams and downloads the live contents of the volume directly as a `.tar.gz` archive without requiring an explicit saved snapshot.
-- **Import Volume (.tar.gz)**: Unpacks and extracts an uploaded `.tar.gz` or `.tar` archive directly into the active volume.
+- **Import Volume (.tar.gz)**: Unpacks and extracts an uploaded `.tar.gz` or `.tar` archive directly into the active volume. An archive of any size imports. An archive whose content would leave the disk less than 1 GiB free is refused before it reaches the volume.
 
 ### Scheduled Commands
 

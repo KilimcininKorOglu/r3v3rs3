@@ -185,17 +185,13 @@ async fn old_archive() -> anyhow::Result<Vec<u8>> {
     super::backup::gzip(&tar.into_inner()?).await
 }
 
-/// An import is outside input: a gzip whose content passes the limit is refused before it
-/// reaches the volume, and an archive that an export gave imports back.
+/// An archive that an export gave imports back, also when it is larger than the old 512 MiB
+/// limit of an import: a volume of any size that the disk holds moves.
 async fn import_and_export(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
     let app = running_app(platform, name).await?;
     let volume = format!("{name}-vol");
-    let bomb = zeros_gzip(super::volume_backup::MAX_VOLUME_ARCHIVE_UNCOMPRESSED_BYTES + 1)?;
-    let refused = platform
-        .import_volume_archive(app.id, &volume, body(bomb))
-        .await;
-    ensure!(refused.is_err(), "a gzip bomb was imported");
-    in_volume(platform, &volume, "echo kept > /v/kept").await?;
+    import_a_large_archive(platform, app.id, &volume).await?;
+    in_volume(platform, &volume, "rm -f /v/zeros && echo kept > /v/kept").await?;
     let (mut file, _) = platform.export_volume_archive(app.id, &volume).await?;
     let mut exported = Vec::new();
     tokio::io::AsyncReadExt::read_to_end(&mut file, &mut exported).await?;
@@ -208,18 +204,34 @@ async fn import_and_export(platform: &Arc<Platform>, name: &str) -> anyhow::Resu
     Ok(())
 }
 
-/// A gzip of `size` zero bytes, written in pieces.
-fn zeros_gzip(size: u64) -> anyhow::Result<Vec<u8>> {
-    use std::io::Write as _;
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
-    let piece = vec![0u8; 1 << 20];
-    let mut left = size;
-    while left > 0 {
-        let n = left.min(piece.len() as u64) as usize;
-        encoder.write_all(&piece[..n])?;
-        left -= n as u64;
-    }
-    Ok(encoder.finish()?)
+/// Imports a file of 600 MiB, past the old limit, and checks its size in the volume.
+async fn import_a_large_archive(
+    platform: &Arc<Platform>,
+    id: ShortId,
+    volume: &str,
+) -> anyhow::Result<()> {
+    let archive = zeros_archive(600 * 1024 * 1024)?;
+    platform
+        .import_volume_archive(id, volume, body(archive))
+        .await?;
+    let found = in_volume(platform, volume, "wc -c < /v/zeros").await?;
+    ensure!(
+        found == "629145600",
+        "the imported file holds {found} bytes"
+    );
+    Ok(())
+}
+
+/// A `.tar.gz` that holds the file `zeros` of `size` zero bytes, written in pieces.
+fn zeros_archive(size: u64) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read as _;
+    let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    let mut tar = tar::Builder::new(encoder);
+    let mut header = tar::Header::new_gnu();
+    header.set_mode(0o644);
+    header.set_size(size);
+    tar.append_data(&mut header, "zeros", std::io::repeat(0).take(size))?;
+    Ok(tar.into_inner()?.finish()?)
 }
 
 /// A request body of `content` in pieces of 64 KiB.

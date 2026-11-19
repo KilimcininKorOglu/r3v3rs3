@@ -268,6 +268,87 @@ pub(super) fn ensure_free_space(dir: &Path, need: u64) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Free space that a transfer leaves on the disk for the databases and the logs of the server.
+pub(super) const DISK_RESERVE: u64 = 1024 * 1024 * 1024;
+
+/// The bytes that a transfer may still write on the disk of a directory: its free space less a
+/// reserve. A transfer has no size limit of its own, so a decompression bomb or an oversized
+/// object stops here, before the disk of the server fills.
+pub(super) struct DiskRoom {
+    dir: PathBuf,
+    reserve: u64,
+    room: u64,
+}
+
+impl DiskRoom {
+    pub(super) fn new(dir: &Path) -> anyhow::Result<Self> {
+        Self::with_reserve(dir, DISK_RESERVE)
+    }
+
+    pub(super) fn with_reserve(dir: &Path, reserve: u64) -> anyhow::Result<Self> {
+        let mut room = Self {
+            dir: dir.to_path_buf(),
+            reserve,
+            room: 0,
+        };
+        let space = super::prune::get_disk_space(dir)
+            .with_context(|| format!("the free space of {} cannot be read", dir.display()))?;
+        room.room = space.available_bytes.saturating_sub(reserve);
+        Ok(room)
+    }
+
+    /// Fails when `n` bytes do not fit, without counting them.
+    pub(super) fn fits(&self, n: u64) -> anyhow::Result<()> {
+        self.clone_room().take(n)
+    }
+
+    fn clone_room(&self) -> Self {
+        Self {
+            dir: self.dir.clone(),
+            reserve: self.reserve,
+            room: self.room,
+        }
+    }
+
+    /// Counts `n` more bytes, and fails when the disk would keep less than the reserve. The
+    /// room comes from the free space at the start and only shrinks: the free space that the
+    /// file system reports lags the writes of the transfer itself, so reading it again would
+    /// miss bytes that the transfer already wrote.
+    pub(super) fn take(&mut self, n: u64) -> anyhow::Result<()> {
+        ensure!(
+            n <= self.room,
+            "the transfer stopped: the disk of {} would keep less than {} bytes free",
+            self.dir.display(),
+            self.reserve
+        );
+        self.room -= n;
+        Ok(())
+    }
+}
+
+/// Copies `reader` into the new file `dest` within `room`, and returns the bytes written.
+pub(super) async fn copy_within<R: tokio::io::AsyncRead + Unpin>(
+    reader: &mut R,
+    dest: &Path,
+    room: &mut DiskRoom,
+) -> anyhow::Result<u64> {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let mut out = tokio::fs::File::create(dest).await?;
+    let mut buf = vec![0u8; 1024 * 1024];
+    let mut written = 0u64;
+    loop {
+        let n = reader.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        room.take(n as u64)?;
+        out.write_all(&buf[..n]).await?;
+        written += n as u64;
+    }
+    out.sync_all().await?;
+    Ok(written)
+}
+
 /// A directory for the files of one transfer job, removed with the value.
 pub(super) struct Scratch {
     dir: PathBuf,

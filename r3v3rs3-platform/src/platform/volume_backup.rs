@@ -7,7 +7,7 @@
 //! held in memory.
 
 use super::Platform;
-use super::transfer::{Scratch, fetch_to_file, push_file};
+use super::transfer::{DiskRoom, Scratch, fetch_to_file, push_file};
 use crate::clock::unix_ms;
 use crate::runtime::ContainerRuntime;
 use anyhow::{Context as _, bail};
@@ -261,9 +261,10 @@ impl Platform {
         let mount = writable_mount(&app, volume)?;
         let scratch = self.volume_scratch(&app, volume).await?;
         let received = scratch.path("import");
-        let size = receive(body, &received, MAX_VOLUME_ARCHIVE_UNCOMPRESSED_BYTES).await?;
+        let mut room = DiskRoom::new(&self.volume_backup_dir(app.name.as_str(), volume))?;
+        let size = receive(body, &received, &mut room).await?;
         let packed = scratch.path("volume.tar.gz");
-        gzip_bounded(&received, &packed, MAX_VOLUME_ARCHIVE_UNCOMPRESSED_BYTES).await?;
+        gzip_within(&received, &packed, &mut room).await?;
         unpack_volume(&runtime, &app, &mount, (&packed, UNPACK_IMPORT)).await?;
         Ok(size)
     }
@@ -425,8 +426,8 @@ async fn finish_helper(
     removed
 }
 
-/// Writes a request body into `dest` and fails once more than `max_bytes` arrived.
-async fn receive<S, E>(mut body: S, dest: &Path, max_bytes: u64) -> anyhow::Result<u64>
+/// Writes a request body into `dest` within the room of the disk.
+async fn receive<S, E>(mut body: S, dest: &Path, room: &mut DiskRoom) -> anyhow::Result<u64>
 where
     S: futures::Stream<Item = Result<bytes::Bytes, E>> + Unpin,
     E: std::fmt::Display,
@@ -437,45 +438,44 @@ where
     let mut size = 0u64;
     while let Some(piece) = body.next().await {
         let piece = piece.map_err(|err| anyhow::anyhow!("the archive upload failed: {err}"))?;
+        room.take(piece.len() as u64)?;
         size += piece.len() as u64;
-        if size > max_bytes {
-            bail!("the archive is larger than {max_bytes} bytes");
-        }
         out.write_all(&piece).await?;
     }
     out.sync_all().await?;
     Ok(size)
 }
 
-/// Writes the archive `src`, a `.tar` or a `.tar.gz`, as a `.tar.gz` into `dest`, and fails
-/// once its decompressed content passes `max_bytes`, which stops a decompression bomb.
-async fn gzip_bounded(src: &Path, dest: &Path, max_bytes: u64) -> anyhow::Result<()> {
+/// Writes the archive `src`, a `.tar` or a `.tar.gz`, as a `.tar.gz` into `dest`. An import
+/// is outside input: a gzip whose decompressed content does not fit the room of the disk is
+/// refused before it reaches the volume, which stops a decompression bomb.
+async fn gzip_within(src: &Path, dest: &Path, room: &mut DiskRoom) -> anyhow::Result<()> {
+    let size = tokio::fs::metadata(src).await?.len();
     let head = super::transfer::head_bytes(src, 2).await?;
-    if head.starts_with(&[0x1f, 0x8b]) {
-        let plain_size = gunzip_size(src, max_bytes).await?;
-        if plain_size > max_bytes {
-            bail!("the decompressed archive is larger than {max_bytes} bytes");
-        }
-        tokio::fs::copy(src, dest).await?;
-        return Ok(());
+    if !head.starts_with(&[0x1f, 0x8b]) {
+        room.take(size)?;
+        return super::transfer::gzip_file(src, dest).await.map(|_| ());
     }
-    if tokio::fs::metadata(src).await?.len() > max_bytes {
-        bail!("the archive is larger than {max_bytes} bytes");
-    }
-    super::transfer::gzip_file(src, dest).await.map(|_| ())
+    count_gunzipped(src, room).await?;
+    room.take(size)?;
+    tokio::fs::copy(src, dest).await?;
+    Ok(())
 }
 
-/// The decompressed size of the gzip file `src`, counted up to one byte past `max_bytes`.
-async fn gunzip_size(src: &Path, max_bytes: u64) -> anyhow::Result<u64> {
+/// Counts the decompressed content of the gzip file `src` against `room`, writing nothing.
+async fn count_gunzipped(src: &Path, room: &mut DiskRoom) -> anyhow::Result<()> {
     use tokio::io::AsyncReadExt as _;
     let input = tokio::io::BufReader::new(tokio::fs::File::open(src).await?);
-    let mut reader = async_compression::tokio::bufread::GzipDecoder::new(input)
-        .take(max_bytes.saturating_add(1));
-    Ok(tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?)
+    let mut reader = async_compression::tokio::bufread::GzipDecoder::new(input);
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = reader.read(&mut buf).await?;
+        if n == 0 {
+            return Ok(());
+        }
+        room.take(n as u64)?;
+    }
 }
-
-/// The largest archive that an import takes, compressed or decompressed.
-pub const MAX_VOLUME_ARCHIVE_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
 
 pub fn validate_backup_id(backup_id: &str) -> anyhow::Result<()> {
     if !backup_id.is_empty()
@@ -498,6 +498,29 @@ fn generate_backup_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An import is outside input: a gzip whose decompressed content does not fit the room of
+    /// the disk must be refused before it reaches the volume. The reserve here leaves room for
+    /// 8 MiB, and the bomb holds 64 MiB of zeros in a few KiB.
+    #[tokio::test]
+    async fn an_import_bomb_is_refused_at_the_room_of_the_disk() -> anyhow::Result<()> {
+        use std::io::Write as _;
+        let dir = Scratch::new(&std::env::temp_dir()).await?;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&vec![0u8; 64 * 1024 * 1024])?;
+        let src = dir.path("bomb.tar.gz");
+        tokio::fs::write(&src, encoder.finish()?).await?;
+        let free = super::super::prune::get_disk_space(&std::env::temp_dir())
+            .context("the free space of the temp dir")?
+            .available_bytes;
+        let mut room = DiskRoom::with_reserve(&std::env::temp_dir(), free - 8 * 1024 * 1024)?;
+        let err = gzip_within(&src, &dir.path("out.tar.gz"), &mut room)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("would keep less than"), "{err}");
+        assert!(!tokio::fs::try_exists(dir.path("out.tar.gz")).await?);
+        Ok(())
+    }
 
     #[test]
     fn test_volume_backup_id_validation() {

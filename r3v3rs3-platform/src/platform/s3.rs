@@ -307,47 +307,43 @@ async fn abort_multipart(
 }
 
 /// Downloads `{prefix}/{key}` into the local file `dest` piece by piece and returns its size.
-/// The object is outside input: a download larger than `max_bytes` fails, and every piece
-/// must arrive within the request timeout.
+/// The object is outside input: a download that passes the room of the disk fails, and every
+/// piece must arrive within the request timeout.
 pub(crate) async fn download_to_file(
     client: &HttpClient,
     config: &S3Config,
     key: &str,
-    (dest, max_bytes): (&std::path::Path, u64),
+    (dest, room): (&std::path::Path, &mut super::transfer::DiskRoom),
 ) -> anyhow::Result<u64> {
     let object = ObjectUrl::new(config, key)?;
     let request = object.signed(config, (Method::GET, ""), Bytes::new())?;
     let response = send(client, request).await?;
-    check_length(&response, dest, max_bytes)?;
-    write_body(response.into_body(), dest, max_bytes).await
+    check_length(&response, room)?;
+    write_body(response.into_body(), dest, room).await
 }
 
-/// Refuses an object whose announced length passes `max_bytes` or the free space beside
-/// `dest`, before any of it is written.
+/// Refuses an object whose announced length does not fit the room of the disk, before any of
+/// it is written. The room is counted again while the body arrives.
 fn check_length(
     response: &http::Response<hyper::body::Incoming>,
-    dest: &std::path::Path,
-    max_bytes: u64,
+    room: &super::transfer::DiskRoom,
 ) -> anyhow::Result<()> {
     let length = response
         .headers()
         .get(http::header::CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok()?.parse::<u64>().ok());
-    let (Some(length), Some(dir)) = (length, dest.parent()) else {
-        return Ok(());
-    };
-    if length > max_bytes {
-        bail!("the S3 object is larger than {max_bytes} bytes");
+    match length {
+        Some(length) => room.fits(length),
+        None => Ok(()),
     }
-    super::transfer::ensure_free_space(dir, length)
 }
 
-/// Writes the body into `dest` piece by piece and fails once it passes `max_bytes`, which
-/// also holds for a body that announced no length.
+/// Writes the body into `dest` piece by piece within the room of the disk, which also holds
+/// for a body that announced no length.
 async fn write_body(
     mut body: hyper::body::Incoming,
     dest: &std::path::Path,
-    max_bytes: u64,
+    room: &mut super::transfer::DiskRoom,
 ) -> anyhow::Result<u64> {
     use tokio::io::AsyncWriteExt as _;
     let mut out = tokio::fs::File::create(dest).await?;
@@ -356,10 +352,8 @@ async fn write_body(
         let Ok(data) = frame.map_err(|err| anyhow::anyhow!("{err}"))?.into_data() else {
             continue;
         };
+        room.take(data.len() as u64)?;
         size += data.len() as u64;
-        if size > max_bytes {
-            bail!("the S3 object is larger than {max_bytes} bytes");
-        }
         out.write_all(&data).await?;
     }
     out.sync_all().await?;
@@ -585,6 +579,7 @@ fn object_path(url: &url::Url, config: &S3Config, entry: &BackupEntry) -> String
 
 #[cfg(test)]
 mod tests {
+    use super::super::transfer::DiskRoom;
     use super::*;
 
     fn config(endpoint: &str, prefix: &str) -> S3Config {
@@ -828,9 +823,10 @@ mod tests {
     }
 
     /// An object from the bucket is outside input: a download lands in a file byte for byte,
-    /// and an object larger than the limit fails, also when the bucket sends no length.
+    /// and an object that would leave the disk less than its reserve fails, also when the
+    /// bucket sends no length. The reserve here leaves room for 1 MiB of the 3 MiB object.
     #[tokio::test]
-    async fn a_download_lands_in_a_file_and_stops_at_the_limit() {
+    async fn a_download_lands_in_a_file_and_stops_at_the_room_of_the_disk() {
         let mut server = mockito::Server::new_async().await;
         let content: Vec<u8> = (0..3 * 1024 * 1024).map(|_| rand::random::<u8>()).collect();
         let sent = content.clone();
@@ -848,16 +844,24 @@ mod tests {
         let client = crate::cdn::fetch::build_client().await.unwrap();
         let config = config(&format!("{}/bucket", server.url()), "");
         let dest = dir.0.join("out");
-        let size = download_to_file(&client, &config, "sized", (&dest, u64::MAX))
+        let mut room = DiskRoom::new(&dir.0).unwrap();
+        let size = download_to_file(&client, &config, "sized", (&dest, &mut room))
             .await
             .unwrap();
         assert_eq!(size, content.len() as u64);
         assert!(tokio::fs::read(&dest).await.unwrap() == content);
         for key in ["sized", "chunked"] {
-            let err = download_to_file(&client, &config, key, (&dest, 1024 * 1024))
+            let free = crate::platform::prune::get_disk_space(&dir.0)
+                .unwrap()
+                .available_bytes;
+            let mut room = DiskRoom::with_reserve(&dir.0, free - 1024 * 1024).unwrap();
+            let err = download_to_file(&client, &config, key, (&dest, &mut room))
                 .await
                 .unwrap_err();
-            assert!(format!("{err:#}").contains("larger than"), "{key}: {err:#}");
+            assert!(
+                format!("{err:#}").contains("would keep less than"),
+                "{key}: {err:#}"
+            );
         }
     }
 }

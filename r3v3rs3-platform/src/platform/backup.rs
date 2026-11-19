@@ -932,8 +932,8 @@ impl Platform {
             ..s3
         };
         let dump = DumpFile::new(&self.backup_dir).await?;
-        let limit = (dump.path.as_path(), MAX_DB_BACKUP_UNCOMPRESSED_BYTES);
-        super::s3::download_to_file(self.http().await?, &s3, key, limit)
+        let mut room = super::transfer::DiskRoom::new(&self.backup_dir)?;
+        super::s3::download_to_file(self.http().await?, &s3, key, (&dump.path, &mut room))
             .await
             .map_err(|err| Error::S3OperationFailed {
                 reason: format!("{err:#}"),
@@ -949,7 +949,7 @@ impl Platform {
     ) -> anyhow::Result<RestoreFromS3Response> {
         let raw = self.download_s3_dump(&req.key).await?;
         let dump = if is_gzipped(&raw.head().await?) {
-            DumpFile::gunzip_untrusted(&raw.path, &self.backup_dir).await?
+            DumpFile::gunzip(&raw.path, &self.backup_dir).await?
         } else {
             raw
         };
@@ -2599,8 +2599,6 @@ pub(super) async fn gzip(content: &[u8]) -> anyhow::Result<Vec<u8>> {
     Ok(compressed)
 }
 
-pub const MAX_DB_BACKUP_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-
 /// A dump on the local disk, in a directory of its own under `parent`. The directory goes away
 /// with the value. The platform puts its dumps under the backup directory: a decompressed dump
 /// in a temporary directory on tmpfs would sit in memory again.
@@ -2627,35 +2625,19 @@ impl DumpFile {
         Self::new(&self.parent).await
     }
 
-    /// The content behind the gzip file `src` of a backup that the platform took itself, of
-    /// any size.
+    /// The content behind the gzip file `src` of a backup, of any size that the disk holds.
+    /// A backup from S3 is outside input: a decompression bomb stops at the free space of the
+    /// disk less its reserve, and the dump goes away with the value. A disk that cannot hold
+    /// even the compressed size refuses before the start.
     pub(super) async fn gunzip(
         src: &std::path::Path,
         parent: &std::path::Path,
     ) -> anyhow::Result<Self> {
-        Self::gunzip_limited(src, parent, u64::MAX).await
-    }
-
-    /// The content behind the gzip file `src` of a remote backup, bounded to prevent gzip
-    /// decompression bombs: a remote backup is outside input.
-    pub(super) async fn gunzip_untrusted(
-        src: &std::path::Path,
-        parent: &std::path::Path,
-    ) -> anyhow::Result<Self> {
-        Self::gunzip_limited(src, parent, MAX_DB_BACKUP_UNCOMPRESSED_BYTES).await
-    }
-
-    /// Refuses before it starts when the disk cannot hold even the compressed size, so a
-    /// restore does not fill the disk of the server halfway through.
-    async fn gunzip_limited(
-        src: &std::path::Path,
-        parent: &std::path::Path,
-        max_bytes: u64,
-    ) -> anyhow::Result<Self> {
         let size = tokio::fs::metadata(src).await?.len();
         super::transfer::ensure_free_space(parent, size)?;
         let dump = Self::new(parent).await?;
-        ungzip_file_limited(src, &dump.path, max_bytes).await?;
+        let mut room = super::transfer::DiskRoom::new(parent)?;
+        ungzip_file_within(src, &dump.path, &mut room).await?;
         Ok(dump)
     }
 
@@ -2682,24 +2664,15 @@ impl DumpFile {
 /// How much of a dump the format checks read.
 const DUMP_HEAD: u64 = 1024;
 
-/// Decompresses the gzip file `src` into `dest` in pieces, and fails once more than
-/// `max_bytes` came out.
-async fn ungzip_file_limited(
+/// Decompresses the gzip file `src` into `dest` in pieces within `room`.
+async fn ungzip_file_within(
     src: &std::path::Path,
     dest: &std::path::Path,
-    max_bytes: u64,
+    room: &mut super::transfer::DiskRoom,
 ) -> anyhow::Result<()> {
     let input = tokio::io::BufReader::new(tokio::fs::File::open(src).await?);
-    let mut reader = async_compression::tokio::bufread::GzipDecoder::new(input)
-        .take(max_bytes.saturating_add(1));
-    let mut out = tokio::fs::File::create(dest).await?;
-    let copied = tokio::io::copy(&mut reader, &mut out).await?;
-    out.sync_all().await?;
-    if copied > max_bytes {
-        anyhow::bail!(
-            "decompressed database backup exceeds maximum allowed size of {max_bytes} bytes"
-        );
-    }
+    let mut reader = async_compression::tokio::bufread::GzipDecoder::new(input);
+    super::transfer::copy_within(&mut reader, dest, room).await?;
     Ok(())
 }
 
@@ -3112,16 +3085,32 @@ mod tests {
             .unwrap();
         let restored = DumpFile::gunzip(&compressed.path, &tmp).await.unwrap();
         assert_eq!(tokio::fs::read(&restored.path).await.unwrap(), content);
+    }
 
-        // A backup is outside input: a gzip bomb must stop at the limit, not fill the disk.
-        let out = DumpFile::new(&tmp).await.unwrap();
-        let err = ungzip_file_limited(&compressed.path, &out.path, 5)
+    /// A backup from S3 is outside input: a gzip bomb must stop before the disk keeps less than
+    /// its reserve, not fill the disk. The reserve here leaves room for 8 MiB, and the bomb
+    /// holds 64 MiB of zeros in a few KiB.
+    #[tokio::test]
+    async fn a_gzip_bomb_stops_at_the_reserve_of_the_disk() -> anyhow::Result<()> {
+        let tmp = std::env::temp_dir();
+        let zeros = vec![0u8; 64 * 1024 * 1024];
+        let bomb = DumpFile::from_bytes(&gzip(&zeros).await?, &tmp).await?;
+        let free = super::super::prune::get_disk_space(&tmp)
+            .context("the free space of the temp dir")?
+            .available_bytes;
+        let mut room =
+            super::super::transfer::DiskRoom::with_reserve(&tmp, free - 8 * 1024 * 1024)?;
+        let out = DumpFile::new(&tmp).await?;
+        let err = ungzip_file_within(&bomb.path, &out.path, &mut room)
             .await
             .unwrap_err();
+        assert!(err.to_string().contains("would keep less than"), "{err}");
+        let written = tokio::fs::metadata(&out.path).await?.len();
         assert!(
-            err.to_string().contains("exceeds maximum allowed size"),
-            "{err}"
+            written <= 8 * 1024 * 1024,
+            "{written} bytes reached the disk"
         );
+        Ok(())
     }
 
     #[tokio::test]
