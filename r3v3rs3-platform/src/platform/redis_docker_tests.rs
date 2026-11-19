@@ -413,6 +413,88 @@ async fn branch_after_restore(
     Ok(())
 }
 
+/// A clone of a Redis that writes its AOF gets the data of the source and writes its own AOF
+/// again: the restore sets the AOF aside for its restart, so a clone that kept it off would
+/// have no log to archive.
+async fn clone_on_the_aof(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let source = add_db(platform, name).await?;
+    deploy(platform, source.id).await?;
+    cli(platform, source.id, "SET a 1").await?;
+    cli(platform, source.id, "SET b 2").await?;
+    let dest = add_db(platform, &format!("{name}-c")).await?;
+    deploy(platform, dest.id).await?;
+    platform
+        .restore_clone_data(source.id, dest.id, PASSWORD)
+        .await?;
+    wait_for_keys(platform, dest.id, &["a", "b"]).await?;
+    let aof = cli(platform, dest.id, "CONFIG GET appendonly").await?;
+    ensure!(
+        aof.ends_with("yes"),
+        "the clone runs without the AOF: {aof}"
+    );
+    Ok(())
+}
+
+/// Waits up to 90 s until the database holds exactly `expected`.
+async fn wait_for_keys(
+    platform: &Arc<Platform>,
+    id: ShortId,
+    expected: &[&str],
+) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    loop {
+        if let Ok(keys) = sorted_keys(platform, id).await
+            && keys == expected
+        {
+            return Ok(());
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the keys of {id} never became {expected:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+/// A snapshot from S3 restores into a Redis that writes its AOF, and the server writes its AOF
+/// again: the step after the download is the same as a local restore.
+async fn s3_restore_on_the_aof(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let db = add_db(platform, name).await?;
+    deploy(platform, db.id).await?;
+    let backup = back_up_then_replace(platform, db.id).await?;
+    let compressed = platform.download_backup(db.id, &backup).await?;
+    let dump = super::backup::ungzip(&compressed).await?;
+    platform
+        .restore_s3_into_existing(db.id, dump, Some("redis"))
+        .await?;
+    let keys = sorted_keys(platform, db.id).await?;
+    ensure!(keys == ["a", "b"], "the database holds {keys:?}");
+    let aof = cli(platform, db.id, "CONFIG GET appendonly").await?;
+    ensure!(
+        aof.ends_with("yes"),
+        "the AOF is off after the restore: {aof}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_redis_s3_restore_writes_its_aof_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = s3_restore_on_the_aof(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_redis_clone_writes_its_aof_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = clone_on_the_aof(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
 /// A command that prints nothing for longer than the 30 s response timeout of the Docker
 /// client still runs to its end: a large dump written to a file stays silent for minutes.
 async fn wait_out_a_silent_command(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {

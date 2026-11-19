@@ -814,9 +814,12 @@ impl Platform {
         .await
         .context("the new database container did not take the restore")?;
         tracing::info!(%db_id, "database clone restored successfully");
-        // The dump holds no account passwords; the tenants copied from the source get their
-        // stored ones.
-        self.reapply_tenants(db_id).await
+        // The tenants copied from the source get their stored passwords, and a Redis writes
+        // its AOF again.
+        let (app, container, runtime) = self.database_container(db_id).await?;
+        let engine = app.spec.database.clone().unwrap_or_default();
+        self.after_restore(db_id, &engine, &app, (&runtime, &container))
+            .await
     }
 
     /// Copies data from a source database into a newly deployed cloned database.
@@ -949,7 +952,7 @@ impl Platform {
         Ok(())
     }
 
-    async fn restore_s3_into_existing(
+    pub(super) async fn restore_s3_into_existing(
         &self,
         target_id: ShortId,
         dump_bytes: Vec<u8>,
@@ -969,6 +972,8 @@ impl Platform {
             &info.data_path,
         )
         .await?;
+        self.after_restore(target_id, &engine, &app, (&runtime, &container))
+            .await?;
         Ok(RestoreFromS3Response {
             success: true,
             message: format!("restored snapshot into {}", app.name),
