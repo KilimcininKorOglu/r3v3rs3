@@ -1651,7 +1651,11 @@ async fn take_dump(
             runtime
                 .exec_capture(container, plan.command, plan.env)
                 .await?;
-            runtime.download_file(container, path).await
+            // A single download refuses more than 64 MiB, which a Redis dataset passes.
+            let scratch = super::transfer::Scratch::new(&std::env::temp_dir()).await?;
+            let local = scratch.path("dump");
+            super::transfer::fetch_to_file(runtime, container, (path, 0), &local).await?;
+            Ok(tokio::fs::read(&local).await?)
         }
         None => {
             runtime

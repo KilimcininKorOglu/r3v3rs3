@@ -339,6 +339,32 @@ async fn convert(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A backup of a Redis dataset over 64 MiB is taken: the single download of the runtime refuses
+/// more than 64 MiB. Random data keeps the compression of the RDB file from shrinking it.
+async fn back_up_a_large_dataset(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let db = add_db(platform, name).await?;
+    deploy(platform, db.id).await?;
+    let (_, container, runtime) = platform.database_container(db.id).await?;
+    let fill = "for i in $(seq 1 13); do head -c 4194304 /dev/urandom | base64 -w 0 \
+| redis-cli -x SET k$i > /dev/null || exit 1; done";
+    let command = vec!["sh".into(), "-c".into(), fill.into()];
+    let env = vec![format!("REDISCLI_AUTH={PASSWORD}")];
+    runtime.exec_capture(&container, command, env).await?;
+    let backup = platform.run_backup(db.id).await?;
+    // The compressed backup alone holds more than the 16 MiB that an upload takes at once.
+    ensure!(backup.size > 16 << 20, "{backup:?}");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn redis_backs_up_a_dataset_over_64_mib_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = back_up_a_large_dataset(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
 async fn remove_apps(platform: &Arc<Platform>) -> anyhow::Result<()> {
     for app in platform.store.apps().await? {
         platform.delete_app(app.id).await?;
