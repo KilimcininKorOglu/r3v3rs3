@@ -332,6 +332,25 @@ async fn psql_value(
     Ok(String::from_utf8_lossy(&out).trim().to_string())
 }
 
+/// The error of a database that runs without the archive volume: it was deployed before
+/// archiving and starts archiving on its next deployment.
+#[derive(Debug)]
+struct NotArchiving;
+
+impl std::fmt::Display for NotArchiving {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the database writes no WAL archive; deploy it again to turn archiving on")
+    }
+}
+
+/// Whether a failed pull of the loop is an expected state rather than a fault: another job
+/// holds the database, or the database runs without the archive volume. Every other failure
+/// stops the archive and must reach the log.
+fn is_expected_pull_failure(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<NotArchiving>().is_some()
+        || matches!(err.downcast_ref::<Error>(), Some(Error::AppBusy { .. }))
+}
+
 /// The names of the closed files in the archive volume of the container, sorted.
 async fn archive_names(
     runtime: &Arc<dyn ContainerRuntime>,
@@ -340,7 +359,7 @@ async fn archive_names(
     let entries = runtime
         .list_dir(container, WAL_ARCHIVE_PATH)
         .await
-        .context("the database writes no WAL archive; deploy it again to turn archiving on")?;
+        .context(NotArchiving)?;
     let mut names: Vec<String> = entries
         .into_iter()
         .filter(|entry| !entry.dir && is_archive_name(&entry.name))
@@ -1177,10 +1196,12 @@ impl Platform {
     async fn pull_one_database(&self, app: &AppEntry) {
         match self.pull_wal(app.id).await {
             Ok(_) => {}
-            Err(err) => {
-                // A database deployed before archiving has no archive volume yet, and a busy
-                // database is pulled in the next round.
+            Err(err) if is_expected_pull_failure(&err) => {
                 tracing::debug!(database = %app.name, err = format!("{err:#}"), "no WAL pulled");
+                return;
+            }
+            Err(err) => {
+                tracing::error!(database = %app.name, err = format!("{err:#}"), "the WAL pull failed");
                 return;
             }
         }
@@ -1362,6 +1383,27 @@ mod tests {
         assert!(!is_archive_name("../../etc/passwd"));
         assert!(!is_archive_name("a b"));
         assert!(!is_archive_name(""));
+    }
+
+    /// A pull that stops the archive must reach the log: on production a binary log file over
+    /// the download limit failed every round, and the loop wrote it at debug level only. A busy
+    /// database and a database without the archive volume are expected states.
+    #[test]
+    fn only_a_busy_or_unarchived_database_is_an_expected_pull_failure() {
+        let busy: anyhow::Error = Error::AppBusy {
+            name: "shop-db".into(),
+        }
+        .into();
+        let unarchived = anyhow::anyhow!("no such directory").context(NotArchiving);
+        let too_large = anyhow::anyhow!("length limit exceeded");
+        let wrapped_busy = anyhow::Error::from(Error::AppBusy {
+            name: "shop-db".into(),
+        })
+        .context("pull");
+        assert!(is_expected_pull_failure(&busy));
+        assert!(is_expected_pull_failure(&unarchived));
+        assert!(is_expected_pull_failure(&wrapped_busy));
+        assert!(!is_expected_pull_failure(&too_large));
     }
 
     /// The archive volume belongs to the database and is added only where archiving runs.
