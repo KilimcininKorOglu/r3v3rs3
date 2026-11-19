@@ -413,6 +413,30 @@ async fn branch_after_restore(
     Ok(())
 }
 
+/// A command that prints nothing for longer than the 30 s response timeout of the Docker
+/// client still runs to its end: a large dump written to a file stays silent for minutes.
+async fn wait_out_a_silent_command(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let db = add_db(platform, name).await?;
+    deploy(platform, db.id).await?;
+    let (_, container, runtime) = platform.database_container(db.id).await?;
+    let command = vec!["sh".into(), "-c".into(), "sleep 35; echo done".into()];
+    let out = runtime
+        .exec_capture(&container, command, Vec::new())
+        .await?;
+    ensure!(out == b"done\n", "the command returned {out:?}");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_command_silent_past_the_response_timeout_finishes_on_the_docker_engine()
+-> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = wait_out_a_silent_command(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn redis_restores_a_backup_on_the_aof_on_the_docker_engine() -> anyhow::Result<()> {

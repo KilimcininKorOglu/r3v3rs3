@@ -548,25 +548,14 @@ impl DockerRuntime {
             )
             .await?;
         let exec: ExecCreateResponse = read_json(response).await?;
-        let mut stream = self.start_exec(&exec.id).await?;
-        let mut frames = Vec::new();
-        let mut chunk = [0u8; 16 * 1024];
-        loop {
-            let read = tokio::time::timeout(RESPONSE_TIMEOUT, stream.read(&mut chunk))
-                .await
-                .unwrap_or(Ok(0))?;
-            if read == 0 {
-                break;
-            }
-            frames.extend_from_slice(&chunk[..read]);
-        }
-        let state: ExecInspectResponse = self.get(&format!("/exec/{}/json", exec.id)).await?;
+        let frames = self.read_exec(&exec.id).await?;
+        let exit_code = self.exec_exit_code(&exec.id).await?;
         let (stdout, stderr) = split_exec_stream(&frames)?;
-        if state.exit_code != 0 {
+        if exit_code != 0 {
             bail!(
                 "the command {:?} failed with exit code {}: {}{}",
                 command,
-                state.exit_code,
+                exit_code,
                 String::from_utf8_lossy(&stderr),
                 String::from_utf8_lossy(&stdout)
             );
@@ -759,20 +748,48 @@ impl DockerRuntime {
             )
             .await?;
         let exec: ExecCreateResponse = read_json(response).await?;
-        let stream = self.start_exec(&exec.id).await?;
         // The output is not shown, but the session has to run to its end.
-        let mut leftover = stream;
-        let mut chunk = [0u8; 1024];
-        while tokio::time::timeout(RESPONSE_TIMEOUT, leftover.read(&mut chunk))
-            .await
-            .unwrap_or(Ok(0))?
-            > 0
-        {}
-        let state: ExecInspectResponse = self.get(&format!("/exec/{}/json", exec.id)).await?;
-        Ok(state.exit_code)
+        self.read_exec(&exec.id).await?;
+        self.exec_exit_code(&exec.id).await
     }
 
     /// Starts a created exec and returns its duplex stream.
+    /// Reads the output stream of an exec to its end. A command may stay silent for longer than
+    /// the response timeout, as a dump written to a file does, so a read that times out ends
+    /// the stream only when the exec no longer runs.
+    async fn read_exec(&self, id: &str) -> anyhow::Result<Vec<u8>> {
+        let mut stream = self.start_exec(id).await?;
+        let mut frames = Vec::new();
+        let mut chunk = [0u8; 16 * 1024];
+        loop {
+            match tokio::time::timeout(RESPONSE_TIMEOUT, stream.read(&mut chunk)).await {
+                Ok(read) => match read? {
+                    0 => return Ok(frames),
+                    read => frames.extend_from_slice(&chunk[..read]),
+                },
+                Err(_) if self.exec_state(id).await?.running => {}
+                Err(_) => return Ok(frames),
+            }
+        }
+    }
+
+    /// The exit code of an exec whose output ended. The engine may report it as running for a
+    /// moment after the stream closed.
+    async fn exec_exit_code(&self, id: &str) -> anyhow::Result<i64> {
+        for _ in 0..50 {
+            let state = self.exec_state(id).await?;
+            if let (false, Some(code)) = (state.running, state.exit_code) {
+                return Ok(code);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        bail!("the exec {id} did not report its exit code")
+    }
+
+    async fn exec_state(&self, id: &str) -> anyhow::Result<ExecInspectResponse> {
+        self.get(&format!("/exec/{id}/json")).await
+    }
+
     async fn start_exec(&self, id: &str) -> anyhow::Result<crate::kv::http::UpgradedStream> {
         let path = format!("/exec/{id}/start");
         let request = self
@@ -1617,7 +1634,9 @@ struct ExecCreateResponse {
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct ExecInspectResponse {
-    exit_code: i64,
+    running: bool,
+    /// Null while the exec runs.
+    exit_code: Option<i64>,
 }
 
 /// One stats document of the Docker Engine API, with `stream=false`.
