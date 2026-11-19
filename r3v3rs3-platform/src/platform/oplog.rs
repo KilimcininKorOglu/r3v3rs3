@@ -123,10 +123,12 @@ impl MongoSession {
             .context("the server writes no oplog")
     }
 
-    /// The newest archived entry after `since`, or none.
+    /// The newest entry after `since` that a replay needs. The periodic noop entries that an
+    /// idle primary writes about every ten seconds change no data, so a range of only those
+    /// stores nothing; they go into the next file with the writes after them.
     async fn newest_after(&self, since: u64) -> anyhow::Result<Option<u64>> {
         self.packed(&format!(
-            "const e = db.getSiblingDB('local').oplog.rs.find({{ts: {{$gt: {}}}, ns: {{$nin: {ACCOUNT_NAMESPACES}}}}}).sort({{$natural: -1}}).limit(1).toArray(); print(e.length ? pack(e[0].ts) : 'none');",
+            "const e = db.getSiblingDB('local').oplog.rs.find({{ts: {{$gt: {}}}, ns: {{$nin: {ACCOUNT_NAMESPACES}}}, $nor: [{{op: 'n', 'o.msg': 'periodic noop'}}]}}).sort({{$natural: -1}}).limit(1).toArray(); print(e.length ? pack(e[0].ts) : 'none');",
             timestamp(since)
         ))
         .await

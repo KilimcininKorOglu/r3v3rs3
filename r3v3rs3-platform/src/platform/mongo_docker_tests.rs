@@ -455,6 +455,42 @@ async fn refuse_a_target_in_a_gap(platform: &Arc<Platform>, name: &str) -> anyho
     Ok(())
 }
 
+/// An idle primary writes a "periodic noop" entry about every ten seconds (measured on
+/// mongo:8). Those entries change no data, so pulls across them store no file: otherwise an
+/// idle database fills its archive with one file a minute. A real write is stored again.
+async fn store_no_idle_noops(platform: &Arc<Platform>, name: &str) -> anyhow::Result<()> {
+    let db = add_db(platform, name).await?;
+    deploy(platform, db.id).await?;
+    platform.archive_wal(db.id).await?;
+    let before = platform.list_wal_segments(db.id).await?.len();
+    tokio::time::sleep(Duration::from_secs(25)).await;
+    platform.pull_wal(db.id).await?;
+    let idle = platform.list_wal_segments(db.id).await?.len();
+    ensure!(
+        idle == before,
+        "an idle pull stored {} files",
+        idle - before
+    );
+    eval(platform, db.id, INSERT).await?;
+    platform.pull_wal(db.id).await?;
+    let written = platform.list_wal_segments(db.id).await?.len();
+    ensure!(
+        written == before + 1,
+        "a write stored {} files",
+        written - before
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn an_idle_mongodb_archives_no_noop_entries_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = store_no_idle_noops(&platform, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn mongodb_refuses_a_target_in_an_oplog_gap_on_the_docker_engine() -> anyhow::Result<()> {
