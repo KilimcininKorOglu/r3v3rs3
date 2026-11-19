@@ -429,6 +429,68 @@ async fn remove_apps(platform: &Arc<Platform>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A platform whose runtime records every transfer that holds more than one piece in memory.
+async fn bounded_platform() -> anyhow::Result<(
+    Arc<Platform>,
+    Arc<super::bounded_runtime::BoundedRuntime>,
+    TempDir,
+)> {
+    let (command, _) = mpsc::channel(1);
+    let (mut platform, _fake, dir) = platform_with(&PlatformConfig::default(), command).await?;
+    let host = std::env::var("DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());
+    let bounded = Arc::new(super::bounded_runtime::BoundedRuntime::new(Arc::new(
+        super::docker_runtime(&host)?,
+    )));
+    platform.local = bounded.clone();
+    platform.timing.health_timeout = Duration::from_secs(60);
+    Ok((Arc::new(platform), bounded, dir))
+}
+
+/// A base backup and a recovery of a database larger than one transfer piece pass in bounded
+/// pieces: a server with hundreds of megabytes must not be held in the memory of the panel,
+/// which can be smaller than the database. The filler is random text, so the compressed base
+/// stays larger than one piece too.
+async fn recover_a_large_base(
+    platform: &Arc<Platform>,
+    bounded: &super::bounded_runtime::BoundedRuntime,
+    name: &str,
+) -> anyhow::Result<()> {
+    let db = running_postgres(platform, name, PG17).await?;
+    let filler = "CREATE TABLE f AS SELECT md5(random()::text) || md5(random()::text) AS x \
+                  FROM generate_series(1, 800000)";
+    sql(platform, db.id, filler).await?;
+    let table = "CREATE TABLE t (i int, at timestamptz DEFAULT clock_timestamp())";
+    sql(platform, db.id, table).await?;
+    platform.archive_wal(db.id).await?;
+    let commits = commit_six_rows(platform, db.id).await?;
+    let request = PitrRestoreRequest {
+        target_time: commits[2] + (commits[3] - commits[2]) / 2,
+        new_name: Some(format!("{name}-branch").parse()?),
+        host_port: None,
+    };
+    let response = platform.restore_pitr(db.id, request).await?;
+    let branch = sql(platform, response.app.id, ROWS).await?;
+    ensure!(branch == "1,2,3", "the branch holds the rows {branch}");
+    let filled = sql(platform, response.app.id, "SELECT count(*) FROM f").await?;
+    ensure!(filled == "800000", "the branch holds {filled} filler rows");
+    let violations = bounded.violations();
+    ensure!(
+        violations.is_empty(),
+        "whole transfers in memory: {violations:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn postgres_recovers_a_large_base_in_pieces_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, bounded, _dir) = bounded_platform().await?;
+    let name = format!("pitr{}", hex::encode(rand::random::<[u8; 3]>()));
+    let run = recover_a_large_base(&platform, &bounded, &name).await;
+    run.and(remove_apps(&platform).await)
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn postgres_recovers_to_a_second_on_the_docker_engine() -> anyhow::Result<()> {

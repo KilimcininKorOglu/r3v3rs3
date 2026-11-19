@@ -8,9 +8,10 @@
 //! manual, "mongorestore").
 
 use super::Platform;
-use super::backup::{mongodb_uri, ungzip};
-use super::binlog::{WORK_DIR, aside_script, tar_files};
+use super::backup::mongodb_uri;
+use super::binlog::{WORK_DIR, aside_script};
 use super::history::{Archive, timeline_for};
+use super::transfer::{Scratch, fetch_to_file, gunzip_file, push_file};
 use super::wal::{
     BaseBackup, BaseStart, PREVIOUS_DIR, data_mount, pick_base, replay_files, rollback_script,
     store_native_segment,
@@ -23,8 +24,12 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, PitrRange, PitrRestoreRequest, PitrRestoreResponse, WalSegment,
 };
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// The file in the container that `mongodump` writes a base archive into.
+const BASE_REMOTE: &str = "/tmp/r3v3rs3-mongo-base.archive";
 
 /// The prefix of an archived oplog file. The suffix is the packed timestamp of its newest
 /// entry, so the files sort in the order of the oplog.
@@ -86,6 +91,23 @@ impl MongoSession {
         self.runtime
             .exec_capture(&self.container, command, env)
             .await
+    }
+
+    /// Writes a `mongodump --oplog` archive into the local file `dest`. The archive goes into a
+    /// file in the container first and leaves it in bounded pieces, so a base of any size passes.
+    async fn dump_to(&self, dest: &Path) -> anyhow::Result<()> {
+        let script =
+            format!("mongodump --uri=\"$MONGO_URI\" --archive --oplog 2>/dev/null > {BASE_REMOTE}");
+        let written = self.shell(&script, &[]).await;
+        let fetched = match written {
+            Ok(_) => fetch_to_file(&self.runtime, &self.container, (BASE_REMOTE, 0), dest).await,
+            Err(err) => Err(err),
+        };
+        self.runtime
+            .remove_path(&self.container, BASE_REMOTE)
+            .await?;
+        ensure!(fetched? > 0, "mongodump wrote no archive");
+        Ok(())
     }
 
     /// The printed answer of a mongosh script.
@@ -231,18 +253,15 @@ impl Platform {
     ) -> anyhow::Result<BaseBackup> {
         let session = self.mongo_session(db_id).await?;
         let start = session.newest().await?;
-        let archive = session
-            .shell(
-                "mongodump --uri=\"$MONGO_URI\" --archive --oplog 2>/dev/null",
-                &[],
-            )
-            .await?;
+        let scratch = Scratch::new(&self.base_dir(db_id).await?).await?;
+        let archive = scratch.path("base.archive");
+        session.dump_to(&archive).await?;
         let start = BaseStart {
             log: oplog_name(start),
             position: None,
             data_directory: "/data/db".to_string(),
         };
-        let base = self.store_base(db_id, start, &archive).await?;
+        let base = self.store_base_file(db_id, start, &archive).await?;
         self.prune_base_backups(db_id).await?;
         Ok(base)
     }
@@ -317,7 +336,7 @@ impl Platform {
         &self,
         db_id: ShortId,
         target: u64,
-    ) -> anyhow::Result<(BaseBackup, Vec<WalSegment>, Vec<(String, Vec<u8>)>)> {
+    ) -> anyhow::Result<(BaseBackup, Vec<WalSegment>, OplogUpload)> {
         self.finish_history_moves(db_id).await?;
         if self.store.running_deployment(db_id).await?.is_some() {
             self.archive_oplog(db_id).await?;
@@ -338,7 +357,7 @@ impl Platform {
     async fn recover_oplog_into(
         &self,
         db_id: ShortId,
-        upload: Vec<(String, Vec<u8>)>,
+        upload: OplogUpload,
         limit: u64,
     ) -> anyhow::Result<()> {
         let app = self.app(db_id).await?;
@@ -382,16 +401,19 @@ impl Platform {
         runtime: &Arc<dyn ContainerRuntime>,
         app: &AppEntry,
         mount: &str,
-        upload: Vec<(String, Vec<u8>)>,
+        upload: OplogUpload,
         limit: u64,
     ) -> anyhow::Result<()> {
         self.run_db_helper(runtime, app, aside_script(mount), None)
             .await?;
         let session = self.ready_set(app).await?;
-        let replay = upload.len() > 1;
-        runtime
-            .upload_archive(&session.container, "/tmp", tar_files(&upload)?)
-            .await?;
+        let replay = upload.files.len() > 1;
+        session.shell(&format!("mkdir -p {WORK_DIR}"), &[]).await?;
+        for (name, path) in &upload.files {
+            let remote = format!("{WORK_DIR}/{name}");
+            push_file(runtime, &session.container, path, &remote).await?;
+        }
+        drop(upload.scratch);
         session
             .shell(
                 &format!("mongorestore --uri=\"$MONGO_URI\" --archive={WORK_DIR}/base.archive --nsExclude='admin.*' --drop 2>&1"),
@@ -452,30 +474,57 @@ fn mount_of(app: &AppEntry) -> anyhow::Result<String> {
         .to_string())
 }
 
-/// The base archive and the oplog files of a recovery as one BSON file, read before anything
-/// stops, so a missing file fails the recovery while the database still runs on its data.
+/// The base archive and the oplog of a recovery, decompressed on disk.
+struct OplogUpload {
+    scratch: Scratch,
+    files: Vec<(String, PathBuf)>,
+}
+
+/// The base archive and the oplog files of a recovery, the oplog joined into one BSON file,
+/// decompressed on disk before anything stops, so a missing file fails the recovery while the
+/// database still runs on its data.
 async fn oplog_upload(
     archive: &Archive,
     base: &BaseBackup,
     files: &[WalSegment],
-) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
-    let dump = tokio::fs::read(archive.base.join(format!("{}.tar.gz", base.id))).await?;
-    let mut upload = vec![("base.archive".to_string(), ungzip(&dump).await?)];
-    if files.is_empty() {
-        return Ok(upload);
+) -> anyhow::Result<OplogUpload> {
+    let scratch = Scratch::new(&archive.base).await?;
+    let dump = scratch.path("base.archive");
+    gunzip_file(&archive.base.join(format!("{}.tar.gz", base.id)), &dump).await?;
+    let mut upload = vec![("base.archive".to_string(), dump)];
+    if !files.is_empty() {
+        let oplog = scratch.path("oplog.bson");
+        join_oplog(archive, files, (&scratch, &oplog)).await?;
+        upload.push(("oplog.bson".to_string(), oplog));
     }
-    // BSON documents follow each other without a separator, so the files join into one.
-    let mut oplog = Vec::new();
+    Ok(OplogUpload {
+        scratch,
+        files: upload,
+    })
+}
+
+/// Joins the oplog files into `dest`. BSON documents follow each other without a separator,
+/// so the files join into one.
+async fn join_oplog(
+    archive: &Archive,
+    files: &[WalSegment],
+    (scratch, dest): (&Scratch, &Path),
+) -> anyhow::Result<()> {
+    let mut out = tokio::fs::File::create(dest).await?;
+    let part = scratch.path("part.bson");
     for segment in files {
-        let path = archive.wal.join(format!("{}.wal.gz", segment.id));
-        let compressed = tokio::fs::read(&path)
+        gunzip_file(&archive.wal.join(format!("{}.wal.gz", segment.id)), &part)
             .await
             .with_context(|| format!("the oplog file {} is missing", segment.filename))?;
-        oplog.extend(ungzip(&compressed).await?);
+        let mut input = tokio::fs::File::open(&part).await?;
+        tokio::io::copy(&mut input, &mut out).await?;
     }
-    ensure!(!oplog.is_empty(), "the archived oplog is empty");
-    upload.push(("oplog.bson".to_string(), oplog));
-    Ok(upload)
+    out.sync_all().await?;
+    ensure!(
+        out.metadata().await?.len() > 0,
+        "the archived oplog is empty"
+    );
+    Ok(())
 }
 
 #[cfg(test)]

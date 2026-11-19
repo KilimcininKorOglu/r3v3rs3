@@ -10,6 +10,8 @@ mod backup;
 mod binlog;
 #[cfg(test)]
 mod binlog_docker_tests;
+#[cfg(test)]
+mod bounded_runtime;
 mod build;
 mod compose;
 mod connections;

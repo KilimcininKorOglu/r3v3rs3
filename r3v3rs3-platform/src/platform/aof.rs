@@ -9,8 +9,9 @@
 //! documentation, "Redis persistence").
 
 use super::Platform;
-use super::backup::{redis_auth, ungzip};
+use super::backup::redis_auth;
 use super::history::{Archive, timeline_for};
+use super::transfer::{Scratch, fetch_to_file, gunzip_file, push_file};
 use super::wal::{
     BaseBackup, BaseStart, PREVIOUS_DIR, data_mount, pick_base, rollback_script,
     store_marker_segment, store_native_segment,
@@ -23,6 +24,7 @@ use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{
     AppEntry, PitrRange, PitrRestoreRequest, PitrRestoreResponse, WalSegment,
 };
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -68,8 +70,12 @@ const INCR_LIMIT: u64 = 256 * 1024 * 1024;
 /// How long a switch to the AOF or a fresh server may take.
 const READY_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// The directory that a recovery helper finds its uploaded files in.
-const UPLOAD_DIR: &str = "/r3v3rs3-pitr";
+/// The directory in the data volume that a recovery writes its files into while the server
+/// still runs. The helper moves the whole volume aside first, so it reads them from there.
+const RESTORE_NAME: &str = ".r3v3rs3-restore";
+
+/// The file in the container that a base backup is packed into.
+const BASE_REMOTE: &str = "/tmp/r3v3rs3-aof-base.tar";
 
 fn pack(seq: u64, offset: u64) -> u64 {
     (seq << OFFSET_BITS) | offset
@@ -132,9 +138,9 @@ fn rebuild_script(mount: &str, until: u64) -> String {
     format!(
         "set -e; M='{mount}'; P=\"$M/{PREVIOUS_DIR}\"; rm -rf \"$P\"; mkdir \"$P\"; \
 find \"$M\" -mindepth 1 -maxdepth 1 ! -name {PREVIOUS_DIR} -exec mv {{}} \"$P\"/ \\;; \
-D=\"$M/appendonlydir\"; mkdir \"$D\"; tar -xf {UPLOAD_DIR}/base.tar -C \"$D\"; \
+U=\"$P/{RESTORE_NAME}\"; D=\"$M/appendonlydir\"; mkdir \"$D\"; tar -xf \"$U/base.tar\" -C \"$D\"; \
 i=$(awk '$6 == \"i\" {{print $2}}' \"$D/appendonly.aof.manifest\"); \
-cp {UPLOAD_DIR}/incr.aof \"$D/$i\"; \
+cp \"$U/incr.aof\" \"$D/$i\"; \
 if [ -s \"$D/$i\" ] && ! head -c 4 \"$D/$i\" | grep -q '^#TS:'; then \
 echo 'the archived AOF does not start with a timestamp' >&2; exit 1; fi; \
 first=$(grep -a '^#TS:' \"$D/$i\" | head -1 | cut -d: -f2 | tr -d '\\r'); \
@@ -157,6 +163,22 @@ impl RedisSession {
         self.runtime
             .exec_capture(&self.container, command, self.auth.clone())
             .await
+    }
+
+    /// Packs the AOF base file `base_file` with the manifest into the local tar file `dest`.
+    /// The tar goes into a file in the container first and leaves it in bounded pieces, so a
+    /// base of any size passes.
+    async fn pack_base(&self, base_file: &str, dest: &std::path::Path) -> anyhow::Result<()> {
+        let script =
+            format!("tar -C {AOF_DIR} -cf {BASE_REMOTE} '{base_file}' appendonly.aof.manifest");
+        let fetched = match self.shell(&script).await {
+            Ok(_) => fetch_to_file(&self.runtime, &self.container, (BASE_REMOTE, 0), dest).await,
+            Err(err) => Err(err),
+        };
+        self.runtime
+            .remove_path(&self.container, BASE_REMOTE)
+            .await?;
+        fetched.map(|_| ())
     }
 
     async fn text(&self, script: &str) -> anyhow::Result<String> {
@@ -376,17 +398,15 @@ impl Platform {
             is_aof_name(&base_file),
             "unexpected AOF base file: {base_file}"
         );
-        let archive = session
-            .shell(&format!(
-                "tar -C {AOF_DIR} -cf - '{base_file}' appendonly.aof.manifest"
-            ))
-            .await?;
+        let scratch = Scratch::new(&self.base_dir(db_id).await?).await?;
+        let archive = scratch.path("base.tar");
+        session.pack_base(&base_file, &archive).await?;
         let start = BaseStart {
             log: piece_name(seq, 0),
             position: None,
             data_directory: "/data".to_string(),
         };
-        let base = self.store_base(db_id, start, &archive).await?;
+        let base = self.store_base_file(db_id, start, &archive).await?;
         self.prune_base_backups(db_id).await?;
         Ok(base)
     }
@@ -501,7 +521,7 @@ impl Platform {
         &self,
         db_id: ShortId,
         target: u64,
-    ) -> anyhow::Result<(BaseBackup, Vec<WalSegment>, Vec<(String, Vec<u8>)>)> {
+    ) -> anyhow::Result<(BaseBackup, Vec<WalSegment>, AofUpload)> {
         let archive = self.timeline_archive(db_id, target).await?;
         let bases = archive.bases().await?;
         let segments = archive.segments().await?;
@@ -528,19 +548,20 @@ impl Platform {
     async fn recover_aof_into(
         &self,
         db_id: ShortId,
-        upload: Vec<(String, Vec<u8>)>,
+        upload: AofUpload,
         until: u64,
     ) -> anyhow::Result<()> {
         let app = self.app(db_id).await?;
         let _lock = self.lock_app(&app)?;
         let (app, container, runtime) = self.database_container(db_id).await?;
         let mount = mount_of(&app)?;
+        let restore = format!("{mount}/{RESTORE_NAME}");
+        push_upload(&runtime, &container, &upload, &restore).await?;
         runtime
             .stop_container(&container, Duration::from_secs(60))
             .await?;
-        let archive = tar_upload(&upload)?;
         let rebuilt = self
-            .run_db_helper(&runtime, &app, rebuild_script(&mount, until), Some(archive))
+            .run_db_helper(&runtime, &app, rebuild_script(&mount, until), None)
             .await;
         let started = match rebuilt {
             Ok(()) => self.ready_redis(&app).await,
@@ -606,7 +627,11 @@ impl Platform {
             .context("the old data of the database could not be put back")?;
         self.ready_redis(app)
             .await
-            .context("the database did not answer on its old data")
+            .context("the database did not answer on its old data")?;
+        // The upload of the recovery came back with the old data.
+        runtime
+            .remove_path(container, &format!("{mount}/{RESTORE_NAME}"))
+            .await
     }
 }
 
@@ -633,40 +658,70 @@ fn mount_of(app: &AppEntry) -> anyhow::Result<String> {
         .to_string())
 }
 
-/// The base archive and the incr file of a recovery, read before anything stops, so a
-/// missing piece fails the recovery while the database still runs on its data.
+/// Writes the files of a recovery into `dir` of the running database container, one bounded
+/// piece at a time. A failed write leaves no part of the upload behind.
+async fn push_upload(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    upload: &AofUpload,
+    dir: &str,
+) -> anyhow::Result<()> {
+    let pushed = push_files(runtime, container, upload, dir).await;
+    if let Err(err) = pushed {
+        if let Err(cleanup) = runtime.remove_path(container, dir).await {
+            return Err(err.context(format!("{dir} stays: {cleanup:#}")));
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+async fn push_files(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    upload: &AofUpload,
+    dir: &str,
+) -> anyhow::Result<()> {
+    runtime.remove_path(container, dir).await?;
+    let mkdir = vec!["mkdir".into(), "-p".into(), dir.to_string()];
+    runtime.exec_capture(container, mkdir, Vec::new()).await?;
+    for (name, path) in &upload.files {
+        push_file(runtime, container, path, &format!("{dir}/{name}")).await?;
+    }
+    Ok(())
+}
+
+/// The base archive and the incr file of a recovery, decompressed on disk.
+pub(super) struct AofUpload {
+    _scratch: Scratch,
+    files: [(&'static str, PathBuf); 2],
+}
+
+/// The base archive and the incr file of a recovery, decompressed on disk before anything
+/// stops, so a missing piece fails the recovery while the database still runs on its data.
 async fn aof_upload(
     archive: &Archive,
     base: &BaseBackup,
     pieces: &[WalSegment],
-) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
-    let tar = tokio::fs::read(archive.base.join(format!("{}.tar.gz", base.id))).await?;
-    let mut incr = Vec::new();
+) -> anyhow::Result<AofUpload> {
+    let scratch = Scratch::new(&archive.base).await?;
+    let tar = scratch.path("base.tar");
+    gunzip_file(&archive.base.join(format!("{}.tar.gz", base.id)), &tar).await?;
+    let incr = scratch.path("incr.aof");
+    let mut out = tokio::fs::File::create(&incr).await?;
+    let part = scratch.path("part.aof");
     for piece in pieces {
-        let path = archive.wal.join(format!("{}.wal.gz", piece.id));
-        let compressed = tokio::fs::read(&path)
+        gunzip_file(&archive.wal.join(format!("{}.wal.gz", piece.id)), &part)
             .await
             .with_context(|| format!("the AOF piece {} is missing", piece.filename))?;
-        incr.extend(ungzip(&compressed).await?);
+        let mut input = tokio::fs::File::open(&part).await?;
+        tokio::io::copy(&mut input, &mut out).await?;
     }
-    Ok(vec![
-        ("base.tar".to_string(), ungzip(&tar).await?),
-        ("incr.aof".to_string(), incr),
-    ])
-}
-
-/// The upload of a recovery helper, unpacked at `/r3v3rs3-pitr`.
-fn tar_upload(files: &[(String, Vec<u8>)]) -> anyhow::Result<Vec<u8>> {
-    let mut builder = tar::Builder::new(Vec::new());
-    for (name, bytes) in files {
-        let mut header = tar::Header::new_gnu();
-        header.set_size(bytes.len() as u64);
-        header.set_mode(0o644);
-        header.set_cksum();
-        let path = format!("{}/{name}", UPLOAD_DIR.trim_start_matches('/'));
-        builder.append_data(&mut header, path, bytes.as_slice())?;
-    }
-    Ok(builder.into_inner()?)
+    out.sync_all().await?;
+    Ok(AofUpload {
+        _scratch: scratch,
+        files: [("base.tar", tar), ("incr.aof", incr)],
+    })
 }
 
 #[cfg(test)]

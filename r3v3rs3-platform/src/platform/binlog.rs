@@ -768,20 +768,6 @@ find \"$M\" -mindepth 1 -maxdepth 1 ! -name {PREVIOUS_DIR} -exec mv {{}} \"$P\"/
     )
 }
 
-/// A tar archive of the work directory with the given files.
-pub(super) fn tar_files(files: &[(String, Vec<u8>)]) -> anyhow::Result<Vec<u8>> {
-    let mut builder = tar::Builder::new(Vec::new());
-    for (name, bytes) in files {
-        let mut header = tar::Header::new_gnu();
-        header.set_size(bytes.len() as u64);
-        header.set_mode(0o644);
-        header.set_cksum();
-        let path = format!("{}/{name}", WORK_DIR.trim_start_matches("/tmp/"));
-        builder.append_data(&mut header, path, bytes.as_slice())?;
-    }
-    Ok(builder.into_inner()?)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

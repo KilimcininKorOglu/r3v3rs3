@@ -601,6 +601,62 @@ async fn a_standalone_mongodb_9_becomes_a_replica_set_on_the_docker_engine() -> 
     run.and(remove_apps(&platform).await)
 }
 
+/// Random text documents, about 80 MB, in batches that mongosh sends one at a time.
+const FILL: &str = "const f = db.getSiblingDB('app').f; \
+for (let b = 0; b < 40; b++) { \
+f.insertMany(Array.from({length: 10000}, () => ({x: Array.from({length: 16}, () => \
+Math.random().toString(36).slice(2)).join('')}))); } \
+print(f.countDocuments())";
+
+/// A base backup and a recovery of a database larger than one transfer piece pass in bounded
+/// pieces: a server with hundreds of megabytes must not be held in the memory of the panel,
+/// which can be smaller than the database. The filler is random text, so the compressed base
+/// stays larger than one piece too.
+async fn recover_a_large_base(
+    platform: &Arc<Platform>,
+    bounded: &super::bounded_runtime::BoundedRuntime,
+    name: &str,
+) -> anyhow::Result<()> {
+    let db = add_db(platform, name).await?;
+    deploy(platform, db.id).await?;
+    let filled = eval(platform, db.id, FILL).await?;
+    ensure!(
+        filled == "400000",
+        "the database holds {filled} filler documents"
+    );
+    platform.archive_wal(db.id).await?;
+    for _ in 1..=6 {
+        eval(platform, db.id, INSERT).await?;
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+    }
+    let target = doc_time(platform, db.id, 3).await? + 1000;
+    let (docs, _) = branch_docs(platform, db.id, &format!("{name}-b"), target).await?;
+    ensure!(docs == "1,2,3", "the branch holds the documents {docs}");
+    let violations = bounded.violations();
+    ensure!(
+        violations.is_empty(),
+        "whole transfers in memory: {violations:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn mongodb_recovers_a_large_base_in_pieces_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (command, _) = mpsc::channel(1);
+    let (mut platform, _fake, _dir) = platform_with(&PlatformConfig::default(), command).await?;
+    let host = std::env::var("DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());
+    let bounded = Arc::new(super::bounded_runtime::BoundedRuntime::new(Arc::new(
+        super::docker_runtime(&host)?,
+    )));
+    platform.local = bounded.clone();
+    platform.timing.health_timeout = Duration::from_secs(120);
+    let platform = Arc::new(platform);
+    let run = recover_a_large_base(&platform, &bounded, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn a_mongodb_replica_set_serves_after_a_redeploy_on_the_docker_engine() -> anyhow::Result<()>

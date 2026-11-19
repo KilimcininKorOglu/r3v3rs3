@@ -6,8 +6,8 @@
 //! time (PostgreSQL manual, "Continuous Archiving and Point-in-Time Recovery").
 
 use super::Platform;
-use super::backup::{backup_id, gzip, ungzip};
-use super::transfer::{Scratch, fetch_to_file, gzip_file};
+use super::backup::{backup_id, gzip};
+use super::transfer::{Scratch, fetch_to_file, gunzip_file, gzip_file, push_file};
 use crate::clock::unix_ms;
 use crate::runtime::ContainerRuntime;
 use anyhow::{Context as _, bail, ensure};
@@ -29,6 +29,13 @@ use std::time::Duration;
 
 /// The path of the archive volume inside a PostgreSQL container.
 pub(super) const WAL_ARCHIVE_PATH: &str = "/wal-archive";
+
+/// Where a PostgreSQL recovery puts its base backup and WAL files in the archive volume. The
+/// pull of the archive reads only the files at the top of the volume, so it skips this directory.
+const RESTORE_DIR: &str = "/wal-archive/restore";
+
+/// The file in the container that `pg_basebackup` writes a base backup into.
+const BASE_REMOTE: &str = "/tmp/r3v3rs3-pg-base.tar";
 
 /// The start command of a PostgreSQL server that archives its WAL. A named volume belongs to
 /// root when Docker creates it, so the shell gives the archive to `postgres` before the
@@ -259,8 +266,8 @@ fn recovery_script(mount: &str, data_directory: &str, target: &str) -> String {
         "set -e; M='{mount}'; D='{data_directory}'; P=\"$M/{PREVIOUS_DIR}\"; \
 rm -rf \"$P\"; mkdir \"$P\"; \
 find \"$M\" -mindepth 1 -maxdepth 1 ! -name {PREVIOUS_DIR} -exec mv {{}} \"$P\"/ \\;; \
-mkdir -p \"$D\"; tar -xzf /restore/base.tar.gz -C \"$D\"; \
-tar -xf /restore/wal.tar -C {WAL_ARCHIVE_PATH}; \
+mkdir -p \"$D\"; tar -xzf {RESTORE_DIR}/base.tar.gz -C \"$D\"; \
+find {RESTORE_DIR}/wal -type f -exec mv {{}} {WAL_ARCHIVE_PATH}/ \\;; rm -rf {RESTORE_DIR}; \
 touch \"$D/recovery.signal\"; \
 printf '%s\\n' \"restore_command = 'cp {WAL_ARCHIVE_PATH}/%f %p'\" \
 \"recovery_target_time = '{target}'\" \"recovery_target_action = 'promote'\" \
@@ -286,19 +293,6 @@ pub(super) fn rollback_script(mount: &str) -> String {
 find \"$M\" -mindepth 1 -maxdepth 1 ! -name {PREVIOUS_DIR} -exec rm -rf {{}} +; \
 find \"$P\" -mindepth 1 -maxdepth 1 -exec mv {{}} \"$M\"/ \\;; rmdir \"$P\""
     )
-}
-
-/// A tar archive in memory with the given files.
-fn tar_of(files: &[(String, Vec<u8>)]) -> anyhow::Result<Vec<u8>> {
-    let mut builder = tar::Builder::new(Vec::new());
-    for (name, bytes) in files {
-        let mut header = tar::Header::new_gnu();
-        header.set_size(bytes.len() as u64);
-        header.set_mode(0o644);
-        header.set_cksum();
-        builder.append_data(&mut header, name, bytes.as_slice())?;
-    }
-    Ok(builder.into_inner()?)
 }
 
 /// The image of a database app.
@@ -494,39 +488,16 @@ impl Platform {
     async fn take_base_backup_locked(&self, db_id: ShortId) -> anyhow::Result<BaseBackup> {
         let pg = self.pg_session(db_id).await?;
         let (start_wal, data_directory) = pg.base_start().await?;
-        let archive = pg.basebackup().await?;
+        let scratch = Scratch::new(&self.base_dir(db_id).await?).await?;
+        let archive = scratch.path("base.tar");
+        pg.basebackup_to(&archive).await?;
         let start = BaseStart {
             log: start_wal,
             position: None,
             data_directory,
         };
-        let base = self.store_base(db_id, start, &archive).await?;
+        let base = self.store_base_file(db_id, start, &archive).await?;
         self.prune_base_backups(db_id).await?;
-        Ok(base)
-    }
-
-    /// Stores the archive of a base backup with its manifest.
-    pub(super) async fn store_base(
-        &self,
-        db_id: ShortId,
-        start: BaseStart,
-        archive: &[u8],
-    ) -> anyhow::Result<BaseBackup> {
-        let compressed = gzip(archive).await?;
-        let base = BaseBackup {
-            id: backup_id(),
-            created_at: unix_ms(),
-            start_wal: start.log,
-            start_position: start.position,
-            data_directory: start.data_directory,
-            size: compressed.len() as u64,
-            sha256: hex::encode(Sha256::digest(&compressed)),
-        };
-        let dir = self.base_dir(db_id).await?;
-        tokio::fs::create_dir_all(&dir).await?;
-        write_atomic(&dir.join(format!("{}.tar.gz", base.id)), &compressed).await?;
-        let manifest = serde_json::to_vec(&base)?;
-        write_atomic(&dir.join(format!("{}.json", base.id)), &manifest).await?;
         Ok(base)
     }
 
@@ -898,14 +869,12 @@ impl Platform {
             .target
             .as_str()
             .to_string();
-        let upload = self.recovery_upload(recovery).await?;
+        self.push_recovery(&runtime, &container, recovery).await?;
         runtime
             .stop_container(&container, Duration::from_secs(60))
             .await?;
         let script = recovery_script(&mount, &recovery.base.data_directory, &recovery.target);
-        let replaced = self
-            .run_db_helper(&runtime, &app, script, Some(upload))
-            .await;
+        let replaced = self.run_db_helper(&runtime, &app, script, None).await;
         let replayed = match replaced {
             Ok(()) => wait_ready(&runtime, &container).await,
             Err(err) => Err(err),
@@ -913,32 +882,83 @@ impl Platform {
         match replayed {
             Ok(()) => finish_recovery(&runtime, &container, &mount, recovery.files).await,
             Err(err) => {
-                self.roll_back(&runtime, &app, &container, &mount).await?;
-                Err(Error::RestoreFailed {
-                    reason: format!("{err:#}"),
-                }
-                .into())
+                self.fail_recovery(&runtime, &app, (&container, &mount), err)
+                    .await
             }
         }
     }
 
-    /// The tar archive that a recovery uploads: the base backup and the WAL files.
-    async fn recovery_upload(&self, recovery: &Recovery<'_>) -> anyhow::Result<Vec<u8>> {
+    /// Puts the old data back after a failed replay, removes the upload of the recovery and
+    /// reports the failure.
+    async fn fail_recovery(
+        &self,
+        runtime: &Arc<dyn ContainerRuntime>,
+        app: &AppEntry,
+        (container, mount): (&ContainerName, &str),
+        err: anyhow::Error,
+    ) -> anyhow::Result<()> {
+        self.roll_back(runtime, app, container, mount).await?;
+        runtime.remove_path(container, RESTORE_DIR).await?;
+        Err(Error::RestoreFailed {
+            reason: format!("{err:#}"),
+        }
+        .into())
+    }
+
+    /// Writes the base backup and the WAL files of a recovery into `RESTORE_DIR` of the archive
+    /// volume while the server still runs, one bounded piece at a time. A missing file fails the
+    /// recovery here, before anything stops, and leaves no part of the upload behind.
+    async fn push_recovery(
+        &self,
+        runtime: &Arc<dyn ContainerRuntime>,
+        container: &ContainerName,
+        recovery: &Recovery<'_>,
+    ) -> anyhow::Result<()> {
+        let pushed = self.push_recovery_files(runtime, container, recovery).await;
+        if let Err(err) = pushed {
+            if let Err(cleanup) = runtime.remove_path(container, RESTORE_DIR).await {
+                return Err(err.context(format!("{RESTORE_DIR} stays: {cleanup:#}")));
+            }
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    async fn push_recovery_files(
+        &self,
+        runtime: &Arc<dyn ContainerRuntime>,
+        container: &ContainerName,
+        recovery: &Recovery<'_>,
+    ) -> anyhow::Result<()> {
+        runtime.remove_path(container, RESTORE_DIR).await?;
+        let mkdir = vec!["mkdir".into(), "-p".into(), format!("{RESTORE_DIR}/wal")];
+        runtime.exec_capture(container, mkdir, Vec::new()).await?;
         let base_dir = self.base_dir(recovery.source).await?;
-        let base = tokio::fs::read(base_dir.join(format!("{}.tar.gz", recovery.base.id))).await?;
+        let base = base_dir.join(format!("{}.tar.gz", recovery.base.id));
+        let remote = format!("{RESTORE_DIR}/base.tar.gz");
+        push_file(runtime, container, &base, &remote).await?;
+        self.push_wal_files(runtime, container, recovery).await
+    }
+
+    /// Writes the WAL files of a recovery, each decompressed on disk first.
+    async fn push_wal_files(
+        &self,
+        runtime: &Arc<dyn ContainerRuntime>,
+        container: &ContainerName,
+        recovery: &Recovery<'_>,
+    ) -> anyhow::Result<()> {
         let wal_dir = self.wal_dir(recovery.source).await?;
-        let mut wal = Vec::new();
+        let scratch = Scratch::new(&wal_dir).await?;
         for segment in recovery.files {
-            let path = wal_dir.join(format!("{}.wal.gz", segment.id));
-            let compressed = tokio::fs::read(&path)
+            let local = scratch.path(&segment.filename);
+            gunzip_file(&wal_dir.join(format!("{}.wal.gz", segment.id)), &local)
                 .await
                 .with_context(|| format!("the WAL file {} is missing", segment.filename))?;
-            wal.push((segment.filename.clone(), ungzip(&compressed).await?));
+            let remote = format!("{RESTORE_DIR}/wal/{}", segment.filename);
+            push_file(runtime, container, &local, &remote).await?;
+            tokio::fs::remove_file(&local).await?;
         }
-        tar_of(&[
-            ("restore/base.tar.gz".to_string(), base),
-            ("restore/wal.tar".to_string(), tar_of(&wal)?),
-        ])
+        Ok(())
     }
 
     /// Runs a one-off container of the database image on the volumes of the database.
@@ -1086,19 +1106,29 @@ impl PgSession {
         Ok(((before != after).then_some(before), mark))
     }
 
-    /// The tar archive of the data directory that `pg_basebackup` writes to stdout.
-    async fn basebackup(&self) -> anyhow::Result<Vec<u8>> {
-        let user = self.info.user.as_str();
-        let command = ["pg_basebackup", "-D", "-", "-Ft", "-X", "none", "-U", user]
-            .map(str::to_string)
-            .to_vec();
+    /// Writes the tar archive of the data directory that `pg_basebackup` produces into the local
+    /// file `dest`. The archive goes into a file in the container first and leaves it in
+    /// bounded pieces, so a base of any size passes.
+    async fn basebackup_to(&self, dest: &Path) -> anyhow::Result<()> {
+        let script = format!(
+            "pg_basebackup -D - -Ft -X none -U '{}' > {BASE_REMOTE}",
+            self.info.user
+        );
+        let command = vec!["sh".to_string(), "-c".to_string(), script];
         let env = vec![format!("PGPASSWORD={}", self.password)];
-        let archive = self
+        let written = self
             .runtime
             .exec_capture(&self.container, command, env)
+            .await;
+        let fetched = match written {
+            Ok(_) => fetch_to_file(&self.runtime, &self.container, (BASE_REMOTE, 0), dest).await,
+            Err(err) => Err(err),
+        };
+        self.runtime
+            .remove_path(&self.container, BASE_REMOTE)
             .await?;
-        ensure!(!archive.is_empty(), "pg_basebackup wrote no archive");
-        Ok(archive)
+        ensure!(fetched? > 0, "pg_basebackup wrote no archive");
+        Ok(())
     }
 }
 

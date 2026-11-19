@@ -356,6 +356,59 @@ async fn back_up_a_large_dataset(platform: &Arc<Platform>, name: &str) -> anyhow
     Ok(())
 }
 
+/// A base backup and a recovery of a database larger than one transfer piece pass in bounded
+/// pieces: a server with hundreds of megabytes must not be held in the memory of the panel,
+/// which can be smaller than the database. Random data keeps the base larger than one piece
+/// after compression too.
+async fn recover_a_large_base(
+    platform: &Arc<Platform>,
+    bounded: &super::bounded_runtime::BoundedRuntime,
+    name: &str,
+) -> anyhow::Result<()> {
+    let db = add_db(platform, name).await?;
+    deploy(platform, db.id).await?;
+    let (_, container, runtime) = platform.database_container(db.id).await?;
+    let fill = "for i in $(seq 1 13); do head -c 4194304 /dev/urandom | base64 -w 0 \
+| redis-cli -x SET k$i > /dev/null || exit 1; done";
+    let command = vec!["sh".into(), "-c".into(), fill.into()];
+    let env = vec![format!("REDISCLI_AUTH={PASSWORD}")];
+    runtime.exec_capture(&container, command, env).await?;
+    platform.archive_wal(db.id).await?;
+    let mut third = 0;
+    for i in 1..=6 {
+        let at = push(platform, db.id, i).await?;
+        if i == 3 {
+            third = at;
+        }
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+    }
+    let branch = branch_items(platform, db.id, &format!("{name}-b"), third + 1000).await?;
+    ensure!(branch == "1,2,3", "the branch holds {branch}");
+    let violations = bounded.violations();
+    ensure!(
+        violations.is_empty(),
+        "whole transfers in memory: {violations:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn redis_recovers_a_large_base_in_pieces_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (command, _) = mpsc::channel(1);
+    let (mut platform, _fake, _dir) = platform_with(&PlatformConfig::default(), command).await?;
+    let host = std::env::var("DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());
+    let bounded = Arc::new(super::bounded_runtime::BoundedRuntime::new(Arc::new(
+        super::docker_runtime(&host)?,
+    )));
+    platform.local = bounded.clone();
+    platform.timing.health_timeout = Duration::from_secs(120);
+    let platform = Arc::new(platform);
+    let run = recover_a_large_base(&platform, &bounded, &name()).await;
+    run.and(remove_apps(&platform).await)
+}
+
 /// Every key of the database, sorted.
 async fn sorted_keys(platform: &Arc<Platform>, id: ShortId) -> anyhow::Result<Vec<String>> {
     let out = cli(platform, id, "--scan").await?;
