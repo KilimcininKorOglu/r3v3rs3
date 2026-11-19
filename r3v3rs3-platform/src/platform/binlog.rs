@@ -8,11 +8,11 @@
 //! Recovery Using Binary Log"; MariaDB "mariadb-binlog").
 
 use super::Platform;
-use super::backup::ungzip;
 use super::history::{Archive, timeline_for};
+use super::transfer::{Scratch, fetch_to_file, gunzip_file, head_text, push_file};
 use super::wal::{
-    BaseBackup, BaseStart, PREVIOUS_DIR, data_mount, is_archive_name, pick_base, replay_files,
-    rollback_script, store_native_segment,
+    BaseBackup, BaseStart, PREVIOUS_DIR, data_mount, fetch_native_segment, is_archive_name,
+    pick_base, replay_files, rollback_script,
 };
 use crate::runtime::ContainerRuntime;
 use anyhow::{Context as _, bail, ensure};
@@ -23,6 +23,7 @@ use r3v3rs3_api::platform::{
     AppEntry, PitrRange, PitrRestoreRequest, PitrRestoreResponse, WalSegment,
 };
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -30,6 +31,9 @@ use std::time::Duration;
 /// arguments that start with `-` to the server. Row format records the changed rows, so a
 /// replay does not depend on the time or state of the replaying server.
 const BINLOG_ARGS: [&str; 3] = ["--log-bin=binlog", "--server-id=1", "--binlog-format=ROW"];
+
+/// The bytes at the head of a dump that hold its binary log coordinates.
+const HEADER_BYTES: u64 = 64 * 1024;
 
 /// The directory inside the container that a recovery uploads its files to.
 pub(super) const WORK_DIR: &str = "/tmp/r3v3rs3-pitr";
@@ -122,40 +126,66 @@ fn is_account_statement(statement: &str) -> bool {
 /// A decoded binary log without its account statements. Every statement ends with the
 /// delimiter `/*!*/;`; the comment, `SET` and `use` lines in front of a statement carry the
 /// state of the session and stay.
+#[cfg(test)]
 fn without_account_statements(decoded: &str) -> String {
-    let mut out = String::with_capacity(decoded.len());
-    let mut block: Vec<&str> = Vec::new();
-    for line in decoded.lines() {
+    let mut out = Vec::with_capacity(decoded.len());
+    filter_account_statements(decoded.as_bytes(), &mut out)
+        .expect("a filter into memory cannot fail");
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Streams a decoded binary log from `input` to `out` without its account statements, one
+/// statement in memory at a time, so a replay of any size passes.
+fn filter_account_statements(
+    input: impl std::io::BufRead,
+    out: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    let mut block: Vec<String> = Vec::new();
+    for line in input.split(b'\n') {
+        let line = String::from_utf8_lossy(&line?).into_owned();
+        let ends = line.trim_end().ends_with("/*!*/;");
         block.push(line);
-        if line.trim_end().ends_with("/*!*/;") {
-            push_block(&mut out, &block);
+        if ends {
+            push_block(out, &block)?;
             block.clear();
         }
     }
-    for line in block {
-        out.push_str(line);
-        out.push('\n');
+    for line in &block {
+        writeln!(out, "{line}")?;
     }
-    out
+    Ok(())
+}
+
+/// Filters the decoded binary log in the local file `src` into `dest`.
+async fn filter_account_file(src: &Path, dest: &Path) -> anyhow::Result<()> {
+    let (src, dest) = (src.to_path_buf(), dest.to_path_buf());
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let input = std::io::BufReader::new(std::fs::File::open(&src)?);
+        let mut out = std::io::BufWriter::new(std::fs::File::create(&dest)?);
+        filter_account_statements(input, &mut out)?;
+        out.into_inner()?.sync_all()?;
+        Ok(())
+    })
+    .await?
 }
 
 fn is_session_line(line: &str) -> bool {
     line.starts_with('#') || line.starts_with("SET ") || line.starts_with("use ")
 }
 
-fn push_block(out: &mut String, block: &[&str]) {
+fn push_block(out: &mut impl std::io::Write, block: &[String]) -> std::io::Result<()> {
     let statement: Vec<&str> = block
         .iter()
-        .copied()
+        .map(String::as_str)
         .skip_while(|line| is_session_line(line))
         .collect();
     let drop = is_account_statement(&statement.join("\n"));
     for line in block {
         if !drop || is_session_line(line) {
-            out.push_str(line);
-            out.push('\n');
+            writeln!(out, "{line}")?;
         }
     }
+    Ok(())
 }
 
 /// A time for `--stop-datetime`: whole seconds in UTC, rounded down. Binary log events carry
@@ -316,11 +346,15 @@ impl Platform {
         let mut pulled = Vec::new();
         for name in names {
             let path = format!("{datadir}/{name}");
-            let bytes = session
-                .runtime
-                .download_file(&session.container, &path)
-                .await?;
-            let segment = store_native_segment(&dir, db_id, name.clone(), &bytes, start).await?;
+            let segment = fetch_native_segment(
+                &session.runtime,
+                &session.container,
+                (&path, &dir),
+                db_id,
+                name.clone(),
+                start,
+            )
+            .await?;
             start = segment.end_time;
             pulled.push(segment);
         }
@@ -333,22 +367,28 @@ impl Platform {
         db_id: ShortId,
     ) -> anyhow::Result<BaseBackup> {
         let session = self.my_session(db_id).await?;
-        let script = base_dump_script(&session.engine, &session.tools);
-        let dump = session.shell(script).await?;
-        let text = String::from_utf8_lossy(&dump);
+        let scratch = Scratch::new(&self.base_dir(db_id).await?).await?;
+        let dump = scratch.path("base.sql");
+        dump_to_file(&session, &dump).await?;
+        let start = self.base_start(&session, &dump).await?;
+        let base = self.store_base_file(db_id, start, &dump).await?;
+        self.prune_base_backups(db_id).await?;
+        Ok(base)
+    }
+
+    /// Where the replay of the dump in the local file `dump` starts.
+    async fn base_start(&self, session: &MySession, dump: &Path) -> anyhow::Result<BaseStart> {
+        let text = head_text(dump, HEADER_BYTES).await?;
         let (log, position) = match dump_coordinates(&text) {
             Some(coordinates) => coordinates,
             // A server without user databases dumps nothing, so the open file is the start.
-            None => self.open_log_end(&session).await?,
+            None => self.open_log_end(session).await?,
         };
-        let start = BaseStart {
+        Ok(BaseStart {
             log,
             position: Some(position),
             data_directory: session.datadir().await?,
-        };
-        let base = self.store_base(db_id, start, &dump).await?;
-        self.prune_base_backups(db_id).await?;
-        Ok(base)
+        })
     }
 
     /// The open log file and its size, where the next event goes.
@@ -429,7 +469,7 @@ impl Platform {
         &self,
         db_id: ShortId,
         target: u64,
-    ) -> anyhow::Result<(BaseBackup, Vec<WalSegment>, Vec<(String, Vec<u8>)>)> {
+    ) -> anyhow::Result<(BaseBackup, Vec<WalSegment>, Upload)> {
         self.finish_history_moves(db_id).await?;
         if self.store.running_deployment(db_id).await?.is_some() {
             self.archive_binlog(db_id).await?;
@@ -446,23 +486,51 @@ impl Platform {
     }
 }
 
-/// The dump and the log files that a recovery uploads, read before anything stops, so a
+/// Writes the base dump into a file in the container and copies it to the local `dest`. A
+/// server that kept its binary log before archiving has a large open file; the flush first
+/// keeps the first file of a replay small.
+async fn dump_to_file(session: &MySession, dest: &Path) -> anyhow::Result<()> {
+    session.query("FLUSH BINARY LOGS").await?;
+    let remote = format!("{WORK_DIR}-base.sql");
+    let script = base_dump_script(&session.engine, &session.tools);
+    session.shell(format!("{{ {script}; }} > {remote}")).await?;
+    let fetched = fetch_to_file(&session.runtime, &session.container, (&remote, 0), dest).await;
+    session.shell(format!("rm -f {remote}")).await?;
+    fetched.map(|_| ())
+}
+
+/// The dump and the log files of a recovery, decompressed on disk. The first file is the dump.
+pub(super) struct Upload {
+    scratch: Scratch,
+    files: Vec<(String, PathBuf)>,
+}
+
+/// Decompresses the dump and the log files that a recovery uploads before anything stops, so a
 /// missing file fails the recovery while the database still runs on its data.
 async fn binlog_upload(
     archive: &Archive,
     base: &BaseBackup,
     files: &[WalSegment],
-) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
-    let dump = tokio::fs::read(archive.base.join(format!("{}.tar.gz", base.id))).await?;
-    let mut upload = vec![("base.sql".to_string(), ungzip(&dump).await?)];
+) -> anyhow::Result<Upload> {
+    let scratch = Scratch::new(&archive.base).await?;
+    let dump = scratch.path("base.sql");
+    gunzip_file(&archive.base.join(format!("{}.tar.gz", base.id)), &dump).await?;
+    let mut upload = vec![("base.sql".to_string(), dump)];
     for segment in files {
         let path = archive.wal.join(format!("{}.wal.gz", segment.id));
-        let compressed = tokio::fs::read(&path)
-            .await
-            .with_context(|| format!("the binary log {} is missing", segment.filename))?;
-        upload.push((segment.filename.clone(), ungzip(&compressed).await?));
+        ensure!(
+            tokio::fs::try_exists(&path).await?,
+            "the binary log {} is missing",
+            segment.filename
+        );
+        let raw = scratch.path(&segment.filename);
+        gunzip_file(&path, &raw).await?;
+        upload.push((segment.filename.clone(), raw));
     }
-    Ok(upload)
+    Ok(Upload {
+        scratch,
+        files: upload,
+    })
 }
 
 impl Platform {
@@ -472,7 +540,7 @@ impl Platform {
         &self,
         db_id: ShortId,
         base: &BaseBackup,
-        upload: Vec<(String, Vec<u8>)>,
+        upload: Upload,
         stop: &str,
     ) -> anyhow::Result<()> {
         let app = self.app(db_id).await?;
@@ -514,21 +582,21 @@ impl Platform {
         runtime: &Arc<dyn ContainerRuntime>,
         app: &AppEntry,
         mount: &str,
-        (base, upload, stop): (&BaseBackup, Vec<(String, Vec<u8>)>, &str),
+        (base, upload, stop): (&BaseBackup, Upload, &str),
     ) -> anyhow::Result<()> {
         self.run_db_helper(runtime, app, aside_script(mount), None)
             .await?;
         let session = self.ready_session(app.id).await?;
-        let position = base.start_position.unwrap_or(4);
-        let names: Vec<String> = upload
-            .iter()
-            .skip(1)
-            .map(|(name, _)| name.clone())
-            .collect();
-        let archive = tar_files(&upload)?;
-        runtime
-            .upload_archive(&session.container, "/tmp", archive)
+        session.shell(format!("mkdir -p {WORK_DIR}")).await?;
+        for (name, path) in &upload.files {
+            push_file(
+                runtime,
+                &session.container,
+                path,
+                &format!("{WORK_DIR}/{name}"),
+            )
             .await?;
+        }
         session
             .shell(format!(
                 "{{ echo 'SET SESSION sql_log_bin=0;'; cat {WORK_DIR}/base.sql; }} | {} -u root",
@@ -536,25 +604,11 @@ impl Platform {
             ))
             .await
             .context("the base dump did not load")?;
-        if names.is_empty() {
+        if upload.files.len() == 1 {
             return Ok(());
         }
-        let files: Vec<String> = names.iter().map(|n| format!("{WORK_DIR}/{n}")).collect();
-        let decoded = session
-            .shell(format!(
-                "{} --start-position={position} --stop-datetime='{stop}' {}",
-                session.tools.decoder,
-                files.join(" ")
-            ))
-            .await
-            .context("the binary log could not be decoded")?;
-        let replay = without_account_statements(&String::from_utf8_lossy(&decoded));
-        runtime
-            .upload_file(
-                &session.container,
-                &format!("{WORK_DIR}/replay.sql"),
-                replay.into_bytes(),
-            )
+        let position = base.start_position.unwrap_or(4);
+        self.prepare_replay(&session, &upload, (position, stop))
             .await?;
         session
             .shell(format!(
@@ -564,6 +618,36 @@ impl Platform {
             .await
             .context("the binary log did not replay")?;
         Ok(())
+    }
+
+    /// Decodes the uploaded log files up to `stop` into a file in the container, filters the
+    /// account statements out on the server and writes the result back as `replay.sql`. Each
+    /// step goes through a file, so a replay of any size passes.
+    async fn prepare_replay(
+        &self,
+        session: &MySession,
+        upload: &Upload,
+        (position, stop): (u64, &str),
+    ) -> anyhow::Result<()> {
+        let files: Vec<String> = upload.files[1..]
+            .iter()
+            .map(|(name, _)| format!("{WORK_DIR}/{name}"))
+            .collect();
+        let remote = format!("{WORK_DIR}/decoded.sql");
+        session
+            .shell(format!(
+                "{} --start-position={position} --stop-datetime='{stop}' {} > {remote}",
+                session.tools.decoder,
+                files.join(" ")
+            ))
+            .await
+            .context("the binary log could not be decoded")?;
+        let decoded = upload.scratch.path("decoded.sql");
+        fetch_to_file(&session.runtime, &session.container, (&remote, 0), &decoded).await?;
+        let replay = upload.scratch.path("replay.sql");
+        filter_account_file(&decoded, &replay).await?;
+        let target = format!("{WORK_DIR}/replay.sql");
+        push_file(&session.runtime, &session.container, &replay, &target).await
     }
 
     /// Starts the database container and waits until the final server answers. On an empty

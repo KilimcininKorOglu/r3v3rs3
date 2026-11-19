@@ -49,6 +49,7 @@ pub mod tenant;
 #[cfg(test)]
 mod tenant_docker_tests;
 pub mod terminal;
+mod transfer;
 pub mod volume_backup;
 mod wal;
 #[cfg(test)]

@@ -7,6 +7,7 @@
 
 use super::Platform;
 use super::backup::{backup_id, gzip, ungzip};
+use super::transfer::{Scratch, fetch_to_file, gzip_file};
 use crate::clock::unix_ms;
 use crate::runtime::ContainerRuntime;
 use anyhow::{Context as _, bail, ensure};
@@ -524,6 +525,32 @@ impl Platform {
         let dir = self.base_dir(db_id).await?;
         tokio::fs::create_dir_all(&dir).await?;
         write_atomic(&dir.join(format!("{}.tar.gz", base.id)), &compressed).await?;
+        let manifest = serde_json::to_vec(&base)?;
+        write_atomic(&dir.join(format!("{}.json", base.id)), &manifest).await?;
+        Ok(base)
+    }
+
+    /// Stores the local file `src` as the archive of a base backup, compressed on disk, so a
+    /// base of any size passes without being held in memory.
+    pub(super) async fn store_base_file(
+        &self,
+        db_id: ShortId,
+        start: BaseStart,
+        src: &Path,
+    ) -> anyhow::Result<BaseBackup> {
+        let dir = self.base_dir(db_id).await?;
+        tokio::fs::create_dir_all(&dir).await?;
+        let id = backup_id();
+        let (size, sha256) = gzip_file(src, &dir.join(format!("{id}.tar.gz"))).await?;
+        let base = BaseBackup {
+            id,
+            created_at: unix_ms(),
+            start_wal: start.log,
+            start_position: start.position,
+            data_directory: start.data_directory,
+            size,
+            sha256,
+        };
         let manifest = serde_json::to_vec(&base)?;
         write_atomic(&dir.join(format!("{}.json", base.id)), &manifest).await?;
         Ok(base)
@@ -1086,9 +1113,45 @@ async fn pull_file(
     start: u64,
 ) -> anyhow::Result<WalSegment> {
     let path = format!("{WAL_ARCHIVE_PATH}/{name}");
-    let bytes = runtime.download_file(container, &path).await?;
-    let segment = store_native_segment(dir, db_id, name, &bytes, start).await?;
+    let segment =
+        fetch_native_segment(runtime, container, (&path, dir), db_id, name, start).await?;
     runtime.remove_path(container, &path).await?;
+    Ok(segment)
+}
+
+/// Copies the closed log file at `path` inside the container into the archive `dir` in
+/// bounded pieces and records it. A log file can outgrow any single download.
+pub(super) async fn fetch_native_segment(
+    runtime: &Arc<dyn ContainerRuntime>,
+    container: &ContainerName,
+    (path, dir): (&str, &Path),
+    db_id: ShortId,
+    filename: String,
+    start_time: u64,
+) -> anyhow::Result<WalSegment> {
+    let scratch = Scratch::new(dir).await?;
+    let raw = scratch.path("log");
+    let copied = fetch_to_file(runtime, container, (path, 0), &raw).await?;
+    ensure!(copied > 0, "the archived WAL file {filename} is empty");
+    let id = backup_id();
+    let (size, sha256) = gzip_file(&raw, &dir.join(format!("{id}.wal.gz"))).await?;
+    let now = unix_ms();
+    let segment = WalSegment {
+        id,
+        app: db_id,
+        filename,
+        size,
+        sha256,
+        start_time,
+        end_time: now,
+        created_at: now,
+        native: true,
+    };
+    write_atomic(
+        &dir.join(format!("{}.json", segment.id)),
+        &serde_json::to_vec(&segment)?,
+    )
+    .await?;
     Ok(segment)
 }
 

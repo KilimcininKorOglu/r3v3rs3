@@ -381,6 +381,65 @@ fn name() -> String {
     format!("bin{}", hex::encode(rand::random::<[u8; 3]>()))
 }
 
+/// The rows of 4 MiB that fill one binary log file past every single transfer of the runtime:
+/// 64 MiB for a download and 16 MiB for an upload.
+const LARGE_ROWS: u32 = 18;
+
+/// Takes the base backup, then writes `LARGE_ROWS` rows of 4 MiB into the one open log file.
+async fn fill_one_log(platform: &Arc<Platform>, id: ShortId) -> anyhow::Result<()> {
+    let setup = "CREATE DATABASE app; CREATE TABLE app.t (i int primary key, b longblob)";
+    sql_on(platform, id, setup).await?;
+    platform.archive_wal(id).await?;
+    let insert =
+        "INSERT INTO app.t SELECT coalesce(max(i), 0) + 1, REPEAT('x', 4194304) FROM app.t";
+    for _ in 1..=LARGE_ROWS {
+        sql_on(platform, id, insert).await?;
+    }
+    Ok(())
+}
+
+/// A database whose archive holds one binary log file of more than 64 MiB recovers a branch
+/// from it. On production a 68,970,837-byte file stopped the archive of a MySQL database, and
+/// its 72 MB dump could not be uploaded for a recovery.
+async fn recover_a_large_log(
+    platform: &Arc<Platform>,
+    name: &str,
+    engine: &str,
+    image: &str,
+) -> anyhow::Result<()> {
+    let db = running_db(platform, name, engine, image).await?;
+    fill_one_log(platform, db.id).await?;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let target = crate::clock::unix_ms();
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    sql_on(platform, db.id, "INSERT INTO app.t VALUES (1000, 'late')").await?;
+    let segment = platform.archive_wal(db.id).await?;
+    ensure!(segment.size > 0, "{segment:?}");
+    let request = PitrRestoreRequest {
+        target_time: target,
+        new_name: Some(format!("{name}-branch").parse()?),
+        host_port: None,
+    };
+    let response = platform.restore_pitr(db.id, request).await?;
+    let rows = "SELECT concat(count(*), ',', sum(length(b))) FROM app.t";
+    let branch = sql_on(platform, response.app.id, rows).await?;
+    let expected = format!("{LARGE_ROWS},{}", u64::from(LARGE_ROWS) * 4_194_304);
+    ensure!(
+        branch == expected,
+        "the branch holds {branch}, not {expected}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn mysql_recovers_from_a_binary_log_over_64_mib_on_the_docker_engine() -> anyhow::Result<()> {
+    catalog();
+    let (platform, _dir) = docker_platform().await?;
+    let run = recover_a_large_log(&platform, &name(), "mysql", "mysql:9").await;
+    run.and(remove_apps(&platform).await)
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn mysql_recovers_a_branch_to_a_second_on_the_docker_engine() -> anyhow::Result<()> {
