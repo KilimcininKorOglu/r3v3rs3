@@ -927,16 +927,36 @@ impl Platform {
             })
     }
 
+    /// Downloads one S3 backup snapshot into a dump file under the backup directory. The
+    /// snapshot is outside input, so it is bounded like a decompressed dump.
+    async fn download_s3_dump(&self, key: &str) -> anyhow::Result<DumpFile> {
+        let config = self.backup_config().await?;
+        let (Some(s3), Some(secret)) = (config.s3, self.s3_secret().await?) else {
+            return Err(Error::S3NotConfigured.into());
+        };
+        let s3 = r3v3rs3_api::platform::S3Config {
+            secret_key: secret,
+            ..s3
+        };
+        let dump = DumpFile::new(&self.backup_dir).await?;
+        let limit = (dump.path.as_path(), MAX_DB_BACKUP_UNCOMPRESSED_BYTES);
+        super::s3::download_to_file(self.http().await?, &s3, key, limit)
+            .await
+            .map_err(|err| Error::S3OperationFailed {
+                reason: format!("{err:#}"),
+            })?;
+        Ok(dump)
+    }
+
     /// Restores a database from an S3 remote backup snapshot.
     pub async fn restore_s3_backup(
         self: &Arc<Self>,
         req: RestoreFromS3Request,
         caller: &str,
     ) -> anyhow::Result<RestoreFromS3Response> {
-        let raw = self.download_s3_backup(&req.key).await?;
-        let raw = DumpFile::from_bytes(&raw, &self.backup_dir).await?;
+        let raw = self.download_s3_dump(&req.key).await?;
         let dump = if is_gzipped(&raw.head().await?) {
-            DumpFile::gunzip(&raw.path, &self.backup_dir).await?
+            DumpFile::gunzip_untrusted(&raw.path, &self.backup_dir).await?
         } else {
             raw
         };
@@ -1300,8 +1320,7 @@ impl Platform {
             secret_key: secret,
             ..s3
         };
-        let content = tokio::fs::read(dump_path).await?;
-        super::s3::upload(self.http().await?, &s3, entry, content).await
+        super::s3::upload(self.http().await?, &s3, entry, dump_path).await
     }
 
     fn sftp_remote_spec(sftp: &r3v3rs3_api::platform::SftpConfig) -> String {
@@ -2615,18 +2634,40 @@ impl DumpFile {
         Self::new(&self.parent).await
     }
 
-    /// The content behind the gzip file `src`, bounded to prevent gzip decompression bombs: an
-    /// uploaded or a remote backup is outside input.
+    /// The content behind the gzip file `src` of a backup that the platform took itself, of
+    /// any size.
     pub(super) async fn gunzip(
         src: &std::path::Path,
         parent: &std::path::Path,
     ) -> anyhow::Result<Self> {
+        Self::gunzip_limited(src, parent, u64::MAX).await
+    }
+
+    /// The content behind the gzip file `src` of a remote backup, bounded to prevent gzip
+    /// decompression bombs: a remote backup is outside input.
+    pub(super) async fn gunzip_untrusted(
+        src: &std::path::Path,
+        parent: &std::path::Path,
+    ) -> anyhow::Result<Self> {
+        Self::gunzip_limited(src, parent, MAX_DB_BACKUP_UNCOMPRESSED_BYTES).await
+    }
+
+    /// Refuses before it starts when the disk cannot hold even the compressed size, so a
+    /// restore does not fill the disk of the server halfway through.
+    async fn gunzip_limited(
+        src: &std::path::Path,
+        parent: &std::path::Path,
+        max_bytes: u64,
+    ) -> anyhow::Result<Self> {
+        let size = tokio::fs::metadata(src).await?.len();
+        super::transfer::ensure_free_space(parent, size)?;
         let dump = Self::new(parent).await?;
-        ungzip_file_limited(src, &dump.path, MAX_DB_BACKUP_UNCOMPRESSED_BYTES).await?;
+        ungzip_file_limited(src, &dump.path, max_bytes).await?;
         Ok(dump)
     }
 
     /// A dump with the given content.
+    #[cfg(test)]
     pub(super) async fn from_bytes(bytes: &[u8], parent: &std::path::Path) -> anyhow::Result<Self> {
         let dump = Self::new(parent).await?;
         tokio::fs::write(&dump.path, bytes).await?;
@@ -2656,7 +2697,8 @@ async fn ungzip_file_limited(
     max_bytes: u64,
 ) -> anyhow::Result<()> {
     let input = tokio::io::BufReader::new(tokio::fs::File::open(src).await?);
-    let mut reader = async_compression::tokio::bufread::GzipDecoder::new(input).take(max_bytes + 1);
+    let mut reader = async_compression::tokio::bufread::GzipDecoder::new(input)
+        .take(max_bytes.saturating_add(1));
     let mut out = tokio::fs::File::create(dest).await?;
     let copied = tokio::io::copy(&mut reader, &mut out).await?;
     out.sync_all().await?;

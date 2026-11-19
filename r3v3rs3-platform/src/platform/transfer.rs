@@ -243,6 +243,19 @@ fn temp_beside(dest: &Path) -> anyhow::Result<PathBuf> {
     Ok(dest.with_file_name(format!(".{name}.{}.tmp", crate::clock::unix_ms())))
 }
 
+/// Fails when the file system of `dir` has less than `need` bytes free for the server.
+pub(super) fn ensure_free_space(dir: &Path, need: u64) -> anyhow::Result<()> {
+    let space = super::prune::get_disk_space(dir)
+        .with_context(|| format!("the free space of {} cannot be read", dir.display()))?;
+    ensure!(
+        space.available_bytes >= need,
+        "{} has {} bytes free, and the transfer needs at least {need}",
+        dir.display(),
+        space.available_bytes
+    );
+    Ok(())
+}
+
 /// A directory for the files of one transfer job, removed with the value.
 pub(super) struct Scratch {
     dir: PathBuf,
@@ -280,6 +293,17 @@ mod tests {
 
     /// The upload limit of the Docker runtime (`MAX_UPLOAD_SIZE`).
     const UPLOAD_LIMIT: usize = 16 * 1024 * 1024;
+
+    /// A transfer that the disk cannot hold is refused before it starts, and one that it can
+    /// hold passes; a directory whose space cannot be read is an error, not a pass.
+    #[test]
+    fn a_transfer_larger_than_the_free_space_is_refused() {
+        let tmp = std::env::temp_dir();
+        let err = ensure_free_space(&tmp, u64::MAX).unwrap_err();
+        assert!(err.to_string().contains("bytes free"), "{err}");
+        ensure_free_space(&tmp, 1).unwrap();
+        assert!(ensure_free_space(Path::new("/no/such/r3v3rs3/dir"), 1).is_err());
+    }
 
     /// A container whose files live in memory. It runs the few shell commands of a transfer,
     /// refuses an upload over the limit of the Docker runtime, and records the largest piece it

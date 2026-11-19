@@ -37,10 +37,10 @@ pub(crate) async fn upload(
     client: &HttpClient,
     config: &S3Config,
     entry: &BackupEntry,
-    content: Vec<u8>,
+    src: &std::path::Path,
 ) -> anyhow::Result<()> {
     let key = format!("{}/{}.dump.gz", entry.name, entry.id);
-    upload_key(client, config, &key, content).await
+    upload_file(client, config, &key, src).await
 }
 
 /// Uploads content under `{prefix}/{key}` to the configured S3 endpoint.
@@ -143,6 +143,280 @@ pub(crate) async fn download_key(
         .to_bytes()
         .to_vec();
     Ok(body)
+}
+
+/// The size of one part of a multipart upload. S3 needs at least 5 MiB for every part but the
+/// last, and allows 10,000 parts; the panel holds one part in memory at a time.
+pub(crate) const PART_SIZE: u64 = 16 * 1024 * 1024;
+
+/// The scheme and host, the host header and the URI path of the object `key`.
+struct ObjectUrl {
+    base: String,
+    host: String,
+    path: String,
+}
+
+impl ObjectUrl {
+    fn new(config: &S3Config, key: &str) -> anyhow::Result<Self> {
+        let url = url::Url::parse(&config.endpoint).context("the S3 endpoint is not a URL")?;
+        let scheme = url.scheme();
+        if scheme != "https" && scheme != "http" {
+            bail!("the S3 endpoint must be an http or https URL");
+        }
+        let host = host(&url);
+        Ok(Self {
+            base: format!("{scheme}://{host}"),
+            path: object_key_path(&url, config, key),
+            host,
+        })
+    }
+
+    /// A request to the object, signed with SigV4 over `payload`. `query` is the canonical
+    /// query string: sorted and encoded, without the `?`.
+    fn signed(
+        &self,
+        config: &S3Config,
+        (method, query): (Method, &str),
+        payload: Bytes,
+    ) -> anyhow::Result<Request<Full<Bytes>>> {
+        let amz_date = sigv4::amz_date(OffsetDateTime::now_utc());
+        let authorization = sigv4::authorization(
+            &config.access_key,
+            &config.secret_key,
+            &SigningInput {
+                method: method.as_str(),
+                host: &self.host,
+                path: &self.path,
+                query,
+                amz_date: &amz_date,
+                payload: &payload,
+                region: &config.region,
+                service: "s3",
+            },
+        )?;
+        let uri = match query {
+            "" => format!("{}{}", self.base, self.path),
+            _ => format!("{}{}?{query}", self.base, self.path),
+        };
+        Ok(Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", &self.host)
+            .header("x-amz-date", &amz_date)
+            .header(
+                "x-amz-content-sha256",
+                hex::encode(Sha256::digest(&payload)),
+            )
+            .header("authorization", authorization)
+            .body(Full::new(payload))?)
+    }
+}
+
+/// Sends a signed request and fails on a status that is not a success.
+async fn send(
+    client: &HttpClient,
+    request: Request<Full<Bytes>>,
+) -> anyhow::Result<http::Response<hyper::body::Incoming>> {
+    let response = tokio::time::timeout(UPLOAD_TIMEOUT, client.request(request)).await??;
+    let status = response.status();
+    if !status.is_success() {
+        bail!("the S3 bucket answered {status}");
+    }
+    Ok(response)
+}
+
+/// The body of a small answer, such as the XML of a multipart step.
+async fn small_body(response: http::Response<hyper::body::Incoming>) -> anyhow::Result<String> {
+    let body = tokio::time::timeout(UPLOAD_TIMEOUT, BodyExt::collect(response.into_body()))
+        .await?
+        .map_err(|err| anyhow::anyhow!("{err}"))?
+        .to_bytes();
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
+/// Uploads the local file `src` under `{prefix}/{key}`. A file larger than one part goes up
+/// as a multipart upload, one part at a time, so a backup of any size passes without being
+/// held in memory.
+pub(crate) async fn upload_file(
+    client: &HttpClient,
+    config: &S3Config,
+    key: &str,
+    src: &std::path::Path,
+) -> anyhow::Result<()> {
+    let size = tokio::fs::metadata(src).await?.len();
+    if size <= PART_SIZE {
+        return upload_key(client, config, key, tokio::fs::read(src).await?).await;
+    }
+    let object = ObjectUrl::new(config, key)?;
+    let upload_id = create_multipart(client, config, &object).await?;
+    let sent = upload_parts(client, config, (&object, &upload_id), src).await;
+    let done = match sent {
+        Ok(etags) => complete_multipart(client, config, (&object, &upload_id), &etags).await,
+        Err(err) => Err(err),
+    };
+    if let Err(err) = &done
+        && let Err(abort) = abort_multipart(client, config, (&object, &upload_id)).await
+    {
+        // The parts stay in the bucket until a lifecycle rule removes them.
+        tracing::warn!(
+            key,
+            err = format!("{err:#}"),
+            abort = format!("{abort:#}"),
+            "the multipart upload could not be aborted"
+        );
+    }
+    done
+}
+
+/// The canonical query of the requests of one multipart upload.
+fn upload_query(upload_id: &str) -> String {
+    format!("uploadId={}", utf8_percent_encode(upload_id, AWS_QUERY_SET))
+}
+
+async fn create_multipart(
+    client: &HttpClient,
+    config: &S3Config,
+    object: &ObjectUrl,
+) -> anyhow::Result<String> {
+    let request = object.signed(config, (Method::POST, "uploads="), Bytes::new())?;
+    let xml = small_body(send(client, request).await?).await?;
+    let upload_id = parse_xml_tag(&xml, "UploadId")
+        .context("the S3 bucket answered the multipart upload without an upload id")?;
+    Ok(xml_unescape(upload_id))
+}
+
+/// Sends the parts of `src` one after another and returns their ETags in order.
+async fn upload_parts(
+    client: &HttpClient,
+    config: &S3Config,
+    (object, upload_id): (&ObjectUrl, &str),
+    src: &std::path::Path,
+) -> anyhow::Result<Vec<String>> {
+    use tokio::io::AsyncReadExt as _;
+    let mut file = tokio::fs::File::open(src).await?;
+    let mut etags = Vec::new();
+    loop {
+        let mut part = Vec::with_capacity(PART_SIZE as usize);
+        (&mut file).take(PART_SIZE).read_to_end(&mut part).await?;
+        if part.is_empty() {
+            return Ok(etags);
+        }
+        let number = etags.len() + 1;
+        let query = format!("partNumber={number}&{}", upload_query(upload_id));
+        let request = object.signed(config, (Method::PUT, &query), Bytes::from(part))?;
+        let response = send(client, request).await?;
+        let etag = response
+            .headers()
+            .get(http::header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .with_context(|| format!("the S3 bucket answered part {number} without an ETag"))?;
+        etags.push(etag.to_string());
+    }
+}
+
+/// Joins the parts into the object. S3 can answer the completion with 200 and an error in the
+/// body, so the body is checked too.
+async fn complete_multipart(
+    client: &HttpClient,
+    config: &S3Config,
+    (object, upload_id): (&ObjectUrl, &str),
+    etags: &[String],
+) -> anyhow::Result<()> {
+    let body = complete_body(etags);
+    let query = upload_query(upload_id);
+    let request = object.signed(config, (Method::POST, &query), Bytes::from(body))?;
+    let xml = small_body(send(client, request).await?).await?;
+    if xml.contains("<Error>") {
+        bail!("the S3 bucket refused to complete the multipart upload: {xml}");
+    }
+    Ok(())
+}
+
+/// The XML body of `CompleteMultipartUpload`.
+fn complete_body(etags: &[String]) -> String {
+    let mut body = String::from("<CompleteMultipartUpload>");
+    for (index, etag) in etags.iter().enumerate() {
+        let etag = etag
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        body.push_str(&format!(
+            "<Part><PartNumber>{}</PartNumber><ETag>{etag}</ETag></Part>",
+            index + 1
+        ));
+    }
+    body.push_str("</CompleteMultipartUpload>");
+    body
+}
+
+async fn abort_multipart(
+    client: &HttpClient,
+    config: &S3Config,
+    (object, upload_id): (&ObjectUrl, &str),
+) -> anyhow::Result<()> {
+    let query = upload_query(upload_id);
+    let request = object.signed(config, (Method::DELETE, &query), Bytes::new())?;
+    send(client, request).await.map(|_| ())
+}
+
+/// Downloads `{prefix}/{key}` into the local file `dest` piece by piece and returns its size.
+/// The object is outside input: a download larger than `max_bytes` fails, and every piece
+/// must arrive within the request timeout.
+pub(crate) async fn download_to_file(
+    client: &HttpClient,
+    config: &S3Config,
+    key: &str,
+    (dest, max_bytes): (&std::path::Path, u64),
+) -> anyhow::Result<u64> {
+    let object = ObjectUrl::new(config, key)?;
+    let request = object.signed(config, (Method::GET, ""), Bytes::new())?;
+    let response = send(client, request).await?;
+    check_length(&response, dest, max_bytes)?;
+    write_body(response.into_body(), dest, max_bytes).await
+}
+
+/// Refuses an object whose announced length passes `max_bytes` or the free space beside
+/// `dest`, before any of it is written.
+fn check_length(
+    response: &http::Response<hyper::body::Incoming>,
+    dest: &std::path::Path,
+    max_bytes: u64,
+) -> anyhow::Result<()> {
+    let length = response
+        .headers()
+        .get(http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok()?.parse::<u64>().ok());
+    let (Some(length), Some(dir)) = (length, dest.parent()) else {
+        return Ok(());
+    };
+    if length > max_bytes {
+        bail!("the S3 object is larger than {max_bytes} bytes");
+    }
+    super::transfer::ensure_free_space(dir, length)
+}
+
+/// Writes the body into `dest` piece by piece and fails once it passes `max_bytes`, which
+/// also holds for a body that announced no length.
+async fn write_body(
+    mut body: hyper::body::Incoming,
+    dest: &std::path::Path,
+    max_bytes: u64,
+) -> anyhow::Result<u64> {
+    use tokio::io::AsyncWriteExt as _;
+    let mut out = tokio::fs::File::create(dest).await?;
+    let mut size = 0u64;
+    while let Some(frame) = tokio::time::timeout(UPLOAD_TIMEOUT, body.frame()).await? {
+        let Ok(data) = frame.map_err(|err| anyhow::anyhow!("{err}"))?.into_data() else {
+            continue;
+        };
+        size += data.len() as u64;
+        if size > max_bytes {
+            bail!("the S3 object is larger than {max_bytes} bytes");
+        }
+        out.write_all(&data).await?;
+    }
+    out.sync_all().await?;
+    Ok(size)
 }
 
 fn build_list_request(
@@ -495,5 +769,148 @@ mod tests {
         let conf_empty = config("https://s3.example.com/bucket", "");
         let q_empty = list_query_string(&conf_empty, "");
         assert_eq!(q_empty, "list-type=2");
+    }
+
+    type Seen = std::sync::Arc<std::sync::Mutex<Vec<(String, String, Vec<u8>)>>>;
+
+    /// A bucket that answers the steps of a multipart upload, records the method, the path
+    /// with the query and the body of every request, and fails the part `failing`.
+    async fn multipart_bucket(failing: Option<usize>) -> (mockito::ServerGuard, Seen) {
+        let mut server = mockito::Server::new_async().await;
+        let seen: Seen = Default::default();
+        for method in ["POST", "PUT", "DELETE"] {
+            let record = seen.clone();
+            server
+                .mock(method, mockito::Matcher::Any)
+                .with_header("etag", "\"part\"")
+                .with_body_from_request(move |req| {
+                    let body = req.body().cloned().unwrap_or_default();
+                    let path = req.path_and_query().to_string();
+                    record.lock().unwrap().push((method.into(), path, body));
+                    if method == "POST" && req.path_and_query().ends_with("uploads=") {
+                        return b"<InitiateMultipartUploadResult><UploadId>id+1</UploadId></InitiateMultipartUploadResult>".to_vec();
+                    }
+                    Vec::new()
+                })
+                .create_async()
+                .await;
+        }
+        if let Some(part) = failing {
+            server
+                .mock("PUT", mockito::Matcher::Any)
+                .match_query(mockito::Matcher::Regex(format!("partNumber={part}&")))
+                .with_status(500)
+                .create_async()
+                .await;
+        }
+        (server, seen)
+    }
+
+    /// A file of `size` random bytes in a directory of its own.
+    async fn random_file(
+        size: usize,
+    ) -> (crate::platform::tests::TempDir, std::path::PathBuf, Vec<u8>) {
+        let dir = crate::platform::tests::TempDir(
+            std::env::temp_dir().join(format!("r3v3rs3-s3-{:08x}", rand::random::<u32>())),
+        );
+        tokio::fs::create_dir_all(&dir.0).await.unwrap();
+        let content: Vec<u8> = (0..size).map(|_| rand::random::<u8>()).collect();
+        let path = dir.0.join("backup.dump.gz");
+        tokio::fs::write(&path, &content).await.unwrap();
+        (dir, path, content)
+    }
+
+    /// The S3 multipart API (CreateMultipartUpload, UploadPart, CompleteMultipartUpload): a
+    /// backup larger than one part goes up in parts no larger than the part size, so the panel
+    /// never holds the whole backup, and the parts joined in their order are the file.
+    #[tokio::test]
+    async fn a_file_larger_than_a_part_goes_up_in_parts() {
+        let (server, seen) = multipart_bucket(None).await;
+        let size = 2 * PART_SIZE as usize + 5;
+        let (_dir, path, content) = random_file(size).await;
+        let client = crate::cdn::fetch::build_client().await.unwrap();
+        let config = config(&format!("{}/bucket", server.url()), "backups");
+        upload_file(&client, &config, "db/1.dump.gz", &path)
+            .await
+            .unwrap();
+        let seen = seen.lock().unwrap();
+        let parts: Vec<_> = seen.iter().filter(|(m, _, _)| m == "PUT").collect();
+        assert_eq!(parts.len(), 3);
+        for (number, (_, path, body)) in parts.iter().enumerate() {
+            assert!(
+                path.contains(&format!("partNumber={}&uploadId=id%2B1", number + 1)),
+                "{path}"
+            );
+            assert!(body.len() as u64 <= PART_SIZE);
+        }
+        let joined: Vec<u8> = parts.iter().flat_map(|(_, _, body)| body.clone()).collect();
+        assert!(joined == content, "the parts do not join into the file");
+        let (_, last_path, last_body) = seen.last().unwrap();
+        assert!(last_path.ends_with("uploadId=id%2B1"), "{last_path}");
+        let complete = String::from_utf8_lossy(last_body);
+        assert!(
+            complete.contains("<PartNumber>3</PartNumber>"),
+            "{complete}"
+        );
+    }
+
+    /// A part that the bucket refuses fails the upload, and the upload is aborted, so the parts
+    /// sent before it do not stay in the bucket.
+    #[tokio::test]
+    async fn a_refused_part_aborts_the_upload() {
+        let (server, seen) = multipart_bucket(Some(2)).await;
+        let (_dir, path, _) = random_file(2 * PART_SIZE as usize + 5).await;
+        let client = crate::cdn::fetch::build_client().await.unwrap();
+        let config = config(&format!("{}/bucket", server.url()), "");
+        let err = upload_file(&client, &config, "db/1.dump.gz", &path)
+            .await
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("500"), "{err:#}");
+        let seen = seen.lock().unwrap();
+        assert!(
+            seen.iter()
+                .any(|(m, p, _)| m == "DELETE" && p.ends_with("uploadId=id%2B1")),
+            "no abort in {:?}",
+            seen.iter().map(|(m, p, _)| (m, p)).collect::<Vec<_>>()
+        );
+        assert!(
+            !seen
+                .iter()
+                .any(|(m, p, _)| m == "POST" && p.contains("uploadId="))
+        );
+    }
+
+    /// An object from the bucket is outside input: a download lands in a file byte for byte,
+    /// and an object larger than the limit fails, also when the bucket sends no length.
+    #[tokio::test]
+    async fn a_download_lands_in_a_file_and_stops_at_the_limit() {
+        let mut server = mockito::Server::new_async().await;
+        let content: Vec<u8> = (0..3 * 1024 * 1024).map(|_| rand::random::<u8>()).collect();
+        let sent = content.clone();
+        server
+            .mock("GET", "/bucket/sized")
+            .with_body(content.clone())
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/bucket/chunked")
+            .with_chunked_body(move |w| w.write_all(&sent))
+            .create_async()
+            .await;
+        let (dir, _, _) = random_file(0).await;
+        let client = crate::cdn::fetch::build_client().await.unwrap();
+        let config = config(&format!("{}/bucket", server.url()), "");
+        let dest = dir.0.join("out");
+        let size = download_to_file(&client, &config, "sized", (&dest, u64::MAX))
+            .await
+            .unwrap();
+        assert_eq!(size, content.len() as u64);
+        assert!(tokio::fs::read(&dest).await.unwrap() == content);
+        for key in ["sized", "chunked"] {
+            let err = download_to_file(&client, &config, key, (&dest, 1024 * 1024))
+                .await
+                .unwrap_err();
+            assert!(format!("{err:#}").contains("larger than"), "{key}: {err:#}");
+        }
     }
 }
