@@ -2050,6 +2050,8 @@ r3 <server> backup list-all
 r3 <server> backup overview
 r3 <server> backup run <database-id>
 r3 <server> backup s3-list [--database <name>]
+r3 <server> backup s3-download --key <key> [--output db.sql.gz]
+r3 <server> backup download <database-id> <backup-id> [--output db.sql.gz]
 r3 <server> backup s3-restore <key> [--target-db <id> | --new-name <name> [--engine <engine>]]
 
 # Çoklu Düğüm Agent Hedefleri

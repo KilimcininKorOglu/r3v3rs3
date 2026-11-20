@@ -767,6 +767,23 @@ pub enum BackupCommand {
         #[arg(long)]
         database: Option<String>,
     },
+    /// Saves a stored backup of a database to a local file.
+    Download {
+        database_id: String,
+        backup_id: String,
+        /// The file to write; default: `<backup_id>`.
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Saves an S3 backup snapshot to a local file.
+    S3Download {
+        /// The S3 object key from `backup s3-list`.
+        #[arg(long)]
+        key: String,
+        /// The file to write; default: the last part of the key.
+        #[arg(long)]
+        output: Option<String>,
+    },
     /// Restores a database from an S3 snapshot, into a database or into a new one.
     S3Restore {
         /// The S3 object key from `backup s3-list`.
@@ -2398,6 +2415,23 @@ async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::
         | BackupCommand::Run { .. }
         | BackupCommand::S3List { .. }
         | BackupCommand::S3Restore { .. }) => run_backup_all(api, all).await,
+        BackupCommand::Download {
+            database_id,
+            backup_id,
+            output,
+        } => {
+            let path = format!("/api/databases/{database_id}/backups/{backup_id}/download");
+            api.download_to(&path, &output.unwrap_or(backup_id)).await
+        }
+        BackupCommand::S3Download { key, output } => {
+            let name = key.rsplit('/').next().filter(|n| !n.is_empty());
+            let target = output
+                .or_else(|| name.map(str::to_string))
+                .context("--key names no file; give --output")?;
+            let query = query_string(&[("key", Some(key))]);
+            api.download_to(&format!("/api/databases/s3/download?{query}"), &target)
+                .await
+        }
     }
 }
 

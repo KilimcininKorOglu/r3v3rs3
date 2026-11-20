@@ -2945,6 +2945,37 @@ async fn assert_cli_volumes(binary: &Path, addr: &SocketAddr, token: &str) -> an
     Ok(())
 }
 
+/// `r3 backup download` and `r3 backup s3-download` reach the binary backup downloads that only
+/// the CLI offers (OpenAPI `download_database_backup`, `download_s3_database_backup`): a missing
+/// database is not found and an unset S3 bucket is reported.
+#[tokio::test]
+async fn the_backup_downloads_are_reachable_from_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("cli-backup-downloads")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let token = access_token(&addr).await?;
+        let binary = client_binary()?;
+        let out = run_client(
+            &binary,
+            &addr,
+            &token,
+            &["backup", "download", MISSING_DB, "b1"],
+        )
+        .await?;
+        assert_not_found("backup download", &String::from_utf8_lossy(&out.stderr));
+        let args = ["backup", "s3-download", "--key", "db/b1.sql.gz"];
+        let out = run_client(&binary, &addr, &token, &args).await?;
+        assert!(
+            !out.status.success(),
+            "a download without an S3 bucket succeeded"
+        );
+        assert_s3_not_configured("backup s3-download", &String::from_utf8_lossy(&out.stderr));
+        Ok(())
+    })
+    .await
+}
+
 /// Volume backup and archive operations are reachable from MCP and the CLI.
 #[tokio::test]
 async fn the_volume_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
