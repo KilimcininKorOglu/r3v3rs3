@@ -140,6 +140,44 @@ pub struct IdJsonRequestParams {
     pub request: serde_json::Map<String, serde_json::Value>,
 }
 
+/// The filters of `get_traffic` and `get_traffic_geo`.
+#[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+pub struct TrafficQueryParams {
+    /// Only entries of this proxy.
+    pub resource_id: Option<String>,
+    /// Only entries with this HTTP status.
+    pub status: Option<u16>,
+    /// Only entries whose host, path or client holds this text.
+    pub search: Option<String>,
+    /// The most entries to return.
+    pub limit: Option<usize>,
+    /// Only entries newer than this entry id.
+    pub since_id: Option<u64>,
+    /// Only entries from this ISO country code.
+    pub country: Option<String>,
+}
+
+impl TrafficQueryParams {
+    fn query(self) -> Result<r3v3rs3_api::traffic::AccessLogQuery, ErrorData> {
+        let resource_id = self.resource_id.as_deref().map(parse_id).transpose()?;
+        Ok(r3v3rs3_api::traffic::AccessLogQuery {
+            resource_id,
+            status: self.status,
+            search: self.search,
+            limit: self.limit,
+            since_id: self.since_id,
+            country: self.country,
+        })
+    }
+}
+
+/// The arguments of `get_traffic_entry`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TrafficEntryParams {
+    /// The id of the access log entry.
+    pub id: u64,
+}
+
 /// The arguments of `upload_cert`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UploadCertParams {
@@ -4238,6 +4276,169 @@ impl McpServer {
         )
         .await
         .map_err(any_error)?;
+        json_result(result.0)
+    }
+
+    /// Read the HTTP access log.
+    #[tool(
+        description = "List recent HTTP access log entries, newest first. Optional filters: `resource_id` (a proxy id), `status`, `search` (a text in the host, path or client), `country` (ISO code), `since_id` and `limit`. An account with a proxy list sees only its proxies. Read-only."
+    )]
+    async fn get_traffic(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<TrafficQueryParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let query = params.query()?;
+        let entries = super::traffic::get(axum::Extension(caller), axum::extract::Query(query))
+            .await
+            .map_err(any_error)?;
+        json_result(entries.0)
+    }
+
+    /// Read one access log entry.
+    #[tool(
+        description = "Show the access log entry `id` with its request and response headers. Read-only."
+    )]
+    async fn get_traffic_entry(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<TrafficEntryParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let entry =
+            super::traffic::get_entry(axum::Extension(caller), axum::extract::Path(params.id))
+                .await
+                .map_err(any_error)?;
+        json_result(entry.0)
+    }
+
+    /// Count the access log by country.
+    #[tool(
+        description = "Count recent requests by client country. Takes the same filters as `get_traffic`. Read-only."
+    )]
+    async fn get_traffic_geo(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<TrafficQueryParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let query = params.query()?;
+        let geo = super::traffic::geo(axum::Extension(caller), axum::extract::Query(query))
+            .await
+            .map_err(any_error)?;
+        json_result(geo.0)
+    }
+
+    /// Send a captured request again.
+    #[tool(
+        description = "Send an HTTP request and return the answer. `request` holds `method`, `url`, `headers` (a list of `name`/`value`), optional `body` and `timeout_ms`. Private and loopback addresses are refused unless `allow_internal` is true. Needs a token with the edit scope and an admin account."
+    )]
+    async fn replay_traffic_request(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request: r3v3rs3_api::traffic::RequestReplayRequest = json_arg(params.request)?;
+        let answer = super::traffic::replay(axum::Extension(caller), axum::Json(request))
+            .await
+            .map_err(any_error)?;
+        json_result(answer.0)
+    }
+
+    /// Read the anomaly alert rules.
+    #[tool(
+        description = "Show the anomaly alert rules: `enabled` and the thresholds `max_p99_latency_ms`, `max_5xx_percent`, `max_request_rate_rps` and `max_event_loop_lag_ms`. Read-only."
+    )]
+    async fn get_anomaly_rules(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let rules = super::anomaly::get_rules(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(rules.0)
+    }
+
+    /// Replace the anomaly alert rules.
+    #[tool(
+        description = "Replace the anomaly alert rules with `request` (the fields that `get_anomaly_rules` returns; a missing threshold turns that alert off). Needs a token with the edit scope and an account that may edit."
+    )]
+    async fn update_anomaly_rules(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let rules: r3v3rs3_api::anomaly::AnomalyAlertRules = json_arg(params.request)?;
+        let stored = super::anomaly::update_rules(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(rules),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(stored.0)
+    }
+
+    /// Dismiss the current anomaly alerts.
+    #[tool(
+        description = "Dismiss every current anomaly alert. New anomalies raise new alerts. Needs a token with the edit scope and an account that may edit."
+    )]
+    async fn dismiss_anomalies(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        super::anomaly::dismiss(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(serde_json::json!({ "dismissed": true }))
+    }
+
+    /// Grade a set of response header rules.
+    #[tool(
+        description = "Grade the response header rules `request.rules` (the `header_rules` of a proxy) against the OWASP secure header recommendations: returns `score`, `grade`, one item per header and the matching profile. Read-only."
+    )]
+    async fn analyze_security_headers(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let body: r3v3rs3_api::security_headers::AnalyzeHeadersRequest = json_arg(params.request)?;
+        let audit =
+            super::security_headers::analyze_headers(axum::Extension(caller), axum::Json(body))
+                .await
+                .map_err(any_error)?;
+        json_result(audit.0)
+    }
+
+    /// Show where a proxy would send a request.
+    #[tool(
+        description = "Run a request through a proxy definition without sending it. `request` holds `proxy` (an HTTP proxy as in `add_proxy`), `url`, optional `method` and `client_ip`. Returns whether a route matched, the route, the upstream URL or the redirect. Read-only."
+    )]
+    async fn dry_run_proxy(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let request: r3v3rs3_api::proxy::ProxyDryRunRequest = json_arg(params.request)?;
+        let result = super::proxies::dry_run(axum::Extension(caller), axum::Json(request))
+            .await
+            .map_err(any_error)?;
         json_result(result.0)
     }
 

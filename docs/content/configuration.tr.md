@@ -1870,7 +1870,7 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 
 | Kategori | Araçlar ve İşlemler | Açıklama |
 |---|---|---|
-| **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database`, `get_server_upgrade_status`, `run_server_upgrade` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları, fail2ban kaba kuvvet IP engeli, tehdit otomatik karantina yönetimi, otomatik GeoIP MMDB veritabanı yönetimi ve kesintisiz canlı sunucu kendini güncelleme işlemi. |
+| **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database`, `get_server_upgrade_status`, `run_server_upgrade`, `get_traffic`, `get_traffic_entry`, `get_traffic_geo`, `replay_traffic_request`, `get_anomaly_rules`, `update_anomaly_rules`, `dismiss_anomalies`, `analyze_security_headers`, `dry_run_proxy` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları, fail2ban kaba kuvvet IP engeli, tehdit otomatik karantina yönetimi, otomatik GeoIP MMDB veritabanı yönetimi ve kesintisiz canlı sunucu kendini güncelleme işlemi. |
 | **Portlar** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Dinleyici port yaşam döngüsü: dinleme adresleri, TLS sonlandırma ayarları, soket yeniden başlatma/yenileme ve sunucu ağ arayüzlerini listeleme. |
 | **Proxy'ler** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | HTTP, WebSocket, TCP, UDP, TLS ve HTTP/3 için ters proxy yapılandırması, upstream sağlık durumu ve yol bazlı önbellek temizleme (purge). |
 | **Sertifikalar ve ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials`, `get_dns_credential`, `add_dns_credential`, `update_dns_credential`, `delete_dns_credential`, `get_ct_monitor_config`, `update_ct_monitor_config`, `get_ct_monitor_status`, `list_ct_log_entries`, `check_ct_logs_now`, `dismiss_ct_alert`, `update_acme`, `self_sign_cert`, `upload_cert`, `download_cert` (yalnız zincir, private key asla dönmez), `delete_certs`, `verify_cname` | TLS sertifikası inceleme, alan adı kapsam kontrolü, otomatik ACME sertifika talepleri (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegasyonu, anlık sertifika yenileme, DNS sağlayıcı kimlik bilgileri yönetimi ve Sertifika Şeffaflığı sahte sertifika denetimi. |
@@ -2083,6 +2083,15 @@ r3 <server> traffic connections close <connection-id>
 r3 <server> traffic priority
 r3 <server> traffic geo
 r3 <server> traffic replay <log-entry-id>
+r3 <server> traffic list [--resource-id <proxy-id>] [--status 502] [--search /api] [--country DE] [--limit 50]
+r3 <server> traffic get <log-entry-id>
+r3 <server> traffic replay-request <request.json|yaml|->
+r3 <server> security anomalies
+r3 <server> security anomaly-rules
+r3 <server> security set-anomaly-rules <rules.json|yaml|->
+r3 <server> security dismiss-anomalies
+r3 <server> security analyze-headers <rules.json|yaml|->
+r3 <server> proxy dry-run <request.json|yaml|->
 
 # Güvenlik, Yasaklı & Karantinalı IP'ler
 r3 <server> security banned-ips

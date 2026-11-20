@@ -202,6 +202,9 @@ pub enum ProxyCommand {
         #[arg(long)]
         adaptive_concurrency: Option<bool>,
     },
+    /// Shows where a proxy definition would send a request, without sending it. The payload
+    /// (inline JSON/YAML, a file path, or stdin '-') holds `proxy`, `url`, `method` and `client_ip`.
+    DryRun { payload: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -255,6 +258,28 @@ pub enum TrafficCommand {
     Geo,
     /// Replays a captured traffic log entry.
     Replay { id: u64 },
+    /// Lists recent access log entries as JSON, newest first.
+    #[command(alias = "ls")]
+    List {
+        /// Only entries of this proxy.
+        #[arg(long)]
+        resource_id: Option<String>,
+        #[arg(long)]
+        status: Option<u16>,
+        /// Only entries whose host, path or client holds this text.
+        #[arg(long)]
+        search: Option<String>,
+        /// Only entries from this ISO country code.
+        #[arg(long)]
+        country: Option<String>,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Shows one access log entry.
+    Get { id: u64 },
+    /// Sends an HTTP request from inline JSON/YAML, a file path, or stdin ('-'): `method`,
+    /// `url`, `headers`, `body`, `timeout_ms`, `allow_internal`.
+    ReplayRequest { payload: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -952,6 +977,17 @@ pub enum SecurityCommand {
     /// Show or change the host firewall table (nftables) that r3v3rs3 keeps.
     #[command(subcommand)]
     Firewall(FirewallCommand),
+    /// Shows the current system anomalies.
+    Anomalies,
+    /// Shows the anomaly alert rules.
+    AnomalyRules,
+    /// Replaces the anomaly alert rules from inline JSON/YAML, a file path, or stdin ('-').
+    SetAnomalyRules { payload: String },
+    /// Dismisses every current anomaly alert.
+    DismissAnomalies,
+    /// Grades response header rules against the OWASP secure header recommendations. The
+    /// payload (inline JSON/YAML, a file path, or stdin '-') holds `rules`.
+    AnalyzeHeaders { payload: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1412,6 +1448,34 @@ async fn run_traffic(api: &api_client::ApiClient, cmd: TrafficCommand) -> anyhow
         TrafficCommand::Priority => api.get_traffic_priority_stats().await,
         TrafficCommand::Geo => api.traffic_geo().await,
         TrafficCommand::Replay { id } => api.traffic_replay(id).await,
+        TrafficCommand::List {
+            resource_id,
+            status,
+            search,
+            country,
+            limit,
+        } => {
+            let mut query = url::form_urlencoded::Serializer::new(String::new());
+            let pairs = [
+                ("resource_id", resource_id),
+                ("status", status.map(|s| s.to_string())),
+                ("search", search),
+                ("country", country),
+                ("limit", limit.map(|l| l.to_string())),
+            ];
+            for (key, value) in pairs {
+                if let Some(value) = value {
+                    query.append_pair(key, &value);
+                }
+            }
+            api.print_get(&format!("/api/traffic?{}", query.finish()))
+                .await
+        }
+        TrafficCommand::Get { id } => api.print_get(&format!("/api/traffic/{id}")).await,
+        TrafficCommand::ReplayRequest { payload } => {
+            let body = api_client::load_payload(&payload)?;
+            api.print_post("/api/traffic/replay", &body).await
+        }
     }
 }
 
@@ -1588,6 +1652,10 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
             inject_header,
             adaptive_concurrency,
         } => run_proxy_priority(api, &id, enable, inject_header, adaptive_concurrency).await,
+        ProxyCommand::DryRun { payload } => {
+            let body = api_client::load_payload(&payload)?;
+            api.print_post("/api/proxies/dry-run", &body).await
+        }
     }
 }
 
@@ -2174,6 +2242,32 @@ async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyh
             enabled,
             extra_ports,
         }) => api.set_firewall(enabled, extra_ports.as_deref()).await,
+        other => run_security_checks(api, other).await,
+    }
+}
+
+/// The security commands for anomalies and response header analysis.
+async fn run_security_checks(
+    api: &api_client::ApiClient,
+    cmd: SecurityCommand,
+) -> anyhow::Result<()> {
+    let rules_path = "/api/system/anomalies/rules";
+    match cmd {
+        SecurityCommand::Anomalies => api.print_get("/api/system/anomalies").await,
+        SecurityCommand::AnomalyRules => api.print_get(rules_path).await,
+        SecurityCommand::SetAnomalyRules { payload } => {
+            api.print_put(rules_path, &api_client::load_payload(&payload)?)
+                .await
+        }
+        SecurityCommand::DismissAnomalies => {
+            api.print_post("/api/system/anomalies/dismiss", &serde_json::json!({}))
+                .await
+        }
+        SecurityCommand::AnalyzeHeaders { payload } => {
+            let body = api_client::load_payload(&payload)?;
+            api.print_post("/api/security/headers/analyze", &body).await
+        }
+        other => anyhow::bail!("{other:?} is not a security check command"),
     }
 }
 

@@ -2400,6 +2400,186 @@ async fn the_certificate_operations_are_reachable_from_mcp_and_the_cli() -> anyh
     .await
 }
 
+/// A proxy that sends `/api` of app.example.test to a closed local port.
+fn dry_run_request() -> Value {
+    json!({
+        "proxy": { "vhosts": ["app.example.test"],
+            "routes": [{ "path": "/api", "servers": [{ "url": "http://127.0.0.1:9" }] }] },
+        "url": "http://app.example.test/api/items"
+    })
+}
+
+/// A replay to a loopback address without `allow_internal`, which must be refused (OWASP
+/// SSRF prevention).
+fn loopback_replay() -> Value {
+    json!({ "method": "GET", "url": "http://127.0.0.1:9/", "headers": [] })
+}
+
+/// The traffic tools filter the access log, do not find a missing entry and refuse a replay to
+/// a loopback address (OpenAPI `get_traffic`, `get_traffic_entry`, `get_traffic_geo`,
+/// `replay_traffic_request`).
+async fn assert_mcp_traffic(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let filter = json!({ "resource_id": MISSING_DB });
+    let listed = mcp_call(client, "get_traffic", filter.clone()).await?;
+    assert_eq!(
+        serde_json::from_str::<Value>(&listed)?,
+        json!([]),
+        "{listed}"
+    );
+    mcp_call(client, "get_traffic_geo", filter).await?;
+    let missing = mcp_call(client, "get_traffic_entry", json!({ "id": u64::MAX }))
+        .await
+        .err();
+    assert_not_found(
+        "get_traffic_entry",
+        &missing.map(|e| e.to_string()).unwrap_or_default(),
+    );
+    let replay = json!({ "request": loopback_replay() });
+    let refused = mcp_call(client, "replay_traffic_request", replay).await;
+    assert!(refused.is_err(), "a replay to a loopback address was sent");
+    assert_reached(
+        "replay_traffic_request",
+        &refused.map_err(|e| e.to_string()),
+    );
+    Ok(())
+}
+
+/// The anomaly rule tools store the rules they are given, the header analysis reports a missing
+/// Strict-Transport-Security header (OWASP Secure Headers), and the dry run matches the route
+/// (OpenAPI `get_anomaly_rules`, `update_anomaly_rules`, `dismiss_anomalies`,
+/// `analyze_security_headers`, `dry_run_proxy`).
+async fn assert_mcp_checks(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let rules = json!({ "enabled": true, "max_p99_latency_ms": 1234, "max_5xx_percent": 7,
+        "max_request_rate_rps": null, "max_event_loop_lag_ms": null });
+    mcp_call(client, "update_anomaly_rules", json!({ "request": rules })).await?;
+    let stored = mcp_call(client, "get_anomaly_rules", json!({})).await?;
+    assert!(
+        stored.contains("1234") && stored.contains("\"max_5xx_percent\": 7"),
+        "{stored}"
+    );
+    mcp_call(client, "dismiss_anomalies", json!({})).await?;
+    let audit = mcp_call(
+        client,
+        "analyze_security_headers",
+        json!({ "request": { "rules": [] } }),
+    )
+    .await?;
+    assert!(
+        audit.to_lowercase().contains("strict-transport-security"),
+        "{audit}"
+    );
+    let run = mcp_call(
+        client,
+        "dry_run_proxy",
+        json!({ "request": dry_run_request() }),
+    )
+    .await?;
+    assert!(
+        run.contains("\"matched\": true") && run.contains("127.0.0.1:9"),
+        "{run}"
+    );
+    Ok(())
+}
+
+/// `r3 traffic`, `r3 security` and `r3 proxy dry-run` reach the same endpoints.
+async fn assert_cli_traffic(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
+    let listed = cli_ok(
+        binary,
+        addr,
+        token,
+        &["traffic", "list", "--resource-id", MISSING_DB],
+    )
+    .await?;
+    assert_eq!(
+        serde_json::from_str::<Value>(&listed)?,
+        json!([]),
+        "{listed}"
+    );
+    let out = run_client(
+        binary,
+        addr,
+        token,
+        &["traffic", "get", "18446744073709551615"],
+    )
+    .await?;
+    assert_not_found("traffic get", &String::from_utf8_lossy(&out.stderr));
+    let out = run_client(
+        binary,
+        addr,
+        token,
+        &["traffic", "replay-request", &loopback_replay().to_string()],
+    )
+    .await?;
+    assert!(
+        !out.status.success(),
+        "a replay to a loopback address was sent"
+    );
+    assert_reached(
+        "traffic replay-request",
+        &Err(String::from_utf8_lossy(&out.stderr).to_string()),
+    );
+    assert_cli_security_checks(binary, addr, token).await
+}
+
+/// `r3 security` stores anomaly rules and grades headers, and `r3 proxy dry-run` matches the
+/// route.
+async fn assert_cli_security_checks(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+) -> anyhow::Result<()> {
+    let rules = json!({ "enabled": true, "max_p99_latency_ms": 4321 });
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["security", "set-anomaly-rules", &rules.to_string()],
+    )
+    .await?;
+    let stored = cli_ok(binary, addr, token, &["security", "anomaly-rules"]).await?;
+    assert!(stored.contains("4321"), "{stored}");
+    cli_ok(binary, addr, token, &["security", "anomalies"]).await?;
+    cli_ok(binary, addr, token, &["security", "dismiss-anomalies"]).await?;
+    let audit = cli_ok(
+        binary,
+        addr,
+        token,
+        &["security", "analyze-headers", "{\"rules\":[]}"],
+    )
+    .await?;
+    assert!(
+        audit.to_lowercase().contains("strict-transport-security"),
+        "{audit}"
+    );
+    let run = cli_ok(
+        binary,
+        addr,
+        token,
+        &["proxy", "dry-run", &dry_run_request().to_string()],
+    )
+    .await?;
+    assert!(run.contains("\"matched\": true"), "{run}");
+    Ok(())
+}
+
+/// Traffic, anomaly, header analysis and dry-run operations are reachable from MCP and the CLI.
+#[tokio::test]
+async fn the_traffic_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-traffic")?;
+    with_admin_config(&dir.0, mcp_config(), |addr| async move {
+        let token = access_token(&addr).await?;
+        let client = mcp_client(addr, &token).await?;
+        assert_mcp_traffic(&client).await?;
+        assert_mcp_checks(&client).await?;
+        assert_cli_traffic(&client_binary()?, &addr, &token).await
+    })
+    .await
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
