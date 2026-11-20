@@ -57,6 +57,9 @@ pub struct PortStatus {
     #[schema(value_type = Option<u64>)]
     #[schemars(with = "Option<u64>")]
     pub started_at: Option<SystemTime>,
+    /// Whether the host firewall table opens the port; absent when r3v3rs3 does not manage it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firewall: Option<crate::firewall::PortFirewall>,
 }
 
 #[derive(

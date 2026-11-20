@@ -53,6 +53,44 @@ impl Transport {
     }
 }
 
+/// Whether the host firewall lets clients outside the host reach a port.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PortFirewall {
+    /// The table opens the port and no other firewall was found.
+    Open,
+    /// The table opens the port, but another firewall of the host can still drop it.
+    OpenWithWarnings,
+    /// The table does not open the port yet, for example after a failed update.
+    Closed,
+}
+
+impl FirewallStatus {
+    /// The state of a port that listens on `listen`; `None` when r3v3rs3 does not manage the
+    /// firewall or the port listens only on a loopback address.
+    pub fn port_state(&self, listen: &crate::multiaddr::Multiaddr) -> Option<PortFirewall> {
+        if !self.enabled || listen.ip_addr().is_ok_and(|ip| ip.is_loopback()) {
+            return None;
+        }
+        let transport = match listen.is_udp() || listen.is_quic() {
+            true => Transport::Udp,
+            false => Transport::Tcp,
+        };
+        let port = listen.port().ok()?;
+        let open = self
+            .ports
+            .iter()
+            .any(|p| p.transport == transport && (p.first..=p.last).contains(&port));
+        Some(match (open, self.warnings.is_empty()) {
+            (false, _) => PortFirewall::Closed,
+            (true, true) => PortFirewall::Open,
+            (true, false) => PortFirewall::OpenWithWarnings,
+        })
+    }
+}
+
 /// One port or an inclusive port range of one protocol, written `tcp/443` or `udp/49160-49240`.
 /// A field of this type names `#[schema(value_type = String)]`, because it travels as text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, schemars::JsonSchema)]
@@ -171,6 +209,37 @@ mod tests {
         ] {
             assert!(bad.parse::<HostPort>().is_err(), "{bad:?}");
         }
+    }
+
+    /// A port is open only when the table holds its protocol and number; another firewall
+    /// turns open into a warning, and an unmanaged firewall or a loopback port reports nothing.
+    #[test]
+    fn a_port_is_open_only_for_its_own_protocol_and_number() {
+        let addr = |text: &str| text.parse::<crate::multiaddr::Multiaddr>().unwrap();
+        let mut status = FirewallStatus {
+            enabled: true,
+            ports: vec![
+                "tcp/443".parse().unwrap(),
+                "udp/49160-49240".parse().unwrap(),
+            ],
+            ..Default::default()
+        };
+        let https = addr("/ip4/0.0.0.0/tcp/443/https");
+        assert_eq!(status.port_state(&https), Some(PortFirewall::Open));
+        let quic = addr("/ip4/0.0.0.0/udp/443/quic/http");
+        assert_eq!(status.port_state(&quic), Some(PortFirewall::Closed));
+        let relay = addr("/ip4/0.0.0.0/udp/49200");
+        assert_eq!(status.port_state(&relay), Some(PortFirewall::Open));
+        let outside = addr("/ip4/0.0.0.0/udp/49241");
+        assert_eq!(status.port_state(&outside), Some(PortFirewall::Closed));
+        assert_eq!(status.port_state(&addr("/ip4/127.0.0.1/tcp/443")), None);
+        status.warnings.push("firewalld is active".into());
+        assert_eq!(
+            status.port_state(&https),
+            Some(PortFirewall::OpenWithWarnings)
+        );
+        status.enabled = false;
+        assert_eq!(status.port_state(&https), None);
     }
 
     #[test]

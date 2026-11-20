@@ -1285,7 +1285,7 @@ impl ServerState {
             for (entry, ctx) in self.ports.entries().cloned().zip(self.ports.as_slice()) {
                 let _ = self.br_sender.send(ServerEvent::PortStatusUpdated {
                     id: entry.id,
-                    status: *ctx.status(),
+                    status: self.port_status(ctx),
                 });
             }
         }
@@ -1304,6 +1304,13 @@ impl ServerState {
             .filter(|entry| entry.port.active)
             .map(|entry| &entry.port.listen);
         firewall.update(&self.config.firewall, listens, was_enabled);
+    }
+
+    /// The status of a port with the state of its host firewall hole.
+    pub fn port_status(&self, port: &PortContext) -> r3v3rs3_api::port::PortStatus {
+        let mut status = *port.status();
+        status.firewall = self.firewall_status().port_state(&port.entry().port.listen);
+        status
     }
 
     /// The state of the host firewall table, or `None` in a worker.

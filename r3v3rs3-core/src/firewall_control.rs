@@ -134,8 +134,13 @@ async fn run(
             Ok(()) => info!(enabled, ports = ports.len(), "updated the firewall table"),
             Err(err) => error!(%err, "failed to update the firewall table"),
         }
+        let warnings = match enabled {
+            true => crate::firewall_conflicts::detect().await,
+            false => Vec::new(),
+        };
         if let Ok(mut current) = status.lock() {
             *current = next_status(&current, enabled, ports, result);
+            current.warnings = warnings;
         }
     }
 }

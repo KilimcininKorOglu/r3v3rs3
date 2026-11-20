@@ -21,7 +21,7 @@ impl RpcMethod for GetPortList {
             .iter()
             .map(|port| {
                 let mut entry = port.entry().clone();
-                entry.status = Some(*port.status());
+                entry.status = Some(state.port_status(port));
                 entry
             })
             .collect();
@@ -42,7 +42,7 @@ impl RpcMethod for GetPort {
             .get(self.id)
             .map(|port| {
                 let mut entry = port.entry().clone();
-                entry.status = Some(*port.status());
+                entry.status = Some(state.port_status(port));
                 entry
             })
             .ok_or(Error::IdNotFound {
@@ -62,7 +62,7 @@ impl RpcMethod for GetPortStatus {
         state
             .ports
             .get(self.id)
-            .map(|port| *port.status())
+            .map(|port| state.port_status(port))
             .ok_or(Error::IdNotFound {
                 id: self.id.to_string(),
             })

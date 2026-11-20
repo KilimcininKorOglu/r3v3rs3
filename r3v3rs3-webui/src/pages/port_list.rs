@@ -12,6 +12,7 @@ use crate::pages::Route;
 use crate::store::{PortStore, SessionStore};
 use gloo_net::http::Request;
 use r3v3rs3_api::{
+    firewall::PortFirewall,
     i18n::Locale,
     id::ShortId,
     port::{PortEntry, PortState, SocketState},
@@ -287,7 +288,15 @@ fn port_row(
             html! { <>{title}</> },
             html! { <>{entry.port.listen.protocol_name()}</> },
             html! { <>{addr}</> },
-            status_badge(locale.t(status_key), color),
+            html! {
+                <span class="inline-flex flex-wrap gap-2">
+                    { status_badge(locale.t(status_key), color) }
+                    { status.firewall.map(|state| {
+                        let (key, color) = firewall_state(state);
+                        status_badge(locale.t(key), color)
+                    }).unwrap_or_default() }
+                </span>
+            },
             active_toggle(entry.port.active, !can_edit, onchange),
         ],
         actions: html! {
@@ -326,6 +335,15 @@ fn port_state(state: &PortState) -> (&'static str, &'static str) {
         return ("state.tls_error", "bg-red-500");
     }
     socket_state(&state.socket)
+}
+
+/// Returns the translation key and the color of the host firewall state of a port.
+fn firewall_state(state: PortFirewall) -> (&'static str, &'static str) {
+    match state {
+        PortFirewall::Open => ("ports.firewall_open", "bg-green-500"),
+        PortFirewall::OpenWithWarnings => ("ports.firewall_warning", "bg-amber-500"),
+        PortFirewall::Closed => ("ports.firewall_closed", "bg-red-500"),
+    }
 }
 
 /// Returns the translation key and the color of the socket state.
