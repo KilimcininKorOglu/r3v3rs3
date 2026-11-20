@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.0] - 2026-11-20
+
+### Added
+- TCP and UDP ports can listen on a port range such as `/udp/49160-49240` (at most 16384 ports). Each port goes to the upstream port at the same position, and the upstream servers need a range of the same size.
+- r3v3rs3 keeps an nftables table (`inet r3v3rs3_tproxy`) and a policy route that send a range to one socket with TPROXY; a UDP reply leaves from the port the client sent to.
+- Transparent mode: a TCP, TCP over TLS or UDP port can open its upstream connections from the client address, so the upstream (a TURN server, for example) sees the real client. A loopback upstream is refused on such a port.
+- MCP tool `set_port_transparent` and CLI command `r3 port set-transparent`.
+- The WebUI port form takes a port range, and the TCP and UDP proxy forms take an upstream port range.
+
+### Fixed
+- `r3 port set-early-data --enable false` and `r3 app generate-env --save false` are accepted; before, both options could only be turned on, and a bare `--enable` or `--save` still works.
+
+### Changed
+- `make test-tproxy` and the CI `test-docker` job run the TPROXY tests as root in a network namespace.
+- Documentation of port ranges and transparent mode.
+
 ## [3.5.4] - 2026-11-20
 
 ### Added
