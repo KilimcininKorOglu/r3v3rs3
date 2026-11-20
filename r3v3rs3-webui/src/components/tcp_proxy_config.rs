@@ -9,7 +9,7 @@ use super::port_config::{find_option, option_list};
 use crate::i18n::use_locale;
 use r3v3rs3_api::i18n::Locale;
 use r3v3rs3_api::id::ShortId;
-use r3v3rs3_api::multiaddr::Multiaddr;
+use r3v3rs3_api::multiaddr::{Multiaddr, PortSpan};
 use r3v3rs3_api::port::UpstreamServer;
 use r3v3rs3_api::proxy::TcpProxy;
 use r3v3rs3_api::proxy_protocol::ProxyProtocolVersion;
@@ -42,16 +42,18 @@ const SEND_PROXY_PROTOCOL: [(Option<ProxyProtocolVersion>, &str, &str); 3] = [
 #[derive(Clone, PartialEq, Debug)]
 pub(super) struct ServerForm {
     host: String,
-    port: u16,
+    /// One port, or a range (`50000-50080`) for a proxy on a range port.
+    port: String,
     tls: bool,
     weight: String,
 }
 
 impl ServerForm {
     fn new(server: &UpstreamServer) -> Self {
+        let port = server.addr.port_range().map(|span| span.to_string());
         Self {
             host: server.addr.host().unwrap_or_default(),
-            port: server.addr.port().unwrap_or(0),
+            port: port.unwrap_or_default(),
             tls: server.addr.is_tls(),
             weight: server.weight.to_string(),
         }
@@ -60,7 +62,7 @@ impl ServerForm {
     fn example() -> Self {
         Self {
             host: "example.com".into(),
-            port: 8080,
+            port: "8080".into(),
             tls: false,
             weight: "1".into(),
         }
@@ -70,7 +72,10 @@ impl ServerForm {
     /// `/dns/example.com/tcp/443/tls`. `None` when the host or the port is invalid.
     fn addr(&self, protocol: &str) -> Option<Multiaddr> {
         let host = self.host.trim();
-        if host.is_empty() || self.port == 0 {
+        let port = self.port.trim();
+        // Port 0 can only be listened on; a server needs a real port.
+        let valid = PortSpan::parse(port).is_some_and(|span| span.first != 0);
+        if host.is_empty() || !valid {
             return None;
         }
         let host = if let Ok(addr) = host.parse::<Ipv4Addr>() {
@@ -81,7 +86,7 @@ impl ServerForm {
             format!("/dns/{host}")
         };
         let tls = if self.tls { "/tls" } else { "" };
-        format!("{host}/{protocol}/{}{tls}", self.port).parse().ok()
+        format!("{host}/{protocol}/{port}{tls}").parse().ok()
     }
 }
 
@@ -190,7 +195,7 @@ fn server_view(
         server.host = input_element(&event).value();
     });
     let port_onchange = item_update(servers, index, |server, event: Event| {
-        server.port = input_element(&event).value().parse().unwrap_or(0);
+        server.port = input_element(&event).value();
     });
     let tls_onchange = item_update(servers, index, |server, event: Event| {
         server.tls = input_element(&event).checked();
@@ -205,7 +210,7 @@ fn server_view(
             <input type="text" autocapitalize="off" placeholder="example.com" onchange={host_onchange} value={server.host.clone()} class={INPUT_CLASS} />
 
             <label class={LABEL_CLASS}>{locale.t("common.port")}</label>
-            <input type="number" placeholder="8080" onchange={port_onchange} value={server.port.to_string()} max="65535" min="1" class={INPUT_CLASS} />
+            <input type="text" inputmode="numeric" placeholder="8080" onchange={port_onchange} value={server.port.clone()} class={INPUT_CLASS} />
 
             <label class={LABEL_CLASS}>{locale.t("proxy_form.weight")}</label>
             <input type="number" placeholder="1" onchange={weight_onchange} value={server.weight.clone()} max="65535" min="0" class={INPUT_CLASS} />
@@ -312,7 +317,7 @@ pub(super) mod tests {
     pub(in crate::components) fn server(host: &str, port: u16, tls: bool) -> ServerForm {
         ServerForm {
             host: host.into(),
-            port,
+            port: port.to_string(),
             tls,
             weight: "1".into(),
         }
@@ -340,6 +345,23 @@ pub(super) mod tests {
         }
         assert_eq!(server(" ", 443, false).addr("tcp"), None);
         assert_eq!(server("example.com", 0, false).addr("tcp"), None);
+    }
+
+    /// A proxy on a range port needs an upstream range, so the server form takes one, reads it
+    /// back from a saved proxy, and refuses a reversed range and a range on a TLS server.
+    #[test]
+    fn server_form_takes_an_upstream_range() {
+        let mut form = server("turn.example.com", 0, false);
+        form.port = "50000-50080".into();
+        let addr = form.addr("udp").unwrap();
+        assert_eq!(addr.to_string(), "/dns/turn.example.com/udp/50000-50080");
+        assert_eq!(ServerForm::new(&UpstreamServer::new(addr)), form);
+
+        form.port = "50080-50000".into();
+        assert_eq!(form.addr("udp"), None);
+        form.port = "50000-50080".into();
+        form.tls = true;
+        assert_eq!(form.addr("tcp"), None);
     }
 
     #[test]
