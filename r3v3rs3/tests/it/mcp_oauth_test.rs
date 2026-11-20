@@ -2729,6 +2729,93 @@ async fn the_grpc_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Res
     .await
 }
 
+/// The platform tools rotate the master key, list the MCP sessions (the caller's own session
+/// among them) and refuse to revoke a missing one, and return the server facts, the Prometheus
+/// metrics and the Grafana dashboard (OpenAPI `rotate_platform_key`, `list_mcp_sessions`,
+/// `revoke_mcp_session`, `get_app_info`, `get_metrics`, `get_grafana_dashboard`).
+async fn assert_mcp_platform_admin(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let report = mcp_call(client, "rotate_platform_key", json!({})).await?;
+    assert!(report.contains("\"new_key_id\""), "{report}");
+    let sessions = mcp_call(client, "list_mcp_sessions", json!({})).await?;
+    assert!(
+        sessions.contains(&format!("\"client_id\": \"{CLIENT_ID}\"")),
+        "{sessions}"
+    );
+    let missing = mcp_call(client, "revoke_mcp_session", json!({ "id": MISSING_DB }))
+        .await
+        .err();
+    assert_not_found(
+        "revoke_mcp_session",
+        &missing.map(|e| e.to_string()).unwrap_or_default(),
+    );
+    let info = mcp_call(client, "get_app_info", json!({})).await?;
+    assert!(info.contains("\"version\""), "{info}");
+    let metrics = mcp_call(client, "get_metrics", json!({})).await?;
+    assert!(metrics.contains("r3v3rs3_rx_bytes_total"), "{metrics}");
+    let grafana: Value =
+        serde_json::from_str(&mcp_call(client, "get_grafana_dashboard", json!({})).await?)?;
+    assert!(grafana["panels"].is_array(), "{grafana}");
+    Ok(())
+}
+
+/// `r3 backup set-config` stores the configuration that `r3 backup config` shows, and
+/// `r3 platform` lists MCP sessions and saves the Grafana dashboard.
+async fn assert_cli_platform_admin(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+) -> anyhow::Result<()> {
+    let config = cli_ok(binary, addr, token, &["backup", "config"]).await?;
+    let config: Value = serde_json::from_str(&config)?;
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["backup", "set-config", &config.to_string()],
+    )
+    .await?;
+    let sessions = cli_ok(binary, addr, token, &["platform", "mcp-sessions"]).await?;
+    assert!(sessions.contains(CLIENT_ID), "{sessions}");
+    let out = run_client(
+        binary,
+        addr,
+        token,
+        &["platform", "revoke-mcp-session", MISSING_DB],
+    )
+    .await?;
+    assert_not_found("revoke-mcp-session", &String::from_utf8_lossy(&out.stderr));
+    let file = std::env::temp_dir().join(format!("r3-grafana-{}.json", std::process::id()));
+    let path = file.to_string_lossy().to_string();
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["platform", "grafana", "--output", &path],
+    )
+    .await?;
+    let dashboard: Value = serde_json::from_slice(&std::fs::read(&file)?)?;
+    std::fs::remove_file(&file)?;
+    assert!(dashboard["panels"].is_array(), "{dashboard}");
+    Ok(())
+}
+
+/// Key rotation, MCP sessions, backup settings, metrics and the Grafana dashboard are reachable
+/// from MCP and the CLI.
+#[tokio::test]
+async fn the_platform_admin_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-platform-admin")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let token = access_token(&addr).await?;
+        assert_mcp_platform_admin(&mcp_client(addr, &token).await?).await?;
+        assert_cli_platform_admin(&client_binary()?, &addr, &token).await
+    })
+    .await
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {

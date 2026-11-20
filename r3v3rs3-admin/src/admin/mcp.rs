@@ -1187,6 +1187,18 @@ fn tool_error(err: Error) -> ErrorData {
     ErrorData::internal_error(err.to_string(), None)
 }
 
+/// The largest response body a tool reads from a handler that answers with raw bytes.
+const MAX_TOOL_BODY: usize = 16 * 1024 * 1024;
+
+/// The body of a raw handler response as text.
+async fn response_text(response: axum::response::Response) -> Result<String, ErrorData> {
+    let bytes = axum::body::to_bytes(response.into_body(), MAX_TOOL_BODY)
+        .await
+        .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
+    String::from_utf8(bytes.to_vec())
+        .map_err(|err| ErrorData::internal_error(err.to_string(), None))
+}
+
 /// Parses an id string into a typed ShortId.
 fn parse_id(id: &str) -> Result<ShortId, ErrorData> {
     id.parse()
@@ -4290,6 +4302,114 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(result.0)
+    }
+
+    /// Seal every platform secret with a new master key.
+    #[tool(
+        description = "Create a new platform master key and seal every stored secret (app environments, Git connections, GitHub Apps, settings) with it. Returns the new key id and the count of resealed records. Needs a token with the edit scope and an admin account."
+    )]
+    async fn rotate_platform_key(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let report = super::platform::rotate_platform_key(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(report.0)
+    }
+
+    /// List the MCP sessions.
+    #[tool(
+        description = "List the MCP sessions that hold a valid token: session id, client id and name, account, scopes and times. Tokens are never returned. Needs an admin account."
+    )]
+    async fn list_mcp_sessions(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let sessions = super::oauth2::list_mcp_sessions(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(sessions.0)
+    }
+
+    /// End an MCP session.
+    #[tool(
+        description = "Revoke the MCP session `id` and its tokens; the client must authorize again. Needs a token with the edit scope and an admin account."
+    )]
+    async fn revoke_mcp_session(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        super::oauth2::revoke_mcp_session(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(params.id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(serde_json::json!({ "revoked": true }))
+    }
+
+    /// Read the facts of this server.
+    #[tool(
+        description = "Show the server facts: version, build target and profile, configuration directory, whether the platform is on and whether a newer release is available. Read-only."
+    )]
+    async fn get_app_info(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        caller_of(&parts)?;
+        let info = super::app_info::get(axum::extract::State(self.state.clone()))
+            .await
+            .map_err(any_error)?;
+        json_result(info.0)
+    }
+
+    /// Read the Prometheus metrics.
+    #[tool(
+        description = "Return the metrics of the /api/metrics endpoint in the Prometheus text format: request, byte, status, latency and TLS handshake counters, limited to the proxies the account sees. Read-only."
+    )]
+    async fn get_metrics(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let response =
+            super::metrics::metrics(axum::http::HeaderMap::new(), axum::Extension(caller))
+                .await
+                .map_err(any_error)?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            response_text(response).await?,
+        )]))
+    }
+
+    /// Read the Grafana dashboard.
+    #[tool(
+        description = "Return the Grafana dashboard JSON for the Prometheus metrics of this server, ready to import. Read-only."
+    )]
+    async fn get_grafana_dashboard(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let response = super::metrics::grafana_dashboard(axum::Extension(caller))
+            .await
+            .map_err(any_error)?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            response_text(response).await?,
+        )]))
     }
 
     /// Check the health of any gRPC server.

@@ -721,6 +721,9 @@ pub enum BackupCommand {
     },
     /// Shows backup configuration.
     Config,
+    /// Replaces the backup configuration from inline JSON/YAML, a file path, or stdin ('-'),
+    /// in the form that `backup config` prints.
+    SetConfig { payload: String },
     /// Tests decompression and format integrity of a database backup.
     Test {
         database_id: String,
@@ -1425,6 +1428,16 @@ pub enum PlatformCommand {
     },
     /// Rotates the platform encryption key and re-encrypts all stored secrets.
     RotateKey,
+    /// Lists the MCP sessions that hold a valid token.
+    McpSessions,
+    /// Revokes an MCP session and its tokens.
+    RevokeMcpSession { id: String },
+    /// Saves the Grafana dashboard for the Prometheus metrics to a file.
+    Grafana {
+        /// The file to write; default: `r3v3rs3-grafana.json`.
+        #[arg(long)]
+        output: Option<String>,
+    },
     /// Deletes the rotated container log files across the platform.
     VacuumLogs {
         /// Optional minimum size threshold in MB for vacuuming.
@@ -1711,6 +1724,14 @@ async fn run_platform_node_alerts(
 async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyhow::Result<()> {
     match cmd {
         PlatformCommand::RotateKey => api.rotate_platform_key().await,
+        PlatformCommand::McpSessions => api.print_get("/api/mcp/sessions").await,
+        PlatformCommand::RevokeMcpSession { id } => {
+            api.print_delete(&format!("/api/mcp/sessions/{id}")).await
+        }
+        PlatformCommand::Grafana { output } => {
+            let target = output.unwrap_or_else(|| "r3v3rs3-grafana.json".to_string());
+            api.download_to("/api/metrics/grafana", &target).await
+        }
         PlatformCommand::Status => api.platform_status().await,
         PlatformCommand::Metrics => api.platform_metrics().await,
         PlatformCommand::Prune => api.platform_prune().await,
@@ -2181,6 +2202,10 @@ async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::
             backup_id,
         } => api.test_database_backup(&database_id, &backup_id).await,
         BackupCommand::Config => api.backup_config().await,
+        BackupCommand::SetConfig { payload } => {
+            api.print_put("/api/backup-config", &api_client::load_payload(&payload)?)
+                .await
+        }
         BackupCommand::Dr(c) => run_dr(api, c).await,
         pitr_wal @ (BackupCommand::PitrRange { .. }
         | BackupCommand::PitrRestore { .. }
