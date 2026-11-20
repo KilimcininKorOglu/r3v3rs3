@@ -71,6 +71,14 @@ jobs:
           tool: nextest
       - name: Run the Docker runtime tests
         run: cargo nextest run --all-features --locked --no-fail-fast --run-ignored only -E '(binary(it) & (test(/^runtime_docker_test::/) | test(/^platform_deploy_test::/))) | test(on_the_docker_engine)'
+      # The TPROXY tests install an nftables table, a policy route and a network namespace,
+      # so they run as root, one at a time, from the test binary the step above built.
+      - name: Run the TPROXY range and transparent port tests
+        run: |
+          bin=$(cargo test -p r3v3rs3 --test it --all-features --locked --no-run --message-format json \
+            | jq -r 'select(.executable != null and .target.name == "it") | .executable' | tail -1)
+          test -n "$bin"
+          sudo sh r3v3rs3/tests/tproxy/run.sh "$bin"
 
   lint:
     runs-on: ubuntu-24.04
