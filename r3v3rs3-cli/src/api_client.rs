@@ -395,6 +395,29 @@ impl ApiClient {
         print_json(&self.request(Method::POST, path, Some(body)).await?)
     }
 
+    /// Sends a DELETE request and prints the JSON answer.
+    pub async fn print_delete(&self, path: &str) -> anyhow::Result<()> {
+        print_json(&self.request(Method::DELETE, path, None).await?)
+    }
+
+    /// Reads the Git token from standard input, so it never appears in the process list,
+    /// and stores it for the app. The answer holds no token.
+    pub async fn set_app_git_token(&self, id: &str) -> anyhow::Result<()> {
+        let mut token = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut token)?;
+        let token = token.trim();
+        anyhow::ensure!(!token.is_empty(), "no Git token on standard input");
+        let body = serde_json::json!({ "token": token });
+        let app = self
+            .request(
+                Method::PUT,
+                &format!("/api/apps/{id}/git_token"),
+                Some(&body),
+            )
+            .await?;
+        print_json(&app)
+    }
+
     pub async fn run_backup_now(&self, database_id: &str) -> anyhow::Result<()> {
         let body = serde_json::json!({ "database_id": database_id });
         self.print_post("/api/backups/run", &body).await

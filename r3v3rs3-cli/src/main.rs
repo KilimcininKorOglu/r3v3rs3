@@ -510,6 +510,39 @@ pub enum AppCommand {
         #[arg(long)]
         clear: bool,
     },
+    /// Checks the registry for a newer image tag or digest of an app.
+    CheckUpdate { id: String },
+    /// Lists the deployments of an app.
+    Deployments { id: String },
+    /// Shows one deployment.
+    Deployment { id: String },
+    /// Approves a deployment that waits for approval.
+    Approve { id: String },
+    /// Rejects a deployment that waits for approval.
+    Reject { id: String },
+    /// Shows the CPU, memory and network history of an app.
+    Metrics {
+        id: String,
+        /// How far back the history goes, from 1 to 24 hours.
+        #[arg(long)]
+        hours: Option<u32>,
+    },
+    /// Shows the state of each service of a Compose app.
+    Services { id: String },
+    /// Shows the service graph of a Compose app.
+    Topology { id: String },
+    /// Updates an App Store app to the image of its newer catalog entry.
+    UpgradeCatalog { id: String },
+    /// Sets the Git token of an app, read from standard input so it stays out of the process list.
+    SetGitToken { id: String },
+    /// Removes the Git token of an app.
+    DeleteGitToken { id: String },
+    /// Creates a new push webhook secret; the answer shows it once.
+    NewWebhookSecret { id: String },
+    /// Removes the push webhook secret of an app.
+    DeleteWebhookSecret { id: String },
+    /// Installs the push webhook in the repository through the app's Git connection.
+    InstallHook { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1612,6 +1645,66 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
             post_deploy,
             clear,
         } => api.app_hooks(&id, pre_deploy, post_deploy, clear).await,
+        other => run_app_more(api, other).await,
+    }
+}
+
+/// The app commands that read deployments and state or manage the Git and webhook secrets.
+async fn run_app_more(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result<()> {
+    let empty = serde_json::json!({});
+    match cmd {
+        AppCommand::CheckUpdate { id } => {
+            api.print_post(&format!("/api/apps/{id}/check_update"), &empty)
+                .await
+        }
+        AppCommand::Deployments { id } => {
+            api.print_get(&format!("/api/apps/{id}/deployments")).await
+        }
+        AppCommand::Deployment { id } => api.print_get(&format!("/api/deployments/{id}")).await,
+        AppCommand::Approve { id } => {
+            api.print_post(&format!("/api/deployments/{id}/approve"), &empty)
+                .await
+        }
+        AppCommand::Reject { id } => {
+            api.print_post(&format!("/api/deployments/{id}/reject"), &empty)
+                .await
+        }
+        AppCommand::Metrics { id, hours } => {
+            let query = hours.map(|h| format!("?hours={h}")).unwrap_or_default();
+            api.print_get(&format!("/api/apps/{id}/metrics{query}"))
+                .await
+        }
+        AppCommand::Services { id } => api.print_get(&format!("/api/apps/{id}/services")).await,
+        AppCommand::Topology { id } => api.print_get(&format!("/api/apps/{id}/topology")).await,
+        other => run_app_secrets(api, other).await,
+    }
+}
+
+/// The app commands that change the catalog entry, the Git token or the push webhook.
+async fn run_app_secrets(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result<()> {
+    let empty = serde_json::json!({});
+    match cmd {
+        AppCommand::UpgradeCatalog { id } => {
+            api.print_post(&format!("/api/apps/{id}/upgrade-catalog"), &empty)
+                .await
+        }
+        AppCommand::SetGitToken { id } => api.set_app_git_token(&id).await,
+        AppCommand::DeleteGitToken { id } => {
+            api.print_delete(&format!("/api/apps/{id}/git_token")).await
+        }
+        AppCommand::NewWebhookSecret { id } => {
+            api.print_post(&format!("/api/apps/{id}/webhook_secret"), &empty)
+                .await
+        }
+        AppCommand::DeleteWebhookSecret { id } => {
+            api.print_delete(&format!("/api/apps/{id}/webhook_secret"))
+                .await
+        }
+        AppCommand::InstallHook { id } => {
+            api.print_post(&format!("/api/apps/{id}/hook"), &empty)
+                .await
+        }
+        other => anyhow::bail!("{other:?} is not an app command"),
     }
 }
 

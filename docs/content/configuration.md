@@ -1875,7 +1875,7 @@ The admin API exposes its complete tool suite over the Model Context Protocol at
 | **Proxies** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | Reverse proxy configuration for HTTP, WebSocket, TCP, UDP, TLS, and HTTP/3, upstream health status, and path-selective cache purging. |
 | **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials`, `get_dns_credential`, `add_dns_credential`, `update_dns_credential`, `delete_dns_credential`, `get_ct_monitor_config`, `update_ct_monitor_config`, `get_ct_monitor_status`, `list_ct_log_entries`, `check_ct_logs_now`, `dismiss_ct_alert` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegation, instant certificate orders/renewals, DNS credential management, and Certificate Transparency rogue detection. |
 | **Access Lists** | `list_access_lists`, `add_access_list`, `update_access_list`, `delete_access_list` | Access control lists with CIDR IP filtering, HTTP basic authentication, and custom bearer tokens. |
-| **PaaS Applications** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update`, `list_app_scheduled_commands`, `add_app_scheduled_command`, `update_app_scheduled_command`, `delete_app_scheduled_command`, `run_app_scheduled_command` | Autonomous PaaS container lifecycle: image/git/compose app deployment, container log streaming, environment variable injection, deployment rollbacks, scheduled cron commands management and immediate in-container execution, and Docker registry update detection. |
+| **PaaS Applications** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update`, `list_app_scheduled_commands`, `add_app_scheduled_command`, `update_app_scheduled_command`, `delete_app_scheduled_command`, `run_app_scheduled_command`, `get_deployment`, `approve_deployment`, `reject_deployment`, `get_app_metrics`, `get_app_services`, `get_app_topology`, `upgrade_app_catalog`, `set_app_git_token`, `delete_app_git_token`, `new_app_webhook_secret`, `delete_app_webhook_secret`, `install_app_hook` | Autonomous PaaS container lifecycle: image/git/compose app deployment, container log streaming, environment variable injection, deployment rollbacks, scheduled cron commands management and immediate in-container execution, and Docker registry update detection. |
 | **App Store Catalog** | `get_store`, `refresh_store`, `install_store_app` | Instant deployment of curated one-click templates (databases, dashboards, CMS, wikis, analytics) directly from the store into fully configured and routed applications. |
 | **Managed Databases & Backups** | `list_databases`, `list_database_engines`, `create_database`, `get_database_credentials`, `list_database_tenants`, `reset_database_password`, `delete_database_tenant`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config`, `test_database_backup`, `get_database_pitr_range`, `restore_database_pitr`, `archive_database_wal_segment`, `list_database_wal_segments`, `delete_database`, `clone_database`, `list_database_replicas`, `create_database_replica`, `restore_database_backup`, `run_database_backup_now`, `list_all_backups`, `get_backups_overview`, `list_s3_database_backups`, `restore_s3_database_backup`, `refresh_database_engines` | Provisioning PostgreSQL, MySQL, Redis, MariaDB, and MongoDB with automated credentials, immediate backup creation, snapshot deletion, backup integrity verification, PITR point-in-time recovery with branching, WAL archive operations, and remote storage configuration. |
 | **Agent Target Nodes** | `list_targets`, `add_target`, `delete_target`, `set_target_region`, `drain_target`, `undrain_target`, `generate_target_token`, `upgrade_target`, `upgrade_all_targets` | Multi-node Docker agent infrastructure, one-time enrollment token issuance, target decommissioning, geo-region assignment, traffic draining/undraining, and remote target binary upgrades. |
@@ -1990,6 +1990,20 @@ r3 <server> app vacuum-logs <id>
 r3 <server> app env <id>
 r3 <server> app set-env <id> KEY=VAL [KEY2=VAL2...]
 r3 <server> app delete <id>
+r3 <server> app check-update <id>
+r3 <server> app deployments <id>
+r3 <server> app deployment <deployment-id>
+r3 <server> app approve <deployment-id>
+r3 <server> app reject <deployment-id>
+r3 <server> app metrics <id> [--hours 6]
+r3 <server> app services <id>
+r3 <server> app topology <id>
+r3 <server> app upgrade-catalog <id>
+printf '%s' "$TOKEN" | r3 <server> app set-git-token <id>
+r3 <server> app delete-git-token <id>
+r3 <server> app new-webhook-secret <id>
+r3 <server> app delete-webhook-secret <id>
+r3 <server> app install-hook <id>
 
 # Managed Databases
 r3 <server> db list

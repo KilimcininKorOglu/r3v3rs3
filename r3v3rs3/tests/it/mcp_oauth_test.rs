@@ -1703,6 +1703,186 @@ async fn the_database_operations_are_reachable_from_mcp_and_the_cli() -> anyhow:
     .await
 }
 
+/// Asserts that a call reached its endpoint: it succeeded, or the API itself refused it.
+/// A missing tool ("tool not found"), a missing command ("unrecognized subcommand") or a
+/// missing route (`{"message":"NOT_FOUND"`) fails the assertion.
+fn assert_reached(what: &str, outcome: &Result<String, String>) {
+    if let Err(err) = outcome {
+        for missing in ["tool not found", "unrecognized subcommand", "\"NOT_FOUND\""] {
+            assert!(!err.contains(missing), "{what}: {err}");
+        }
+    }
+}
+
+const GIT_TOKEN: &str = "ghp-test-token-never-shown";
+
+/// A Git app that is created but never deployed, so no Docker engine is needed.
+fn git_app(name: &str) -> Value {
+    json!({ "name": name, "target": "local", "spec": {
+        "source": { "type": "git", "repository": "https://git.example.com/team/app" },
+        "port": 8080 } })
+}
+
+/// The app and deployment tools reach their endpoints (OpenAPI `set_app_git_token`,
+/// `delete_app_git_token`, `new_app_webhook_secret`, `delete_app_webhook_secret`,
+/// `get_deployment`, `approve_deployment`, `reject_deployment`, `get_app_metrics`,
+/// `get_app_services`, `get_app_topology`, `upgrade_app_catalog`, `install_app_hook`).
+async fn assert_mcp_apps(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let added: Value = serde_json::from_str(
+        &mcp_call(client, "add_app", json!({ "app": git_app("mcp-app") })).await?,
+    )?;
+    let id = added["id"].as_str().context("no app id")?.to_string();
+    let with_token = mcp_call(
+        client,
+        "set_app_git_token",
+        json!({ "id": id, "token": GIT_TOKEN }),
+    )
+    .await?;
+    assert!(!with_token.contains(GIT_TOKEN), "{with_token}");
+    mcp_call(client, "delete_app_git_token", json!({ "id": id })).await?;
+    let secret = mcp_call(client, "new_app_webhook_secret", json!({ "id": id })).await?;
+    assert!(secret.contains("secret"), "{secret}");
+    mcp_call(client, "delete_app_webhook_secret", json!({ "id": id })).await?;
+    for name in ["get_deployment", "approve_deployment", "reject_deployment"] {
+        let err = mcp_call(client, name, json!({ "id": MISSING_DB }))
+            .await
+            .err();
+        assert_not_found(name, &err.map(|e| e.to_string()).unwrap_or_default());
+    }
+    for name in [
+        "get_app_metrics",
+        "get_app_services",
+        "get_app_topology",
+        "upgrade_app_catalog",
+        "install_app_hook",
+    ] {
+        let outcome = mcp_call(client, name, json!({ "id": id }))
+            .await
+            .map_err(|e| e.to_string());
+        assert_reached(name, &outcome);
+    }
+    Ok(())
+}
+
+/// Runs the client with `input` on its standard input.
+async fn run_client_stdin(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    args: &[&str],
+    input: &'static str,
+) -> anyhow::Result<std::process::Output> {
+    use std::io::Write as _;
+    let mut command = std::process::Command::new(binary);
+    command
+        .arg(format!("http://{addr}"))
+        .arg("--token")
+        .arg(token)
+        .args(args);
+    command
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped());
+    command.stderr(std::process::Stdio::piped());
+    tokio::task::spawn_blocking(move || {
+        let mut child = command.spawn().context("failed to run the client binary")?;
+        child
+            .stdin
+            .take()
+            .context("no stdin")?
+            .write_all(input.as_bytes())?;
+        child
+            .wait_with_output()
+            .context("the client did not finish")
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("the client task failed: {err}"))?
+}
+
+/// The CLI reaches the same app and deployment endpoints; the Git token is read from
+/// standard input, so it never appears in the process list.
+async fn assert_cli_apps(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["app", "add", &git_app("cli-app").to_string()],
+    )
+    .await?;
+    let id = listed_id(
+        &cli_ok(binary, addr, token, &["app", "list"]).await?,
+        "cli-app",
+    )?;
+    let out = run_client_stdin(
+        binary,
+        addr,
+        token,
+        &["app", "set-git-token", &id],
+        GIT_TOKEN,
+    )
+    .await?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!stdout.contains(GIT_TOKEN), "{stdout}");
+    cli_ok(binary, addr, token, &["app", "delete-git-token", &id]).await?;
+    let secret = cli_ok(binary, addr, token, &["app", "new-webhook-secret", &id]).await?;
+    assert!(secret.contains("secret"), "{secret}");
+    cli_ok(binary, addr, token, &["app", "delete-webhook-secret", &id]).await?;
+    assert_cli_app_reads(binary, addr, token, &id).await
+}
+
+/// The deployment and state commands of `r3 app` reach their endpoints.
+async fn assert_cli_app_reads(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let deployments = cli_ok(binary, addr, token, &["app", "deployments", id]).await?;
+    assert!(deployments.trim_start().starts_with('['), "{deployments}");
+    for cmd in ["deployment", "approve", "reject"] {
+        let out = run_client(binary, addr, token, &["app", cmd, MISSING_DB]).await?;
+        assert_not_found(cmd, &String::from_utf8_lossy(&out.stderr));
+    }
+    for cmd in [
+        "metrics",
+        "services",
+        "topology",
+        "upgrade-catalog",
+        "install-hook",
+        "check-update",
+    ] {
+        let out = run_client(binary, addr, token, &["app", cmd, id]).await?;
+        let outcome = if out.status.success() {
+            Ok(String::new())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).to_string())
+        };
+        assert_reached(cmd, &outcome);
+    }
+    Ok(())
+}
+
+/// App and deployment operations are reachable from MCP and the CLI.
+#[tokio::test]
+async fn the_app_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-apps")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let token = access_token(&addr).await?;
+        let client = mcp_client(addr, &token).await?;
+        assert_mcp_apps(&client).await?;
+        assert_cli_apps(&client_binary()?, &addr, &token).await
+    })
+    .await
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {

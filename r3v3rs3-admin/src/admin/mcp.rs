@@ -140,6 +140,33 @@ pub struct IdJsonRequestParams {
     pub request: serde_json::Map<String, serde_json::Value>,
 }
 
+/// The arguments of `get_app_metrics`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AppMetricsParams {
+    /// The id of the app.
+    pub id: String,
+    /// How far back the history goes, from 1 to 24 hours. The default is 6.
+    pub hours: Option<u32>,
+}
+
+/// The arguments of `set_app_git_token`.
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct GitTokenParams {
+    /// The id of the app.
+    pub id: String,
+    /// The access token that clones the private repository.
+    pub token: String,
+}
+
+/// The token stays out of debug output and logs.
+impl std::fmt::Debug for GitTokenParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitTokenParams")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The optional filter of `list_s3_database_backups`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct S3ListParams {
@@ -4004,6 +4031,274 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(engines.0)
+    }
+
+    /// Read one deployment.
+    #[tool(
+        description = "Show one deployment (`id` from `list_app_deployments`): its app, state, image, commit, timestamps and error. Read-only; any account can call it."
+    )]
+    async fn get_deployment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let entry = super::platform::get_deployment(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entry.0)
+    }
+
+    /// Approve a deployment that waits for approval.
+    #[tool(
+        description = "Approve the deployment `id` that waits for approval (apps with `require_approval` or outside their `deploy_window`); it starts at once. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn approve_deployment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let entry = super::platform::approve_deployment(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entry.0)
+    }
+
+    /// Reject a deployment that waits for approval.
+    #[tool(
+        description = "Reject the deployment `id` that waits for approval; it never starts. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn reject_deployment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let entry = super::platform::reject_deployment(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entry.0)
+    }
+
+    /// Read the CPU and memory history of an app.
+    #[tool(
+        description = "Show the CPU, memory and network history of the app `id` over the last `hours` (1 to 24, default 6). Read-only; any account can call it."
+    )]
+    async fn get_app_metrics(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AppMetricsParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let query = r3v3rs3_api::platform::MetricsQuery {
+            hours: params.hours,
+        };
+        let points = super::platform::get_app_metrics(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::extract::Query(query),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(points.0)
+    }
+
+    /// Read the state of each service of a Compose app.
+    #[tool(
+        description = "Show the state, health and ports of each service of the Compose app `id`. Read-only; any account can call it."
+    )]
+    async fn get_app_services(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let services = super::platform::get_services(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(services.0)
+    }
+
+    /// Read the service graph of a Compose app.
+    #[tool(
+        description = "Show the services of the Compose app `id` with their dependencies, networks and volumes. Read-only; any account can call it."
+    )]
+    async fn get_app_topology(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let topology = super::platform::get_topology(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(topology.0)
+    }
+
+    /// Move an App Store app to the newer catalog entry.
+    #[tool(
+        description = "Update the app `id`, installed from the App Store, to the image of its newer catalog entry (see `catalog_update` in `list_apps`), and return the app. Deploy it afterwards with `deploy_app`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn upgrade_app_catalog(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let app = super::platform::upgrade_app_catalog(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
+    }
+
+    /// Set the Git token that clones a private repository.
+    #[tool(
+        description = "Set the access `token` that clones the private repository of the Git or Compose app `id` without a Git connection. The token is sealed and never returned. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn set_app_git_token(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<GitTokenParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let request = r3v3rs3_api::platform::GitTokenRequest {
+            token: params.token,
+        };
+        let app = super::platform::put_git_token(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
+    }
+
+    /// Remove the Git token of an app.
+    #[tool(
+        description = "Remove the stored Git access token of the app `id`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn delete_app_git_token(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let app = super::platform::delete_git_token(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
+    }
+
+    /// Create a new push webhook secret for an app.
+    #[tool(
+        description = "Create a new push webhook secret for the app `id` and return it with the webhook URL. The secret is shown only in this answer; the old one stops working. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn new_app_webhook_secret(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let secret = super::platform::new_webhook_secret(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(secret.0)
+    }
+
+    /// Remove the push webhook secret of an app.
+    #[tool(
+        description = "Remove the push webhook secret of the app `id`; pushes no longer deploy it. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn delete_app_webhook_secret(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let app = super::platform::delete_webhook_secret(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
+    }
+
+    /// Install the push webhook in the Git provider.
+    #[tool(
+        description = "Install the push webhook of the app `id` in its repository through the app's Git connection, so a push deploys it. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn install_app_hook(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let app = super::platform::install_hook(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
     }
 
     /// Take an immediate database backup snapshot.
