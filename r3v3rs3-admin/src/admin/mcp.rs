@@ -140,6 +140,19 @@ pub struct IdJsonRequestParams {
     pub request: serde_json::Map<String, serde_json::Value>,
 }
 
+/// The arguments of `get_logs`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct LogsParams {
+    /// `server`, or a port or proxy id.
+    pub id: String,
+    /// The oldest row, as Unix seconds.
+    pub since: Option<i64>,
+    /// The newest row, as Unix seconds.
+    pub until: Option<i64>,
+    /// The most rows: 100 by default, at most 500.
+    pub limit: Option<u32>,
+}
+
 /// The filters of `get_traffic` and `get_traffic_geo`.
 #[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
 pub struct TrafficQueryParams {
@@ -4277,6 +4290,99 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(result.0)
+    }
+
+    /// Read the CDN IP range status.
+    #[tool(
+        description = "Show the CDN IP ranges that restore the client address: when and from where they were loaded, each provider with its range count, and the last download errors. Read-only."
+    )]
+    async fn get_cdn_status(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        caller_of(&parts)?;
+        json_result(super::cdn::get().await.0)
+    }
+
+    /// Download the CDN IP ranges again.
+    #[tool(
+        description = "Download the CDN IP ranges from every provider now and apply them. Needs a token with the edit scope and an account that may edit."
+    )]
+    async fn refresh_cdn_ranges(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let status = super::cdn::refresh(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(status.0)
+    }
+
+    /// Read the state of the discovery sources.
+    #[tool(
+        description = "List the service discovery sources (Docker labels, etcd) with their state, last sync and the proxies they created. Read-only."
+    )]
+    async fn list_discovery_status(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let sources = super::discovery::list(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(sources.0)
+    }
+
+    /// Read a system log.
+    #[tool(
+        description = "Read the log rows of `id`: `server` for the server log, or a port or proxy id. Optional `since` and `until` (Unix seconds) and `limit` (100 by default, at most 500). Read-only; a proxy outside the account's proxy list is not found."
+    )]
+    async fn get_logs(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<LogsParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let query = serde_json::json!({
+            "since": params.since, "until": params.until, "limit": params.limit,
+        });
+        let query: r3v3rs3_api::log::LogQuery = serde_json::from_value(query)
+            .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let rows = super::logs::get(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(params.id),
+            axum::extract::Query(query),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(rows.0)
+    }
+
+    /// Read the dashboard summary.
+    #[tool(
+        description = "Show the dashboard summary: port and proxy counts by state, certificates that expire soon and, with the platform on, the app counts. Read-only."
+    )]
+    async fn get_dashboard(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let summary = super::dashboard::get(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(summary.0)
     }
 
     /// Read the HTTP access log.

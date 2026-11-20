@@ -2580,6 +2580,80 @@ async fn the_traffic_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::
     .await
 }
 
+/// The status tools read the CDN ranges, discovery sources, a log and the dashboard
+/// (OpenAPI `get_cdn_status`, `list_discovery_status`, `get_logs`, `get_dashboard`).
+async fn assert_mcp_status(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let cdn = mcp_call(client, "get_cdn_status", json!({})).await?;
+    assert!(cdn.contains("\"providers\""), "{cdn}");
+    let sources: Value =
+        serde_json::from_str(&mcp_call(client, "list_discovery_status", json!({})).await?)?;
+    assert!(sources.is_array(), "{sources}");
+    let rows: Value = serde_json::from_str(
+        &mcp_call(client, "get_logs", json!({ "id": "server", "limit": 5 })).await?,
+    )?;
+    assert!(
+        rows.as_array().is_some_and(|rows| rows.len() <= 5),
+        "{rows}"
+    );
+    let dashboard = mcp_call(client, "get_dashboard", json!({})).await?;
+    assert!(
+        dashboard.contains("\"ports\"") && dashboard.contains("\"proxies\""),
+        "{dashboard}"
+    );
+    Ok(())
+}
+
+/// A viewer may read the CDN status but may not download new ranges (OpenAPI
+/// `refresh_cdn_ranges` needs the edit permission).
+async fn assert_viewer_cannot_refresh_cdn(addr: SocketAddr, binary: &Path) -> anyhow::Result<()> {
+    create_account_as_admin(addr, "viewer", "viewer").await?;
+    let token = access_token_for(&addr, "viewer", "password").await?;
+    let client = mcp_client(addr, &token).await?;
+    let refused = mcp_call(&client, "refresh_cdn_ranges", json!({})).await;
+    assert!(refused.is_err(), "a viewer refreshed the CDN ranges");
+    assert_reached("refresh_cdn_ranges", &refused.map_err(|e| e.to_string()));
+    let out = run_client(binary, &addr, &token, &["cdn", "refresh"]).await?;
+    assert!(!out.status.success(), "a viewer refreshed the CDN ranges");
+    assert_reached(
+        "cdn refresh",
+        &Err(String::from_utf8_lossy(&out.stderr).to_string()),
+    );
+    Ok(())
+}
+
+/// `r3 cdn`, `discovery`, `logs`, `dashboard`, `audit` and `port` read the same endpoints.
+async fn assert_cli_status(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
+    let cdn = cli_ok(binary, addr, token, &["cdn", "status"]).await?;
+    assert!(cdn.contains("\"providers\""), "{cdn}");
+    cli_ok(binary, addr, token, &["discovery", "list"]).await?;
+    cli_ok(binary, addr, token, &["logs", "server", "--limit", "5"]).await?;
+    let dashboard = cli_ok(binary, addr, token, &["dashboard"]).await?;
+    assert!(dashboard.contains("\"proxies\""), "{dashboard}");
+    let audit = cli_ok(binary, addr, token, &["audit", "list", "--limit", "5"]).await?;
+    assert!(serde_json::from_str::<Value>(&audit)?.is_array(), "{audit}");
+    cli_ok(binary, addr, token, &["port", "interfaces"]).await?;
+    let out = run_client(binary, addr, token, &["port", "status", MISSING_DB]).await?;
+    assert_not_found("port status", &String::from_utf8_lossy(&out.stderr));
+    Ok(())
+}
+
+/// CDN, discovery, log, dashboard, audit and port status reads are reachable from MCP and the
+/// CLI, and refreshing the CDN ranges needs the edit permission.
+#[tokio::test]
+async fn the_status_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-status")?;
+    with_admin_config(&dir.0, mcp_config(), |addr| async move {
+        let token = access_token(&addr).await?;
+        assert_mcp_status(&mcp_client(addr, &token).await?).await?;
+        let binary = client_binary()?;
+        assert_cli_status(&binary, &addr, &token).await?;
+        assert_viewer_cannot_refresh_cdn(addr, &binary).await
+    })
+    .await
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {

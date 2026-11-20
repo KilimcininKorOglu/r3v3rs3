@@ -78,6 +78,30 @@ enum Command {
     /// Manage environment variable groups shared by apps.
     #[command(subcommand)]
     EnvGroup(EnvGroupCommand),
+    /// Show or download the CDN IP ranges that restore client addresses.
+    #[command(subcommand)]
+    Cdn(CdnCommand),
+    /// Show the service discovery sources (Docker labels, etcd).
+    #[command(subcommand)]
+    Discovery(DiscoveryCommand),
+    /// Read the log rows of `server` or of a port or proxy id.
+    Logs {
+        id: String,
+        /// The oldest row, as Unix seconds.
+        #[arg(long)]
+        since: Option<i64>,
+        /// The newest row, as Unix seconds.
+        #[arg(long)]
+        until: Option<i64>,
+        /// The most rows: 100 by default, at most 500.
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    /// Show the dashboard summary.
+    Dashboard,
+    /// Read the audit log.
+    #[command(subcommand)]
+    Audit(AuditCommand),
     /// Browse and install applications from the App Store catalog.
     #[command(subcommand)]
     Store(StoreCommand),
@@ -125,6 +149,10 @@ pub enum PortCommand {
     List,
     /// Shows configuration of a port.
     Get { id: String },
+    /// Shows whether a port listens and why it does not.
+    Status { id: String },
+    /// Lists the network interfaces and addresses a port can bind.
+    Interfaces,
     /// Adds a port from inline JSON/YAML, a file path, or stdin ('-').
     Add { payload: String },
     /// Updates a port from inline JSON/YAML, a file path, or stdin ('-').
@@ -886,6 +914,46 @@ pub enum ProjectCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum CdnCommand {
+    /// Shows the loaded CDN IP ranges per provider and the last download errors.
+    Status,
+    /// Downloads the CDN IP ranges from every provider now and applies them.
+    Refresh,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DiscoveryCommand {
+    /// Lists the discovery sources with their state and last sync.
+    #[command(alias = "ls")]
+    List,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuditCommand {
+    /// Lists audit records as JSON, newest first.
+    #[command(alias = "ls")]
+    List {
+        /// Only records after this time, as Unix milliseconds.
+        #[arg(long)]
+        since: Option<u64>,
+        /// Only records before this time, as Unix milliseconds.
+        #[arg(long)]
+        until: Option<u64>,
+        #[arg(long)]
+        username: Option<String>,
+        #[arg(long)]
+        resource_id: Option<String>,
+        /// Only records of this action, for example `add_proxy`.
+        #[arg(long)]
+        action: Option<String>,
+        #[arg(long)]
+        search: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum EnvGroupCommand {
     /// Lists the environment variable groups.
     #[command(alias = "ls")]
@@ -1521,8 +1589,66 @@ async fn run_api_system(api: &api_client::ApiClient, cmd: Command) -> anyhow::Re
         Command::Config(c) => run_config(api, c).await,
         Command::Platform(c) => run_platform(api, c).await,
         Command::Apply { file } => run_apply(api, &file).await,
-        _ => unreachable!(),
+        other => run_api_status(api, other).await,
     }
+}
+
+/// The read commands for CDN ranges, discovery, logs, the dashboard and the audit log.
+async fn run_api_status(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()> {
+    match cmd {
+        Command::Cdn(CdnCommand::Status) => api.print_get("/api/cdn").await,
+        Command::Cdn(CdnCommand::Refresh) => {
+            api.print_post("/api/cdn/refresh", &serde_json::json!({}))
+                .await
+        }
+        Command::Discovery(DiscoveryCommand::List) => api.print_get("/api/discovery").await,
+        Command::Logs {
+            id,
+            since,
+            until,
+            limit,
+        } => {
+            let query = query_string(&[
+                ("since", since.map(|v| v.to_string())),
+                ("until", until.map(|v| v.to_string())),
+                ("limit", limit.map(|v| v.to_string())),
+            ]);
+            api.print_get(&format!("/api/logs/{id}?{query}")).await
+        }
+        Command::Dashboard => api.print_get("/api/dashboard").await,
+        Command::Audit(AuditCommand::List {
+            since,
+            until,
+            username,
+            resource_id,
+            action,
+            search,
+            limit,
+        }) => {
+            let query = query_string(&[
+                ("since", since.map(|v| v.to_string())),
+                ("until", until.map(|v| v.to_string())),
+                ("username", username),
+                ("resource_id", resource_id),
+                ("action", action),
+                ("search", search),
+                ("limit", limit.map(|v| v.to_string())),
+            ]);
+            api.print_get(&format!("/api/audit?{query}")).await
+        }
+        other => anyhow::bail!("{other:?} has no handler"),
+    }
+}
+
+/// A URL query string from the pairs that hold a value.
+fn query_string(pairs: &[(&str, Option<String>)]) -> String {
+    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    for (key, value) in pairs {
+        if let Some(value) = value {
+            query.append_pair(key, value);
+        }
+    }
+    query.finish()
 }
 
 async fn run_platform_node_alerts(
@@ -1609,6 +1735,8 @@ async fn run_port(api: &api_client::ApiClient, cmd: PortCommand) -> anyhow::Resu
         PortCommand::Reset { id } => api.reset_port(&id).await,
         PortCommand::SetEarlyData { id, enable } => api.set_port_early_data(&id, enable).await,
         PortCommand::SetTransparent { id, enable } => api.set_port_transparent(&id, enable).await,
+        PortCommand::Status { id } => api.print_get(&format!("/api/ports/{id}/status")).await,
+        PortCommand::Interfaces => api.print_get("/api/ports/interfaces").await,
     }
 }
 
