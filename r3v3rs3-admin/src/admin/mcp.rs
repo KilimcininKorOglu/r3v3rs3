@@ -1216,6 +1216,26 @@ async fn small_text(response: axum::response::Response, limit: usize) -> Result<
     })
 }
 
+/// An app and one of its volumes.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct VolumeParams {
+    /// The id of the app.
+    pub id: String,
+    /// The name of the volume.
+    pub volume: String,
+}
+
+/// An app, one of its volumes and a stored backup of it.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct VolumeBackupParams {
+    /// The id of the app.
+    pub id: String,
+    /// The name of the volume.
+    pub volume: String,
+    /// The id of the backup.
+    pub backup_id: String,
+}
+
 /// An app and a path inside one of its volumes.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AppFileParams {
@@ -4346,6 +4366,93 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(result.0)
+    }
+
+    /// List the stored backups of an app volume.
+    #[tool(
+        description = "List the stored snapshot backups of the volume `volume` of the app `id`: backup id, size and time. Needs an admin account."
+    )]
+    async fn list_volume_backups(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<VolumeParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let path = (parse_id(&params.id)?, params.volume);
+        let entries = super::app_files::list_volume_backups(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(path),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entries.0)
+    }
+
+    /// Back up an app volume now.
+    #[tool(
+        description = "Store a snapshot backup of the volume `volume` of the running app `id` and return it. The CLI command `r3 app volumes download-backup` saves the archive. Needs a token with the edit scope and an admin account."
+    )]
+    async fn create_volume_backup(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<VolumeParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let path = (parse_id(&params.id)?, params.volume);
+        let entry = super::app_files::create_volume_backup(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(path),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entry.0)
+    }
+
+    /// Restore an app volume from a backup.
+    #[tool(
+        description = "Replace the content of the volume `volume` of the app `id` with the stored backup `backup_id`. Needs a token with the edit scope and an admin account."
+    )]
+    async fn restore_volume_backup(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<VolumeBackupParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let path = (parse_id(&params.id)?, params.volume, params.backup_id);
+        let axum::Json(()) = super::app_files::restore_volume_backup(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(path),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(serde_json::json!({ "restored": true }))
+    }
+
+    /// Delete a stored volume backup.
+    #[tool(
+        description = "Delete the stored backup `backup_id` of the volume `volume` of the app `id`. Needs a token with the edit scope and an admin account."
+    )]
+    async fn delete_volume_backup(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<VolumeBackupParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let path = (parse_id(&params.id)?, params.volume, params.backup_id);
+        let axum::Json(()) = super::app_files::delete_volume_backup(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(path),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(serde_json::json!({ "deleted": true }))
     }
 
     /// List a directory inside a volume of an app.

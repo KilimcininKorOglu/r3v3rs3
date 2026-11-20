@@ -2886,6 +2886,79 @@ async fn assert_cli_app_files(binary: &Path, addr: &SocketAddr, token: &str) -> 
     Ok(())
 }
 
+/// The volume backup tools reach their endpoints: a missing app is not found (OpenAPI
+/// `list_volume_backups`, `create_volume_backup`, `restore_volume_backup`,
+/// `delete_volume_backup`).
+async fn assert_mcp_volume_backups(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let volume = json!({ "id": MISSING_DB, "volume": "data" });
+    let backup = json!({ "id": MISSING_DB, "volume": "data", "backup_id": "b1" });
+    let calls = [
+        ("list_volume_backups", volume.clone()),
+        ("create_volume_backup", volume),
+        ("restore_volume_backup", backup.clone()),
+        ("delete_volume_backup", backup),
+    ];
+    for (tool, args) in calls {
+        let missing = mcp_call(client, tool, args).await.err();
+        assert_not_found(tool, &missing.map(|e| e.to_string()).unwrap_or_default());
+    }
+    Ok(())
+}
+
+/// `r3 app volumes` reaches the volume backup and archive endpoints, including the binary
+/// downloads and the archive import that only the CLI offers.
+async fn assert_cli_volumes(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
+    let local = std::env::temp_dir().join(format!("r3-archive-{}.tar.gz", std::process::id()));
+    std::fs::write(&local, [0x1f, 0x8b])?;
+    let local_path = local.to_string_lossy().to_string();
+    let commands: [&[&str]; 7] = [
+        &["app", "volumes", "backups", MISSING_DB, "data"],
+        &["app", "volumes", "backup", MISSING_DB, "data"],
+        &["app", "volumes", "restore", MISSING_DB, "data", "b1"],
+        &["app", "volumes", "delete-backup", MISSING_DB, "data", "b1"],
+        &[
+            "app",
+            "volumes",
+            "download-backup",
+            MISSING_DB,
+            "data",
+            "b1",
+        ],
+        &["app", "volumes", "export", MISSING_DB, "data"],
+        &[
+            "app",
+            "volumes",
+            "import",
+            MISSING_DB,
+            "data",
+            "--file",
+            &local_path,
+        ],
+    ];
+    for args in commands {
+        let out = run_client(binary, addr, token, args).await?;
+        assert_not_found(&format!("{args:?}"), &String::from_utf8_lossy(&out.stderr));
+    }
+    std::fs::remove_file(&local)?;
+    Ok(())
+}
+
+/// Volume backup and archive operations are reachable from MCP and the CLI.
+#[tokio::test]
+async fn the_volume_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-volumes")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let token = access_token(&addr).await?;
+        assert_mcp_volume_backups(&mcp_client(addr, &token).await?).await?;
+        assert_cli_volumes(&client_binary()?, &addr, &token).await
+    })
+    .await
+}
+
 /// App file operations are reachable from MCP and the CLI.
 #[tokio::test]
 async fn the_app_file_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {

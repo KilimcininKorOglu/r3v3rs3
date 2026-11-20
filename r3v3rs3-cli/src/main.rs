@@ -531,6 +531,9 @@ pub enum AppCommand {
     /// Lists, downloads, uploads and deletes files inside the volumes of a running app.
     #[command(subcommand)]
     Files(AppFilesCommand),
+    /// Backs up, restores, exports and imports the volumes of an app.
+    #[command(subcommand)]
+    Volumes(AppVolumesCommand),
     /// Shows configuration of an application.
     Get { id: String },
     /// Shows unified dashboard summary of an application.
@@ -972,6 +975,51 @@ pub enum AppFilesCommand {
         id: String,
         #[arg(long)]
         path: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AppVolumesCommand {
+    /// Lists the stored backups of a volume.
+    Backups { id: String, volume: String },
+    /// Stores a snapshot backup of a volume now.
+    Backup { id: String, volume: String },
+    /// Replaces the content of a volume with a stored backup.
+    Restore {
+        id: String,
+        volume: String,
+        backup_id: String,
+    },
+    /// Deletes a stored volume backup.
+    DeleteBackup {
+        id: String,
+        volume: String,
+        backup_id: String,
+    },
+    /// Saves a stored volume backup (tar.gz) to a local file.
+    DownloadBackup {
+        id: String,
+        volume: String,
+        backup_id: String,
+        /// The file to write; default: `<volume>-<backup_id>.tar.gz`.
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Saves the whole content of a volume as a tar.gz archive.
+    Export {
+        id: String,
+        volume: String,
+        /// The file to write; default: `<volume>-export.tar.gz`.
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Extracts a local tar or tar.gz archive into a volume.
+    Import {
+        id: String,
+        volume: String,
+        /// The local archive to send.
+        #[arg(long)]
+        file: String,
     },
 }
 
@@ -1743,9 +1791,76 @@ async fn run_app_files(api: &api_client::ApiClient, cmd: AppFilesCommand) -> any
         }
         AppFilesCommand::Upload { id, path, file } => {
             let bytes = std::fs::read(&file).with_context(|| format!("failed to read {file}"))?;
-            api.put_bytes(&at(&id, "", &path), bytes).await
+            api.send_bytes(reqwest::Method::PUT, &at(&id, "", &path), bytes)
+                .await
         }
         AppFilesCommand::Delete { id, path } => api.print_delete(&at(&id, "", &path)).await,
+    }
+}
+
+/// The commands for the volume backups and archives of an app.
+async fn run_app_volumes(
+    api: &api_client::ApiClient,
+    cmd: AppVolumesCommand,
+) -> anyhow::Result<()> {
+    let base = |id: &str, volume: &str| format!("/api/apps/{id}/volumes/{volume}");
+    match cmd {
+        AppVolumesCommand::Backups { id, volume } => {
+            api.print_get(&format!("{}/backups", base(&id, &volume)))
+                .await
+        }
+        AppVolumesCommand::Backup { id, volume } => {
+            let path = format!("{}/backups", base(&id, &volume));
+            api.print_post(&path, &serde_json::json!({})).await
+        }
+        AppVolumesCommand::Restore {
+            id,
+            volume,
+            backup_id,
+        } => {
+            let path = format!("{}/backups/{backup_id}/restore", base(&id, &volume));
+            api.print_post(&path, &serde_json::json!({})).await
+        }
+        AppVolumesCommand::DeleteBackup {
+            id,
+            volume,
+            backup_id,
+        } => {
+            let path = format!("{}/backups/{backup_id}", base(&id, &volume));
+            api.print_delete(&path).await
+        }
+        other => run_app_volume_files(api, other).await,
+    }
+}
+
+/// The volume commands that move archives between the server and local files.
+async fn run_app_volume_files(
+    api: &api_client::ApiClient,
+    cmd: AppVolumesCommand,
+) -> anyhow::Result<()> {
+    let base = |id: &str, volume: &str| format!("/api/apps/{id}/volumes/{volume}");
+    match cmd {
+        AppVolumesCommand::DownloadBackup {
+            id,
+            volume,
+            backup_id,
+            output,
+        } => {
+            let target = output.unwrap_or_else(|| format!("{volume}-{backup_id}.tar.gz"));
+            let path = format!("{}/backups/{backup_id}/download", base(&id, &volume));
+            api.download_to(&path, &target).await
+        }
+        AppVolumesCommand::Export { id, volume, output } => {
+            let target = output.unwrap_or_else(|| format!("{volume}-export.tar.gz"));
+            api.download_to(&format!("{}/archive", base(&id, &volume)), &target)
+                .await
+        }
+        AppVolumesCommand::Import { id, volume, file } => {
+            let bytes = std::fs::read(&file).with_context(|| format!("failed to read {file}"))?;
+            let path = format!("{}/archive", base(&id, &volume));
+            api.send_bytes(reqwest::Method::POST, &path, bytes).await
+        }
+        other => anyhow::bail!("{other:?} is not a volume archive command"),
     }
 }
 
@@ -2091,6 +2206,7 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
     match cmd {
         AppCommand::List => api.list_apps().await,
         AppCommand::Files(cmd) => run_app_files(api, cmd).await,
+        AppCommand::Volumes(cmd) => run_app_volumes(api, cmd).await,
         AppCommand::Get { id } => api.get_app(&id).await,
         AppCommand::Dashboard { id } => api.app_dashboard(&id).await,
         AppCommand::Add { payload } => api.add_app(&payload).await,

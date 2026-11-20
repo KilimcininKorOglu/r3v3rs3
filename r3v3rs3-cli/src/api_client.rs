@@ -417,11 +417,16 @@ impl ApiClient {
         Ok(())
     }
 
-    /// Sends a PUT request with a raw byte body and prints the JSON answer.
-    pub async fn put_bytes(&self, path: &str, body: Vec<u8>) -> anyhow::Result<()> {
+    /// Sends a request with a raw byte body and prints the JSON answer.
+    pub async fn send_bytes(
+        &self,
+        method: Method,
+        path: &str,
+        body: Vec<u8>,
+    ) -> anyhow::Result<()> {
         let res = self
             .client
-            .put(format!("{}{path}", self.server))
+            .request(method, format!("{}{path}", self.server))
             .header("Authorization", format!("Bearer {}", self.token))
             .header("Content-Type", "application/octet-stream")
             .body(body)
