@@ -4292,6 +4292,120 @@ impl McpServer {
         json_result(result.0)
     }
 
+    /// Check the health of any gRPC server.
+    #[tool(
+        description = "Run grpc.health.v1.Health/Check against `request.target_url`, optionally for `request.service`. Needs a token with the edit scope and an account that may edit."
+    )]
+    async fn health_grpc(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request: r3v3rs3_api::grpc::GrpcHealthCheckRequest = json_arg(params.request)?;
+        let answer = super::grpc::health_standalone(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(answer.0)
+    }
+
+    /// Call a method of any gRPC server.
+    #[tool(
+        description = "Call the unary gRPC method `request.service`/`request.method` on `request.target_url` with the JSON `request.payload` and `request.metadata` headers; the server must offer reflection. Needs a token with the edit scope and an account that may edit."
+    )]
+    async fn invoke_grpc(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request: r3v3rs3_api::grpc::GrpcInvokeRequest = json_arg(params.request)?;
+        let answer = super::grpc::invoke_standalone(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(answer.0)
+    }
+
+    /// List the services of any gRPC server.
+    #[tool(
+        description = "List the services and methods of the gRPC server `request.target_url` through server reflection, optionally only `request.service_name`. Needs a token with the edit scope and an account that may edit."
+    )]
+    async fn reflect_grpc(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request: r3v3rs3_api::grpc::GrpcReflectRequest = json_arg(params.request)?;
+        let answer = super::grpc::reflect_standalone(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(answer.0)
+    }
+
+    /// Call a gRPC method through the upstream of a proxy.
+    #[tool(
+        description = "Call a unary gRPC method on the first upstream server of the proxy `id`. `request` holds `service`, `method`, `payload`, `metadata` and an optional `target_url`. Needs a token with the edit scope and an account that may edit proxies."
+    )]
+    async fn invoke_proxy_grpc(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdJsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let request: r3v3rs3_api::grpc::GrpcInvokeRequest = json_arg(params.request)?;
+        let answer = super::grpc::invoke_proxy(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(answer.0)
+    }
+
+    /// List the gRPC services behind a proxy.
+    #[tool(
+        description = "List the services and methods of the first upstream server of the proxy `id` through gRPC server reflection; `request` may hold `service_name`. Needs a token with the edit scope."
+    )]
+    async fn reflect_proxy_grpc(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdJsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let request: r3v3rs3_api::grpc::GrpcReflectRequest = json_arg(params.request)?;
+        let answer = super::grpc::reflect_proxy(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(Some(request)),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(answer.0)
+    }
+
     /// Read the CDN IP range status.
     #[tool(
         description = "Show the CDN IP ranges that restore the client address: when and from where they were loaded, each provider with its range count, and the last download errors. Read-only."

@@ -99,6 +99,9 @@ enum Command {
     },
     /// Show the dashboard summary.
     Dashboard,
+    /// Check, call and list any gRPC server.
+    #[command(subcommand)]
+    Grpc(GrpcCommand),
     /// Read the audit log.
     #[command(subcommand)]
     Audit(AuditCommand),
@@ -230,6 +233,12 @@ pub enum ProxyCommand {
         #[arg(long)]
         adaptive_concurrency: Option<bool>,
     },
+    /// Calls a unary gRPC method on the upstream of a proxy; the payload (inline JSON/YAML, a
+    /// file path, or stdin '-') holds `service`, `method`, `payload` and `metadata`.
+    GrpcInvoke { id: String, payload: String },
+    /// Lists the gRPC services behind a proxy through server reflection; the optional payload
+    /// holds `service_name`.
+    GrpcReflect { id: String, payload: Option<String> },
     /// Shows where a proxy definition would send a request, without sending it. The payload
     /// (inline JSON/YAML, a file path, or stdin '-') holds `proxy`, `url`, `method` and `client_ip`.
     DryRun { payload: String },
@@ -919,6 +928,19 @@ pub enum CdnCommand {
     Status,
     /// Downloads the CDN IP ranges from every provider now and applies them.
     Refresh,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GrpcCommand {
+    /// Runs grpc.health.v1.Health/Check; the payload (inline JSON/YAML, a file path, or stdin
+    /// '-') holds `target_url` and `service`.
+    Health { payload: String },
+    /// Calls a unary method; the payload holds `target_url`, `service`, `method`, `payload`
+    /// and `metadata`.
+    Invoke { payload: String },
+    /// Lists services through server reflection; the payload holds `target_url` and
+    /// `service_name`.
+    Reflect { payload: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1616,6 +1638,15 @@ async fn run_api_status(api: &api_client::ApiClient, cmd: Command) -> anyhow::Re
             api.print_get(&format!("/api/logs/{id}?{query}")).await
         }
         Command::Dashboard => api.print_get("/api/dashboard").await,
+        Command::Grpc(cmd) => {
+            let (path, payload) = match cmd {
+                GrpcCommand::Health { payload } => ("/api/grpc/health", payload),
+                GrpcCommand::Invoke { payload } => ("/api/grpc/invoke", payload),
+                GrpcCommand::Reflect { payload } => ("/api/grpc/reflect", payload),
+            };
+            api.print_post(path, &api_client::load_payload(&payload)?)
+                .await
+        }
         Command::Audit(AuditCommand::List {
             since,
             until,
@@ -1780,6 +1811,19 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
             inject_header,
             adaptive_concurrency,
         } => run_proxy_priority(api, &id, enable, inject_header, adaptive_concurrency).await,
+        ProxyCommand::GrpcInvoke { id, payload } => {
+            let body = api_client::load_payload(&payload)?;
+            api.print_post(&format!("/api/proxies/{id}/grpc/invoke"), &body)
+                .await
+        }
+        ProxyCommand::GrpcReflect { id, payload } => {
+            let body = match payload {
+                Some(payload) => api_client::load_payload(&payload)?,
+                None => serde_json::json!({}),
+            };
+            api.print_post(&format!("/api/proxies/{id}/grpc/reflect"), &body)
+                .await
+        }
         ProxyCommand::DryRun { payload } => {
             let body = api_client::load_payload(&payload)?;
             api.print_post("/api/proxies/dry-run", &body).await

@@ -1870,7 +1870,7 @@ The admin API exposes its complete tool suite over the Model Context Protocol at
 
 | Category | Tools & Operations | Description |
 |---|---|---|
-| **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database`, `get_server_upgrade_status`, `run_server_upgrade`, `get_traffic`, `get_traffic_entry`, `get_traffic_geo`, `replay_traffic_request`, `get_anomaly_rules`, `update_anomaly_rules`, `dismiss_anomalies`, `analyze_security_headers`, `dry_run_proxy`, `get_cdn_status`, `refresh_cdn_ranges`, `list_discovery_status`, `get_logs`, `get_dashboard` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, fail2ban brute-force bans, threat auto-quarantine, automated GeoIP MMDB database management, and seamless live server self-upgrade execution. |
+| **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database`, `get_server_upgrade_status`, `run_server_upgrade`, `get_traffic`, `get_traffic_entry`, `get_traffic_geo`, `replay_traffic_request`, `get_anomaly_rules`, `update_anomaly_rules`, `dismiss_anomalies`, `analyze_security_headers`, `dry_run_proxy`, `get_cdn_status`, `refresh_cdn_ranges`, `list_discovery_status`, `get_logs`, `get_dashboard`, `health_grpc`, `invoke_grpc`, `reflect_grpc`, `invoke_proxy_grpc`, `reflect_proxy_grpc` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, fail2ban brute-force bans, threat auto-quarantine, automated GeoIP MMDB database management, and seamless live server self-upgrade execution. |
 | **Ports** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Complete port listener lifecycle: bind addresses, TLS termination options, socket reset/reload, and host interface enumeration. |
 | **Proxies** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | Reverse proxy configuration for HTTP, WebSocket, TCP, UDP, TLS, and HTTP/3, upstream health status, and path-selective cache purging. |
 | **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials`, `get_dns_credential`, `add_dns_credential`, `update_dns_credential`, `delete_dns_credential`, `get_ct_monitor_config`, `update_ct_monitor_config`, `get_ct_monitor_status`, `list_ct_log_entries`, `check_ct_logs_now`, `dismiss_ct_alert`, `update_acme`, `self_sign_cert`, `upload_cert`, `download_cert` (chain only, never the private key), `delete_certs`, `verify_cname` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegation, instant certificate orders/renewals, DNS credential management, and Certificate Transparency rogue detection. |
@@ -2100,6 +2100,11 @@ r3 <server> discovery list
 r3 <server> logs server [--since 1700000000] [--until 1700003600] [--limit 100]
 r3 <server> dashboard
 r3 <server> audit list [--username admin] [--action add_proxy] [--resource-id <id>] [--search text] [--limit 50]
+r3 <server> grpc health <request.json|yaml|->
+r3 <server> grpc invoke <request.json|yaml|->
+r3 <server> grpc reflect <request.json|yaml|->
+r3 <server> proxy grpc-invoke <proxy-id> <request.json|yaml|->
+r3 <server> proxy grpc-reflect <proxy-id> [<request.json|yaml|->]
 
 # Security, Banned & Quarantined IPs
 r3 <server> security banned-ips

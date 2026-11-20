@@ -2654,6 +2654,81 @@ async fn the_status_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::R
     .await
 }
 
+/// A gRPC target on a closed local port: every call to it must fail with a gRPC error.
+const CLOSED_GRPC: &str = "http://127.0.0.1:9";
+
+/// The gRPC tools report a closed target as an error, and the proxy tools do not find a missing
+/// proxy (OpenAPI `health_grpc`, `invoke_grpc`, `reflect_grpc`, `invoke_proxy_grpc`,
+/// `reflect_proxy_grpc`).
+async fn assert_mcp_grpc(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let invoke = json!({ "target_url": CLOSED_GRPC, "service": "demo.Echo", "method": "Say",
+        "payload": {}, "metadata": {} });
+    let calls = [
+        (
+            "health_grpc",
+            json!({ "request": { "target_url": CLOSED_GRPC } }),
+        ),
+        ("invoke_grpc", json!({ "request": invoke })),
+    ];
+    for (tool, args) in calls {
+        let failed = mcp_call(client, tool, args).await;
+        assert!(failed.is_err(), "{tool} reached a closed port");
+        assert_reached(tool, &failed.map_err(|e| e.to_string()));
+    }
+    let reflect = json!({ "request": { "target_url": CLOSED_GRPC } });
+    let listed = mcp_call(client, "reflect_grpc", reflect).await;
+    assert_reached("reflect_grpc", &listed.map_err(|e| e.to_string()));
+    for tool in ["invoke_proxy_grpc", "reflect_proxy_grpc"] {
+        let args = json!({ "id": MISSING_DB, "request": invoke });
+        let missing = mcp_call(client, tool, args).await.err();
+        assert_not_found(tool, &missing.map(|e| e.to_string()).unwrap_or_default());
+    }
+    Ok(())
+}
+
+/// `r3 grpc` and `r3 proxy grpc-*` reach the same endpoints.
+async fn assert_cli_grpc(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
+    let target = json!({ "target_url": CLOSED_GRPC }).to_string();
+    let invoke = json!({ "target_url": CLOSED_GRPC, "service": "demo.Echo", "method": "Say",
+        "payload": {}, "metadata": {} })
+    .to_string();
+    let out = run_client(binary, addr, token, &["grpc", "reflect", &target]).await?;
+    assert_reached(
+        "grpc reflect",
+        &Err(String::from_utf8_lossy(&out.stderr).to_string()),
+    );
+    for args in [["grpc", "health", &target], ["grpc", "invoke", &invoke]] {
+        let out = run_client(binary, addr, token, &args).await?;
+        assert!(!out.status.success(), "{args:?} reached a closed port");
+        assert_reached(
+            &format!("{args:?}"),
+            &Err(String::from_utf8_lossy(&out.stderr).to_string()),
+        );
+    }
+    for args in [
+        ["proxy", "grpc-invoke", MISSING_DB, &invoke],
+        ["proxy", "grpc-reflect", MISSING_DB, &target],
+    ] {
+        let out = run_client(binary, addr, token, &args).await?;
+        assert_not_found(&format!("{args:?}"), &String::from_utf8_lossy(&out.stderr));
+    }
+    Ok(())
+}
+
+/// gRPC health, invoke and reflection are reachable from MCP and the CLI.
+#[tokio::test]
+async fn the_grpc_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-grpc")?;
+    with_admin_config(&dir.0, mcp_config(), |addr| async move {
+        let token = access_token(&addr).await?;
+        assert_mcp_grpc(&mcp_client(addr, &token).await?).await?;
+        assert_cli_grpc(&client_binary()?, &addr, &token).await
+    })
+    .await
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
