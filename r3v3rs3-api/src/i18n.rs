@@ -222,6 +222,11 @@ mod tests {
             Error::FailedToBuildDnsResolver { reason: text() },
             Error::InvalidMultiaddr { addr: text() },
             Error::InvalidHostPort { value: text() },
+            Error::TransparentNotSupported { addr: text() },
+            Error::PortRangeOverlap {
+                addr: text(),
+                other: text(),
+            },
             Error::TlsTerminationConfigMissing,
             Error::ProxyProtocolNotSupported,
             Error::ProxyProtocolTrustedMissing,

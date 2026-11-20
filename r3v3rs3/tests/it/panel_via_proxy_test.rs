@@ -108,6 +108,7 @@ fn https_port(https: &TestPort) -> PortEntry {
                 http2_limits: None,
                 http3_limits: None,
                 stream_priority: None,
+                transparent: false,
             },
         },
         status: None,

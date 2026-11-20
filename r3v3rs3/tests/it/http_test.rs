@@ -270,6 +270,7 @@ async fn http_proxy_upgrade_insecure() -> anyhow::Result<()> {
                         http2_limits: None,
                         http3_limits: None,
                         stream_priority: None,
+                        transparent: false,
                     },
                 },
                 status: None,

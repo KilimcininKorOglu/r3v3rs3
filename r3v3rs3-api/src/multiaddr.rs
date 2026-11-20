@@ -47,17 +47,27 @@ impl Multiaddr {
             })
     }
 
+    /// The port, or the first port of a range.
     pub fn port(&self) -> Result<u16, Error> {
+        self.port_range().map(|span| span.first)
+    }
+
+    /// The port or the inclusive port range; one port is a range of one.
+    pub fn port_range(&self) -> Result<PortSpan, Error> {
         self.protocols
             .iter()
             .find_map(|p| match p {
-                Protocol::Tcp(port) => Some(*port),
-                Protocol::Udp(port) => Some(*port),
+                Protocol::Tcp(span) | Protocol::Udp(span) => Some(*span),
                 _ => None,
             })
             .ok_or_else(|| Error::InvalidMultiaddr {
                 addr: self.to_string(),
             })
+    }
+
+    /// Whether the address names more than one port.
+    pub fn is_range(&self) -> bool {
+        self.port_range().is_ok_and(|span| span.port_count() > 1)
     }
 
     pub fn host(&self) -> Result<String, Error> {
@@ -86,12 +96,83 @@ impl Multiaddr {
     }
 }
 
+/// The most ports one address may name: the size of the default TURN relay range
+/// 49152-65535.
+pub const MAX_RANGE_PORTS: u32 = 16384;
+
+/// One port, or an inclusive range of ports written `first-last`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PortSpan {
+    pub first: u16,
+    pub last: u16,
+}
+
+impl PortSpan {
+    pub fn single(port: u16) -> Self {
+        Self {
+            first: port,
+            last: port,
+        }
+    }
+
+    /// The number of ports; a span always holds at least one.
+    pub fn port_count(&self) -> u32 {
+        u32::from(self.last) - u32::from(self.first) + 1
+    }
+
+    pub fn contains(&self, port: u16) -> bool {
+        (self.first..=self.last).contains(&port)
+    }
+
+    pub fn overlaps(&self, other: &Self) -> bool {
+        self.first <= other.last && other.first <= self.last
+    }
+
+    /// The port at the same position of `other`: the upstream port of a client port.
+    pub fn map_to(&self, port: u16, other: &Self) -> Option<u16> {
+        let offset = port
+            .checked_sub(self.first)
+            .filter(|_| self.contains(port))?;
+        other
+            .first
+            .checked_add(offset)
+            .filter(|p| other.contains(*p))
+    }
+
+    /// Parses `443` (any port, as before ranges existed) or `49160-49240`: both ends from 1,
+    /// the last above the first, at most [`MAX_RANGE_PORTS`] ports.
+    fn parse(text: &str) -> Option<Self> {
+        let Some((first, last)) = text.split_once('-') else {
+            return text.parse().ok().map(Self::single);
+        };
+        let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+        if !digits(first) || !digits(last) {
+            return None;
+        }
+        let span = Self {
+            first: first.parse().ok().filter(|p| *p != 0)?,
+            last: last.parse().ok()?,
+        };
+        (span.last > span.first && span.port_count() <= MAX_RANGE_PORTS).then_some(span)
+    }
+}
+
+impl fmt::Display for PortSpan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.first)?;
+        if self.last != self.first {
+            write!(f, "-{}", self.last)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Protocol {
     Dns(String),
     Ip(IpAddr),
-    Tcp(u16),
-    Udp(u16),
+    Tcp(PortSpan),
+    Udp(PortSpan),
     Tls,
     Http(String),
     Quic,
@@ -121,12 +202,9 @@ impl FromStr for Multiaddr {
                     protocols.push(Protocol::Ip(addr));
                     rest = next;
                 }
-                "tcp" => {
+                "tcp" | "udp" => {
                     let (port, next) = next.split_once('/').unwrap_or((next, ""));
-                    let port = port.parse::<u16>().map_err(|_| Error::InvalidMultiaddr {
-                        addr: s.to_string(),
-                    })?;
-                    protocols.push(Protocol::Tcp(port));
+                    protocols.push(port_protocol(protocol, port, s)?);
                     rest = next;
                 }
                 "tls" => {
@@ -146,19 +224,29 @@ impl FromStr for Multiaddr {
                     protocols.push(Protocol::Http(format!("/{next}")));
                     rest = "";
                 }
-                "udp" => {
-                    let (port, next) = next.split_once('/').unwrap_or((next, ""));
-                    let port = port.parse::<u16>().map_err(|_| Error::InvalidMultiaddr {
-                        addr: s.to_string(),
-                    })?;
-                    protocols.push(Protocol::Udp(port));
-                    rest = next;
-                }
                 _ => rest = next,
             }
         }
-        Ok(Self { protocols })
+        let addr = Self { protocols };
+        // A range is a plain TCP or UDP port: TLS, HTTP and QUIC serve one port.
+        if addr.is_range() && (addr.is_tls() || addr.is_http() || addr.is_quic()) {
+            return Err(Error::InvalidMultiaddr {
+                addr: s.to_string(),
+            });
+        }
+        Ok(addr)
     }
+}
+
+/// The `tcp/PORTS` or `udp/PORTS` segment of the address `whole`.
+fn port_protocol(name: &str, ports: &str, whole: &str) -> Result<Protocol, Error> {
+    let span = PortSpan::parse(ports).ok_or_else(|| Error::InvalidMultiaddr {
+        addr: whole.to_string(),
+    })?;
+    Ok(match name {
+        "tcp" => Protocol::Tcp(span),
+        _ => Protocol::Udp(span),
+    })
 }
 
 impl fmt::Display for Multiaddr {
@@ -178,8 +266,8 @@ impl Multiaddr {
             Protocol::Dns(host) => write!(f, "/dns/{}", host),
             Protocol::Ip(addr) if addr.is_ipv4() => write!(f, "/ip4/{}", addr),
             Protocol::Ip(addr) => write!(f, "/ip6/{}", addr),
-            Protocol::Tcp(port) => write!(f, "/tcp/{}", port),
-            Protocol::Udp(port) => write!(f, "/udp/{}", port),
+            Protocol::Tcp(span) => write!(f, "/tcp/{span}"),
+            Protocol::Udp(span) => write!(f, "/udp/{span}"),
             Protocol::Tls if self.is_http() => Ok(()),
             Protocol::Tls => write!(f, "/tls"),
             Protocol::Http(path) => self.write_http(f, path),
@@ -254,5 +342,61 @@ mod test {
         assert!(!addr.is_tls());
         assert!(addr.is_udp());
         assert!(addr.is_quic());
+    }
+
+    /// A TURN relay range is one address: it keeps its written form, starts at its first port
+    /// and maps each client port to the port at the same position of the upstream range.
+    #[test]
+    fn a_plain_tcp_or_udp_address_may_name_a_port_range() {
+        let addr = Multiaddr::from_str("/ip4/0.0.0.0/udp/49160-49240").unwrap();
+        assert_eq!(addr.to_string(), "/ip4/0.0.0.0/udp/49160-49240");
+        assert_eq!(addr.port().unwrap(), 49160);
+        let span = addr.port_range().unwrap();
+        assert_eq!(span.port_count(), 81);
+        assert!(addr.is_range());
+        assert!(
+            !Multiaddr::from_str("/ip4/0.0.0.0/tcp/443")
+                .unwrap()
+                .is_range()
+        );
+        let upstream = Multiaddr::from_str("/dns/turn.example.com/udp/50160-50240").unwrap();
+        let up = upstream.port_range().unwrap();
+        assert_eq!(span.map_to(49160, &up), Some(50160));
+        assert_eq!(span.map_to(49240, &up), Some(50240));
+        assert_eq!(span.map_to(49241, &up), None);
+        assert_eq!(span.map_to(49159, &up), None);
+        let tcp = Multiaddr::from_str("/ip6/::/tcp/8000-8010").unwrap();
+        assert_eq!(tcp.to_string(), "/ip6/::/tcp/8000-8010");
+        assert_eq!(
+            Multiaddr::from_str("/ip4/0.0.0.0/udp/49152-65535")
+                .unwrap()
+                .port_range()
+                .unwrap()
+                .port_count(),
+            MAX_RANGE_PORTS
+        );
+    }
+
+    /// Every malformed range is refused, and so is a range on a TLS, HTTP or QUIC address,
+    /// because those serve one port.
+    #[test]
+    fn a_malformed_or_non_plain_range_is_refused() {
+        for bad in [
+            "/ip4/0.0.0.0/udp/9-1",
+            "/ip4/0.0.0.0/udp/5-5",
+            "/ip4/0.0.0.0/udp/0-10",
+            "/ip4/0.0.0.0/udp/1-",
+            "/ip4/0.0.0.0/udp/-1",
+            "/ip4/0.0.0.0/udp/1-2-3",
+            "/ip4/0.0.0.0/udp/+1-5",
+            "/ip4/0.0.0.0/udp/1-70000",
+            "/ip4/0.0.0.0/udp/1000-17384",
+            "/ip4/0.0.0.0/tcp/8000-8010/tls",
+            "/ip4/0.0.0.0/tcp/8000-8010/http",
+            "/ip4/0.0.0.0/tcp/8000-8010/https",
+            "/ip4/0.0.0.0/udp/8000-8010/quic/http",
+        ] {
+            assert!(Multiaddr::from_str(bad).is_err(), "{bad}");
+        }
     }
 }

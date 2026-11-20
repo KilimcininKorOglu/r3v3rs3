@@ -116,6 +116,13 @@ struct PortForm {
     http2_limits: Http2LimitsForm,
     http3_limits: Http3LimitsForm,
     stream_priority: bool,
+    transparent: bool,
+}
+
+/// Only a plain TCP, TLS-terminating TCP or UDP port can hand the client address to its
+/// upstream.
+fn supports_transparent(protocol: &str) -> bool {
+    matches!(protocol, "tcp" | "tls" | "udp")
 }
 
 #[derive(Clone, PartialEq)]
@@ -249,6 +256,7 @@ struct PortLimitsHandles {
     http2_limits: UseStateHandle<Http2LimitsForm>,
     http3_limits: UseStateHandle<Http3LimitsForm>,
     stream_priority: UseStateHandle<bool>,
+    transparent: UseStateHandle<bool>,
 }
 
 #[hook]
@@ -257,11 +265,13 @@ fn use_port_limits(opts: &PortOptions) -> PortLimitsHandles {
     let http2_limits = use_state(|| Http2LimitsForm::new(opts.http2_limits.as_ref()));
     let http3_limits = use_state(|| Http3LimitsForm::new(opts.http3_limits.as_ref()));
     let stream_priority = use_state(|| initial_stream_priority_opts(opts));
+    let transparent = use_state(|| opts.transparent);
     PortLimitsHandles {
         proxy_protocol,
         http2_limits,
         http3_limits,
         stream_priority,
+        transparent,
     }
 }
 
@@ -313,6 +323,7 @@ pub fn port_config(props: &Props) -> Html {
         http2_limits: (*limits.http2_limits).clone(),
         http3_limits: (*limits.http3_limits).clone(),
         stream_priority: *limits.stream_priority,
+        transparent: *limits.transparent,
     };
     let prev_entry =
         use_state::<Result<Port, HashMap<String, String>>, _>(|| Err(Default::default()));
@@ -609,6 +620,7 @@ fn get_port(
                 http2_limits,
                 http3_limits,
                 stream_priority,
+                transparent: form.transparent && supports_transparent(&form.protocol),
             },
         }),
         _ => Err(errors),
@@ -863,6 +875,21 @@ fn protocol_view(
             if supports_http2(protocol) || supports_http3(protocol) {
                 { stream_priority_view(locale, &limits.stream_priority) }
             }
+            if supports_transparent(protocol) {
+                { transparent_view(locale, &limits.transparent) }
+            }
+        </>
+    }
+}
+
+fn transparent_view(locale: Locale, state: &UseStateHandle<bool>) -> Html {
+    let onchange = state_input(state, checked, |val, checked| *val = checked);
+    html! {
+        <>
+            <div class="mt-6">
+                { toggle(onchange, **state, locale.t("ports.transparent"), "") }
+            </div>
+            <p class={HINT_CLASS}>{locale.t("ports.transparent_hint")}</p>
         </>
     }
 }
@@ -995,11 +1022,32 @@ mod tests {
             http2_limits: Http2LimitsForm::new(None),
             http3_limits: Http3LimitsForm::new(None),
             stream_priority: false,
+            transparent: false,
         }
     }
 
     fn build(form: &PortForm) -> Result<Port, HashMap<String, String>> {
         get_port(Locale::En, form, &TlsTermination::default())
+    }
+
+    /// A TCP, TLS or UDP port keeps the transparent switch; an HTTP or QUIC port drops it,
+    /// because the server refuses a transparent HTTP or QUIC port.
+    #[test]
+    fn only_a_tcp_or_udp_port_is_transparent() {
+        for (protocol, names, kept) in [
+            ("tcp", "", true),
+            ("tls", "example.com", true),
+            ("udp", "", true),
+            ("http", "", false),
+            ("https", "example.com", false),
+            ("http3", "example.com", false),
+        ] {
+            let mut f = form(protocol, names);
+            f.transparent = true;
+            let port = build(&f).unwrap();
+            assert_eq!(port.opts.transparent, kept, "{protocol}");
+            assert!(port.validate().is_ok(), "{protocol}");
+        }
     }
 
     #[test]

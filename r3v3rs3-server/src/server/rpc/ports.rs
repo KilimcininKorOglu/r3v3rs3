@@ -7,6 +7,7 @@ use network_interface::NetworkInterfaceConfig;
 use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
+use r3v3rs3_api::multiaddr::Multiaddr;
 use r3v3rs3_api::port::{NetworkAddr, NetworkInterface, Port, PortEntry, PortStatus};
 
 pub struct GetPortList;
@@ -111,7 +112,7 @@ impl RpcMethod for AddPort {
         if state.ports.get(entry.id).is_some() {
             Err(Error::IdAlreadyExists { id: entry.id })
         } else {
-            validate_port(&entry.port, state)?;
+            validate_port(&entry, state)?;
             let ctx = PortContext::new(entry, &state.config().http2, &state.config().http3)?;
             save_port(state, &ctx).await?;
             state.update_port(ctx).await
@@ -124,8 +125,17 @@ impl RpcMethod for AddPort {
     }
 }
 
-/// Checks the parts of the port config that depend on the certificates.
-fn validate_port(port: &Port, state: &ServerState) -> Result<(), Error> {
+/// Checks the port config, including the parts that depend on the certificates and on the
+/// other ports.
+fn validate_port(entry: &PortEntry, state: &ServerState) -> Result<(), Error> {
+    let port = &entry.port;
+    port.validate()?;
+    let others = state.ports.as_slice().iter().map(|ctx| ctx.entry());
+    let others = others
+        .filter(|other| other.id != entry.id)
+        .map(|o| &o.port.listen);
+    let ssh = crate::firewall::ssh_ports(std::path::Path::new("/etc/ssh"));
+    check_range_overlap(&port.listen, others, &ssh)?;
     if let Some(limits) = &port.opts.http2_limits {
         limits.validate()?;
     }
@@ -134,6 +144,41 @@ fn validate_port(port: &Port, state: &ServerState) -> Result<(), Error> {
     }
     match &port.opts.tls_termination {
         Some(tls) => validate_client_auth(tls, &state.certs),
+        None => Ok(()),
+    }
+}
+
+/// A range diverts every port it names to one socket, so it must not cover a port that
+/// another port of the same protocol or SSH listens on. Two single ports are not checked here:
+/// the second one reports that its address is in use, as before ranges existed.
+fn check_range_overlap<'a>(
+    listen: &Multiaddr,
+    others: impl Iterator<Item = &'a Multiaddr>,
+    ssh: &[u16],
+) -> Result<(), Error> {
+    let Ok(span) = listen.port_range() else {
+        return Ok(());
+    };
+    let udp = listen.is_udp();
+    let overlap = |other: &Multiaddr| {
+        other.is_udp() == udp
+            && (listen.is_range() || other.is_range())
+            && other.port_range().is_ok_and(|o| o.overlaps(&span))
+    };
+    if let Some(other) = others.into_iter().find(|o| overlap(o)) {
+        return Err(Error::PortRangeOverlap {
+            addr: listen.to_string(),
+            other: other.to_string(),
+        });
+    }
+    match ssh
+        .iter()
+        .find(|p| !udp && listen.is_range() && span.contains(**p))
+    {
+        Some(port) => Err(Error::PortRangeOverlap {
+            addr: listen.to_string(),
+            other: format!("ssh/{port}"),
+        }),
         None => Ok(()),
     }
 }
@@ -166,7 +211,7 @@ impl RpcMethod for UpdatePort {
 
     async fn call(self, state: &mut ServerState) -> Result<Self::Output, Error> {
         if state.ports.get(self.entry.id).is_some() {
-            validate_port(&self.entry.port, state)?;
+            validate_port(&self.entry, state)?;
             let ctx = PortContext::new(self.entry, &state.config().http2, &state.config().http3)?;
             save_port(state, &ctx).await?;
             state.update_port(ctx).await
@@ -231,5 +276,59 @@ impl RpcMethod for GetNetworkInterfaceList {
                 }
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn addrs(list: &[&str]) -> Vec<Multiaddr> {
+        list.iter().map(|a| a.parse().unwrap()).collect()
+    }
+
+    fn check(listen: &str, others: &[&str], ssh: &[u16]) -> Result<(), Error> {
+        check_range_overlap(&listen.parse().unwrap(), addrs(others).iter(), ssh)
+    }
+
+    /// A range sends every port it names to one socket, so a port of the same protocol inside
+    /// it, or a range around an existing port, would steal that port's traffic.
+    #[test]
+    fn a_range_must_not_cover_another_port_of_its_protocol() {
+        let relay = "/ip4/0.0.0.0/udp/49160-49240";
+        let overlap = |r: Result<(), Error>| matches!(r, Err(Error::PortRangeOverlap { .. }));
+        assert!(overlap(check(relay, &["/ip4/0.0.0.0/udp/49200"], &[])));
+        assert!(overlap(check("/ip4/0.0.0.0/udp/49200", &[relay], &[])));
+        assert!(overlap(check(
+            relay,
+            &["/ip4/0.0.0.0/udp/49000-49160"],
+            &[]
+        )));
+        // Another protocol, or ports outside the range, do not collide.
+        assert!(check(relay, &["/ip4/0.0.0.0/tcp/49200"], &[]).is_ok());
+        assert!(
+            check(
+                relay,
+                &["/ip4/0.0.0.0/udp/49241", "/ip4/0.0.0.0/udp/3478"],
+                &[]
+            )
+            .is_ok()
+        );
+        // Two single ports keep the old behaviour: the second one reports the busy address.
+        assert!(check("/ip4/0.0.0.0/udp/3478", &["/ip6/::/udp/3478"], &[]).is_ok());
+    }
+
+    /// A TCP range around the SSH port would divert SSH to r3v3rs3 and lock the operator out.
+    #[test]
+    fn a_tcp_range_must_not_cover_ssh() {
+        let overlap = |r: Result<(), Error>| matches!(r, Err(Error::PortRangeOverlap { .. }));
+        assert!(overlap(check("/ip4/0.0.0.0/tcp/1-100", &[], &[22])));
+        assert!(overlap(check(
+            "/ip4/0.0.0.0/tcp/2200-2300",
+            &[],
+            &[22, 2222]
+        )));
+        assert!(check("/ip4/0.0.0.0/udp/1-100", &[], &[22]).is_ok());
+        assert!(check("/ip4/0.0.0.0/tcp/2223-2300", &[], &[22, 2222]).is_ok());
     }
 }

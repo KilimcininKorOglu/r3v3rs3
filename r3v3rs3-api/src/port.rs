@@ -204,6 +204,24 @@ pub struct PortOptions {
     /// Enables adaptive stream priority optimization for HTTP/2 and HTTP/3 on this port.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_priority: Option<crate::priority::StreamPriorityConfig>,
+    /// The upstream sees the address of the client instead of the address of r3v3rs3. Only a
+    /// TCP or UDP port can be transparent, and its upstream must listen on a non-loopback
+    /// address, because the kernel refuses a loopback reply to an outside client.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub transparent: bool,
+}
+
+impl Port {
+    /// Checks the options that depend on the kind of the port: an HTTP or QUIC port serves
+    /// its own clients, so it cannot be transparent.
+    pub fn validate(&self) -> Result<(), crate::error::Error> {
+        if self.opts.transparent && (self.listen.is_http() || self.listen.is_quic()) {
+            return Err(crate::error::Error::TransparentNotSupported {
+                addr: self.listen.to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
@@ -219,4 +237,60 @@ pub struct NetworkAddr {
     pub ip: IpAddr,
     #[schema(value_type = String, example = "255.255.255.0")]
     pub mask: Option<IpAddr>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn port(listen: &str, transparent: bool) -> Port {
+        Port {
+            active: true,
+            name: String::new(),
+            listen: listen.parse().unwrap(),
+            opts: PortOptions {
+                transparent,
+                ..Default::default()
+            },
+        }
+    }
+
+    /// An HTTP or QUIC port answers its clients itself, so only a TCP or UDP port can hand the
+    /// client address to an upstream.
+    #[test]
+    fn only_a_tcp_or_udp_port_can_be_transparent() {
+        for ok in [
+            "/ip4/0.0.0.0/tcp/5349",
+            "/ip4/0.0.0.0/tcp/5349/tls",
+            "/ip4/0.0.0.0/udp/49160-49240",
+        ] {
+            assert!(port(ok, true).validate().is_ok(), "{ok}");
+        }
+        for bad in [
+            "/ip4/0.0.0.0/tcp/80/http",
+            "/ip4/0.0.0.0/tcp/443/https",
+            "/ip4/0.0.0.0/udp/443/quic/http",
+        ] {
+            assert!(matches!(
+                port(bad, true).validate(),
+                Err(crate::error::Error::TransparentNotSupported { .. })
+            ));
+            assert!(port(bad, false).validate().is_ok(), "{bad}");
+        }
+    }
+
+    /// A port saved before the field existed reads as not transparent, and the field is left
+    /// out of the stored form while it is off.
+    #[test]
+    fn transparent_is_off_unless_set() {
+        let old: Port = serde_json::from_str(r#"{"listen":"/ip4/0.0.0.0/udp/3478"}"#).unwrap();
+        assert!(!old.opts.transparent);
+        assert!(!serde_json::to_string(&old).unwrap().contains("transparent"));
+        let on = port("/ip4/0.0.0.0/udp/3478", true);
+        assert!(
+            serde_json::to_string(&on)
+                .unwrap()
+                .contains(r#""transparent":true"#)
+        );
+    }
 }

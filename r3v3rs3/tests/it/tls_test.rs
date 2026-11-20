@@ -50,6 +50,7 @@ async fn tls_proxy() -> anyhow::Result<()> {
                     http2_limits: None,
                     http3_limits: None,
                     stream_priority: None,
+                    transparent: false,
                 },
             },
             status: None,

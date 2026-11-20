@@ -56,6 +56,7 @@ fn storage(listen_port: &TestPort, proxy_port: &TestPort, certs: &[Arc<Cert>]) -
                     http2_limits: None,
                     http3_limits: None,
                     stream_priority: None,
+                    transparent: false,
                 },
             },
             status: None,

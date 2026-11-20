@@ -64,6 +64,12 @@ pub enum Error {
     #[error("invalid host port {value}: use tcp/<port> or udp/<first>-<last> with ports 1-65535")]
     InvalidHostPort { value: String },
 
+    #[error("the port {addr} cannot be transparent: only a TCP or UDP port can")]
+    TransparentNotSupported { addr: String },
+
+    #[error("the ports of {addr} overlap the port {other}")]
+    PortRangeOverlap { addr: String, other: String },
+
     #[error("missing TLS termination config")]
     TlsTerminationConfigMissing,
 
