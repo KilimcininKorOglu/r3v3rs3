@@ -1205,7 +1205,36 @@ async fn assert_mcp_admin_mutations(
 ) -> anyhow::Result<()> {
     let unban = mcp_call(client, "unban_ip", json!({ "ip": "10.0.0.1" })).await?;
     assert!(unban.contains("10.0.0.1"), "{unban}");
-    assert_mcp_firewall(client).await
+    assert_mcp_firewall(client).await?;
+    assert_mcp_dns_credentials(client).await
+}
+
+/// The DNS credential tools reach the same API as the panel (OpenAPI `add_dns_credential`,
+/// `get_dns_credential`, `update_dns_credential`, `delete_dns_credential`): a credential is
+/// added, read without its token, renamed and deleted.
+async fn assert_mcp_dns_credentials(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let secret = "mcp-dns-secret-token";
+    let provider =
+        json!({ "provider": "webhook", "url": "https://dns.example.com/hook", "token": secret });
+    let request = json!({ "name": "mcp-dns", "dns_provider": provider });
+    let added: Value = serde_json::from_str(
+        &mcp_call(client, "add_dns_credential", json!({ "request": request })).await?,
+    )?;
+    let id = added["id"]
+        .as_str()
+        .context("no id in the answer")?
+        .to_string();
+    let renamed = json!({ "id": id, "request": { "name": "mcp-dns-renamed" } });
+    mcp_call(client, "update_dns_credential", renamed).await?;
+    let shown = mcp_call(client, "get_dns_credential", json!({ "id": id })).await?;
+    assert!(shown.contains("mcp-dns-renamed"), "{shown}");
+    assert!(!shown.contains(secret), "{shown}");
+    mcp_call(client, "delete_dns_credential", json!({ "id": id })).await?;
+    let listed = mcp_call(client, "list_dns_credentials", json!({})).await?;
+    assert!(!listed.contains("mcp-dns"), "{listed}");
+    Ok(())
 }
 
 /// `set_firewall` saves the extra ports of the host firewall table, and a port outside

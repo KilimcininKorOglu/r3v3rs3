@@ -117,6 +117,22 @@ pub struct SetPortTransparentParams {
     pub enabled: bool,
 }
 
+/// The argument of `add_dns_credential`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DnsCredentialParams {
+    /// The body of POST /api/dns_credentials.
+    pub request: r3v3rs3_api::acme::DnsCredentialRequest,
+}
+
+/// The arguments of `update_dns_credential`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateDnsCredentialParams {
+    /// The id of the DNS credential.
+    pub id: String,
+    /// The new name and, optionally, new secrets.
+    pub request: r3v3rs3_api::acme::DnsCredentialRequest,
+}
+
 /// The argument of `set_firewall`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SetFirewallParams {
@@ -2548,6 +2564,93 @@ impl McpServer {
             .call(&caller, DeleteAccessList { id })
             .await
             .map_err(tool_error)?;
+        json_result(json!({ "deleted": id.to_string() }))
+    }
+
+    /// Read one named DNS credential.
+    #[tool(
+        description = "Show one named DNS credential (`id` from `list_dns_credentials`): its name, provider and which fields are set. Secrets such as API tokens are never returned. Read-only; any account can call it."
+    )]
+    async fn get_dns_credential(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let info = super::dns_credentials::get(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(info.0)
+    }
+
+    /// Create a named DNS credential.
+    #[tool(
+        description = "Create a named DNS credential that ACME `dns-01` requests reference by id. `request` is the body of POST /api/dns_credentials: `name` and `dns_provider` (for example {\"provider\": \"cloudflare\", \"api_token\": \"...\"}). The secret is sealed and never returned. Needs a token with the edit scope and an admin account."
+    )]
+    async fn add_dns_credential(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<DnsCredentialParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let info = super::dns_credentials::add(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(params.request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(info.0)
+    }
+
+    /// Rename a named DNS credential or replace its secrets.
+    #[tool(
+        description = "Change a named DNS credential (`id`). `request` holds the new `name` and, only when the secrets change, a new `dns_provider`; without `dns_provider` the stored secrets stay. Needs a token with the edit scope and an admin account."
+    )]
+    async fn update_dns_credential(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateDnsCredentialParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let _ = super::dns_credentials::put(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(params.request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(json!({ "updated": id.to_string() }))
+    }
+
+    /// Delete a named DNS credential.
+    #[tool(
+        description = "Delete a named DNS credential (`id`). It is refused while an ACME request references it. Needs a token with the edit scope and an admin account."
+    )]
+    async fn delete_dns_credential(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let _ = super::dns_credentials::delete(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
         json_result(json!({ "deleted": id.to_string() }))
     }
 
