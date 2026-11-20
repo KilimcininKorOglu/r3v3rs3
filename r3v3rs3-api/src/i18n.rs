@@ -228,6 +228,7 @@ mod tests {
                 other: text(),
             },
             Error::UpstreamRangeMismatch { addr: text() },
+            Error::TransparentLoopbackUpstream { addr: text() },
             Error::TlsTerminationConfigMissing,
             Error::ProxyProtocolNotSupported,
             Error::ProxyProtocolTrustedMissing,

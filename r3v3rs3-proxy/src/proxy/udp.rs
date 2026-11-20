@@ -41,6 +41,8 @@ pub struct UdpPortContext {
     pub listen: SocketAddr,
     /// The ports of the address; more than one makes it a TPROXY range port.
     pub ports: PortSpan,
+    /// Whether the upstream servers see the client address (the `transparent` port option).
+    pub transparent: bool,
     upstream: Arc<UdpUpstream>,
     sessions: Arc<DashMap<SessionKey, UdpSession>>,
     status: PortStatus,
@@ -65,6 +67,7 @@ impl UdpPortContext {
         Ok(Self {
             listen,
             ports: entry.port.listen.port_range()?,
+            transparent: entry.port.opts.transparent,
             upstream: Default::default(),
             sessions: Arc::new(DashMap::new()),
             status: Default::default(),
@@ -236,6 +239,7 @@ impl UdpPortContext {
                 listener: reply.clone(),
                 local_port: local.port(),
                 client,
+                transparent: self.transparent,
                 activity: Activity::new(self.upstream.idle_timeout),
                 max_datagram_size: self.upstream.max_datagram_size,
                 group: group.clone(),
@@ -395,6 +399,8 @@ struct SessionContext {
     /// The port of the range that the client sent to.
     local_port: u16,
     client: SocketAddr,
+    /// Whether the upstream socket sends from the client address.
+    transparent: bool,
     activity: Activity,
     max_datagram_size: usize,
     group: Arc<UpstreamGroup>,
@@ -409,6 +415,18 @@ impl SessionContext {
     }
 }
 
+/// A UDP socket on an address of the host, connected to `upstream`.
+async fn plain_socket(upstream: SocketAddr) -> io::Result<UdpSocket> {
+    let bind: SocketAddr = if upstream.is_ipv6() {
+        (Ipv6Addr::UNSPECIFIED, 0).into()
+    } else {
+        (Ipv4Addr::UNSPECIFIED, 0).into()
+    };
+    let socket = UdpSocket::bind(bind).await?;
+    socket.connect(upstream).await?;
+    Ok(socket)
+}
+
 /// The upstream socket of one client. Dropping the session stops its reply task.
 #[derive(Debug)]
 struct UdpSession {
@@ -419,13 +437,10 @@ struct UdpSession {
 
 impl UdpSession {
     async fn open(upstream: SocketAddr, context: Arc<SessionContext>) -> io::Result<Self> {
-        let bind: SocketAddr = if upstream.is_ipv6() {
-            (Ipv6Addr::UNSPECIFIED, 0).into()
-        } else {
-            (Ipv4Addr::UNSPECIFIED, 0).into()
+        let socket = match context.transparent {
+            true => super::transparent::client_udp_socket(context.client, upstream).await?,
+            false => plain_socket(upstream).await?,
         };
-        let socket = UdpSocket::bind(bind).await?;
-        socket.connect(upstream).await?;
         let socket = Arc::new(socket);
         let lease = crate::stats::ConnectionLease::acquire();
         let relay_socket = socket.clone();

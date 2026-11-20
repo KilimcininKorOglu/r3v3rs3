@@ -645,6 +645,7 @@
   "error.invalid_host_port": "Geçersiz host portu {value}: 1-65535 aralığındaki portlarla tcp/<port> veya udp/<ilk>-<son> biçimini kullanın",
   "error.transparent_not_supported": "{addr} portu şeffaf olamaz: yalnız bir TCP veya UDP portu şeffaf olabilir",
   "error.port_range_overlap": "{addr} portları {other} portuyla çakışıyor",
+  "error.transparent_loopback_upstream": "Şeffaf bir port, loopback adresindeki {addr} upstream sunucusuna gönderemez",
   "error.upstream_range_mismatch": "Upstream sunucuları {addr} portu kadar port içermelidir",
   "error.invalid_path_prefix": "Yol öneki / ile başlamalıdır ve ? veya # içeremez: {prefix}",
   "error.invalid_path_regex": "Geçersiz yol regex'i: {pattern}",

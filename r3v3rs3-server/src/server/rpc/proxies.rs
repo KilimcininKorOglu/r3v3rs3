@@ -411,6 +411,7 @@ fn validate_proxy_rules(
 ) -> Result<(), Error> {
     validate_proxy(proxy, state)?;
     ensure_ranges_fit(proxy, state)?;
+    ensure_transparent_reachable(proxy, state)?;
     ensure_access_lists(proxy, state)?;
     ensure_client_cert_allowed(proxy, caller)?;
     ensure_forward_auth_allowed(proxy, caller)?;
@@ -431,6 +432,28 @@ fn ensure_ranges_fit(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
             addr: listen.to_string(),
         }),
         None => Ok(()),
+    }
+}
+
+/// A transparent port sends from the client address, and the kernel refuses to send a packet
+/// with a foreign source to a loopback address (measured: `EINVAL`), so its upstream servers
+/// must not be loopback addresses.
+fn ensure_transparent_reachable(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
+    let transparent = proxy
+        .ports
+        .iter()
+        .filter_map(|id| state.ports.get(*id))
+        .any(|ctx| ctx.entry().port.opts.transparent);
+    let loopback = proxy
+        .kind
+        .stream_upstreams()
+        .into_iter()
+        .find(|up| up.ip_addr().is_ok_and(|ip| ip.is_loopback()));
+    match (transparent, loopback) {
+        (true, Some(up)) => Err(Error::TransparentLoopbackUpstream {
+            addr: up.to_string(),
+        }),
+        _ => Ok(()),
     }
 }
 

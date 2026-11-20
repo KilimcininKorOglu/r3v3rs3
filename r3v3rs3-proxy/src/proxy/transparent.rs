@@ -80,6 +80,47 @@ pub fn bind_reply_socket(local: SocketAddr) -> io::Result<tokio::net::UdpSocket>
     tokio::net::UdpSocket::from_std(socket.into())
 }
 
+/// A socket of `kind` that sends from the client address, so the upstream sees the client. It
+/// carries the upstream mark, whose connection mark routes the replies back to r3v3rs3. The
+/// kernel picks the port.
+fn client_socket(
+    client: SocketAddr,
+    upstream: SocketAddr,
+    kind: socket2::Type,
+) -> io::Result<Socket> {
+    if client.is_ipv6() != upstream.is_ipv6() {
+        return Err(io::Error::other(format!(
+            "the client {client} and the upstream server {upstream} are of different address families"
+        )));
+    }
+    let socket = Socket::new(socket2::Domain::for_address(upstream), kind, None)?;
+    set_transparent(&socket, client.is_ipv6())?;
+    set_mark(&socket, crate::tproxy::UPSTREAM_MARK)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&SocketAddr::new(client.ip(), 0).into())?;
+    Ok(socket)
+}
+
+/// A UDP socket from the client address, connected to `upstream`.
+pub async fn client_udp_socket(
+    client: SocketAddr,
+    upstream: SocketAddr,
+) -> io::Result<tokio::net::UdpSocket> {
+    let socket = client_socket(client, upstream, socket2::Type::DGRAM)?;
+    let socket = tokio::net::UdpSocket::from_std(socket.into())?;
+    socket.connect(upstream).await?;
+    Ok(socket)
+}
+
+/// A TCP socket from the client address, ready to connect to `upstream`.
+pub fn client_tcp_socket(
+    client: SocketAddr,
+    upstream: SocketAddr,
+) -> io::Result<tokio::net::TcpSocket> {
+    let socket = client_socket(client, upstream, socket2::Type::STREAM)?;
+    Ok(tokio::net::TcpSocket::from_std_stream(socket.into()))
+}
+
 /// Receives one datagram with its sender and its original destination, which TPROXY keeps in a
 /// control message. The destination is `None` when the message is missing.
 pub fn recv_with_orig_dst(

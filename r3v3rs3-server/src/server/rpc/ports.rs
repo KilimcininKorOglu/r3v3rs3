@@ -136,6 +136,7 @@ fn validate_port(entry: &PortEntry, state: &ServerState) -> Result<(), Error> {
         .map(|o| &o.port.listen);
     let ssh = crate::firewall::ssh_ports(std::path::Path::new("/etc/ssh"));
     check_range_overlap(&port.listen, others, &ssh)?;
+    check_transparent_upstreams(entry, state)?;
     if let Some(limits) = &port.opts.http2_limits {
         limits.validate()?;
     }
@@ -144,6 +145,28 @@ fn validate_port(entry: &PortEntry, state: &ServerState) -> Result<(), Error> {
     }
     match &port.opts.tls_termination {
         Some(tls) => validate_client_auth(tls, &state.certs),
+        None => Ok(()),
+    }
+}
+
+/// A transparent port sends from the client address, which the kernel refuses toward a
+/// loopback address (measured: `EINVAL`), so no proxy of the port may have a loopback upstream.
+fn check_transparent_upstreams(entry: &PortEntry, state: &ServerState) -> Result<(), Error> {
+    if !entry.port.opts.transparent {
+        return Ok(());
+    }
+    let upstreams = state
+        .proxies
+        .entries()
+        .filter(|proxy| proxy.proxy.ports.contains(&entry.id))
+        .flat_map(|proxy| proxy.proxy.kind.stream_upstreams());
+    match upstreams
+        .into_iter()
+        .find(|up| up.ip_addr().is_ok_and(|ip| ip.is_loopback()))
+    {
+        Some(up) => Err(Error::TransparentLoopbackUpstream {
+            addr: up.to_string(),
+        }),
         None => Ok(()),
     }
 }

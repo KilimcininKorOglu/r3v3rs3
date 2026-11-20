@@ -62,13 +62,14 @@ test-runtime-docker:
 	CARGO_INCREMENTAL=0 $(CARGO) test -p r3v3rs3-platform --lib on_the_docker_engine -- --ignored
 
 # Runs the TPROXY range port tests as root in a privileged Linux container, because they install
-# an nftables table and a policy route. They share that table, so they run one at a time.
+# an nftables table, a policy route and a network namespace (r3v3rs3/tests/tproxy/run.sh). They
+# share that table, so they run one at a time.
 TPROXY_TARGET ?= x86_64-unknown-linux-gnu
 test-tproxy:
 	bin=$$(CARGO_INCREMENTAL=0 $(CARGO) zigbuild -p r3v3rs3 --test it --target $(TPROXY_TARGET) --message-format json \
 		| sed -n 's/.*"executable":"\([^"]*\)".*/\1/p' | tail -1) && test -n "$$bin" && \
-	docker run --rm --privileged --platform linux/amd64 -v "$$bin":/it:ro debian:stable-slim sh -c \
-		'apt-get update -qq && apt-get install -y -qq nftables iproute2 >/dev/null && /it --ignored --test-threads 1 tproxy_test::'
+	docker run --rm --privileged --platform linux/amd64 -v "$$bin":/it:ro \
+		-v $(CURDIR)/r3v3rs3/tests/tproxy/run.sh:/run.sh:ro debian:stable-slim sh /run.sh /it
 
 lint:
 	$(CARGO) clippy --workspace --all-targets --all-features -- -D warnings

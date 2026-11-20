@@ -47,6 +47,8 @@ pub struct TcpPortContext {
     pub listen: SocketAddr,
     /// The ports of the address; more than one makes it a TPROXY range port.
     pub ports: PortSpan,
+    /// Whether the upstream servers see the client address (the `transparent` port option).
+    pub transparent: bool,
     upstream: Option<TcpUpstream>,
     status: PortStatus,
     span: Span,
@@ -82,6 +84,7 @@ impl TcpPortContext {
         Ok(Self {
             listen,
             ports: entry.port.listen.port_range()?,
+            transparent: entry.port.opts.transparent,
             upstream: None,
             status: Default::default(),
             span,
@@ -110,6 +113,7 @@ impl TcpPortContext {
                 if upstream.is_none() && !servers.is_empty() {
                     let mut found = TcpUpstream::new(entry.id, proxy, servers, groups);
                     found.listen_ports = self.ports;
+                    found.transparent = self.transparent;
                     upstream = Some(found);
                 }
             }
@@ -218,6 +222,8 @@ struct TcpUpstream {
     /// The ports of the listening port; a range maps each port to the upstream port at its
     /// position.
     listen_ports: PortSpan,
+    /// Whether the upstream servers see the client address.
+    transparent: bool,
 }
 
 impl TcpUpstream {
@@ -247,6 +253,7 @@ impl TcpUpstream {
             servers: servers.into(),
             group,
             listen_ports: PortSpan::single(0),
+            transparent: false,
         }
     }
 
@@ -281,7 +288,7 @@ impl TcpUpstream {
                 continue;
             };
             let port = self.server_port(conn, client.1)?;
-            let conn_res = connect_server(conn, port, resolver, client).await;
+            let conn_res = connect_server(conn, port, self.transparent, resolver, client).await;
             match conn_res {
                 Ok((addr, stream)) => {
                     let guard = permit.success_keep();
@@ -418,6 +425,7 @@ async fn start(
 async fn connect_server(
     conn: &Connection,
     port: u16,
+    transparent: bool,
     resolver: &Resolver,
     client: ClientAddrs,
 ) -> anyhow::Result<(SocketAddr, Box<dyn IoStream>)> {
@@ -428,9 +436,12 @@ async fn connect_server(
     let target = timeout_at(deadline, resolve_upstream(conn, port, resolver))
         .await
         .map_err(|_| timed_out())??;
-    let out = timeout_at(deadline, connect_upstream(conn.clone(), target, client))
-        .await
-        .map_err(|_| timed_out())??;
+    let out = timeout_at(
+        deadline,
+        connect_upstream(conn.clone(), target, transparent, client),
+    )
+    .await
+    .map_err(|_| timed_out())??;
     Ok((target, out))
 }
 
@@ -452,18 +463,28 @@ async fn resolve_upstream(
     Ok(target)
 }
 
+/// The socket to the upstream server: from the client address on a transparent port.
+fn upstream_socket(
+    target: SocketAddr,
+    transparent: bool,
+    client: SocketAddr,
+) -> std::io::Result<TcpSocket> {
+    match transparent {
+        true => super::transparent::client_tcp_socket(client, target),
+        false if target.is_ipv4() => TcpSocket::new_v4(),
+        false => TcpSocket::new_v6(),
+    }
+}
+
 /// Connects to the upstream server, sends the PROXY protocol header of the proxy, and runs the TLS
 /// handshake of a TLS server.
 async fn connect_upstream(
     conn: Connection,
     target: SocketAddr,
+    transparent: bool,
     client: ClientAddrs,
 ) -> anyhow::Result<Box<dyn IoStream>> {
-    let sock = if target.is_ipv4() {
-        TcpSocket::new_v4()
-    } else {
-        TcpSocket::new_v6()
-    }?;
+    let sock = upstream_socket(target, transparent, client.0)?;
     let mut out = sock.connect(target).await?;
     debug!(%target, "connected");
     if let Some(version) = conn.proxy_protocol {

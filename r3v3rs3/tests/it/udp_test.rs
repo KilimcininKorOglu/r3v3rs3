@@ -1,6 +1,6 @@
 use crate::common;
 use common::{TestPort, TestStorage, alloc_udp_port, with_server};
-use r3v3rs3::server::rpc::proxies::AddProxy;
+use r3v3rs3::server::rpc::{ports::UpdatePort, proxies::AddProxy};
 use r3v3rs3_api::{
     error::Error,
     port::{Port, PortEntry, UpstreamServer},
@@ -263,6 +263,73 @@ async fn a_range_port_refuses_upstreams_of_another_size() -> anyhow::Result<()> 
             );
         }
         common::call(&mut channels, add("/ip4/127.0.0.1/udp/50000-50009")).await??;
+        Ok(())
+    })
+    .await
+}
+
+fn udp_proxy_to(port: &str, upstream: &str) -> Proxy {
+    Proxy {
+        ports: vec![port.parse().unwrap()],
+        kind: ProxyKind::Udp(UdpProxy {
+            upstream_servers: vec![UpstreamServer::new(upstream.parse().unwrap())],
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// A proxy on the transparent port `seen` is refused with a loopback upstream and accepted with
+/// a remote one.
+async fn check_loopback_proxy_refused(
+    channels: &mut r3v3rs3::server::ServerChannels,
+) -> anyhow::Result<()> {
+    for loopback in ["/ip4/127.0.0.1/udp/3478", "/ip6/::1/udp/3478"] {
+        let add = AddProxy {
+            entry: udp_proxy_to("seen", loopback),
+            owner: None,
+        };
+        let result = common::call(channels, add).await?;
+        assert!(
+            matches!(result, Err(Error::TransparentLoopbackUpstream { .. })),
+            "{loopback} was not refused: {result:?}"
+        );
+    }
+    let remote = AddProxy {
+        entry: udp_proxy_to("seen", "/ip4/192.0.2.7/udp/3478"),
+        owner: None,
+    };
+    common::call(channels, remote).await??;
+    Ok(())
+}
+
+/// A transparent port sends from the client address, and Linux refuses such a packet toward a
+/// loopback address (the measured `EINVAL` of the TPROXY spike), so a loopback upstream on a
+/// transparent port is refused, whether the proxy or the port changes last.
+#[tokio::test]
+async fn a_transparent_port_refuses_a_loopback_upstream() -> anyhow::Result<()> {
+    let mut clear = common::port_entry("clear", "/ip4/127.0.0.1/udp/3478".parse()?);
+    clear.port.active = false;
+    let mut seen = clear.clone();
+    seen.id = "seen".parse()?;
+    seen.port.listen = "/ip4/127.0.0.1/udp/3479".parse()?;
+    seen.port.opts.transparent = true;
+    let config = TestStorage::builder()
+        .ports(vec![clear.clone(), seen])
+        .build();
+    with_server(config, |mut channels| async move {
+        check_loopback_proxy_refused(&mut channels).await?;
+        let local = AddProxy {
+            entry: udp_proxy_to("clear", "/ip4/127.0.0.1/udp/5000"),
+            owner: None,
+        };
+        common::call(&mut channels, local).await??;
+        clear.port.opts.transparent = true;
+        let result = common::call(&mut channels, UpdatePort { entry: clear }).await?;
+        assert!(
+            matches!(result, Err(Error::TransparentLoopbackUpstream { .. })),
+            "the port became transparent: {result:?}"
+        );
         Ok(())
     })
     .await

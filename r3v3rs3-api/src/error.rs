@@ -73,6 +73,9 @@ pub enum Error {
     #[error("the upstream servers must name as many ports as the port {addr}")]
     UpstreamRangeMismatch { addr: String },
 
+    #[error("a transparent port cannot send to the loopback upstream server {addr}")]
+    TransparentLoopbackUpstream { addr: String },
+
     #[error("missing TLS termination config")]
     TlsTerminationConfigMissing,
 

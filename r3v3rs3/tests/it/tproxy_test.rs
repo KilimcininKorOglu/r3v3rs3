@@ -19,7 +19,17 @@ const ATTEMPTS: usize = 50;
 const ATTEMPT_WAIT: Duration = Duration::from_millis(200);
 
 fn storage(listen: &str, upstream: &str, kind: fn(UpstreamServer) -> ProxyKind) -> TestStorage {
-    let port = common::port_entry("range", listen.parse().unwrap());
+    storage_with(listen, upstream, kind, false)
+}
+
+fn storage_with(
+    listen: &str,
+    upstream: &str,
+    kind: fn(UpstreamServer) -> ProxyKind,
+    transparent: bool,
+) -> TestStorage {
+    let mut port = common::port_entry("range", listen.parse().unwrap());
+    port.port.opts.transparent = transparent;
     TestStorage::builder()
         .ports(vec![port])
         .proxies(vec![ProxyEntry {
@@ -65,7 +75,12 @@ async fn udp_upstream(addr: &str) -> anyhow::Result<()> {
 
 /// Sends to `target` until a reply comes, and returns the reply and its source.
 async fn udp_exchange(target: SocketAddr) -> anyhow::Result<(String, SocketAddr)> {
-    let client = UdpSocket::bind("127.0.0.1:0").await?;
+    udp_exchange_from("127.0.0.1:0", target).await
+}
+
+/// Like [`udp_exchange`], from a client socket on `bind`.
+async fn udp_exchange_from(bind: &str, target: SocketAddr) -> anyhow::Result<(String, SocketAddr)> {
+    let client = UdpSocket::bind(bind).await?;
     let mut buf = [0; 64];
     for _ in 0..ATTEMPTS {
         client.send_to(b"ping", target).await?;
@@ -143,6 +158,66 @@ async fn a_tcp_range_port_reaches_the_upstream_port_at_its_position() -> anyhow:
             reply, "41203",
             "the connection reached another upstream port"
         );
+        Ok(())
+    })
+    .await
+}
+
+/// The client address of the transparent tests. `run.sh` puts it on the host, and the
+/// upstream servers in the `up` namespace answer with the address they see.
+const CLIENT_IP: &str = "10.66.0.5";
+
+/// The transparent port option makes the upstream see the client address instead of the
+/// address of r3v3rs3, which is what a TURN server needs to give out its relay addresses.
+#[tokio::test]
+#[ignore = "needs the namespaces of r3v3rs3/tests/tproxy/run.sh (make test-tproxy)"]
+async fn a_transparent_udp_port_shows_the_client_to_the_upstream() -> anyhow::Result<()> {
+    let config = storage_with(
+        "/ip4/10.66.0.1/udp/40300",
+        "/ip4/10.77.0.2/udp/5000",
+        udp_kind,
+        true,
+    );
+    with_server(config, |_| async move {
+        let target: SocketAddr = "10.66.0.1:40300".parse()?;
+        let (seen, from) = udp_exchange_from(&format!("{CLIENT_IP}:0"), target).await?;
+        assert_eq!(seen, CLIENT_IP, "the upstream saw another source address");
+        assert_eq!(from, target, "the reply left from another address");
+        Ok(())
+    })
+    .await
+}
+
+/// Connects from `CLIENT_IP` to `target` until the proxy answers, and returns the reply.
+async fn tcp_exchange_from_client(target: SocketAddr) -> anyhow::Result<String> {
+    for _ in 0..ATTEMPTS {
+        let socket = tokio::net::TcpSocket::new_v4()?;
+        socket.bind(format!("{CLIENT_IP}:0").parse()?)?;
+        if let Ok(mut stream) = socket.connect(target).await {
+            let mut reply = String::new();
+            let read = timeout(Duration::from_secs(2), stream.read_to_string(&mut reply)).await;
+            if read.is_ok_and(|r| r.is_ok()) && !reply.is_empty() {
+                return Ok(reply);
+            }
+        }
+        tokio::time::sleep(ATTEMPT_WAIT).await;
+    }
+    anyhow::bail!("no reply from {target}")
+}
+
+/// The TCP upstream of a transparent port also sees the client address.
+#[tokio::test]
+#[ignore = "needs the namespaces of r3v3rs3/tests/tproxy/run.sh (make test-tproxy)"]
+async fn a_transparent_tcp_port_shows_the_client_to_the_upstream() -> anyhow::Result<()> {
+    let config = storage_with(
+        "/ip4/10.66.0.1/tcp/41300",
+        "/ip4/10.77.0.2/tcp/5001",
+        tcp_kind,
+        true,
+    );
+    with_server(config, |_| async move {
+        let seen = tcp_exchange_from_client("10.66.0.1:41300".parse()?).await?;
+        assert_eq!(seen, CLIENT_IP, "the upstream saw another source address");
         Ok(())
     })
     .await
