@@ -1337,6 +1337,63 @@ async fn assert_cli_proxy_mutations(
     Ok(())
 }
 
+/// Runs the client and fails with its stderr when the command does not succeed.
+async fn cli_ok(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    args: &[&str],
+) -> anyhow::Result<String> {
+    let out = run_client(binary, addr, token, args).await?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    anyhow::ensure!(
+        out.status.success(),
+        "r3 {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Ok(stdout)
+}
+
+/// The id in the first column of the list line that names `name`.
+fn listed_id(listing: &str, name: &str) -> anyhow::Result<String> {
+    listing
+        .lines()
+        .find(|line| line.contains(name))
+        .and_then(|line| line.split_whitespace().next())
+        .map(str::to_string)
+        .with_context(|| format!("{name} is not in the list: {listing}"))
+}
+
+/// `r3 acl` reaches the access list API (OpenAPI paths `/api/access_lists` and
+/// `/api/access_lists/{id}`): a list it adds is listed, read, changed and deleted.
+async fn assert_cli_access_lists(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+) -> anyhow::Result<()> {
+    let added = json!({ "name": "cli-acl", "ip_filter": { "allow": ["10.0.0.0/8"] } });
+    cli_ok(binary, addr, token, &["acl", "add", &added.to_string()]).await?;
+    let id = listed_id(
+        &cli_ok(binary, addr, token, &["acl", "list"]).await?,
+        "cli-acl",
+    )?;
+    let changed = json!({ "name": "cli-acl", "ip_filter": { "deny": ["192.0.2.0/24"] } });
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["acl", "update", &id, &changed.to_string()],
+    )
+    .await?;
+    let shown = cli_ok(binary, addr, token, &["acl", "get", &id]).await?;
+    assert!(shown.contains("192.0.2.0/24"), "{shown}");
+    assert!(!shown.contains("10.0.0.0/8"), "{shown}");
+    cli_ok(binary, addr, token, &["acl", "delete", &id]).await?;
+    let listing = cli_ok(binary, addr, token, &["acl", "list"]).await?;
+    assert!(!listing.contains("cli-acl"), "{listing}");
+    Ok(())
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
@@ -1366,6 +1423,7 @@ async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
 
         let port_id = assert_cli_port_mutations(&binary, &addr, &token).await?;
         assert_cli_proxy_mutations(&binary, &addr, &token, &port_id).await?;
+        assert_cli_access_lists(&binary, &addr, &token).await?;
         Ok(())
     })
     .await

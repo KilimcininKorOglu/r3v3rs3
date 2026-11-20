@@ -955,7 +955,7 @@ impl ApiClient {
 
     pub async fn list_acls(&self) -> anyhow::Result<()> {
         let entries: Vec<r3v3rs3_api::access_list::AccessListEntry> =
-            self.get_json("/api/access-lists").await?;
+            self.get_json("/api/access_lists").await?;
         println!("{:<26} {:<30} RULES", "ID", "NAME");
         println!("{:-<26} {:-<30} {:-<10}", "", "", "");
         for item in &entries {
@@ -966,10 +966,13 @@ impl ApiClient {
     }
 
     pub async fn get_acl(&self, id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, &format!("/api/access-lists/{id}"), None)
-            .await?;
-        print_json(&res)
+        // The API has no single-list read, so the list is taken from the full listing.
+        let entries: Vec<serde_json::Value> = self.get_json("/api/access_lists").await?;
+        let entry = entries
+            .into_iter()
+            .find(|entry| entry["id"] == id)
+            .ok_or_else(|| anyhow::anyhow!("access list {id} not found"))?;
+        print_json(&entry)
     }
 
     pub async fn add_acl(&self, payload: &str) -> anyhow::Result<()> {
@@ -977,7 +980,7 @@ impl ApiClient {
         let res = self
             .request(
                 Method::POST,
-                "/api/access-lists",
+                "/api/access_lists",
                 Some(&serde_json::to_value(&list)?),
             )
             .await?;
@@ -990,7 +993,7 @@ impl ApiClient {
         let res = self
             .request(
                 Method::PUT,
-                &format!("/api/access-lists/{id}"),
+                &format!("/api/access_lists/{id}"),
                 Some(&serde_json::to_value(&list)?),
             )
             .await?;
@@ -999,7 +1002,7 @@ impl ApiClient {
     }
 
     pub async fn delete_acl(&self, id: &str) -> anyhow::Result<()> {
-        self.request(Method::DELETE, &format!("/api/access-lists/{id}"), None)
+        self.request(Method::DELETE, &format!("/api/access_lists/{id}"), None)
             .await?;
         println!("access-list/{id} deleted");
         Ok(())
