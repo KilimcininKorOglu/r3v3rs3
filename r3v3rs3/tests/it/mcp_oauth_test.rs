@@ -2138,6 +2138,134 @@ async fn the_project_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::
     .await
 }
 
+const GIT_SECRET: &str = "gitea-client-secret-never-shown";
+const CALLBACK: &str = "https://panel.example.com/oauth/git/callback";
+
+/// The Git connection tools rename a connection without showing its client secret, start the
+/// OAuth authorization (RFC 6749 4.1.1: the URL carries the `client_id`), create a GitHub App
+/// manifest form and refuse a GitHub installation on a Gitea connection (OpenAPI
+/// `update_git_connection`, `authorize_git_connection`, `create_github_app`,
+/// `install_github_app`).
+async fn assert_mcp_git(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let add = json!({ "name": "mcp-gitea", "provider": "gitea", "url": "https://gitea.example.com",
+        "client_id": "mcp-client-id", "client_secret": GIT_SECRET });
+    let id = id_of(&mcp_call(client, "add_git_connection", add).await?)?;
+    let request = json!({ "name": "mcp-gitea-2", "provider": "gitea",
+        "url": "https://gitea.example.com", "client_id": "mcp-client-id" });
+    let updated = mcp_call(
+        client,
+        "update_git_connection",
+        json!({ "id": id, "request": request }),
+    )
+    .await?;
+    assert!(
+        updated.contains("mcp-gitea-2") && !updated.contains(GIT_SECRET),
+        "{updated}"
+    );
+    let auth = json!({ "id": id, "request": { "redirect_uri": CALLBACK } });
+    let url = mcp_call(client, "authorize_git_connection", auth).await?;
+    assert!(
+        url.contains("https://gitea.example.com") && url.contains("mcp-client-id"),
+        "{url}"
+    );
+    let form = mcp_call(
+        client,
+        "create_github_app",
+        json!({ "request": { "name": "mcp-gh", "redirect_uri": CALLBACK } }),
+    )
+    .await?;
+    assert!(form.contains("manifest"), "{form}");
+    let refused = mcp_call(client, "install_github_app", json!({ "id": id })).await;
+    assert!(
+        refused.is_err(),
+        "a Gitea connection took a GitHub installation"
+    );
+    assert_reached("install_github_app", &refused.map_err(|e| e.to_string()));
+    Ok(())
+}
+
+/// `r3 git` reaches the same endpoints.
+async fn assert_cli_git(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
+    let add = [
+        "git",
+        "add",
+        "--name",
+        "cli-gitea",
+        "--provider",
+        "gitea",
+        "--url",
+        "https://gitea.example.com",
+        "--client-id",
+        "cli-client-id",
+        "--client-secret",
+        GIT_SECRET,
+    ];
+    cli_ok(binary, addr, token, &add).await?;
+    let id = listed_id(
+        &cli_ok(binary, addr, token, &["git", "list"]).await?,
+        "cli-gitea",
+    )?;
+    let request = json!({ "name": "cli-gitea-2", "provider": "gitea",
+        "url": "https://gitea.example.com", "client_id": "cli-client-id" });
+    let updated = cli_ok(
+        binary,
+        addr,
+        token,
+        &["git", "update", &id, &request.to_string()],
+    )
+    .await?;
+    assert!(
+        updated.contains("cli-gitea-2") && !updated.contains(GIT_SECRET),
+        "{updated}"
+    );
+    let url = cli_ok(
+        binary,
+        addr,
+        token,
+        &["git", "authorize", &id, "--redirect-uri", CALLBACK],
+    )
+    .await?;
+    assert!(url.contains("cli-client-id"), "{url}");
+    let form = cli_ok(
+        binary,
+        addr,
+        token,
+        &[
+            "git",
+            "github-app",
+            "--name",
+            "cli-gh",
+            "--redirect-uri",
+            CALLBACK,
+        ],
+    )
+    .await?;
+    assert!(form.contains("manifest"), "{form}");
+    let out = run_client(binary, addr, token, &["git", "install", &id]).await?;
+    assert!(!out.status.success());
+    assert_reached(
+        "git install",
+        &Err(String::from_utf8_lossy(&out.stderr).to_string()),
+    );
+    Ok(())
+}
+
+/// Git connection operations are reachable from MCP and the CLI.
+#[tokio::test]
+async fn the_git_connection_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-git")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let token = access_token(&addr).await?;
+        assert_mcp_git(&mcp_client(addr, &token).await?).await?;
+        assert_cli_git(&client_binary()?, &addr, &token).await
+    })
+    .await
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {

@@ -1882,7 +1882,7 @@ The admin API exposes its complete tool suite over the Model Context Protocol at
 | **Projects & Env Groups** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_project_environment`, `update_project_env`, `sync_project_env`, `get_project`, `update_project`, `get_environment`, `update_environment`, `delete_environment`, `get_environment_env`, `diff_environments`, `get_env_group`, `update_env_group` | Project organization, multi-environment isolation, shared environment variable groups, and cross-environment configuration synchronization with selective key cloning. |
 | **Outbound Webhooks** | `list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook` | Outbound event notification webhook dispatchers: endpoint management, HMAC-SHA256 signature secret validation, fine-grained event subscriptions, and end-to-end webhook delivery testing. |
 | **Container Registries** | `list_registries`, `add_registry`, `update_registry`, `delete_registry` | Private Docker and OCI container registry credentials: credential storage, secure pull authentication, and server target endpoints. |
-| **Git Connections** | `list_git_connections`, `get_git_connection`, `add_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches` | Git provider connections (GitHub App, GitLab, Gitea): OAuth link management, accessible repository browsing, and remote branch enumeration. |
+| **Git Connections** | `list_git_connections`, `get_git_connection`, `add_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches`, `update_git_connection`, `authorize_git_connection`, `create_github_app`, `install_github_app` | Git provider connections (GitHub App, GitLab, Gitea): OAuth link management, accessible repository browsing, and remote branch enumeration. |
 | **Accounts & Auth Tokens** | `list_accounts`, `create_account`, `update_account`, `delete_account`, `list_auth_tokens`, `create_auth_token`, `delete_auth_token` | User account administration: roles (admin, editor, viewer), proxy isolation scopes, password management, and persistent scoped API token issuance. |
 | **Disaster Recovery** | `list_dr_backups`, `create_dr_backup` | Full system snapshot archives with optional AES-256-GCM encryption and automatic S3 replication. |
 
@@ -2115,6 +2115,10 @@ r3 <server> git add --name my-gitlab --provider gitlab --client-id <id> [--clien
 r3 <server> git repos <id> [--search query] [--page 1]
 r3 <server> git branches <id> --repo owner/repo
 r3 <server> git delete <id>
+r3 <server> git update <id> <connection.json|yaml|->
+r3 <server> git authorize <id> --redirect-uri https://panel.example.com/oauth/git/callback
+r3 <server> git github-app --name team-github --redirect-uri https://panel.example.com/oauth/git/callback [--organization my-team] [--url https://github.example.com]
+r3 <server> git install <id>
 
 # User Accounts & Auth Tokens
 r3 <server> account list

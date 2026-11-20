@@ -1074,6 +1074,32 @@ pub enum GitCommand {
         #[arg(long)]
         repo: String,
     },
+    /// Replaces a connection from inline JSON/YAML, a file path, or stdin ('-'); the client
+    /// secret changes only when the payload holds `client_secret`.
+    Update { id: String, payload: String },
+    /// Prints the provider URL that grants the connection access in a browser.
+    Authorize {
+        id: String,
+        /// The `/oauth/git/callback` URL of this panel.
+        #[arg(long)]
+        redirect_uri: String,
+    },
+    /// Prints the manifest form that registers a private GitHub App.
+    GithubApp {
+        #[arg(long)]
+        name: String,
+        /// The `/oauth/git/callback` URL of this panel; GitHub returns the browser there.
+        #[arg(long)]
+        redirect_uri: String,
+        /// The GitHub Enterprise URL.
+        #[arg(long)]
+        url: Option<String>,
+        /// The organization that owns the app; without it the account of the admin owns it.
+        #[arg(long)]
+        organization: Option<String>,
+    },
+    /// Reads and stores the installation of a GitHub App connection.
+    Install { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2163,6 +2189,38 @@ async fn run_git(api: &api_client::ApiClient, cmd: GitCommand) -> anyhow::Result
             api.list_git_repos(&id, search.as_deref(), page).await
         }
         GitCommand::Branches { id, repo } => api.list_git_branches(&id, &repo).await,
+        other => run_git_setup(api, other).await,
+    }
+}
+
+/// The commands that change a Git connection or connect it to its provider.
+async fn run_git_setup(api: &api_client::ApiClient, cmd: GitCommand) -> anyhow::Result<()> {
+    let base = "/api/git/connections";
+    match cmd {
+        GitCommand::Update { id, payload } => {
+            let body = api_client::load_payload(&payload)?;
+            api.print_put(&format!("{base}/{id}"), &body).await
+        }
+        GitCommand::Authorize { id, redirect_uri } => {
+            let body = serde_json::json!({ "redirect_uri": redirect_uri });
+            api.print_post(&format!("{base}/{id}/authorize"), &body)
+                .await
+        }
+        GitCommand::GithubApp {
+            name,
+            redirect_uri,
+            url,
+            organization,
+        } => {
+            let body = serde_json::json!({ "name": name, "redirect_uri": redirect_uri,
+                "url": url, "organization": organization });
+            api.print_post("/api/git/github_apps", &body).await
+        }
+        GitCommand::Install { id } => {
+            api.print_post(&format!("{base}/{id}/installation"), &serde_json::json!({}))
+                .await
+        }
+        other => anyhow::bail!("{other:?} is not a Git setup command"),
     }
 }
 

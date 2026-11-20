@@ -4088,6 +4088,98 @@ impl McpServer {
         json_result(engines.0)
     }
 
+    /// Replace a Git connection.
+    #[tool(
+        description = "Replace the Git connection `id`. `request` is the body of PUT /api/git/connections/{id}: `name`, `provider` (`gitlab` or `gitea`), `url`, `client_id` and, only when it changes, `client_secret`. The secret is never returned. Needs a token with the edit scope and an admin account."
+    )]
+    async fn update_git_connection(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdJsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let request: r3v3rs3_api::git_connection::GitConnectionRequest = json_arg(params.request)?;
+        let entry = super::git::update_connection(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entry.0)
+    }
+
+    /// Start the OAuth authorization of a Git connection.
+    #[tool(
+        description = "Start the OAuth authorization of the Git connection `id`: returns the provider URL that an account opens in a browser to grant access. `request` holds `redirect_uri`, the `/oauth/git/callback` URL of this panel. Needs a token with the edit scope and an admin account."
+    )]
+    async fn authorize_git_connection(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdJsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let request: r3v3rs3_api::git_connection::AuthorizeRequest = json_arg(params.request)?;
+        let answer = super::git::authorize_connection(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(answer.0)
+    }
+
+    /// Create the manifest form of a private GitHub App.
+    #[tool(
+        description = "Create the manifest form that registers a private GitHub App for this panel. `request` holds `name`, `redirect_uri` (the `/oauth/git/callback` URL of this panel), optional `organization` and, for GitHub Enterprise, `url`. Open the returned form in a browser to finish the registration on GitHub. Needs a token with the edit scope and an admin account."
+    )]
+    async fn create_github_app(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request: r3v3rs3_api::git_connection::GithubAppRequest = json_arg(params.request)?;
+        let form = super::git::create_github_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(form.0)
+    }
+
+    /// Read the installation of a GitHub App connection.
+    #[tool(
+        description = "Read the installation of the GitHub App connection `id` from GitHub after the app was installed on an account or organization, and store it. Refused for GitLab and Gitea connections. Needs a token with the edit scope and an admin account."
+    )]
+    async fn install_github_app(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let entry = super::git::install_github_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entry.0)
+    }
+
     /// Read one project.
     #[tool(
         description = "Show the project `id` with its environments. Read-only; any account can call it."

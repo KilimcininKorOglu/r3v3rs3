@@ -1882,7 +1882,7 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 | **Projeler ve Ortam Grupları** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_project_environment`, `update_project_env`, `sync_project_env`, `get_project`, `update_project`, `get_environment`, `update_environment`, `delete_environment`, `get_environment_env`, `diff_environments`, `get_env_group`, `update_env_group` | Proje organizasyonu, çoklu ortam izolasyonu, paylaşılan ortam değişkeni grupları ve seçici anahtar kopyalama ile ortamlar arası yapılandırma senkronizasyonu. |
 | **Dışa Dönük Webhook'lar** | `list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook` | Dışa dönük olay bildirim webhook dağıtıcıları: uç nokta yönetimi, HMAC-SHA256 imza sırrı doğrulaması, ayrıntılı olay abonelikleri ve uçtan uca webhook teslimat testi. |
 | **Konteyner Registry'leri** | `list_registries`, `add_registry`, `update_registry`, `delete_registry` | Özel Docker ve OCI konteyner registry kimlik bilgileri: güvenli kimlik doğrulama, pull izinleri ve sunucu hedef uç noktaları. |
-| **Git Bağlantıları** | `list_git_connections`, `get_git_connection`, `add_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches` | Git sağlayıcı bağlantıları (GitHub App, GitLab, Gitea): OAuth bağlantı yönetimi, erişilebilir depo tarama ve uzak dal (branch) listeleme. |
+| **Git Bağlantıları** | `list_git_connections`, `get_git_connection`, `add_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches`, `update_git_connection`, `authorize_git_connection`, `create_github_app`, `install_github_app` | Git sağlayıcı bağlantıları (GitHub App, GitLab, Gitea): OAuth bağlantı yönetimi, erişilebilir depo tarama ve uzak dal (branch) listeleme. |
 | **Hesaplar ve Yetki Token'ları** | `list_accounts`, `create_account`, `update_account`, `delete_account`, `list_auth_tokens`, `create_auth_token`, `delete_auth_token` | Kullanıcı hesap yönetimi: roller (admin, editor, viewer), proxy erişim kapsamları, parola yönetimi ve kalıcı yetkilendirilmiş API token üretimi. |
 | **Felaket Kurtarma** | `list_dr_backups`, `create_dr_backup` | İsteğe bağlı AES-256-GCM şifrelemeli ve otomatik S3 replikasyonlu tam sistem yedek anlık görüntüleri. |
 
@@ -2115,6 +2115,10 @@ r3 <server> git add --name my-gitlab --provider gitlab --client-id <id> [--clien
 r3 <server> git repos <id> [--search query] [--page 1]
 r3 <server> git branches <id> --repo owner/repo
 r3 <server> git delete <id>
+r3 <server> git update <id> <connection.json|yaml|->
+r3 <server> git authorize <id> --redirect-uri https://panel.example.com/oauth/git/callback
+r3 <server> git github-app --name team-github --redirect-uri https://panel.example.com/oauth/git/callback [--organization my-team] [--url https://github.example.com]
+r3 <server> git install <id>
 
 # Kullanıcı Hesapları ve Yetki Token'ları
 r3 <server> account list
