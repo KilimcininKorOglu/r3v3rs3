@@ -188,6 +188,12 @@ impl PlatformHandle {
         match Platform::open(config, config_dir, command, Some(audit), pool).await {
             Ok(platform) => {
                 let platform = Arc::new(platform);
+                // An invalid R3V3RS3_FIREWALL_ENABLED is reported by the firewall status of the
+                // server; the agent tables stay untouched then.
+                match crate::firewall_control::enabled(&config.firewall) {
+                    Ok(enabled) => platform.set_firewall_enabled(enabled),
+                    Err(err) => error!(%err, "the agent firewalls stay unmanaged"),
+                }
                 tokio::spawn(publish::refresh(Arc::downgrade(&platform)));
                 backup::spawn_scheduler(&platform);
                 wal::spawn_puller(&platform);
@@ -258,8 +264,13 @@ pub struct Platform {
     command: mpsc::Sender<ServerCommand>,
     /// The proxies and the issues of the last snapshot that the server got.
     sent: Mutex<Option<publish::Published>>,
-    /// The host ports of each target that the last firewall update sent.
-    sent_host_ports: Mutex<Option<publish::TargetPorts>>,
+    /// The host ports of the local target that the server got last. The server starts with none
+    /// and clears them when the platform restarts, so only a change needs a message.
+    sent_host_ports: Mutex<Vec<r3v3rs3_api::firewall::HostPort>>,
+    /// The firewall that each agent host got last.
+    agent_firewalls: Mutex<std::collections::BTreeMap<ShortId, publish::AgentFirewall>>,
+    /// Whether r3v3rs3 manages the host firewalls, as `[firewall] enabled` says.
+    firewall_enabled: std::sync::atomic::AtomicBool,
     /// The apps that a pipeline or a deletion holds.
     busy: Arc<std::sync::Mutex<HashSet<ShortId>>>,
     /// Active cancellation tokens for in-progress deployments.
@@ -377,9 +388,9 @@ impl Platform {
             config_dir: config_dir.to_path_buf(),
             command,
             sent: Mutex::new(None),
-            // The server starts with no app ports and clears them when the platform restarts,
-            // so only a change needs a message.
-            sent_host_ports: Mutex::new(Some(publish::TargetPorts::new())),
+            sent_host_ports: Mutex::new(Vec::new()),
+            agent_firewalls: Mutex::new(std::collections::BTreeMap::new()),
+            firewall_enabled: std::sync::atomic::AtomicBool::new(false),
             busy: Arc::new(std::sync::Mutex::new(HashSet::new())),
             cancellations: std::sync::Mutex::new(HashMap::new()),
             running_commands: std::sync::Mutex::new(HashSet::new()),

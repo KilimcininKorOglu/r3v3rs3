@@ -36,8 +36,9 @@ impl RemoteRuntime {
         }
     }
 
-    /// Fails unless the connected agent runs `minimum` or a newer release.
-    fn require_version(&self, minimum: &str) -> anyhow::Result<()> {
+    /// Fails unless the connected agent runs `minimum` or a newer release, which `feature`
+    /// needs.
+    fn require_version(&self, minimum: &str, feature: &str) -> anyhow::Result<()> {
         let status = self
             .agents
             .status(self.target)
@@ -45,12 +46,23 @@ impl RemoteRuntime {
         let version_of = crate::config::version_of;
         if version_of(&status.version) < version_of(minimum) {
             return Err(anyhow!(
-                "the agent of the target {} runs r3v3rs3 {}; upgrade it to {minimum} or newer to build with BuildKit",
+                "the agent of the target {} runs r3v3rs3 {}; upgrade it to {minimum} or newer to {feature}",
                 self.target,
                 status.version
             ));
         }
         Ok(())
+    }
+
+    /// Keeps the firewall table of the agent host: opens `ports` with `enabled`, or removes it.
+    pub async fn set_firewall(
+        &self,
+        enabled: bool,
+        ports: Vec<r3v3rs3_api::firewall::HostPort>,
+    ) -> anyhow::Result<()> {
+        self.require_version(FIREWALL_AGENT_VERSION, "manage its firewall")?;
+        self.call_done(AgentRequest::SetFirewall { enabled, ports })
+            .await
     }
 
     fn link(&self) -> Result<Link, Error> {
@@ -107,6 +119,9 @@ impl RemoteRuntime {
 /// The first agent release that answers [`AgentRequest::BuildImageWithBuildKit`].
 pub const BUILDKIT_AGENT_VERSION: &str = "3.3.1";
 
+/// The first agent release that answers [`AgentRequest::SetFirewall`].
+pub const FIREWALL_AGENT_VERSION: &str = "3.5.4";
+
 fn unexpected(output: &AgentOutput) -> anyhow::Error {
     anyhow!("the agent gave an unexpected answer: {output:?}")
 }
@@ -153,7 +168,7 @@ impl ContainerRuntime for RemoteRuntime {
         let (dockerfile, tag) = (dockerfile.clone(), tag.clone());
         let request = match buildkit.filter(|config| config.enabled) {
             Some(config) => {
-                self.require_version(BUILDKIT_AGENT_VERSION)?;
+                self.require_version(BUILDKIT_AGENT_VERSION, "build with BuildKit")?;
                 AgentRequest::BuildImageWithBuildKit {
                     dockerfile,
                     tag,
@@ -507,6 +522,40 @@ mod tests {
             .expect_err("an old agent must refuse a BuildKit build");
         assert!(err.to_string().contains(BUILDKIT_AGENT_VERSION), "{err}");
         assert!(agent.runtime.state().builds.is_empty());
+        Ok(())
+    }
+
+    /// An agent older than [`FIREWALL_AGENT_VERSION`] does not know the request, so the master
+    /// refuses before it sends it and names the release to upgrade to.
+    #[tokio::test]
+    async fn an_old_agent_refuses_a_firewall_update() -> anyhow::Result<()> {
+        let target: ShortId = "fzn-txd".parse()?;
+        let agents = Arc::new(AgentRegistry::default());
+        let _agent = TestAgent::connect_with_version(&agents, target, "3.5.3");
+        let remote = RemoteRuntime::new(target, agents.clone(), Arc::new(Forwarders::new(agents)));
+        let err = remote
+            .set_firewall(true, vec!["udp/3478".parse()?])
+            .await
+            .expect_err("an old agent must refuse");
+        assert!(err.to_string().contains(FIREWALL_AGENT_VERSION), "{err}");
+        Ok(())
+    }
+
+    /// A current agent runs nft on its own host. The test host has no nft or no right to
+    /// change its firewall, so the answer is the nft error of the agent, not a version error.
+    #[tokio::test]
+    async fn a_firewall_update_reaches_a_current_agent() -> anyhow::Result<()> {
+        let target: ShortId = "fzn-txd".parse()?;
+        let agents = Arc::new(AgentRegistry::default());
+        let _agent = TestAgent::connect_with_version(&agents, target, FIREWALL_AGENT_VERSION);
+        let remote = RemoteRuntime::new(target, agents.clone(), Arc::new(Forwarders::new(agents)));
+        let err = remote
+            .set_firewall(true, vec!["udp/3478".parse()?])
+            .await
+            .expect_err("the test host must not let the agent change its firewall");
+        let text = format!("{err:#}");
+        assert!(text.contains("nft"), "{text}");
+        assert!(!text.contains("upgrade"), "{text}");
         Ok(())
     }
 

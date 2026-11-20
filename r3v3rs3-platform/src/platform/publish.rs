@@ -4,6 +4,7 @@ use super::proxy::{self, HostServer, LiveApp};
 use super::store::RunningDeployment;
 use super::{Platform, is_local};
 use crate::agent::forward::ForwardKey;
+use crate::agent::remote::RemoteRuntime;
 use crate::command::ServerCommand;
 use crate::discovery::DiscoveredProxy;
 use r3v3rs3_api::discovery::DiscoveryIssue;
@@ -37,6 +38,22 @@ pub fn host_ports_by_target(deployments: &[RunningDeployment]) -> TargetPorts {
     }
     ports.retain(|_, set| !set.is_empty());
     ports
+}
+
+/// The firewall that an agent host should have.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentFirewall {
+    pub enabled: bool,
+    pub ports: BTreeSet<HostPort>,
+}
+
+/// Whether the agent must get `wanted`. An agent whose table was never set needs no removal
+/// while the firewall is off, because it has no table.
+pub fn needs_update(previous: Option<&AgentFirewall>, wanted: &AgentFirewall) -> bool {
+    match previous {
+        Some(previous) => previous != wanted,
+        None => wanted.enabled,
+    }
 }
 
 /// The host ports of the local target, which this server's own firewall opens.
@@ -77,8 +94,8 @@ impl Platform {
             .is_ok()
     }
 
-    /// Sends the host ports of the local target to the server when they changed. Returns false
-    /// when the server stopped.
+    /// Sends the host ports of the local target to the server and those of each agent target to
+    /// its agent, when they changed. Returns false when the server stopped.
     async fn publish_host_ports(&self) -> bool {
         let deployments = match self.store.running_deployments().await {
             Ok(deployments) => deployments,
@@ -88,16 +105,61 @@ impl Platform {
             }
         };
         let ports = host_ports_by_target(&deployments);
+        self.sync_agent_firewalls(&ports).await;
+        let local = local_ports(&ports);
         let mut sent = self.sent_host_ports.lock().await;
-        if sent.as_ref() == Some(&ports) {
+        if *sent == local {
             return true;
         }
-        let local = local_ports(&ports);
-        *sent = Some(ports);
+        sent.clone_from(&local);
         self.command
             .send(ServerCommand::SetAppHostPorts { ports: local })
             .await
             .is_ok()
+    }
+
+    /// Whether r3v3rs3 manages the host firewalls of the agent targets.
+    pub fn firewall_enabled(&self) -> bool {
+        self.firewall_enabled
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Follows `[firewall] enabled`; the next read updates the agent hosts.
+    pub fn set_firewall_enabled(&self, enabled: bool) {
+        self.firewall_enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Sends each agent target whose wanted firewall changed its ports. A failed agent keeps
+    /// its old entry, so the next read tries again.
+    async fn sync_agent_firewalls(&self, ports: &TargetPorts) {
+        let enabled = self.firewall_enabled();
+        let mut sent = self.agent_firewalls.lock().await;
+        let targets: BTreeSet<ShortId> = ports
+            .keys()
+            .chain(sent.keys())
+            .copied()
+            .filter(|target| !is_local(*target))
+            .collect();
+        for target in targets {
+            let wanted = AgentFirewall {
+                enabled,
+                ports: ports.get(&target).cloned().unwrap_or_default(),
+            };
+            let previous = sent.get(&target);
+            if !needs_update(previous, &wanted) {
+                sent.insert(target, wanted);
+                continue;
+            }
+            let remote = RemoteRuntime::new(target, self.agents.clone(), self.forwarders.clone());
+            let list = wanted.ports.iter().copied().collect();
+            match remote.set_firewall(enabled, list).await {
+                Ok(()) => {
+                    sent.insert(target, wanted);
+                }
+                Err(err) => tracing::warn!(%target, %err, "cannot update the agent firewall"),
+            }
+        }
     }
 
     async fn read_proxies(&self) -> anyhow::Result<Published> {
@@ -361,6 +423,25 @@ mod tests {
             }
             other => anyhow::bail!("expected the host ports, got {other:?}"),
         }
+    }
+
+    /// An agent gets a message only when its wanted firewall changes; an agent without a table
+    /// needs no removal while the firewall is off, but one with a table must lose it.
+    #[test]
+    fn an_agent_is_updated_only_when_its_firewall_changes() -> anyhow::Result<()> {
+        let open = |enabled, ports: &[&str]| -> anyhow::Result<AgentFirewall> {
+            Ok(AgentFirewall {
+                enabled,
+                ports: ports.iter().map(|p| p.parse()).collect::<Result<_, _>>()?,
+            })
+        };
+        assert!(!needs_update(None, &open(false, &[])?));
+        assert!(needs_update(None, &open(true, &[])?));
+        let current = open(true, &["udp/3478"])?;
+        assert!(!needs_update(Some(&current), &current));
+        assert!(needs_update(Some(&current), &open(true, &["udp/3479"])?));
+        assert!(needs_update(Some(&current), &open(false, &["udp/3478"])?));
+        Ok(())
     }
 
     /// An app on an agent target needs its ports open on the agent host, not on this server.

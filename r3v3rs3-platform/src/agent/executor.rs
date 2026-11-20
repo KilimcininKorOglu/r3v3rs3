@@ -105,6 +105,9 @@ impl Executor {
                 .await
                 .map(|image| AgentOutput::Image { image }),
             AgentRequest::RemoveImage { image } => self.remove_image(&image).await,
+            AgentRequest::SetFirewall { enabled, ports } => {
+                set_firewall(enabled, ports).await.map(done)
+            }
             AgentRequest::PruneProjectImages { project, all } => {
                 check_prefix(project.as_str(), RESOURCE_PREFIX)
                     .map(|()| runtime.prune_project_images(&project, all))?
@@ -328,6 +331,22 @@ async fn write_executable(
 
 fn done(_: ()) -> AgentOutput {
     AgentOutput::Done
+}
+
+/// Replaces the firewall table of the agent host, or removes it.
+async fn set_firewall(
+    enabled: bool,
+    ports: Vec<r3v3rs3_api::firewall::HostPort>,
+) -> anyhow::Result<()> {
+    use crate::firewall::{FirewallRules, render, render_removal, run_nft, ssh_ports};
+    let script = match enabled {
+        true => render(&FirewallRules::new(
+            ports,
+            &ssh_ports(std::path::Path::new("/etc/ssh")),
+        )),
+        false => render_removal(),
+    };
+    run_nft(&script).await
 }
 
 fn reply(result: anyhow::Result<AgentOutput>) -> AgentReply {

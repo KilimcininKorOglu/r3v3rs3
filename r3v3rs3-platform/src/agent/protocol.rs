@@ -81,6 +81,12 @@ pub enum AgentRequest {
     RemoveImage {
         image: ImageRef,
     },
+    /// Keeps the r3v3rs3 firewall table of the agent host: with `enabled` it opens `ports`
+    /// and the SSH ports, without it the table is removed.
+    SetFirewall {
+        enabled: bool,
+        ports: Vec<r3v3rs3_api::firewall::HostPort>,
+    },
     PruneProjectImages {
         project: ProjectName,
         all: bool,

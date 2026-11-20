@@ -1822,6 +1822,19 @@ impl ServerState {
         }
     }
 
+    /// Updates the firewall table of this host after a change of `[firewall]`, and tells the
+    /// platform whether to keep the agent tables.
+    fn apply_firewall_config(&self, previous: &r3v3rs3_api::firewall::FirewallConfig) {
+        if *previous != self.config.firewall {
+            self.sync_firewall(previous.enabled);
+        }
+        if let PlatformHandle::Ready(platform) = &self.platform
+            && let Ok(enabled) = crate::firewall_control::enabled(&self.config.firewall)
+        {
+            platform.set_firewall_enabled(enabled);
+        }
+    }
+
     /// Applies a config that the storage already keeps.
     async fn apply_config(&mut self, config: AppConfig) {
         let changed = discovery::changed_providers(&self.config.discovery, &config.discovery);
@@ -1838,12 +1851,8 @@ impl ServerState {
         let upgrade_changed = self.config.upgrade != config.upgrade;
         let geoip_changed = self.config.geoip != config.geoip;
         let themes_changed = self.config.error_page_themes != config.error_page_themes;
-        let firewall_was_enabled = self.config.firewall.enabled;
-        let firewall_changed = self.config.firewall != config.firewall;
+        let previous_firewall = self.config.firewall.clone();
         self.config.clone_from(&config);
-        if firewall_changed {
-            self.sync_firewall(firewall_was_enabled);
-        }
         if upgrade_changed {
             let _ = self.update_interval.send(config.upgrade.check_interval);
         }
@@ -1855,6 +1864,7 @@ impl ServerState {
         if platform_changed {
             self.restart_platform().await;
         }
+        self.apply_firewall_config(&previous_firewall);
         // A new public address installs the webhooks that waited for it, and a changed one
         // reinstalls every webhook, because the providers send the push events to the old one.
         if public_url_changed && let PlatformHandle::Ready(platform) = &self.platform {
