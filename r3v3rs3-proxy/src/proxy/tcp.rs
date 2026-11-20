@@ -9,6 +9,7 @@ use super::{
 use crate::certs::cert_list::CertList;
 use crate::security::AutoQuarantineTracker;
 use anyhow::Context as _;
+use r3v3rs3_api::multiaddr::PortSpan;
 use r3v3rs3_api::{error::Error, id::ShortId, multiaddr::Multiaddr};
 use r3v3rs3_api::{
     port::PortEntry,
@@ -42,7 +43,10 @@ type Resolver = DnsResolver;
 
 #[derive(Debug)]
 pub struct TcpPortContext {
+    /// The address of the socket: the first port of a range.
     pub listen: SocketAddr,
+    /// The ports of the address; more than one makes it a TPROXY range port.
+    pub ports: PortSpan,
     upstream: Option<TcpUpstream>,
     status: PortStatus,
     span: Span,
@@ -77,6 +81,7 @@ impl TcpPortContext {
 
         Ok(Self {
             listen,
+            ports: entry.port.listen.port_range()?,
             upstream: None,
             status: Default::default(),
             span,
@@ -103,7 +108,9 @@ impl TcpPortContext {
             if let ProxyKind::Tcp(proxy) = &entry.proxy.kind {
                 let servers = proxy_connections(certs, proxy)?;
                 if upstream.is_none() && !servers.is_empty() {
-                    upstream = Some(TcpUpstream::new(entry.id, proxy, servers, groups));
+                    let mut found = TcpUpstream::new(entry.id, proxy, servers, groups);
+                    found.listen_ports = self.ports;
+                    upstream = Some(found);
                 }
             }
         }
@@ -208,6 +215,9 @@ struct TcpUpstream {
     proxy_id: ShortId,
     servers: Arc<[Connection]>,
     group: Arc<UpstreamGroup>,
+    /// The ports of the listening port; a range maps each port to the upstream port at its
+    /// position.
+    listen_ports: PortSpan,
 }
 
 impl TcpUpstream {
@@ -236,7 +246,19 @@ impl TcpUpstream {
             proxy_id: id,
             servers: servers.into(),
             group,
+            listen_ports: PortSpan::single(0),
         }
+    }
+
+    /// The upstream port for a client that connected to `local`: the server port of a single
+    /// port, the port at the same position of the server range on a range port.
+    fn server_port(&self, conn: &Connection, local: SocketAddr) -> anyhow::Result<u16> {
+        if self.listen_ports.port_count() == 1 {
+            return Ok(conn.port);
+        }
+        self.listen_ports
+            .map_to(local.port(), &conn.span)
+            .ok_or_else(|| anyhow::anyhow!("the port {local} has no upstream port"))
     }
 
     /// Connects to the selected server. When the connection fails, it connects once to the next
@@ -258,7 +280,8 @@ impl TcpUpstream {
             let Some(conn) = self.servers.get(permit.index()) else {
                 continue;
             };
-            let conn_res = connect_server(conn, resolver, client).await;
+            let port = self.server_port(conn, client.1)?;
+            let conn_res = connect_server(conn, port, resolver, client).await;
             match conn_res {
                 Ok((addr, stream)) => {
                     let guard = permit.success_keep();
@@ -394,6 +417,7 @@ async fn start(
 /// and the TLS handshake.
 async fn connect_server(
     conn: &Connection,
+    port: u16,
     resolver: &Resolver,
     client: ClientAddrs,
 ) -> anyhow::Result<(SocketAddr, Box<dyn IoStream>)> {
@@ -401,7 +425,7 @@ async fn connect_server(
     let timed_out =
         || anyhow::anyhow!("connecting to the upstream server timed out after {connect_timeout:?}");
     let deadline = Instant::now() + connect_timeout;
-    let target = timeout_at(deadline, resolve_upstream(conn, resolver))
+    let target = timeout_at(deadline, resolve_upstream(conn, port, resolver))
         .await
         .map_err(|_| timed_out())??;
     let out = timeout_at(deadline, connect_upstream(conn.clone(), target, client))
@@ -410,7 +434,11 @@ async fn connect_server(
     Ok((target, out))
 }
 
-async fn resolve_upstream(conn: &Connection, resolver: &Resolver) -> anyhow::Result<SocketAddr> {
+async fn resolve_upstream(
+    conn: &Connection,
+    port: u16,
+    resolver: &Resolver,
+) -> anyhow::Result<SocketAddr> {
     let name = match &conn.name {
         ServerName::DnsName(name) => name.as_ref().to_string(),
         ServerName::IpAddress(addr) => match addr {
@@ -419,7 +447,7 @@ async fn resolve_upstream(conn: &Connection, resolver: &Resolver) -> anyhow::Res
         },
         _ => unreachable!(),
     };
-    let target = resolver.resolve_addr(&name, conn.port).await?;
+    let target = resolver.resolve_addr(&name, port).await?;
     debug!(name, %target);
     Ok(target)
 }
@@ -484,12 +512,13 @@ fn multiaddr_to_host(
             .to_owned(),
         _ => return Err(Error::InvalidServerAddress { addr: addr.clone() }),
     };
-    let port = addr
-        .port()
+    let span = addr
+        .port_range()
         .map_err(|_| Error::InvalidServerAddress { addr: addr.clone() })?;
     Ok(Connection {
         name,
-        port,
+        port: span.first,
+        span,
         tls_client_config,
         connect_timeout: proxy.connect_timeout,
         proxy_protocol: proxy.proxy_protocol,
@@ -506,7 +535,10 @@ impl<S> IoStream for S where S: AsyncRead + AsyncWrite + Unpin + Send {}
 #[derive(Debug, Clone)]
 pub struct Connection {
     pub name: ServerName<'static>,
+    /// The port, or the first port of a range.
     pub port: u16,
+    /// The ports of the server; a range port maps each of its ports onto them.
+    pub span: PortSpan,
     /// The TLS client config for a TLS upstream server.
     pub tls_client_config: Option<Arc<ClientConfig>>,
     pub connect_timeout: Duration,

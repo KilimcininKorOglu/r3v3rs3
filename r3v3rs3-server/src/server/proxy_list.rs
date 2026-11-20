@@ -43,11 +43,12 @@ pub struct DiscoveredUpdate {
 
 /// Whether a port with this listening address can serve a proxy of this kind.
 pub fn accepts(kind: &ProxyKind, listen: &Multiaddr) -> bool {
-    match kind {
+    let protocol = match kind {
         ProxyKind::Http(_) => listen.is_http(),
         ProxyKind::Tcp(_) => !listen.is_udp() && !listen.is_http(),
         ProxyKind::Udp(_) => listen.is_udp() && !listen.is_http(),
-    }
+    };
+    protocol && kind.fits_ports_of(listen)
 }
 
 fn is_from(entry: &ProxyEntry, provider: DiscoveryProvider) -> bool {

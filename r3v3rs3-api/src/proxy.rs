@@ -70,6 +70,22 @@ pub enum ProxyKind {
 }
 
 impl ProxyKind {
+    /// The addresses of the upstream servers of a TCP or UDP proxy; an HTTP proxy has none here.
+    pub fn stream_upstreams(&self) -> Vec<&crate::multiaddr::Multiaddr> {
+        match self {
+            Self::Tcp(tcp) => tcp.upstream_servers.iter().map(|s| &s.addr).collect(),
+            Self::Udp(udp) => udp.upstream_servers.iter().map(|s| &s.addr).collect(),
+            Self::Http(_) => Vec::new(),
+        }
+    }
+
+    /// Whether every upstream server fits the port range of `listen`.
+    pub fn fits_ports_of(&self, listen: &crate::multiaddr::Multiaddr) -> bool {
+        self.stream_upstreams()
+            .iter()
+            .all(|up| listen.fits_upstream(up))
+    }
+
     /// Returns the client certificate that the proxy sends to the upstream servers.
     pub fn client_cert(&self) -> Option<ShortId> {
         match self {

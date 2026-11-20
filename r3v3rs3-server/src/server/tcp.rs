@@ -121,10 +121,11 @@ impl TcpListenerPool {
             } else if let Some(listener) = listeners.remove(&bind) {
                 (Some(listener), SocketState::Listening)
             } else {
+                let range = is_range(ctx);
                 span.in_scope(|| {
-                    info!(%bind, "listening on tcp port");
+                    info!(%bind, range, "listening on tcp port");
                 });
-                match create_tcp_listener(bind) {
+                match create_tcp_listener(bind, range) {
                     Ok(sock) => (
                         Some(TcpListenerStream {
                             index: 0,
@@ -171,7 +172,15 @@ fn listen_addr(ctx: &PortContext) -> Option<SocketAddr> {
     }
 }
 
-fn create_tcp_listener(addr: SocketAddr) -> io::Result<TcpListener> {
+/// Whether the port is a TCP range, which TPROXY sends to one transparent listener.
+fn is_range(ctx: &PortContext) -> bool {
+    matches!(ctx.kind(), PortContextKind::Tcp(state) if state.ports.port_count() > 1)
+}
+
+/// A TCP listening socket. A range socket is transparent, so it takes the connections that
+/// TPROXY sends it for every port of the range (needs `CAP_NET_ADMIN`); the accepted socket
+/// keeps the port the client connected to as its local address.
+fn create_tcp_listener(addr: SocketAddr, range: bool) -> io::Result<TcpListener> {
     let socket = socket2::Socket::new(
         socket2::Domain::for_address(addr),
         socket2::Type::STREAM,
@@ -181,6 +190,9 @@ fn create_tcp_listener(addr: SocketAddr) -> io::Result<TcpListener> {
         socket.set_only_v6(true)?;
     }
     socket.set_reuse_address(true)?;
+    if range {
+        crate::proxy::transparent::set_transparent(&socket, addr.is_ipv6())?;
+    }
     socket.set_nonblocking(true)?;
     socket.bind(&addr.into())?;
     socket.listen(SOCKET_BACKLOG_SIZE)?;

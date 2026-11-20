@@ -410,11 +410,28 @@ fn validate_proxy_rules(
     state: &ServerState,
 ) -> Result<(), Error> {
     validate_proxy(proxy, state)?;
+    ensure_ranges_fit(proxy, state)?;
     ensure_access_lists(proxy, state)?;
     ensure_client_cert_allowed(proxy, caller)?;
     ensure_forward_auth_allowed(proxy, caller)?;
     ensure_no_unseen_host_overlap(proxy, proxy_id, caller, state)?;
     ensure_no_unseen_port_conflict(proxy, proxy_id, caller, state)
+}
+
+/// A port range maps each port to the upstream port at the same position, so every upstream
+/// server of the proxy must be a range of the same size; a single port needs single upstreams.
+fn ensure_ranges_fit(proxy: &Proxy, state: &ServerState) -> Result<(), Error> {
+    let listens = proxy
+        .ports
+        .iter()
+        .filter_map(|id| state.ports.get(*id))
+        .map(|ctx| &ctx.entry().port.listen);
+    match listens.into_iter().find(|l| !proxy.kind.fits_ports_of(l)) {
+        Some(listen) => Err(Error::UpstreamRangeMismatch {
+            addr: listen.to_string(),
+        }),
+        None => Ok(()),
+    }
 }
 
 fn ensure_forward_auth_allowed(proxy: &Proxy, caller: &Caller) -> Result<(), Error> {

@@ -123,7 +123,7 @@ pub struct ServerState {
 
 pub enum Received {
     Tcp(usize, TcpStream),
-    Udp(usize, usize, SocketAddr, Vec<u8>),
+    Udp(usize, usize, crate::proxy::udp::UdpDatagram),
     Quic(usize, Box<Incoming>),
 }
 
@@ -1151,8 +1151,8 @@ impl ServerState {
             Some((index, stream)) = self.tcp_pool.select() => {
                 Some(Received::Tcp(index, stream))
             }
-            Some((index, config_index, addr, data)) = self.udp_pool.select() => {
-                Some(Received::Udp(index, config_index, addr, data))
+            Some((index, config_index, datagram)) = self.udp_pool.select() => {
+                Some(Received::Udp(index, config_index, datagram))
             }
             Some((index, stream)) = self.quic_pool.select() => {
                 Some(Received::Quic(index, Box::new(stream)))
@@ -1212,8 +1212,7 @@ impl ServerState {
         &self,
         index: usize,
         config_index: usize,
-        addr: SocketAddr,
-        data: Vec<u8>,
+        datagram: crate::proxy::udp::UdpDatagram,
     ) {
         let Some(listener) = self.udp_pool.socket(index) else {
             return;
@@ -1223,7 +1222,7 @@ impl ServerState {
             let udp = udp.clone();
             let quarantine = self.registries.quarantine.clone();
             tokio::spawn(async move {
-                udp.forward(addr, &data, &listener, &quarantine).await;
+                udp.forward(datagram, &listener, &quarantine).await;
             });
         }
     }

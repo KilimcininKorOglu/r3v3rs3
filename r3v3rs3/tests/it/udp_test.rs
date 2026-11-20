@@ -1,6 +1,8 @@
 use crate::common;
 use common::{TestPort, TestStorage, alloc_udp_port, with_server};
+use r3v3rs3::server::rpc::proxies::AddProxy;
 use r3v3rs3_api::{
+    error::Error,
     port::{Port, PortEntry, UpstreamServer},
     proxy::{Proxy, ProxyEntry, ProxyKind, UdpProxy},
 };
@@ -230,6 +232,40 @@ async fn check_spoofed_reply(
         reply.map(|res| res.map(|(size, _)| buf[..size].to_vec()))
     );
     send_and_expect_echo(&client, proxy, b"still").await
+}
+
+/// A range port sends each port to the upstream port at the same position, so a proxy on it
+/// needs upstream ranges of the same size. A single upstream port, or a range of another size,
+/// leaves ports without an upstream port and is refused before it is saved.
+#[tokio::test]
+async fn a_range_port_refuses_upstreams_of_another_size() -> anyhow::Result<()> {
+    let mut range = common::port_entry("range", "/ip4/127.0.0.1/udp/49160-49169".parse()?);
+    // The test checks the saved configuration only, so the port does not listen.
+    range.port.active = false;
+    let config = TestStorage::builder().ports(vec![range]).build();
+    with_server(config, |mut channels| async move {
+        let add = |upstream: &str| AddProxy {
+            entry: Proxy {
+                ports: vec!["range".parse().unwrap()],
+                kind: ProxyKind::Udp(UdpProxy {
+                    upstream_servers: vec![UpstreamServer::new(upstream.parse().unwrap())],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            owner: None,
+        };
+        for wrong in ["/ip4/127.0.0.1/udp/3478", "/ip4/127.0.0.1/udp/50000-50008"] {
+            let result = common::call(&mut channels, add(wrong)).await?;
+            assert!(
+                matches!(result, Err(Error::UpstreamRangeMismatch { .. })),
+                "{wrong} was not refused: {result:?}"
+            );
+        }
+        common::call(&mut channels, add("/ip4/127.0.0.1/udp/50000-50009")).await??;
+        Ok(())
+    })
+    .await
 }
 
 fn udp_storage_with_size(

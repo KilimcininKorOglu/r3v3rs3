@@ -235,8 +235,8 @@ async fn start_server(
                     Some(Received::Tcp(index, stream)) => {
                         server.handle_tcp_connection(index, stream);
                     }
-                    Some(Received::Udp(index, config_index, addr, data)) => {
-                        server.handle_udp_packet(index, config_index, addr, data);
+                    Some(Received::Udp(index, config_index, datagram)) => {
+                        server.handle_udp_packet(index, config_index, datagram);
                     }
                     Some(Received::Quic(index, conn)) => {
                         server.handle_quic_connection(index, *conn).await;

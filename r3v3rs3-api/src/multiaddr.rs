@@ -70,6 +70,16 @@ impl Multiaddr {
         self.port_range().is_ok_and(|span| span.port_count() > 1)
     }
 
+    /// Whether `upstream` can serve this listening address: a range needs an upstream range of
+    /// the same size, because each port maps to the port at its position, and one port needs one
+    /// upstream port.
+    pub fn fits_upstream(&self, upstream: &Self) -> bool {
+        match (self.port_range(), upstream.port_range()) {
+            (Ok(listen), Ok(up)) => listen.port_count() == up.port_count(),
+            _ => !self.is_range() && !upstream.is_range(),
+        }
+    }
+
     pub fn host(&self) -> Result<String, Error> {
         self.protocols
             .iter()
@@ -398,5 +408,19 @@ mod test {
         ] {
             assert!(Multiaddr::from_str(bad).is_err(), "{bad}");
         }
+    }
+
+    /// Each port of a range goes to the upstream port at its position, so an upstream fits a
+    /// range only with as many ports; a single port needs a single upstream port.
+    #[test]
+    fn an_upstream_fits_a_port_only_with_as_many_ports() {
+        let addr = |s: &str| Multiaddr::from_str(s).unwrap();
+        let range = addr("/ip4/0.0.0.0/udp/49160-49169");
+        assert!(range.fits_upstream(&addr("/dns/turn.example.com/udp/50000-50009")));
+        assert!(!range.fits_upstream(&addr("/ip4/10.0.0.2/udp/3478")));
+        assert!(!range.fits_upstream(&addr("/ip4/10.0.0.2/udp/50000-50008")));
+        let single = addr("/ip4/0.0.0.0/tcp/2222");
+        assert!(single.fits_upstream(&addr("/ip4/10.0.0.2/tcp/22")));
+        assert!(!single.fits_upstream(&addr("/ip4/10.0.0.2/tcp/22-23")));
     }
 }

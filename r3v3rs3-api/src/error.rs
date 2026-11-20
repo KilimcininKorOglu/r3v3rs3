@@ -70,6 +70,9 @@ pub enum Error {
     #[error("the ports of {addr} overlap the port {other}")]
     PortRangeOverlap { addr: String, other: String },
 
+    #[error("the upstream servers must name as many ports as the port {addr}")]
+    UpstreamRangeMismatch { addr: String },
+
     #[error("missing TLS termination config")]
     TlsTerminationConfigMissing,
 

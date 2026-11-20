@@ -645,6 +645,7 @@
   "error.invalid_host_port": "Invalid host port {value}: use tcp/<port> or udp/<first>-<last> with ports 1-65535",
   "error.transparent_not_supported": "The port {addr} cannot be transparent: only a TCP or UDP port can",
   "error.port_range_overlap": "The ports of {addr} overlap the port {other}",
+  "error.upstream_range_mismatch": "The upstream servers must name as many ports as the port {addr}",
   "error.invalid_path_prefix": "Path prefix must start with / and cannot contain ? or #: {prefix}",
   "error.invalid_path_regex": "Invalid path regex: {pattern}",
   "error.invalid_redirect_rule": "Invalid redirect rule: {rule}. Write the status, the regex and the target, separated by spaces.",

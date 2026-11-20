@@ -32,6 +32,7 @@ pub mod registry;
 pub mod srv;
 pub mod tcp;
 pub mod tls;
+pub mod transparent;
 pub mod udp;
 
 /// Builds the DNS resolver of a TCP or UDP port on the tokio runtime.

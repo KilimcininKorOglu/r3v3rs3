@@ -83,6 +83,7 @@ mod stream_priority_test;
 mod tcp_test;
 mod tls_early_data_test;
 mod tls_test;
+mod tproxy_test;
 mod traffic_test;
 mod udp_test;
 mod update_check_test;
