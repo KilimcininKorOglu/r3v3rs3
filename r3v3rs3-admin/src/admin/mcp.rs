@@ -1190,13 +1190,57 @@ fn tool_error(err: Error) -> ErrorData {
 /// The largest response body a tool reads from a handler that answers with raw bytes.
 const MAX_TOOL_BODY: usize = 16 * 1024 * 1024;
 
+/// The largest app file that the file tools read or write as text.
+const MAX_TOOL_FILE: usize = 1024 * 1024;
+
 /// The body of a raw handler response as text.
 async fn response_text(response: axum::response::Response) -> Result<String, ErrorData> {
-    let bytes = axum::body::to_bytes(response.into_body(), MAX_TOOL_BODY)
+    small_text(response, MAX_TOOL_BODY).await
+}
+
+/// The body of a raw handler response as UTF-8 text of at most `limit` bytes.
+async fn small_text(response: axum::response::Response, limit: usize) -> Result<String, ErrorData> {
+    let bytes = axum::body::to_bytes(response.into_body(), limit)
         .await
-        .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
-    String::from_utf8(bytes.to_vec())
-        .map_err(|err| ErrorData::internal_error(err.to_string(), None))
+        .map_err(|_| {
+            ErrorData::invalid_params(
+                format!("the content is larger than {limit} bytes; use the CLI to download it"),
+                None,
+            )
+        })?;
+    String::from_utf8(bytes.to_vec()).map_err(|_| {
+        ErrorData::invalid_params(
+            "the content is not UTF-8 text; use the CLI to download it",
+            None,
+        )
+    })
+}
+
+/// An app and a path inside one of its volumes.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AppFileParams {
+    /// The id of the app.
+    pub id: String,
+    /// The absolute path inside the container, for example `/data/app.db`.
+    pub path: String,
+}
+
+impl AppFileParams {
+    fn query(self) -> Result<(ShortId, r3v3rs3_api::platform::FilePathQuery), ErrorData> {
+        let id = parse_id(&self.id)?;
+        Ok((id, r3v3rs3_api::platform::FilePathQuery { path: self.path }))
+    }
+}
+
+/// The arguments of `upload_app_file`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UploadAppFileParams {
+    /// The id of the app.
+    pub id: String,
+    /// The absolute path inside the container.
+    pub path: String,
+    /// The new content of the file, as UTF-8 text.
+    pub content: String,
 }
 
 /// Parses an id string into a typed ShortId.
@@ -4302,6 +4346,106 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(result.0)
+    }
+
+    /// List a directory inside a volume of an app.
+    #[tool(
+        description = "List the entries of the directory `path` inside a volume of the running app `id`: name, kind, size and modification time. Needs an admin account."
+    )]
+    async fn list_app_files(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AppFileParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let (id, query) = params.query()?;
+        let entries = super::app_files::list(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::extract::Query(query),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entries.0)
+    }
+
+    /// Read a small text file inside a volume of an app.
+    #[tool(
+        description = "Return the content of the text file `path` inside a volume of the running app `id`. Only UTF-8 files up to 1 MiB are returned; the CLI command `r3 app files download` saves any file. Needs an admin account."
+    )]
+    async fn download_app_file(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AppFileParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let (id, query) = params.query()?;
+        let response = super::app_files::download(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::extract::Query(query),
+        )
+        .await
+        .map_err(any_error)?;
+        let response = axum::response::IntoResponse::into_response(response);
+        let text = small_text(response, MAX_TOOL_FILE).await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
+
+    /// Write a small text file inside a volume of an app.
+    #[tool(
+        description = "Write `content` (UTF-8 text, at most 1 MiB) into the file `path` inside a writable volume of the running app `id`, replacing the file. The CLI command `r3 app files upload` writes any file. Needs a token with the edit scope and an admin account."
+    )]
+    async fn upload_app_file(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UploadAppFileParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        if params.content.len() > MAX_TOOL_FILE {
+            return Err(ErrorData::invalid_params(
+                "content is larger than 1 MiB; use `r3 app files upload`",
+                None,
+            ));
+        }
+        let id: ShortId = parse_id(&params.id)?;
+        let query = r3v3rs3_api::platform::FilePathQuery { path: params.path };
+        let axum::Json(()) = super::app_files::upload(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::extract::Query(query),
+            axum::body::Bytes::from(params.content),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(serde_json::json!({ "written": true }))
+    }
+
+    /// Delete a file or directory inside a volume of an app.
+    #[tool(
+        description = "Delete the file or directory `path` inside a writable volume of the running app `id`. Needs a token with the edit scope and an admin account."
+    )]
+    async fn delete_app_file(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AppFileParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let (id, query) = params.query()?;
+        let axum::Json(()) = super::app_files::delete(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::extract::Query(query),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(serde_json::json!({ "deleted": true }))
     }
 
     /// Seal every platform secret with a new master key.

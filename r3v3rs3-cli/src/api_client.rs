@@ -417,6 +417,26 @@ impl ApiClient {
         Ok(())
     }
 
+    /// Sends a PUT request with a raw byte body and prints the JSON answer.
+    pub async fn put_bytes(&self, path: &str, body: Vec<u8>) -> anyhow::Result<()> {
+        let res = self
+            .client
+            .put(format!("{}{path}", self.server))
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Content-Type", "application/octet-stream")
+            .body(body)
+            .send()
+            .await
+            .context("failed to communicate with server")?;
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        if !status.is_success() {
+            bail!("API error {status}: {text}");
+        }
+        println!("{text}");
+        Ok(())
+    }
+
     /// Sends a PUT request with a JSON body and prints the JSON answer.
     pub async fn print_put(&self, path: &str, body: &Value) -> anyhow::Result<()> {
         print_json(&self.request(Method::PUT, path, Some(body)).await?)

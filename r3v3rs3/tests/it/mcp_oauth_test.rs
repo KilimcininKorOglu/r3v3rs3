@@ -2816,6 +2816,90 @@ async fn the_platform_admin_operations_are_reachable_from_mcp_and_the_cli() -> a
     .await
 }
 
+/// The app file tools reach their endpoints: a missing app is not found (OpenAPI
+/// `list_app_files`, `download_app_file`, `upload_app_file`, `delete_app_file`).
+async fn assert_mcp_app_files(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let path = json!({ "id": MISSING_DB, "path": "/data/app.txt" });
+    let upload = json!({ "id": MISSING_DB, "path": "/data/app.txt", "content": "hello" });
+    let calls = [
+        (
+            "list_app_files",
+            json!({ "id": MISSING_DB, "path": "/data" }),
+        ),
+        ("download_app_file", path.clone()),
+        ("upload_app_file", upload),
+        ("delete_app_file", path),
+    ];
+    for (tool, args) in calls {
+        let missing = mcp_call(client, tool, args).await.err();
+        assert_not_found(tool, &missing.map(|e| e.to_string()).unwrap_or_default());
+    }
+    let oversized = "x".repeat(1024 * 1024 + 1);
+    let big = json!({ "id": MISSING_DB, "path": "/data/big.txt", "content": oversized });
+    let refused = mcp_call(client, "upload_app_file", big).await.err();
+    let refused = refused.map(|e| e.to_string()).unwrap_or_default();
+    assert!(refused.contains("larger than 1 MiB"), "{refused}");
+    Ok(())
+}
+
+/// `r3 app files` reaches the same endpoints.
+async fn assert_cli_app_files(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
+    let local = std::env::temp_dir().join(format!("r3-upload-{}.txt", std::process::id()));
+    std::fs::write(&local, b"hello")?;
+    let local_path = local.to_string_lossy().to_string();
+    let commands: [&[&str]; 4] = [
+        &["app", "files", "list", MISSING_DB, "--path", "/data"],
+        &[
+            "app",
+            "files",
+            "download",
+            MISSING_DB,
+            "--path",
+            "/data/app.txt",
+        ],
+        &[
+            "app",
+            "files",
+            "upload",
+            MISSING_DB,
+            "--path",
+            "/data/app.txt",
+            "--file",
+            &local_path,
+        ],
+        &[
+            "app",
+            "files",
+            "delete",
+            MISSING_DB,
+            "--path",
+            "/data/app.txt",
+        ],
+    ];
+    for args in commands {
+        let out = run_client(binary, addr, token, args).await?;
+        assert_not_found(&format!("{args:?}"), &String::from_utf8_lossy(&out.stderr));
+    }
+    std::fs::remove_file(&local)?;
+    Ok(())
+}
+
+/// App file operations are reachable from MCP and the CLI.
+#[tokio::test]
+async fn the_app_file_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-app-files")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let token = access_token(&addr).await?;
+        assert_mcp_app_files(&mcp_client(addr, &token).await?).await?;
+        assert_cli_app_files(&client_binary()?, &addr, &token).await
+    })
+    .await
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {

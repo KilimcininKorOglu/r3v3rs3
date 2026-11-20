@@ -528,6 +528,9 @@ pub enum AppCommand {
     /// Lists deployed applications.
     #[command(alias = "ls")]
     List,
+    /// Lists, downloads, uploads and deletes files inside the volumes of a running app.
+    #[command(subcommand)]
+    Files(AppFilesCommand),
     /// Shows configuration of an application.
     Get { id: String },
     /// Shows unified dashboard summary of an application.
@@ -931,6 +934,45 @@ pub enum CdnCommand {
     Status,
     /// Downloads the CDN IP ranges from every provider now and applies them.
     Refresh,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AppFilesCommand {
+    /// Lists a directory inside a volume of the app.
+    #[command(alias = "ls")]
+    List {
+        id: String,
+        /// The absolute directory path inside the container.
+        #[arg(long)]
+        path: String,
+    },
+    /// Saves a file of the app to a local file.
+    Download {
+        id: String,
+        /// The absolute file path inside the container.
+        #[arg(long)]
+        path: String,
+        /// The local file to write; default: the file name of `--path`.
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Writes a local file into a writable volume of the app.
+    Upload {
+        id: String,
+        /// The absolute file path inside the container.
+        #[arg(long)]
+        path: String,
+        /// The local file to send.
+        #[arg(long)]
+        file: String,
+    },
+    /// Deletes a file or directory inside a writable volume of the app.
+    #[command(alias = "rm")]
+    Delete {
+        id: String,
+        #[arg(long)]
+        path: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1684,6 +1726,29 @@ async fn run_api_status(api: &api_client::ApiClient, cmd: Command) -> anyhow::Re
     }
 }
 
+/// The commands for the files inside the volumes of an app.
+async fn run_app_files(api: &api_client::ApiClient, cmd: AppFilesCommand) -> anyhow::Result<()> {
+    let at = |id: &str, suffix: &str, path: &str| {
+        let query = query_string(&[("path", Some(path.to_string()))]);
+        format!("/api/apps/{id}/files{suffix}?{query}")
+    };
+    match cmd {
+        AppFilesCommand::List { id, path } => api.print_get(&at(&id, "", &path)).await,
+        AppFilesCommand::Download { id, path, output } => {
+            let name = path.rsplit('/').next().filter(|n| !n.is_empty());
+            let target = output
+                .or_else(|| name.map(str::to_string))
+                .context("--path names no file; give --output")?;
+            api.download_to(&at(&id, "/download", &path), &target).await
+        }
+        AppFilesCommand::Upload { id, path, file } => {
+            let bytes = std::fs::read(&file).with_context(|| format!("failed to read {file}"))?;
+            api.put_bytes(&at(&id, "", &path), bytes).await
+        }
+        AppFilesCommand::Delete { id, path } => api.print_delete(&at(&id, "", &path)).await,
+    }
+}
+
 /// A URL query string from the pairs that hold a value.
 fn query_string(pairs: &[(&str, Option<String>)]) -> String {
     let mut query = url::form_urlencoded::Serializer::new(String::new());
@@ -2025,6 +2090,7 @@ async fn run_dns(api: &api_client::ApiClient, cmd: DnsCommand) -> anyhow::Result
 async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result<()> {
     match cmd {
         AppCommand::List => api.list_apps().await,
+        AppCommand::Files(cmd) => run_app_files(api, cmd).await,
         AppCommand::Get { id } => api.get_app(&id).await,
         AppCommand::Dashboard { id } => api.app_dashboard(&id).await,
         AppCommand::Add { payload } => api.add_app(&payload).await,
