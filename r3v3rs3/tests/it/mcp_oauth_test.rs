@@ -1394,6 +1394,40 @@ async fn assert_cli_access_lists(
     Ok(())
 }
 
+/// `r3 dns` reaches the DNS credential API (OpenAPI paths `/api/dns_credentials` and
+/// `/api/dns_credentials/{id}`): a credential it adds is listed, read, renamed and deleted, and
+/// the read never shows its token, because the API returns no secret.
+async fn assert_cli_dns_credentials(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+) -> anyhow::Result<()> {
+    let secret = "cli-dns-secret-token";
+    let provider =
+        json!({ "provider": "webhook", "url": "https://dns.example.com/hook", "token": secret });
+    let added = json!({ "name": "cli-dns", "dns_provider": provider });
+    cli_ok(binary, addr, token, &["dns", "add", &added.to_string()]).await?;
+    let id = listed_id(
+        &cli_ok(binary, addr, token, &["dns", "list"]).await?,
+        "cli-dns",
+    )?;
+    let renamed = json!({ "name": "cli-dns-renamed" });
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["dns", "update", &id, &renamed.to_string()],
+    )
+    .await?;
+    let shown = cli_ok(binary, addr, token, &["dns", "get", &id]).await?;
+    assert!(shown.contains("cli-dns-renamed"), "{shown}");
+    assert!(!shown.contains(secret), "{shown}");
+    cli_ok(binary, addr, token, &["dns", "delete", &id]).await?;
+    let listing = cli_ok(binary, addr, token, &["dns", "list"]).await?;
+    assert!(!listing.contains("cli-dns"), "{listing}");
+    Ok(())
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
@@ -1424,6 +1458,7 @@ async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
         let port_id = assert_cli_port_mutations(&binary, &addr, &token).await?;
         assert_cli_proxy_mutations(&binary, &addr, &token, &port_id).await?;
         assert_cli_access_lists(&binary, &addr, &token).await?;
+        assert_cli_dns_credentials(&binary, &addr, &token).await?;
         Ok(())
     })
     .await

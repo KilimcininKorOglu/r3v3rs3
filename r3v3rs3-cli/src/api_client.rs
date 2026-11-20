@@ -1083,7 +1083,7 @@ impl ApiClient {
 
     pub async fn list_dns(&self) -> anyhow::Result<()> {
         let entries: Vec<r3v3rs3_api::acme::DnsCredentialInfo> =
-            self.get_json("/api/dns-credentials").await?;
+            self.get_json("/api/dns_credentials").await?;
         println!("{:<26} {:<30} PROVIDER", "ID", "NAME");
         println!("{:-<26} {:-<30} {:-<20}", "", "", "");
         for item in &entries {
@@ -1099,7 +1099,7 @@ impl ApiClient {
 
     pub async fn get_dns(&self, id: &str) -> anyhow::Result<()> {
         let res = self
-            .request(Method::GET, &format!("/api/dns-credentials/{id}"), None)
+            .request(Method::GET, &format!("/api/dns_credentials/{id}"), None)
             .await?;
         print_json(&res)
     }
@@ -1109,7 +1109,7 @@ impl ApiClient {
         let res = self
             .request(
                 Method::POST,
-                "/api/dns-credentials",
+                "/api/dns_credentials",
                 Some(&serde_json::to_value(&req)?),
             )
             .await?;
@@ -1122,7 +1122,7 @@ impl ApiClient {
         let res = self
             .request(
                 Method::PUT,
-                &format!("/api/dns-credentials/{id}"),
+                &format!("/api/dns_credentials/{id}"),
                 Some(&serde_json::to_value(&req)?),
             )
             .await?;
@@ -1131,7 +1131,7 @@ impl ApiClient {
     }
 
     pub async fn delete_dns(&self, id: &str) -> anyhow::Result<()> {
-        self.request(Method::DELETE, &format!("/api/dns-credentials/{id}"), None)
+        self.request(Method::DELETE, &format!("/api/dns_credentials/{id}"), None)
             .await?;
         println!("dns-credential/{id} deleted");
         Ok(())
