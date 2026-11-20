@@ -314,6 +314,18 @@ pub enum TrafficCommand {
     },
     /// Shows one access log entry.
     Get { id: u64 },
+    /// Prints new access log entries as they arrive, until Ctrl-C.
+    Live {
+        /// Only entries of this proxy.
+        #[arg(long)]
+        resource_id: Option<String>,
+        #[arg(long)]
+        status: Option<u16>,
+        #[arg(long)]
+        search: Option<String>,
+        #[arg(long)]
+        country: Option<String>,
+    },
     /// Sends an HTTP request from inline JSON/YAML, a file path, or stdin ('-'): `method`,
     /// `url`, `headers`, `body`, `timeout_ms`, `allow_internal`.
     ReplayRequest { payload: String },
@@ -534,6 +546,16 @@ pub enum AppCommand {
     /// Backs up, restores, exports and imports the volumes of an app.
     #[command(subcommand)]
     Volumes(AppVolumesCommand),
+    /// Prints the container log of an app as it is written, until Ctrl-C.
+    LogsLive {
+        id: String,
+        /// The log lines to print first (the server caps it).
+        #[arg(long)]
+        tail: Option<u32>,
+        /// The Compose service to follow.
+        #[arg(long)]
+        service: Option<String>,
+    },
     /// Shows configuration of an application.
     Get { id: String },
     /// Shows unified dashboard summary of an application.
@@ -1682,6 +1704,21 @@ async fn run_traffic(api: &api_client::ApiClient, cmd: TrafficCommand) -> anyhow
                 .await
         }
         TrafficCommand::Get { id } => api.print_get(&format!("/api/traffic/{id}")).await,
+        TrafficCommand::Live {
+            resource_id,
+            status,
+            search,
+            country,
+        } => {
+            let query = query_string(&[
+                ("resource_id", resource_id),
+                ("status", status.map(|s| s.to_string())),
+                ("search", search),
+                ("country", country),
+            ]);
+            api.stream_events(&format!("/api/traffic/live?{query}"))
+                .await
+        }
         TrafficCommand::ReplayRequest { payload } => {
             let body = api_client::load_payload(&payload)?;
             api.print_post("/api/traffic/replay", &body).await
@@ -2224,6 +2261,12 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
         AppCommand::List => api.list_apps().await,
         AppCommand::Files(cmd) => run_app_files(api, cmd).await,
         AppCommand::Volumes(cmd) => run_app_volumes(api, cmd).await,
+        AppCommand::LogsLive { id, tail, service } => {
+            let query =
+                query_string(&[("tail", tail.map(|t| t.to_string())), ("service", service)]);
+            api.stream_websocket(&format!("/api/apps/{id}/logs/live?{query}"))
+                .await
+        }
         AppCommand::Get { id } => api.get_app(&id).await,
         AppCommand::Dashboard { id } => api.app_dashboard(&id).await,
         AppCommand::Add { payload } => api.add_app(&payload).await,

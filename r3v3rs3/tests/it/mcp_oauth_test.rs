@@ -2976,6 +2976,50 @@ async fn the_backup_downloads_are_reachable_from_the_cli() -> anyhow::Result<()>
     .await
 }
 
+/// Starts `r3 <args>` and returns the first line it writes to stderr, then stops it. A live
+/// stream never ends by itself, so the first line is the proof that the stream opened.
+async fn first_stderr_line(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    args: &[&str],
+) -> anyhow::Result<String> {
+    let mut child = tokio::process::Command::new(binary)
+        .arg(format!("http://{addr}"))
+        .args(["--token", token])
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+    let stderr = child.stderr.take().context("no stderr")?;
+    let mut lines = tokio::io::AsyncBufReadExt::lines(tokio::io::BufReader::new(stderr));
+    let line =
+        tokio::time::timeout(std::time::Duration::from_secs(20), lines.next_line()).await??;
+    child.kill().await?;
+    line.context("the client closed stderr without a line")
+}
+
+/// `r3 traffic live` opens the access log stream (OpenAPI `stream_traffic`, SSE) and
+/// `r3 app logs-live` refuses a missing app (OpenAPI `app_logs_live`, WebSocket).
+#[tokio::test]
+async fn the_live_streams_are_reachable_from_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("cli-live-streams")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let token = access_token(&addr).await?;
+        let binary = client_binary()?;
+        let line = first_stderr_line(&binary, &addr, &token, &["traffic", "live"]).await?;
+        assert!(line.contains("streaming"), "{line}");
+        let out = run_client(&binary, &addr, &token, &["app", "logs-live", MISSING_DB]).await?;
+        assert!(!out.status.success());
+        assert_not_found("app logs-live", &String::from_utf8_lossy(&out.stderr));
+        Ok(())
+    })
+    .await
+}
+
 /// Volume backup and archive operations are reachable from MCP and the CLI.
 #[tokio::test]
 async fn the_volume_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {

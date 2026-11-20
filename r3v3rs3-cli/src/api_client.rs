@@ -417,6 +417,68 @@ impl ApiClient {
         Ok(())
     }
 
+    /// Prints the `data:` lines of the server-sent event stream at `path` until the server
+    /// closes it.
+    pub async fn stream_events(&self, path: &str) -> anyhow::Result<()> {
+        let mut res = self
+            .client
+            .get(format!("{}{path}", self.server))
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "text/event-stream")
+            .send()
+            .await
+            .context("failed to communicate with server")?;
+        let status = res.status();
+        if !status.is_success() {
+            let text = res.text().await.unwrap_or_default();
+            bail!("API error {status}: {text}");
+        }
+        eprintln!("streaming {path}; press Ctrl-C to stop");
+        let mut pending = Vec::new();
+        while let Some(chunk) = res.chunk().await.context("the stream broke")? {
+            pending.extend_from_slice(&chunk);
+            while let Some(end) = pending.iter().position(|b| *b == b'\n') {
+                let line: Vec<u8> = pending.drain(..=end).collect();
+                if let Some(data) = line.strip_prefix(b"data:") {
+                    println!("{}", String::from_utf8_lossy(data).trim());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Prints the messages of the WebSocket at `path` until the server closes it.
+    pub async fn stream_websocket(&self, path: &str) -> anyhow::Result<()> {
+        use futures::StreamExt;
+        use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+        let url = websocket_url(&self.server, path)?;
+        let mut request = url.as_str().into_client_request()?;
+        let bearer = format!("Bearer {}", self.token).parse()?;
+        request.headers_mut().insert("Authorization", bearer);
+        let (mut socket, _) = match tokio_tungstenite::connect_async(request).await {
+            Ok(connected) => connected,
+            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+                let body = response.body().as_deref().unwrap_or_default();
+                bail!(
+                    "API error {}: {}",
+                    response.status(),
+                    String::from_utf8_lossy(body)
+                );
+            }
+            Err(err) => return Err(err).context("failed to open the WebSocket"),
+        };
+        eprintln!("streaming {path}; press Ctrl-C to stop");
+        while let Some(message) = socket.next().await {
+            match message.context("the stream broke")? {
+                Message::Text(text) => println!("{text}"),
+                Message::Binary(bytes) => print!("{}", String::from_utf8_lossy(&bytes)),
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Sends a request with a raw byte body and prints the JSON answer.
     pub async fn send_bytes(
         &self,
@@ -3751,6 +3813,18 @@ fn print_json(val: &Value) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The `ws://` or `wss://` URL of `path` on the server `server` (`http://` or `https://`).
+fn websocket_url(server: &str, path: &str) -> anyhow::Result<String> {
+    let rest = if let Some(rest) = server.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = server.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        bail!("the server address {server} is neither http:// nor https://");
+    };
+    Ok(format!("{}{path}", rest.trim_end_matches('/')))
+}
+
 /// Writes `bytes` to a temporary file next to `target`, syncs it and renames it over `target`.
 fn write_atomic(target: &std::path::Path, bytes: &[u8]) -> anyhow::Result<()> {
     use std::io::Write;
@@ -3954,6 +4028,24 @@ protocol: http
     #[test]
     fn load_payload_rejects_garbage() {
         assert!(load_payload("").is_err());
+    }
+
+    /// RFC 6455 section 3: a WebSocket on an `http` server uses `ws`, on an `https` server
+    /// `wss`; any other scheme has no WebSocket form and is refused.
+    #[test]
+    fn websocket_url_maps_the_scheme() {
+        let path = "/api/apps/a/logs/live?tail=5";
+        let plain = websocket_url("http://127.0.0.1:46999/", path).ok();
+        assert_eq!(
+            plain.as_deref(),
+            Some("ws://127.0.0.1:46999/api/apps/a/logs/live?tail=5")
+        );
+        let secure = websocket_url("https://panel.example.com", path).ok();
+        assert_eq!(
+            secure.as_deref(),
+            Some("wss://panel.example.com/api/apps/a/logs/live?tail=5")
+        );
+        assert!(websocket_url("ftp://panel.example.com", path).is_err());
     }
 
     #[test]
