@@ -3189,6 +3189,48 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn get_firewall_status(&self) -> anyhow::Result<()> {
+        let status: r3v3rs3_api::firewall::FirewallStatus = self.get_json("/api/firewall").await?;
+        let ports: Vec<String> = status.ports.iter().map(ToString::to_string).collect();
+        println!("{:<10} {}", "Enabled:", status.enabled);
+        println!("{:<10} {}", "Ports:", ports.join(", "));
+        for warning in &status.warnings {
+            println!("{:<10} {warning}", "Warning:");
+        }
+        if let Some(error) = &status.error {
+            println!("{:<10} {error}", "Error:");
+        }
+        Ok(())
+    }
+
+    /// Changes `[firewall]` and keeps every other setting as the server returns it.
+    pub async fn set_firewall(
+        &self,
+        enabled: Option<bool>,
+        extra_ports: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut config: r3v3rs3_api::app::AppConfig = self.get_json("/api/config").await?;
+        if let Some(enabled) = enabled {
+            config.firewall.enabled = enabled;
+        }
+        if let Some(text) = extra_ports {
+            config.firewall.extra_ports = text
+                .split(',')
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::parse)
+                .collect::<Result<_, _>>()?;
+        }
+        self.request(
+            Method::PUT,
+            "/api/config",
+            Some(&serde_json::to_value(&config)?),
+        )
+        .await?;
+        println!("Firewall settings updated.");
+        self.get_firewall_status().await
+    }
+
     pub async fn get_config(&self) -> anyhow::Result<()> {
         let res = self.request(Method::GET, "/api/config", None).await?;
         print_json(&res)

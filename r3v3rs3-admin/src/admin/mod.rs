@@ -74,6 +74,7 @@ mod disaster_recovery;
 mod discovery;
 mod dns_credentials;
 mod error_page_themes;
+mod firewall;
 mod geoip;
 mod git;
 mod grpc;
@@ -1211,6 +1212,10 @@ fn state_routes() -> OpenApiRouter<AppState> {
         .nest(
             "/workers",
             OpenApiRouter::new().routes(routes!(workers::list)),
+        )
+        .nest(
+            "/firewall",
+            OpenApiRouter::new().routes(routes!(firewall::status)),
         )
 }
 

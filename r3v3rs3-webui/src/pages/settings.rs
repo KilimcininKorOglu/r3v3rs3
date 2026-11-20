@@ -87,6 +87,9 @@ struct Fields {
     http2_max_pending_accept_reset_streams: String,
     http3_max_concurrent_bidi_streams: String,
     http3_max_concurrent_uni_streams: String,
+    firewall_enabled: bool,
+    /// Comma-separated host ports such as `udp/51820`.
+    firewall_extra_ports: String,
     platform_enabled: bool,
     platform_docker: String,
     /// Comma-separated port names or ids.
@@ -165,6 +168,14 @@ impl Fields {
             http2_max_pending_accept_reset_streams: text("/http2/max_pending_accept_reset_streams"),
             http3_max_concurrent_bidi_streams: text("/http3/max_concurrent_bidi_streams"),
             http3_max_concurrent_uni_streams: text("/http3/max_concurrent_uni_streams"),
+            firewall_enabled: config.firewall.enabled,
+            firewall_extra_ports: config
+                .firewall
+                .extra_ports
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
             platform_enabled: platform.enabled,
             platform_docker: platform.docker.clone(),
             platform_proxy_ports: platform.proxy_ports.join(","),
@@ -344,6 +355,7 @@ pub fn settings() -> Html {
 
             { notifications_section(locale, &fields, &errors, &test_notice) }
             { platform_section(locale, &fields, &errors) }
+            { firewall_section(locale, &fields, &errors) }
             { mcp_section(locale, &fields, &errors) }
             { acme_exec_section(locale, &fields, &errors) }
             { docker_section(locale, &fields, &errors, &client_certs) }
@@ -580,6 +592,43 @@ fn platform_section(
                 <p class={HINT_CLASS}>{locale.t("settings.rotate_key_hint")}</p>
             </div>
         </>
+    }
+}
+
+fn firewall_section(
+    locale: Locale,
+    fields: &UseStateHandle<Option<Fields>>,
+    errors: &HashMap<String, String>,
+) -> Html {
+    html! {
+        <>
+            { section_title(locale.t("settings.firewall_title")) }
+            { checkbox_field(fields, locale.t("settings.firewall_enabled"), |f| &mut f.firewall_enabled) }
+            <p class={HINT_CLASS}>{locale.t("settings.firewall_enabled_hint")}</p>
+            { text_field(fields, errors, locale.t("settings.firewall_extra_ports"), "firewall_extra_ports", "udp/51820", |f| &mut f.firewall_extra_ports) }
+            <p class={HINT_CLASS}>{locale.t("settings.firewall_extra_ports_hint")}</p>
+        </>
+    }
+}
+
+/// The extra host ports of the firewall; an invalid entry is reported on the field.
+fn parse_firewall(
+    locale: Locale,
+    fields: &Fields,
+    errors: &mut HashMap<String, String>,
+) -> r3v3rs3_api::firewall::FirewallConfig {
+    let mut extra_ports = Vec::new();
+    for item in comma_list(&fields.firewall_extra_ports) {
+        match item.parse() {
+            Ok(port) => extra_ports.push(port),
+            Err(err) => {
+                errors.insert("firewall_extra_ports".into(), locale.error_message(&err));
+            }
+        }
+    }
+    r3v3rs3_api::firewall::FirewallConfig {
+        enabled: fields.firewall_enabled,
+        extra_ports,
     }
 }
 
@@ -1075,6 +1124,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
     let http2 = parse_http2_limits(locale, fields, &mut errors);
     let http3 = parse_http3_limits(locale, fields, &mut errors);
     let public_url = parse_public_url(locale, &mut errors, &fields.public_url);
+    let firewall = parse_firewall(locale, fields, &mut errors);
     match (
         admin,
         (log, notifications),
@@ -1134,6 +1184,7 @@ fn parse_fields(locale: Locale, fields: &Fields) -> Result<AppConfig, HashMap<St
                 check_interval: upgrade.upgrade.check_interval,
             },
             auto_quarantine: fields.auto_quarantine.clone(),
+            firewall,
             error_page_themes: fields.error_page_themes.clone(),
         }),
         _ => Err(errors),

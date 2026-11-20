@@ -782,6 +782,24 @@ pub enum SecurityCommand {
     /// Manage GeoIP MMDB database, MaxMind licensing, and automated updates.
     #[command(subcommand)]
     Geoip(GeoipCommand),
+    /// Show or change the host firewall table (nftables) that r3v3rs3 keeps.
+    #[command(subcommand)]
+    Firewall(FirewallCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum FirewallCommand {
+    /// Shows whether the table is enabled, its open ports, warnings and the last error.
+    Status,
+    /// Turns the table on or off and sets the extra ports.
+    Set {
+        /// Whether r3v3rs3 keeps the table.
+        #[arg(long)]
+        enabled: Option<bool>,
+        /// Comma-separated extra ports such as "udp/51820,tcp/8443"; "" clears them.
+        #[arg(long)]
+        extra_ports: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1734,6 +1752,11 @@ async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyh
             .await
         }
         SecurityCommand::Geoip(cmd) => run_geoip(api, cmd).await,
+        SecurityCommand::Firewall(FirewallCommand::Status) => api.get_firewall_status().await,
+        SecurityCommand::Firewall(FirewallCommand::Set {
+            enabled,
+            extra_ports,
+        }) => api.set_firewall(enabled, extra_ports.as_deref()).await,
     }
 }
 

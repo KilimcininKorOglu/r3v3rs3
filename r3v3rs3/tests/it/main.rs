@@ -43,6 +43,7 @@ mod discovery_e2e_test;
 mod discovery_etcd_test;
 mod discovery_readonly_test;
 mod dns_credential_test;
+mod firewall_test;
 mod geoip_filter_test;
 mod grpc_health_test;
 mod grpc_web_test;

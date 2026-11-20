@@ -3,6 +3,39 @@
 use crate::error::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, str::FromStr};
+use utoipa::ToSchema;
+
+/// The `[firewall]` settings. Off by default, because the table drops every port that r3v3rs3
+/// does not know, such as a VPN port of the host.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct FirewallConfig {
+    /// Whether r3v3rs3 keeps the `inet r3v3rs3` nftables table. The environment variable
+    /// `R3V3RS3_FIREWALL_ENABLED` overrides it.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Ports that the table opens besides the ports of r3v3rs3 and SSH, such as `udp/51820`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>, example = json!(["udp/51820"]))]
+    pub extra_ports: Vec<HostPort>,
+}
+
+/// The state of the firewall table, as the last update left it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct FirewallStatus {
+    /// Whether r3v3rs3 manages the table.
+    pub enabled: bool,
+    /// The ports that the table opens.
+    #[schema(value_type = Vec<String>)]
+    pub ports: Vec<HostPort>,
+    /// Other firewalls of the host that can still drop the open ports.
+    pub warnings: Vec<String>,
+    /// The error of the last update; the table keeps its previous ports then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// When the last update finished, in Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<u64>,
+}
 
 /// The transport protocol of a host port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

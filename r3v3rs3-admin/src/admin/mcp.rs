@@ -1433,6 +1433,24 @@ impl McpServer {
         json_result(json!({ "status": "updated" }))
     }
 
+    /// The host firewall table that r3v3rs3 keeps.
+    #[tool(
+        description = "Show the host firewall table (nftables `inet r3v3rs3`) that r3v3rs3 keeps: whether it is enabled, the TCP and UDP ports it opens (`tcp/443`, `udp/49160-49240`), warnings about other firewalls of the host that can still drop these ports, and the error of the last update. Turn it on and add extra ports with `update_config` (`firewall.enabled`, `firewall.extra_ports`). Takes no arguments. Read-only; any account can call it."
+    )]
+    async fn get_firewall_status(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let status = super::firewall::status(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(status.0)
+    }
+
     /// Get the current status and metadata of the loaded GeoIP database.
     #[tool(
         description = "Show the GeoIP country database that country rules and GeoIP steering use: whether one is loaded, its path, size and build date, the MaxMind account and whether a license key is set (the key itself is not shown), and the automatic update settings. Takes no arguments. Read-only; any account can call it."

@@ -16,6 +16,7 @@ pub mod config;
 pub mod discovery;
 pub mod dns_credential;
 pub mod error_page_themes;
+pub mod firewall;
 pub mod geoip;
 pub mod ports;
 pub mod proxies;

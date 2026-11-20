@@ -112,6 +112,8 @@ pub struct ServerState {
     update_available: Option<String>,
     /// The check interval that the update check task reads again on every round.
     update_interval: watch::Sender<std::time::Duration>,
+    /// Keeps the host firewall table; only the master has it.
+    firewall: Option<crate::firewall_control::FirewallControl>,
 }
 
 pub enum Received {
@@ -374,6 +376,8 @@ impl ServerState {
             worker_link: None,
             update_available: None,
             update_interval: watch::Sender::new(check_interval),
+            firewall: leader
+                .then(|| crate::firewall_control::FirewallControl::spawn("/etc/ssh".into())),
         };
         this.initialize(role, listeners).await;
         this
@@ -441,6 +445,9 @@ impl ServerState {
             error!(%err, "failed to adopt the listeners of the master");
         }
         self.sync_port_pools().await;
+        // The table survives a restart, but a port list changed while the server was down must
+        // reach it, so the start applies it once.
+        self.sync_firewall(self.config.firewall.enabled);
         self.update_certs().await;
         self.publish_proxies();
         self.update_acmes().await;
@@ -1273,6 +1280,7 @@ impl ServerState {
         if self.refresh_discovery().await {
             self.publish_proxies();
         }
+        self.sync_firewall(self.config.firewall.enabled);
         if self.broadcast_events {
             for (entry, ctx) in self.ports.entries().cloned().zip(self.ports.as_slice()) {
                 let _ = self.br_sender.send(ServerEvent::PortStatusUpdated {
@@ -1282,6 +1290,28 @@ impl ServerState {
             }
         }
         saved
+    }
+
+    /// Hands the listening addresses of the active ports to the firewall task. `was_enabled`
+    /// is the setting before a config change, so turning the firewall off removes the table.
+    fn sync_firewall(&self, was_enabled: bool) {
+        let Some(firewall) = &self.firewall else {
+            return;
+        };
+        let listens = self
+            .ports
+            .entries()
+            .filter(|entry| entry.port.active)
+            .map(|entry| &entry.port.listen);
+        firewall.update(&self.config.firewall, listens, was_enabled);
+    }
+
+    /// The state of the host firewall table, or `None` in a worker.
+    pub fn firewall_status(&self) -> r3v3rs3_api::firewall::FirewallStatus {
+        self.firewall
+            .as_ref()
+            .map(|firewall| firewall.status())
+            .unwrap_or_default()
     }
 
     /// Saves the port list after `edit` changes a copy of it. The callers save before they change
@@ -1780,7 +1810,12 @@ impl ServerState {
         let upgrade_changed = self.config.upgrade != config.upgrade;
         let geoip_changed = self.config.geoip != config.geoip;
         let themes_changed = self.config.error_page_themes != config.error_page_themes;
+        let firewall_was_enabled = self.config.firewall.enabled;
+        let firewall_changed = self.config.firewall != config.firewall;
         self.config.clone_from(&config);
+        if firewall_changed {
+            self.sync_firewall(firewall_was_enabled);
+        }
         if upgrade_changed {
             let _ = self.update_interval.send(config.upgrade.check_interval);
         }

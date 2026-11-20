@@ -99,6 +99,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub auto_quarantine: crate::quarantine::AutoQuarantineConfig,
 
+    /// The nftables table that opens the ports of r3v3rs3 on the host firewall.
+    #[serde(default)]
+    pub firewall: crate::firewall::FirewallConfig,
+
     /// Centralized reusable error page themes pool.
     #[serde(default)]
     pub error_page_themes: Vec<crate::error_page_theme::ErrorPageTheme>,
