@@ -70,6 +70,10 @@ pub enum ServerCommand {
     SetUpdateAvailable {
         tag: Option<String>,
     },
+    /// The host ports that the running apps of the local target need open in the firewall.
+    SetAppHostPorts {
+        ports: Vec<r3v3rs3_api::firewall::HostPort>,
+    },
     /// Replaces the state and the proxies of a discovery provider.
     SetDiscovery {
         snapshot: DiscoverySnapshot,
@@ -159,6 +163,10 @@ impl std::fmt::Debug for ServerCommand {
             Self::SetUpdateAvailable { tag } => f
                 .debug_struct("SetUpdateAvailable")
                 .field("tag", tag)
+                .finish(),
+            Self::SetAppHostPorts { ports } => f
+                .debug_struct("SetAppHostPorts")
+                .field("ports", ports)
                 .finish(),
             // The definitions can hold plain text passwords, so only the counts are printed.
             Self::SetDiscovery { snapshot } => f

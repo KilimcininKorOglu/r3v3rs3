@@ -476,6 +476,7 @@ mod tests {
             deploy_window: None,
             tag_trigger: None,
             watch_paths: Vec::new(),
+            host_ports: Vec::new(),
             store_app_id: None,
             targets: Vec::new(),
             load_balancing: None,

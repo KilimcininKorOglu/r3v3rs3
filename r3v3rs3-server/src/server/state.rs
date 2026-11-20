@@ -114,6 +114,8 @@ pub struct ServerState {
     update_interval: watch::Sender<std::time::Duration>,
     /// Keeps the host firewall table; only the master has it.
     firewall: Option<crate::firewall_control::FirewallControl>,
+    /// The host ports of the running apps of the local target, from the platform.
+    app_host_ports: Vec<r3v3rs3_api::firewall::HostPort>,
 }
 
 pub enum Received {
@@ -378,6 +380,7 @@ impl ServerState {
             update_interval: watch::Sender::new(check_interval),
             firewall: leader
                 .then(|| crate::firewall_control::FirewallControl::spawn("/etc/ssh".into())),
+            app_host_ports: Vec::new(),
         };
         this.initialize(role, listeners).await;
         this
@@ -512,12 +515,6 @@ impl ServerState {
                         .await;
                 }
             }
-            ServerCommand::SetUpdateAvailable { tag } => {
-                if self.update_available != tag {
-                    self.update_available = tag.clone();
-                    let _ = self.br_sender.send(ServerEvent::UpdateAvailable { tag });
-                }
-            }
             ServerCommand::WorkerApply => {
                 self.apply_worker_state().await;
             }
@@ -542,6 +539,25 @@ impl ServerState {
                         open_connections: status.open_connections,
                     }),
                 });
+            }
+            other => self.handle_status_command(other).await,
+        }
+    }
+
+    /// Handles the commands that report a state from outside the server loop.
+    async fn handle_status_command(&mut self, cmd: ServerCommand) {
+        match cmd {
+            ServerCommand::SetAppHostPorts { ports } => {
+                if self.app_host_ports != ports {
+                    self.app_host_ports = ports;
+                    self.sync_firewall(self.config.firewall.enabled);
+                }
+            }
+            ServerCommand::SetUpdateAvailable { tag } => {
+                if self.update_available != tag {
+                    self.update_available = tag.clone();
+                    let _ = self.br_sender.send(ServerEvent::UpdateAvailable { tag });
+                }
             }
             other => self.handle_topology_command(other).await,
         }
@@ -1303,7 +1319,12 @@ impl ServerState {
             .entries()
             .filter(|entry| entry.port.active)
             .map(|entry| &entry.port.listen);
-        firewall.update(&self.config.firewall, listens, was_enabled);
+        firewall.update(
+            &self.config.firewall,
+            listens,
+            &self.app_host_ports,
+            was_enabled,
+        );
     }
 
     /// The status of a port with the state of its host firewall hole.
@@ -1936,6 +1957,11 @@ impl ServerState {
     async fn restart_platform(&mut self) {
         self.platform.shutdown(Duration::from_secs(5)).await;
         self.platform = PlatformHandle::Disabled;
+        // The new platform sends its app ports again; a disabled one opens none.
+        if !self.app_host_ports.is_empty() {
+            self.app_host_ports.clear();
+            self.sync_firewall(self.config.firewall.enabled);
+        }
         if !self.config.platform.enabled {
             return;
         }

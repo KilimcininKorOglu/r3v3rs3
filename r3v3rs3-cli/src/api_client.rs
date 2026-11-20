@@ -1441,6 +1441,7 @@ fn build_store_spec(
         deploy_window: None,
         tag_trigger: None,
         watch_paths: Vec::new(),
+        host_ports: Vec::new(),
         store_app_id: Some(store_app.id),
         targets: Vec::new(),
         load_balancing: None,

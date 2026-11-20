@@ -1205,6 +1205,12 @@ pub struct AppSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub watch_paths: Vec<String>,
 
+    /// Ports of the host that the r3v3rs3 firewall opens while the app runs, such as
+    /// `udp/49160-49240` for the relay range of a TURN server on the host network.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>, example = json!(["udp/3478", "udp/49160-49240"]))]
+    pub host_ports: Vec<crate::firewall::HostPort>,
+
     /// Optional app store catalog entry id that this app was installed from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub store_app_id: Option<String>,
@@ -1486,7 +1492,17 @@ impl AppSpec {
         self.validate_git_config()?;
         self.validate_buildkit()?;
         self.validate_tag_trigger()?;
-        self.validate_watch_paths()
+        self.validate_watch_paths()?;
+        self.validate_host_ports()
+    }
+
+    fn validate_host_ports(&self) -> Result<(), Error> {
+        match self.host_ports.len() > MAX_HOST_PORTS {
+            true => Err(invalid(&format!(
+                "host_ports holds at most {MAX_HOST_PORTS} entries"
+            ))),
+            false => Ok(()),
+        }
     }
 
     fn validate_watch_paths(&self) -> Result<(), Error> {
@@ -1759,6 +1775,9 @@ fn parse_window_minutes(s: &str) -> Option<u32> {
 
 /// The most entries of [`AppSpec::watch_paths`].
 pub const MAX_WATCH_PATHS: usize = 50;
+
+/// The most entries of [`AppSpec::host_ports`].
+pub const MAX_HOST_PORTS: usize = 32;
 
 /// The longest entry of [`AppSpec::watch_paths`], in bytes.
 const MAX_WATCH_PATH_LEN: usize = 256;
@@ -3216,6 +3235,28 @@ mod tests {
             "watch_paths": ["src/"],
         }));
         assert!(image.is_err());
+    }
+
+    /// Host ports open holes in the host firewall, so a malformed entry or an oversized list
+    /// is refused before it reaches the nft script.
+    #[test]
+    fn host_ports_accept_only_valid_ports_up_to_the_limit() {
+        let app = |ports: serde_json::Value| {
+            spec(json!({
+                "source": {"type": "image", "image": "coturn/coturn:4"},
+                "port": 3478,
+                "host_ports": ports,
+            }))
+        };
+        let parsed = app(json!(["udp/3478", "udp/49160-49240", "tcp/5349"])).unwrap();
+        assert_eq!(parsed.host_ports.len(), 3);
+        for bad in ["udp/0", "udp/3478-", "sctp/1", "udp/9-1", ""] {
+            assert!(app(json!([bad])).is_err(), "{bad:?}");
+        }
+        let many: Vec<String> = (1..=MAX_HOST_PORTS + 1)
+            .map(|p| format!("udp/{p}"))
+            .collect();
+        assert!(app(json!(many)).is_err());
     }
 
     /// A watched directory covers every file below it, and nothing outside it whose name only

@@ -46,10 +46,11 @@ impl FirewallControl {
         &self,
         config: &FirewallConfig,
         listens: impl Iterator<Item = &'a Multiaddr>,
+        app_ports: &[HostPort],
         was_enabled: bool,
     ) {
         let next = match enabled(config) {
-            Ok(true) => Wanted::Apply(wanted_ports(config, listens)),
+            Ok(true) => Wanted::Apply(wanted_ports(config, listens, app_ports)),
             Ok(false) if was_enabled => Wanted::Remove,
             Ok(false) => return,
             Err(err) => {
@@ -94,10 +95,12 @@ fn parse_bool(value: &str) -> Option<bool> {
 }
 
 /// The ports that clients outside the host reach: every listening address that is not a
-/// loopback address, as TCP or as UDP for UDP and QUIC ports, plus the extra ports.
+/// loopback address, as TCP or as UDP for UDP and QUIC ports, plus the extra ports and the
+/// host ports of the running apps.
 pub fn wanted_ports<'a>(
     config: &FirewallConfig,
     listens: impl Iterator<Item = &'a Multiaddr>,
+    app_ports: &[HostPort],
 ) -> Vec<HostPort> {
     let ports = listens.filter_map(|addr| {
         let loopback = addr.ip_addr().is_ok_and(|ip| ip.is_loopback());
@@ -108,7 +111,10 @@ pub fn wanted_ports<'a>(
         let port = addr.port().ok()?;
         (!loopback).then_some(HostPort::single(transport, port))
     });
-    let mut all: Vec<HostPort> = ports.chain(config.extra_ports.iter().copied()).collect();
+    let mut all: Vec<HostPort> = ports
+        .chain(config.extra_ports.iter().copied())
+        .chain(app_ports.iter().copied())
+        .collect();
     all.sort_unstable();
     all.dedup();
     all
@@ -196,13 +202,22 @@ mod tests {
             enabled: true,
             extra_ports: vec!["udp/51820".parse().unwrap(), "tcp/443".parse().unwrap()],
         };
-        let ports: Vec<String> = wanted_ports(&config, listens.iter())
+        // A TURN server on the host network needs its relay range open.
+        let app = ["udp/49160-49240".parse().unwrap()];
+        let ports: Vec<String> = wanted_ports(&config, listens.iter(), &app)
             .iter()
             .map(ToString::to_string)
             .collect();
         assert_eq!(
             ports,
-            ["tcp/443", "tcp/5349", "udp/443", "udp/3478", "udp/51820"]
+            [
+                "tcp/443",
+                "tcp/5349",
+                "udp/443",
+                "udp/3478",
+                "udp/49160-49240",
+                "udp/51820"
+            ]
         );
     }
 

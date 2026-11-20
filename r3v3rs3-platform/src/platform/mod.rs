@@ -258,6 +258,8 @@ pub struct Platform {
     command: mpsc::Sender<ServerCommand>,
     /// The proxies and the issues of the last snapshot that the server got.
     sent: Mutex<Option<publish::Published>>,
+    /// The host ports of each target that the last firewall update sent.
+    sent_host_ports: Mutex<Option<publish::TargetPorts>>,
     /// The apps that a pipeline or a deletion holds.
     busy: Arc<std::sync::Mutex<HashSet<ShortId>>>,
     /// Active cancellation tokens for in-progress deployments.
@@ -375,6 +377,9 @@ impl Platform {
             config_dir: config_dir.to_path_buf(),
             command,
             sent: Mutex::new(None),
+            // The server starts with no app ports and clears them when the platform restarts,
+            // so only a change needs a message.
+            sent_host_ports: Mutex::new(Some(publish::TargetPorts::new())),
             busy: Arc::new(std::sync::Mutex::new(HashSet::new())),
             cancellations: std::sync::Mutex::new(HashMap::new()),
             running_commands: std::sync::Mutex::new(HashSet::new()),
@@ -1937,6 +1942,7 @@ mod tests {
                 deploy_window: None,
                 tag_trigger: None,
                 watch_paths: Vec::new(),
+                host_ports: Vec::new(),
                 store_app_id: None,
                 targets: Vec::new(),
                 load_balancing: None,

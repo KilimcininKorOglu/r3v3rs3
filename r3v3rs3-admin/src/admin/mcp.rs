@@ -1105,6 +1105,7 @@ fn build_store_app_request(
         deploy_window: None,
         tag_trigger: None,
         watch_paths: Vec::new(),
+        host_ports: Vec::new(),
         store_app_id: Some(store_app.id.clone()),
         targets: Vec::new(),
         load_balancing: None,

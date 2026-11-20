@@ -7,8 +7,10 @@ use crate::agent::forward::ForwardKey;
 use crate::command::ServerCommand;
 use crate::discovery::DiscoveredProxy;
 use r3v3rs3_api::discovery::DiscoveryIssue;
+use r3v3rs3_api::firewall::HostPort;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::AgentLinkQuality;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Weak;
 use std::time::Duration;
 
@@ -19,6 +21,33 @@ pub const REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 /// The proxies and the issues of one read.
 pub type Published = (Vec<DiscoveredProxy>, Vec<DiscoveryIssue>);
 
+/// The host ports that the running apps of each target need open.
+pub type TargetPorts = BTreeMap<ShortId, BTreeSet<HostPort>>;
+
+/// Groups the host ports of the running deployments by the targets that run them.
+pub fn host_ports_by_target(deployments: &[RunningDeployment]) -> TargetPorts {
+    let mut ports = TargetPorts::new();
+    for deployment in deployments {
+        for target in deployment.spec.targets_or_default(deployment.target) {
+            ports
+                .entry(target)
+                .or_default()
+                .extend(deployment.spec.host_ports.iter().copied());
+        }
+    }
+    ports.retain(|_, set| !set.is_empty());
+    ports
+}
+
+/// The host ports of the local target, which this server's own firewall opens.
+pub fn local_ports(ports: &TargetPorts) -> Vec<HostPort> {
+    ports
+        .iter()
+        .filter(|(target, _)| is_local(**target))
+        .flat_map(|(_, set)| set.iter().copied())
+        .collect()
+}
+
 impl Platform {
     /// Reads the running containers and sends their proxies to the server when they changed.
     /// Returns false when the server stopped.
@@ -26,6 +55,9 @@ impl Platform {
     /// The server loop must not call it, because it waits for the server loop to take the
     /// snapshot.
     pub async fn publish(&self) -> bool {
+        if !self.publish_host_ports().await {
+            return false;
+        }
         let mut sent = self.sent.lock().await;
         let snapshot = match self.read_proxies().await {
             Ok(current) if sent.as_ref() == Some(&current) => return true,
@@ -41,6 +73,29 @@ impl Platform {
         };
         self.command
             .send(ServerCommand::SetDiscovery { snapshot })
+            .await
+            .is_ok()
+    }
+
+    /// Sends the host ports of the local target to the server when they changed. Returns false
+    /// when the server stopped.
+    async fn publish_host_ports(&self) -> bool {
+        let deployments = match self.store.running_deployments().await {
+            Ok(deployments) => deployments,
+            Err(err) => {
+                tracing::error!(%err, "cannot read the host ports of the running apps");
+                return true;
+            }
+        };
+        let ports = host_ports_by_target(&deployments);
+        let mut sent = self.sent_host_ports.lock().await;
+        if sent.as_ref() == Some(&ports) {
+            return true;
+        }
+        let local = local_ports(&ports);
+        *sent = Some(ports);
+        self.command
+            .send(ServerCommand::SetAppHostPorts { ports: local })
             .await
             .is_ok()
     }
@@ -259,6 +314,77 @@ mod tests {
         let snapshot = take(&mut setup.commands).expect("a snapshot");
         assert_eq!(resources(&snapshot), ["blog", "shop"]);
         assert!(snapshot.issues.is_empty());
+        Ok(())
+    }
+
+    /// A running app with host ports makes the server open them; an unchanged read sends no
+    /// second update, and an app that no longer runs closes them again.
+    #[tokio::test]
+    async fn the_host_ports_of_running_local_apps_reach_the_server() -> anyhow::Result<()> {
+        let mut setup = setup().await?;
+        let app = run_turn_server(&setup.platform).await?;
+
+        assert!(setup.platform.publish_host_ports().await);
+        assert_eq!(
+            sent_ports(&mut setup.commands)?,
+            ["udp/3478", "udp/49160-49240"]
+        );
+
+        assert!(setup.platform.publish_host_ports().await);
+        assert!(setup.commands.try_recv().is_err(), "an unchanged read sent");
+
+        assert!(setup.platform.store.delete_app(app).await?);
+        assert!(setup.platform.publish_host_ports().await);
+        assert!(sent_ports(&mut setup.commands)?.is_empty());
+        Ok(())
+    }
+
+    /// Adds an app with two host ports and a running deployment on the local target.
+    async fn run_turn_server(platform: &Platform) -> anyhow::Result<ShortId> {
+        let mut app = request("turn");
+        app.spec.host_ports = vec!["udp/3478".parse()?, "udp/49160-49240".parse()?];
+        let app = platform.add_app(app, 1).await?;
+        let mut deployment =
+            NewDeployment::new(&app, DeploymentTrigger::Manual, "alice", &app.spec, &[])?;
+        let id = deployment.id;
+        deployment.started_at = 2;
+        platform.store.insert_deployment(&deployment).await?;
+        platform.store.finish_deployment(app.id, id, 3).await?;
+        Ok(app.id)
+    }
+
+    /// The host ports of the next command, which must be a host port update.
+    fn sent_ports(commands: &mut mpsc::Receiver<ServerCommand>) -> anyhow::Result<Vec<String>> {
+        match commands.try_recv() {
+            Ok(ServerCommand::SetAppHostPorts { ports }) => {
+                Ok(ports.iter().map(ToString::to_string).collect())
+            }
+            other => anyhow::bail!("expected the host ports, got {other:?}"),
+        }
+    }
+
+    /// An app on an agent target needs its ports open on the agent host, not on this server.
+    #[test]
+    fn host_ports_belong_to_the_targets_that_run_the_app() -> anyhow::Result<()> {
+        let agent: ShortId = "abc-def".parse()?;
+        let mut spec = request("turn").spec;
+        spec.host_ports = vec!["udp/3478".parse()?];
+        let running = |target| RunningDeployment {
+            id: ShortId::default(),
+            app: ShortId::default(),
+            target,
+            app_name: "turn".parse().unwrap(),
+            spec: spec.clone(),
+        };
+        let ports = host_ports_by_target(&[running(agent)]);
+        assert_eq!(ports.keys().collect::<Vec<_>>(), [&agent]);
+        assert!(local_ports(&ports).is_empty(), "an agent port opened here");
+        let local_target: ShortId = r3v3rs3_api::platform::LOCAL_TARGET.parse()?;
+        let local = host_ports_by_target(&[running(local_target), running(agent)]);
+        assert_eq!(local_ports(&local), [spec.host_ports[0]]);
+        let mut plain = running(agent);
+        plain.spec.host_ports.clear();
+        assert!(host_ports_by_target(&[plain]).is_empty());
         Ok(())
     }
 

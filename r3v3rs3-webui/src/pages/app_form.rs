@@ -8,6 +8,7 @@ use crate::components::domain_ssl_status::DomainCertCoverage;
 use crate::components::tabs::{TabItem, Tabs};
 use r3v3rs3_api::container::{ResourceLimits, RestartPolicy, VolumeMount};
 use r3v3rs3_api::error::Error;
+use r3v3rs3_api::firewall::HostPort;
 use r3v3rs3_api::git::{GitRef, RelPath, RepoUrl};
 use r3v3rs3_api::git_connection::GitConnectionEntry;
 use r3v3rs3_api::i18n::Locale;
@@ -101,6 +102,8 @@ pub struct AppForm {
     pub deploy_window: String,
     pub tag_trigger: String,
     pub watch_paths: String,
+    /// Comma-separated host ports such as `udp/49160-49240`.
+    pub host_ports: String,
     pub store_app_id: Option<String>,
     pub targets: Vec<String>,
     pub load_balancing: String,
@@ -167,6 +170,7 @@ impl Default for AppForm {
             deploy_window: String::new(),
             tag_trigger: String::new(),
             watch_paths: String::new(),
+            host_ports: String::new(),
             store_app_id: None,
             targets: Vec::new(),
             load_balancing: String::new(),
@@ -268,6 +272,12 @@ impl AppForm {
             deploy_window: spec.deploy_window.clone().unwrap_or_default(),
             tag_trigger: spec.tag_trigger.clone().unwrap_or_default(),
             watch_paths: spec.watch_paths.join(", "),
+            host_ports: spec
+                .host_ports
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", "),
             store_app_id: spec.store_app_id.clone(),
             targets: spec.targets.iter().map(ToString::to_string).collect(),
             load_balancing: spec
@@ -446,6 +456,13 @@ impl AppForm {
         })
     }
 
+    fn parse_host_ports(&self, locale: Locale) -> Result<Vec<HostPort>, String> {
+        split_list(&self.host_ports)
+            .iter()
+            .map(|item| item.parse().map_err(|err| locale.error_message(&err)))
+            .collect()
+    }
+
     fn build_spec(&self, locale: Locale) -> Result<AppSpec, String> {
         let (volumes, restart, limits) = self.container_settings(locale)?;
         let (targets, load_balancing) = self.parse_replica_settings(locale)?;
@@ -468,6 +485,7 @@ impl AppForm {
             deploy_window: non_empty(&self.deploy_window).map(str::to_string),
             tag_trigger: non_empty(&self.tag_trigger).map(str::to_string),
             watch_paths: split_list(&self.watch_paths),
+            host_ports: self.parse_host_ports(locale)?,
             store_app_id: self.store_app_id.clone(),
             targets,
             load_balancing,
@@ -910,6 +928,7 @@ pub fn fields_view(
             <DomainCertCoverage domains={split_domains(&form.domains)} />
             { ports_view(locale, form, options.ports) }
             { text_field(locale, form, "apps.health_check_path", Some("apps.health_check_path_hint"), |f| &mut f.health_check_path) }
+            { text_field(locale, form, "apps.host_ports", Some("apps.host_ports_hint"), |f| &mut f.host_ports) }
             { database_select(locale, form, options.databases) }
             { env_groups_view(locale, form, options.env_groups) }
             if form.kind != SourceKind::Compose {

@@ -1907,6 +1907,8 @@
   "apps.custom_ports_hint": "Yukarıdaki listenin dışında, her satıra bir port adı veya id.",
   "apps.health_check_path": "Sağlık kontrolü yolu",
   "apps.health_check_path_hint": "Uygulama hazır olunca 2xx veya 3xx dönen bir yol. Boş bırakılırsa port bağlantı kabul edene kadar beklenir.",
+  "apps.host_ports": "Host Portları",
+  "apps.host_ports_hint": "Uygulama çalışırken sunucunun güvenlik duvarının açtığı portlar, virgülle ayrılmış. Örneğin udp/3478 veya udp/49160-49240. Host ağındaki bir servis için gereklidir.",
   "apps.volumes": "Volume'lar",
   "apps.volumes_hint": "Her satıra bir mount yazın: volume:/yol, salt okunur mount için volume:/yol:ro.",
   "apps.invalid_volume": "Geçersiz volume: {volume}",
