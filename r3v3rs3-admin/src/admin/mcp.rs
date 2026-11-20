@@ -124,6 +124,37 @@ pub struct RestoreConfigParams {
     pub backup: serde_json::Map<String, serde_json::Value>,
 }
 
+/// A request body whose API type has no JSON schema; the tool checks it against the type.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct JsonRequestParams {
+    /// The request body, as the matching REST endpoint takes it.
+    pub request: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The id of a resource and a request body whose API type has no JSON schema.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct IdJsonRequestParams {
+    /// The id of the resource.
+    pub id: String,
+    /// The request body, as the matching REST endpoint takes it.
+    pub request: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The optional filter of `list_s3_database_backups`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct S3ListParams {
+    /// Only the snapshots of this database name.
+    pub database: Option<String>,
+}
+
+/// Turns a JSON object argument into its API type; a mismatch is an invalid argument.
+fn json_arg<T: serde::de::DeserializeOwned>(
+    object: serde_json::Map<String, serde_json::Value>,
+) -> Result<T, ErrorData> {
+    serde_json::from_value(serde_json::Value::Object(object))
+        .map_err(|err| ErrorData::invalid_params(err.to_string(), None))
+}
+
 /// The argument of `add_dns_credential`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DnsCredentialParams {
@@ -1540,9 +1571,7 @@ impl McpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let backup: r3v3rs3_api::config_backup::ConfigBackup =
-            serde_json::from_value(serde_json::Value::Object(params.backup))
-                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let backup: r3v3rs3_api::config_backup::ConfigBackup = json_arg(params.backup)?;
         let _ = super::config::restore(
             axum::extract::State(self.state.clone()),
             axum::Extension(caller),
@@ -3738,6 +3767,243 @@ impl McpServer {
             .map_err(any_error)?;
         let backups = platform.list_backups(id).await.map_err(any_error)?;
         json_result(backups)
+    }
+
+    /// List the backups of every database.
+    #[tool(
+        description = "List the backups of every managed database with their database, size and creation time. Takes no arguments. Read-only; any account can call it."
+    )]
+    async fn list_all_backups(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let list = super::backups::list_all(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(list.0)
+    }
+
+    /// Summarize the backups of every database.
+    #[tool(
+        description = "Summarize the database backups: counts, total size, the newest backup and the databases without one. Takes no arguments. Read-only; any account can call it."
+    )]
+    async fn get_backups_overview(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let overview = super::backups::overview(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(overview.0)
+    }
+
+    /// Run a scheduled-style backup of one database now.
+    #[tool(
+        description = "Run a backup of the database `id` now, with the retention and S3 replication of the backup configuration, and return the new backup entry. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn run_database_backup_now(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request = r3v3rs3_api::platform::RunBackupRequest {
+            database_id: parse_id(&params.id)?,
+        };
+        let entry = super::backups::run_backup_now(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entry.0)
+    }
+
+    /// Restore a database from one of its backups.
+    #[tool(
+        description = "Restore the database `db_id` from its backup `backup_id` (from `list_database_backups`). The current data of the database is replaced. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn restore_database_backup(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<DeleteBackupParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.db_id)?;
+        let _ = super::backups::restore(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path((id, params.backup_id.clone())),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(json!({ "restored": params.backup_id }))
+    }
+
+    /// List the backups stored in S3.
+    #[tool(
+        description = "List the database backup snapshots in the S3 bucket of the backup configuration, optionally only those of the database name `database`. Fails with `s3_not_configured` when no S3 storage is set. Read-only; any account can call it."
+    )]
+    async fn list_s3_database_backups(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<S3ListParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let query = r3v3rs3_api::platform::S3SnapshotsQuery {
+            database: params.database,
+        };
+        let list = super::backups::list_s3(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Query(query),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(list.0)
+    }
+
+    /// Restore a database from an S3 snapshot.
+    #[tool(
+        description = "Restore a database from an S3 snapshot. `request` is the body of POST /api/databases/s3/restore: `key` (from `list_s3_database_backups`) and either `target_db_id` (restore into that database) or `new_database_name` with an optional `engine` (create a new database). Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn restore_s3_database_backup(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request: r3v3rs3_api::platform::RestoreFromS3Request = json_arg(params.request)?;
+        let done = super::backups::restore_s3(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(done.0)
+    }
+
+    /// List the read replicas of a database.
+    #[tool(
+        description = "List the read replicas of the database `id`. Read-only; any account can call it."
+    )]
+    async fn list_database_replicas(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let list = super::databases::list_replicas(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(list.0)
+    }
+
+    /// Create a read replica of a database.
+    #[tool(
+        description = "Create a read replica of the database `id`. `request` is the body of POST /api/databases/{id}/replicas: `name`, optional `host_port` and `limits`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn create_database_replica(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdJsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let request: r3v3rs3_api::platform::DatabaseReplicaRequest = json_arg(params.request)?;
+        let created = super::databases::create_replica(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(created.0)
+    }
+
+    /// Clone a database into a new one.
+    #[tool(
+        description = "Clone the database `id` with its data into a new database. `request` is the body of POST /api/databases/{id}/clone: `name`, optional `host_port` and `limits`. The answer holds the new password once. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn clone_database(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdJsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let request: r3v3rs3_api::platform::DatabaseCloneRequest = json_arg(params.request)?;
+        let created = super::databases::clone(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(created.0)
+    }
+
+    /// Delete a database.
+    #[tool(
+        description = "Delete the database `id` with its container. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn delete_database(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let _ = super::databases::delete(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(json!({ "deleted": id.to_string() }))
+    }
+
+    /// Download the database engine catalog again.
+    #[tool(
+        description = "Download the database engine catalog again from the catalog repository and return the engines. Takes no arguments. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn refresh_database_engines(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let engines = super::databases::refresh_engines(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(engines.0)
     }
 
     /// Take an immediate database backup snapshot.

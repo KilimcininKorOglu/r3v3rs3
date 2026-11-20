@@ -546,6 +546,10 @@ pub enum DbCommand {
         #[arg(long)]
         name: String,
     },
+    /// Lists the read replicas of a database.
+    Replicas { id: String },
+    /// Downloads the database engine catalog again.
+    RefreshEngines,
     /// Displays database container logs.
     Logs {
         id: String,
@@ -612,6 +616,32 @@ pub enum BackupCommand {
     /// Manages full platform disaster recovery (.r3bundle) snapshots.
     #[command(subcommand)]
     Dr(DrCommand),
+    /// Lists the backups of every database.
+    ListAll,
+    /// Summarizes the backups of every database.
+    Overview,
+    /// Runs a backup of a database now, with the retention and S3 replication of the settings.
+    Run { database_id: String },
+    /// Lists the backup snapshots in the S3 bucket of the backup settings.
+    S3List {
+        /// Only the snapshots of this database name.
+        #[arg(long)]
+        database: Option<String>,
+    },
+    /// Restores a database from an S3 snapshot, into a database or into a new one.
+    S3Restore {
+        /// The S3 object key from `backup s3-list`.
+        key: String,
+        /// The database to restore into.
+        #[arg(long)]
+        target_db: Option<String>,
+        /// The name of a new database to create from the snapshot.
+        #[arg(long)]
+        new_name: Option<String>,
+        /// The engine of the new database, when the key does not name it.
+        #[arg(long)]
+        engine: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1598,6 +1628,14 @@ async fn run_db(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<(
         DbCommand::Clone { id, name } => api.clone_db(&id, &name).await,
         DbCommand::Replica { id, name } => api.replica_db(&id, &name).await,
         DbCommand::Logs { id, tail } => api.db_logs(&id, tail).await,
+        DbCommand::Replicas { id } => {
+            api.print_get(&format!("/api/databases/{id}/replicas"))
+                .await
+        }
+        DbCommand::RefreshEngines => {
+            api.print_post("/api/databases/engines/refresh", &serde_json::json!({}))
+                .await
+        }
         accounts => run_db_accounts(api, accounts).await,
     }
 }
@@ -1660,6 +1698,36 @@ async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::
         | BackupCommand::PitrRestore { .. }
         | BackupCommand::WalArchive { .. }
         | BackupCommand::WalSegments { .. }) => run_backup_pitr_wal(api, pitr_wal).await,
+        all @ (BackupCommand::ListAll
+        | BackupCommand::Overview
+        | BackupCommand::Run { .. }
+        | BackupCommand::S3List { .. }
+        | BackupCommand::S3Restore { .. }) => run_backup_all(api, all).await,
+    }
+}
+
+/// The commands that cover the backups of every database and the S3 snapshots.
+async fn run_backup_all(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::Result<()> {
+    match cmd {
+        BackupCommand::ListAll => api.print_get("/api/backups").await,
+        BackupCommand::Overview => api.print_get("/api/backups/overview").await,
+        BackupCommand::Run { database_id } => api.run_backup_now(&database_id).await,
+        BackupCommand::S3List { database } => api.list_s3_backups(database.as_deref()).await,
+        BackupCommand::S3Restore {
+            key,
+            target_db,
+            new_name,
+            engine,
+        } => {
+            let request = serde_json::json!({
+                "key": key,
+                "target_db_id": target_db,
+                "new_database_name": new_name,
+                "engine": engine,
+            });
+            api.print_post("/api/databases/s3/restore", &request).await
+        }
+        other => anyhow::bail!("{other:?} is not a backup overview command"),
     }
 }
 

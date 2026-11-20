@@ -1877,7 +1877,7 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 | **Erişim Listeleri** | `list_access_lists`, `add_access_list`, `update_access_list`, `delete_access_list` | CIDR IP filtreleme, HTTP basic authentication ve özel bearer token'lar içeren erişim kontrol listeleri. |
 | **PaaS Uygulamaları** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update`, `list_app_scheduled_commands`, `add_app_scheduled_command`, `update_app_scheduled_command`, `delete_app_scheduled_command`, `run_app_scheduled_command` | Otonom PaaS konteyner yaşam döngüsü: Docker image/git/compose uygulaması dağıtımı, konteyner log akışı, ortam değişkeni yönetimi, önceki dağıtıma geri alma (rollback), zamanlanmış cron komutları yönetimi ile konteyner içinde anlık çalıştırma ve Docker registry güncelleme kontrolü. |
 | **App Store Kataloğu** | `get_store`, `refresh_store`, `install_store_app` | Küratörlü tek tıkla kurulum şablonlarının (veritabanları, paneller, CMS, analitik) katalogdan doğrudan tam yapılandırılmış ve yönlendirilmiş uygulamalar olarak otonom kurulumu. |
-| **Yönetilen Veritabanları ve Yedekler** | `list_databases`, `list_database_engines`, `create_database`, `get_database_credentials`, `list_database_tenants`, `reset_database_password`, `delete_database_tenant`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config`, `test_database_backup`, `get_database_pitr_range`, `restore_database_pitr`, `archive_database_wal_segment`, `list_database_wal_segments` | Otomatik üretilen kimlik bilgileriyle PostgreSQL, MySQL, Redis, MariaDB ve MongoDB sağlama, anlık yedek alma, yedek silme, yedek bütünlüğü testi, dallanabilir PITR belirli bir zamana geri dönme, WAL arşivleme ve uzak depolama ayarları. |
+| **Yönetilen Veritabanları ve Yedekler** | `list_databases`, `list_database_engines`, `create_database`, `get_database_credentials`, `list_database_tenants`, `reset_database_password`, `delete_database_tenant`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config`, `test_database_backup`, `get_database_pitr_range`, `restore_database_pitr`, `archive_database_wal_segment`, `list_database_wal_segments`, `delete_database`, `clone_database`, `list_database_replicas`, `create_database_replica`, `restore_database_backup`, `run_database_backup_now`, `list_all_backups`, `get_backups_overview`, `list_s3_database_backups`, `restore_s3_database_backup`, `refresh_database_engines` | Otomatik üretilen kimlik bilgileriyle PostgreSQL, MySQL, Redis, MariaDB ve MongoDB sağlama, anlık yedek alma, yedek silme, yedek bütünlüğü testi, dallanabilir PITR belirli bir zamana geri dönme, WAL arşivleme ve uzak depolama ayarları. |
 | **Agent Hedef Düğümleri** | `list_targets`, `add_target`, `delete_target`, `set_target_region`, `drain_target`, `undrain_target`, `generate_target_token`, `upgrade_target`, `upgrade_all_targets` | Çok düğümlü Docker agent altyapısı, tek kullanımlık kayıt token'ı üretme, hedef düğümleri kaldırma, coğrafi bölge atama, trafik boşaltma/geri alma ve uzak hedef ikili dosya güncellemeleri. |
 | **Projeler ve Ortam Grupları** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_project_environment`, `update_project_env`, `sync_project_env` | Proje organizasyonu, çoklu ortam izolasyonu, paylaşılan ortam değişkeni grupları ve seçici anahtar kopyalama ile ortamlar arası yapılandırma senkronizasyonu. |
 | **Dışa Dönük Webhook'lar** | `list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook` | Dışa dönük olay bildirim webhook dağıtıcıları: uç nokta yönetimi, HMAC-SHA256 imza sırrı doğrulaması, ayrıntılı olay abonelikleri ve uçtan uca webhook teslimat testi. |
@@ -2003,6 +2003,8 @@ r3 <server> db tenants <id>
 r3 <server> db reset-password <id> [--tenant <name>]
 r3 <server> db delete-tenant <id> <tenant>
 r3 <server> db delete <id>
+r3 <server> db replicas <id>
+r3 <server> db refresh-engines
 
 # Yedekler, Otomatik Doğrulama, Belirli Bir Ana Geri Yükleme (PITR) ve WAL
 r3 <server> backup config
@@ -2015,6 +2017,11 @@ r3 <server> backup pitr-restore <database-id> <timestamp_ms> [--new-name <name>]
 r3 <server> backup wal-archive <database-id>
 r3 <server> backup wal-segments <database-id>
 r3 <server> backup delete <database-id> <backup-id>
+r3 <server> backup list-all
+r3 <server> backup overview
+r3 <server> backup run <database-id>
+r3 <server> backup s3-list [--database <name>]
+r3 <server> backup s3-restore <key> [--target-db <id> | --new-name <name> [--engine <engine>]]
 
 # Çoklu Düğüm Agent Hedefleri
 r3 <server> target list

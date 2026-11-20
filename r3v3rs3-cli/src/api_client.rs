@@ -385,6 +385,33 @@ impl ApiClient {
         serde_json::from_value(res_val).context("failed to deserialize response")
     }
 
+    /// Sends a GET request and prints the JSON answer.
+    pub async fn print_get(&self, path: &str) -> anyhow::Result<()> {
+        print_json(&self.request(Method::GET, path, None).await?)
+    }
+
+    /// Sends a POST request with a JSON body and prints the JSON answer.
+    pub async fn print_post(&self, path: &str, body: &Value) -> anyhow::Result<()> {
+        print_json(&self.request(Method::POST, path, Some(body)).await?)
+    }
+
+    pub async fn run_backup_now(&self, database_id: &str) -> anyhow::Result<()> {
+        let body = serde_json::json!({ "database_id": database_id });
+        self.print_post("/api/backups/run", &body).await
+    }
+
+    pub async fn list_s3_backups(&self, database: Option<&str>) -> anyhow::Result<()> {
+        match database {
+            Some(name) => {
+                let encoded: String =
+                    url::form_urlencoded::byte_serialize(name.as_bytes()).collect();
+                self.print_get(&format!("/api/databases/s3/backups?database={encoded}"))
+                    .await
+            }
+            None => self.print_get("/api/databases/s3/backups").await,
+        }
+    }
+
     pub async fn put_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
         &self,
         path: &str,

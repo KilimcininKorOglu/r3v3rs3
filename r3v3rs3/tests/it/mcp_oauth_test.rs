@@ -1567,6 +1567,142 @@ async fn the_client_binary_reads_targets_and_the_server_status() -> anyhow::Resu
     .await
 }
 
+/// An id that names no database, so every call that takes it must answer "not found".
+const MISSING_DB: &str = "zzz-zzz";
+
+/// Asserts that a call failed with the API's not-found answer (OpenAPI `NotFoundResponse`),
+/// which proves the tool or command reached the endpoint instead of failing before it.
+fn assert_not_found(what: &str, err: &str) {
+    assert!(err.to_lowercase().contains("not found"), "{what}: {err}");
+    assert!(!err.contains("tool not found"), "{what}: {err}");
+}
+
+/// The database and backup tools reach their endpoints (OpenAPI `list_all_backups`,
+/// `get_backups_overview`, `list_database_replicas`, `clone_database`,
+/// `create_database_replica`, `delete_database`, `restore_database_backup`).
+async fn assert_mcp_databases(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let all: Value = serde_json::from_str(&mcp_call(client, "list_all_backups", json!({})).await?)?;
+    assert!(all.is_array(), "{all}");
+    let overview: Value =
+        serde_json::from_str(&mcp_call(client, "get_backups_overview", json!({})).await?)?;
+    assert!(overview.is_object(), "{overview}");
+    let named = json!({ "name": "copy" });
+    let calls = [
+        ("list_database_replicas", json!({ "id": MISSING_DB })),
+        ("delete_database", json!({ "id": MISSING_DB })),
+        (
+            "clone_database",
+            json!({ "id": MISSING_DB, "request": named }),
+        ),
+        (
+            "create_database_replica",
+            json!({ "id": MISSING_DB, "request": named }),
+        ),
+        (
+            "restore_database_backup",
+            json!({ "db_id": MISSING_DB, "backup_id": "b1" }),
+        ),
+    ];
+    for (name, args) in calls {
+        let err = mcp_call(client, name, args)
+            .await
+            .err()
+            .map(|e| e.to_string());
+        assert_not_found(name, &err.unwrap_or_default());
+    }
+    // Without S3 settings both S3 calls are refused (`S3NotConfigured`).
+    let s3_calls = [
+        ("list_s3_database_backups", json!({})),
+        (
+            "restore_s3_database_backup",
+            json!({ "request": { "key": "x.sql.gz" } }),
+        ),
+    ];
+    for (name, args) in s3_calls {
+        let err = mcp_call(client, name, args)
+            .await
+            .err()
+            .map(|e| e.to_string());
+        assert_s3_not_configured(name, &err.unwrap_or_default());
+    }
+    Ok(())
+}
+
+fn assert_s3_not_configured(what: &str, err: &str) {
+    assert!(err.to_lowercase().contains("s3"), "{what}: {err}");
+    assert!(
+        !err.contains("tool not found") && !err.contains("unrecognized"),
+        "{what}: {err}"
+    );
+}
+
+/// The CLI reaches the same endpoints, plus the S3 list and the backup run.
+async fn assert_cli_databases(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
+    let all = cli_ok(binary, addr, token, &["backup", "list-all"]).await?;
+    assert!(all.trim_start().starts_with('['), "{all}");
+    let overview = cli_ok(binary, addr, token, &["backup", "overview"]).await?;
+    assert!(overview.trim_start().starts_with('{'), "{overview}");
+    let calls: [&[&str]; 2] = [
+        &["db", "replicas", MISSING_DB],
+        &["backup", "run", MISSING_DB],
+    ];
+    for args in calls {
+        let out = run_client(binary, addr, token, args).await?;
+        assert_not_found(&args.join(" "), &String::from_utf8_lossy(&out.stderr));
+    }
+    let s3_calls: [&[&str]; 2] = [
+        &["backup", "s3-list"],
+        &["backup", "s3-restore", "x.sql.gz"],
+    ];
+    for args in s3_calls {
+        let out = run_client(binary, addr, token, args).await?;
+        assert_s3_not_configured(&args.join(" "), &String::from_utf8_lossy(&out.stderr));
+    }
+    Ok(())
+}
+
+/// `refresh_database_engines` (MCP) and `r3 db refresh-engines` change the catalog, so a token
+/// with only the read scope is refused (403 forbidden), never let through to the download.
+async fn assert_engine_refresh_needs_edit(
+    binary: &Path,
+    addr: &SocketAddr,
+    read_token: &str,
+) -> anyhow::Result<()> {
+    let client = mcp_client(*addr, read_token).await?;
+    let err = mcp_call(&client, "refresh_database_engines", json!({}))
+        .await
+        .err();
+    let err = err.map(|e| e.to_string()).unwrap_or_default();
+    assert!(
+        err.contains("scope") && !err.contains("tool not found"),
+        "{err}"
+    );
+    let out = run_client(binary, addr, read_token, &["db", "refresh-engines"]).await?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("403"), "{stderr}");
+    Ok(())
+}
+
+/// Database and backup operations are reachable from MCP and the CLI.
+#[tokio::test]
+async fn the_database_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-databases")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let token = access_token(&addr).await?;
+        let client = mcp_client(addr, &token).await?;
+        assert_mcp_databases(&client).await?;
+        let binary = client_binary()?;
+        assert_cli_databases(&binary, &addr, &token).await?;
+        let read_token = access_token_with_scope(&addr, "read").await?;
+        assert_engine_refresh_needs_edit(&binary, &addr, &read_token).await
+    })
+    .await
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
