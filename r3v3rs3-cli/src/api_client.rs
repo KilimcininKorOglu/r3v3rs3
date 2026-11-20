@@ -2048,10 +2048,13 @@ impl ApiClient {
     }
 
     pub async fn get_target(&self, id: &str) -> anyhow::Result<()> {
-        let res = self
-            .request(Method::GET, &format!("/api/targets/{id}"), None)
-            .await?;
-        print_json(&res)
+        // The API has no single-target read, so the target is taken from the full listing.
+        let targets: Vec<serde_json::Value> = self.get_json("/api/targets").await?;
+        let target = targets
+            .into_iter()
+            .find(|target| target["id"] == id)
+            .ok_or_else(|| anyhow::anyhow!("target {id} not found"))?;
+        print_json(&target)
     }
 
     pub async fn add_target(&self, name: &str, region: Option<&str>) -> anyhow::Result<()> {
@@ -2108,9 +2111,9 @@ impl ApiClient {
         print_json(&updated)
     }
 
-    pub async fn new_target_token(&self) -> anyhow::Result<()> {
+    pub async fn new_target_token(&self, id: &str) -> anyhow::Result<()> {
         let res = self
-            .request(Method::POST, "/api/targets/token", None)
+            .request(Method::POST, &format!("/api/targets/{id}/token"), None)
             .await?;
         print_json(&res)
     }
@@ -2973,8 +2976,9 @@ impl ApiClient {
     // --- Platform & System operations ---
 
     pub async fn platform_status(&self) -> anyhow::Result<()> {
-        let res = self.request(Method::GET, "/api/status", None).await?;
-        print_json(&res)
+        let app = self.request(Method::GET, "/api/app_info", None).await?;
+        let workers = self.request(Method::GET, "/api/workers", None).await?;
+        print_json(&serde_json::json!({ "app": app, "workers": workers }))
     }
 
     pub async fn platform_metrics(&self) -> anyhow::Result<()> {

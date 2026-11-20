@@ -2020,7 +2020,7 @@ r3 <server> target drain <id>
 r3 <server> target undrain <id>
 r3 <server> target upgrade <id>
 r3 <server> target upgrade-all
-r3 <server> target token
+r3 <server> target token <id>
 r3 <server> target delete <id>
 
 # Projeler ve Ortamlar

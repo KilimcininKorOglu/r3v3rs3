@@ -683,8 +683,8 @@ pub enum TargetCommand {
         #[arg(long)]
         region: Option<String>,
     },
-    /// Generates a new target node enrollment token.
-    Token,
+    /// Replaces the enrollment token of an agent target; the old token stops working.
+    Token { id: String },
     /// Upgrades the agent binary on a target node.
     Upgrade { id: String },
     /// Triggers binary upgrade on all connected agent target nodes.
@@ -1695,7 +1695,7 @@ async fn run_target(api: &api_client::ApiClient, cmd: TargetCommand) -> anyhow::
         TargetCommand::SetRegion { id, region } => {
             api.set_target_region(&id, region.as_deref()).await
         }
-        TargetCommand::Token => api.new_target_token().await,
+        TargetCommand::Token { id } => api.new_target_token(&id).await,
         TargetCommand::Upgrade { id } => api.upgrade_target(&id).await,
         TargetCommand::UpgradeAll => api.upgrade_all_targets().await,
     }
