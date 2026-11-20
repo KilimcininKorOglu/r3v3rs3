@@ -135,7 +135,7 @@ pub enum PortCommand {
     SetEarlyData {
         id: String,
         /// `--enable false` turns early data off; a bare bool flag could only turn it on.
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
         enable: bool,
     },
     /// Makes the upstream servers of a TCP or UDP port see the client address (needs
@@ -143,7 +143,7 @@ pub enum PortCommand {
     SetTransparent {
         id: String,
         /// `--enable false` turns the option off; a bare bool flag could only turn it on.
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
         enable: bool,
     },
 }
@@ -473,7 +473,7 @@ pub enum AppCommand {
         id: String,
         /// Save the generated secrets directly to the application; `--save false` only shows
         /// them.
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
         save: bool,
         /// Overwrite existing non-empty values.
         #[arg(long)]
@@ -2156,6 +2156,31 @@ mod tests {
         assert_eq!(parse(&[]), Ok(true));
         assert_eq!(parse(&["--save", "false"]), Ok(false));
         assert_eq!(parse(&["--save", "true"]), Ok(true));
+        assert_eq!(parse(&["--save"]), Ok(true));
+    }
+
+    /// The port switches take `--enable false`, and a bare `--enable` (as the docs and older
+    /// scripts write it) still turns the option on.
+    #[test]
+    fn the_port_switches_take_a_bare_or_an_explicit_value() {
+        let parse = |command: &str, extra: &[&str]| {
+            let mut argv = vec!["r3", "http://127.0.0.1:1", "port", command, "abc"];
+            argv.extend_from_slice(extra);
+            match Args::try_parse_from(argv).map(|a| a.command) {
+                Ok(Command::Port(PortCommand::SetEarlyData { enable, .. }))
+                | Ok(Command::Port(PortCommand::SetTransparent { enable, .. })) => Ok(enable),
+                other => Err(format!("{other:?}")),
+            }
+        };
+        for command in ["set-early-data", "set-transparent"] {
+            assert_eq!(parse(command, &[]), Ok(true), "{command}");
+            assert_eq!(parse(command, &["--enable"]), Ok(true), "{command}");
+            assert_eq!(
+                parse(command, &["--enable", "false"]),
+                Ok(false),
+                "{command}"
+            );
+        }
     }
 
     #[test]
