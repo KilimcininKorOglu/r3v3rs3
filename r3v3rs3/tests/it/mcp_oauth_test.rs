@@ -1002,6 +1002,7 @@ async fn assert_mcp_tool_names(
     assert!(names.contains(&"upgrade_all_targets"), "{names:?}");
     assert!(names.contains(&"get_server_upgrade_status"), "{names:?}");
     assert!(names.contains(&"run_server_upgrade"), "{names:?}");
+    assert!(names.contains(&"set_port_transparent"), "{names:?}");
     Ok(())
 }
 
@@ -1117,7 +1118,27 @@ async fn assert_mcp_port_mutations(
     let reset_res = mcp_call(client, "reset_port", json!({ "id": &port_id })).await?;
     assert!(reset_res.contains(&port_id), "{reset_res}");
 
+    assert_mcp_transparent_toggle(client, &port_id).await?;
     Ok(port_id)
+}
+
+/// `set_port_transparent` changes only the transparent option of the port, and the change is
+/// saved: `get_port` reads it back each time.
+async fn assert_mcp_transparent_toggle(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+    port_id: &str,
+) -> anyhow::Result<()> {
+    for enabled in [true, false] {
+        let args = json!({ "id": port_id, "enabled": enabled });
+        mcp_call(client, "set_port_transparent", args).await?;
+        let port: Value =
+            serde_json::from_str(&mcp_call(client, "get_port", json!({ "id": port_id })).await?)?;
+        // The port JSON leaves out an option that is off.
+        let transparent = port["transparent"].as_bool().unwrap_or(false);
+        assert_eq!(transparent, enabled, "{port}");
+        assert_eq!(port["name"], "p-mcp-upd", "another setting changed: {port}");
+    }
+    Ok(())
 }
 
 async fn assert_mcp_proxy_mutations(
@@ -1235,7 +1256,34 @@ async fn assert_cli_port_mutations(
 
     let get_out = run_client(binary, addr, token, &["port", "get", &port_id]).await?;
     assert!(get_out.status.success());
+    assert_cli_transparent(binary, addr, token, &port_id).await?;
     Ok(port_id)
+}
+
+/// `port set-transparent` saves the option, and `--enable false` clears it again.
+async fn assert_cli_transparent(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    port_id: &str,
+) -> anyhow::Result<()> {
+    for enabled in ["true", "false"] {
+        let args = ["port", "set-transparent", port_id, "--enable", enabled];
+        let out = run_client(binary, addr, token, &args).await?;
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let get_out = run_client(binary, addr, token, &["port", "get", port_id]).await?;
+        let port = String::from_utf8_lossy(&get_out.stdout).to_string();
+        assert_eq!(
+            port.contains("\"transparent\": true"),
+            enabled == "true",
+            "{port}"
+        );
+    }
+    Ok(())
 }
 
 async fn assert_cli_proxy_mutations(

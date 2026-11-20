@@ -108,6 +108,15 @@ pub struct SetPortEarlyDataParams {
     pub enabled: bool,
 }
 
+/// The argument of `set_port_transparent`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SetPortTransparentParams {
+    /// The id of the port.
+    pub id: String,
+    /// Whether the upstream servers see the client address.
+    pub enabled: bool,
+}
+
 /// The argument of `update_ct_monitor_config`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateCtConfigParams {
@@ -1578,7 +1587,7 @@ impl McpServer {
 
     /// Create a listening port.
     #[tool(
-        description = "Create a port and start listening on it. `port` is the same JSON object as the body of POST /api/ports, for example {\"name\": \"https\", \"listen\": \"/ip4/0.0.0.0/tcp/443/https\"}; the protocol at the end of `listen` (tcp, tls, http, https, udp, quic) selects the handler. Returns the name of the new port; read its id with `list_ports`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+        description = "Create a port and start listening on it. `port` is the same JSON object as the body of POST /api/ports, for example {\"name\": \"https\", \"listen\": \"/ip4/0.0.0.0/tcp/443/https\"}; the protocol at the end of `listen` (tcp, tls, http, https, udp, quic) selects the handler. A plain TCP or UDP port can name a range such as `/ip4/0.0.0.0/udp/49160-49240` (at most 16384 ports; its proxies need upstream ranges of the same size, and each port goes to the upstream port at its position), and `opts.transparent: true` makes the upstream servers see the client address. Returns the name of the new port; read its id with `list_ports`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn add_port(
         &self,
@@ -1651,6 +1660,31 @@ impl McpServer {
             .await
             .map_err(tool_error)?;
         json_result(json!({ "reset": id.to_string() }))
+    }
+
+    /// Turn the transparent option of a TCP or UDP port on or off.
+    #[tool(
+        description = "Turn the transparent option on or off for one TCP or UDP port (`id`, `enabled`). A transparent port opens its upstream connections from the client address, so the upstream server (a TURN server, for example) sees the real client IP; r3v3rs3 keeps the nftables table and policy route for the replies. It needs CAP_NET_ADMIN on the server, fails on an HTTP or QUIC port, and fails when a proxy of the port has a loopback upstream server. Other port settings stay unchanged. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn set_port_transparent(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<SetPortTransparentParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let mut entry: r3v3rs3_api::port::PortEntry = *self
+            .state
+            .call(&caller, GetPort { id })
+            .await
+            .map_err(tool_error)?;
+        entry.port.opts.transparent = params.enabled;
+        self.state
+            .call(&caller, UpdatePort { entry })
+            .await
+            .map_err(tool_error)?;
+        json_result(json!({ "id": id.to_string(), "transparent": params.enabled }))
     }
 
     /// Enable or disable TLS 1.3 0-RTT early data on a port.

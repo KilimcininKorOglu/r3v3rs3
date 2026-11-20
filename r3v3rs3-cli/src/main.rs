@@ -137,6 +137,14 @@ pub enum PortCommand {
         #[arg(long, default_value_t = true)]
         enable: bool,
     },
+    /// Makes the upstream servers of a TCP or UDP port see the client address (needs
+    /// CAP_NET_ADMIN on the server and an upstream that is not a loopback address).
+    SetTransparent {
+        id: String,
+        /// `--enable false` turns the option off; a bare bool flag could only turn it on.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        enable: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1348,6 +1356,7 @@ async fn run_port(api: &api_client::ApiClient, cmd: PortCommand) -> anyhow::Resu
         PortCommand::Delete { id } => api.delete_port(&id).await,
         PortCommand::Reset { id } => api.reset_port(&id).await,
         PortCommand::SetEarlyData { id, enable } => api.set_port_early_data(&id, enable).await,
+        PortCommand::SetTransparent { id, enable } => api.set_port_transparent(&id, enable).await,
     }
 }
 

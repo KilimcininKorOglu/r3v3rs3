@@ -508,6 +508,24 @@ impl ApiClient {
         print_json(&res)
     }
 
+    /// Turns the transparent option of a TCP or UDP port on or off; the server refuses it on
+    /// another port and with a loopback upstream server.
+    pub async fn set_port_transparent(&self, id: &str, enable: bool) -> anyhow::Result<()> {
+        let entry: r3v3rs3_api::port::PortEntry =
+            self.get_json(&format!("/api/ports/{id}")).await?;
+        let mut port = entry.port;
+        port.opts.transparent = enable;
+        let res = self
+            .request(
+                Method::PUT,
+                &format!("/api/ports/{id}"),
+                Some(&serde_json::to_value(&port)?),
+            )
+            .await?;
+        println!("port/{id} transparent set to {enable}");
+        print_json(&res)
+    }
+
     // --- Proxy operations ---
 
     pub async fn list_proxies(&self) -> anyhow::Result<()> {
