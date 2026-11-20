@@ -13,7 +13,7 @@ use r3v3rs3_api::{
     error::Error,
     i18n::Locale,
     id::ShortId,
-    multiaddr::Multiaddr,
+    multiaddr::{Multiaddr, PortSpan},
     port::{NetworkInterface, Port, PortOptions},
     proxy_protocol::{ProxyProtocolAccept, ProxyProtocolReceive},
     subject_name::SubjectName,
@@ -107,7 +107,8 @@ struct PortForm {
     name: String,
     protocol: String,
     interface: String,
-    port: u16,
+    /// One port (`443`) or, on a plain TCP or UDP port, a range (`49160-49240`).
+    port: String,
     server_names: String,
     client_auth: ClientAuthMode,
     client_ca_certs: Vec<ShortId>,
@@ -238,9 +239,9 @@ fn protocol_name(udp: bool, tls: bool, http: bool, quic: bool) -> &'static str {
     }
 }
 
-fn extract_listen_addr(stack: &Multiaddr) -> Option<(String, u16)> {
+fn extract_listen_addr(stack: &Multiaddr) -> Option<(String, String)> {
     let host = stack.host().ok()?;
-    let port = stack.port().ok()?;
+    let port = stack.port_range().ok()?.to_string();
     Some((host, port))
 }
 
@@ -314,7 +315,7 @@ pub fn port_config(props: &Props) -> Html {
         name: name.to_string(),
         protocol: protocol.to_string(),
         interface: interface.to_string(),
-        port: *port,
+        port: port.to_string(),
         server_names: tls_fields.server_names.to_string(),
         client_auth: *tls_fields.client_auth,
         client_ca_certs: (*tls_fields.client_ca_certs).clone(),
@@ -349,7 +350,9 @@ pub fn port_config(props: &Props) -> Html {
             { error_view(errors.get("interface")) }
 
             <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.port")}</label>
-            <input type="number" placeholder="8080" onchange={port_onchange} value={port.to_string()} max="65535" min="1" class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
+            <input type="text" inputmode="numeric" placeholder="8080" onchange={port_onchange} value={port.to_string()} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" />
+            { error_view(errors.get("port")) }
+            <p class={HINT_CLASS}>{locale.t("ports.port_range_hint")}</p>
 
             <label class="block mt-4 mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-200">{locale.t("common.protocol")}</label>
             <select onchange={protocol_onchange} class="bg-neutral-50 dark:text-neutral-200 dark:bg-neutral-800 dark:border-neutral-600 border border-neutral-300 text-neutral-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
@@ -790,7 +793,11 @@ fn listen_addr(
         format!("/dns/{interface}")
     };
 
-    let port = form.port;
+    let port = &form.port;
+    if PortSpan::parse(port).is_none() {
+        errors.insert("port".into(), locale.t("ports.invalid_port").into());
+        return None;
+    }
     let transport = match form.protocol.as_str() {
         "tcp" => format!("/tcp/{port}"),
         "tls" => format!("/tcp/{port}/tls"),
@@ -806,9 +813,19 @@ fn listen_addr(
         .ok()
         .filter(|_| !transport.is_empty());
     if parsed.is_none() {
-        errors.insert("interface".into(), locale.t("ports.invalid_address").into());
+        let (key, message) = address_error(port);
+        errors.insert(key.into(), locale.t(message).into());
     }
     parsed
+}
+
+/// The field and message of an address that does not parse: only a plain TCP or UDP port
+/// takes a range, so a range points at the port field.
+fn address_error(port: &str) -> (&'static str, &'static str) {
+    match port.contains('-') {
+        true => ("port", "ports.range_plain_only"),
+        false => ("interface", "ports.invalid_address"),
+    }
 }
 
 async fn get_interfaces(locale: Locale) -> Result<Vec<NetworkInterface>, String> {
@@ -995,11 +1012,11 @@ fn select_onchange(state: UseStateHandle<String>) -> Callback<Event> {
     })
 }
 
-/// Writes the port number of a text input to the state handle. An invalid number becomes 1.
-fn port_onchange(state: UseStateHandle<u16>) -> Callback<Event> {
+/// Writes the port or port range of a text input to the state handle. `get_port` checks it.
+fn port_onchange(state: UseStateHandle<String>) -> Callback<Event> {
     Callback::from(move |event: Event| {
         let target: HtmlInputElement = event.target().unwrap_throw().dyn_into().unwrap_throw();
-        state.set(target.value().parse().unwrap_or(1));
+        state.set(target.value().trim().to_string());
     })
 }
 
@@ -1013,7 +1030,7 @@ mod tests {
             name: " web ".into(),
             protocol: protocol.into(),
             interface: "0.0.0.0".into(),
-            port: 443,
+            port: "443".into(),
             server_names: server_names.into(),
             client_auth: ClientAuthMode::Off,
             client_ca_certs: Vec::new(),
@@ -1047,6 +1064,32 @@ mod tests {
             let port = build(&f).unwrap();
             assert_eq!(port.opts.transparent, kept, "{protocol}");
             assert!(port.validate().is_ok(), "{protocol}");
+        }
+    }
+
+    /// A plain TCP or UDP port takes a range; a TLS, HTTP or QUIC port and a malformed or
+    /// reversed range are refused on the port field before the form is sent.
+    #[test]
+    fn only_a_plain_port_takes_a_range() {
+        let mut udp = form("udp", "");
+        udp.port = "49160-49240".into();
+        let port = build(&udp).unwrap();
+        assert_eq!(port.listen.to_string(), "/ip4/0.0.0.0/udp/49160-49240");
+        for (protocol, names, text, message) in [
+            ("tls", "example.com", "8000-8010", "ports.range_plain_only"),
+            ("http", "", "8000-8010", "ports.range_plain_only"),
+            ("tcp", "", "8010-8000", "ports.invalid_port"),
+            ("tcp", "", "80a", "ports.invalid_port"),
+            ("tcp", "", "", "ports.invalid_port"),
+        ] {
+            let mut f = form(protocol, names);
+            f.port = text.into();
+            let errors = build(&f).unwrap_err();
+            assert_eq!(
+                errors.get("port").map(String::as_str),
+                Some(Locale::En.t(message)),
+                "{protocol} {text}"
+            );
         }
     }
 

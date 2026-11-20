@@ -151,7 +151,7 @@ impl PortSpan {
 
     /// Parses `443` (any port, as before ranges existed) or `49160-49240`: both ends from 1,
     /// the last above the first, at most [`MAX_RANGE_PORTS`] ports.
-    fn parse(text: &str) -> Option<Self> {
+    pub fn parse(text: &str) -> Option<Self> {
         let Some((first, last)) = text.split_once('-') else {
             return text.parse().ok().map(Self::single);
         };
