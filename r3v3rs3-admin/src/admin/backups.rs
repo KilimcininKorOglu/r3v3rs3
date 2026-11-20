@@ -231,7 +231,7 @@ pub async fn get_config(
     put,
     path = "/",
     tag = "platform",
-    operation_id = "put_backup_config",
+    operation_id = "update_backup_config",
     request_body = BackupConfig,
     responses((status = 200, description = "The backup settings are saved."), ErrorResponses)
 )]

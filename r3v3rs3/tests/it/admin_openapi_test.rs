@@ -473,6 +473,7 @@ fn check_document(document: &Value) {
         OPERATIONS.len(),
         "operation ids repeat"
     );
+    check_operation_verbs(&operation_ids);
 
     assert_eq!(document["info"]["version"], env!("CARGO_PKG_VERSION"));
     let session = &document["components"]["securitySchemes"]["session"];
@@ -491,6 +492,85 @@ fn check_document(document: &Value) {
             "missing schema {name}"
         );
     }
+}
+
+/// The verbs an operation id may start with. Project naming rule: one verb per action, so
+/// synonyms such as `add`, `put`, `new` and `set` are not on the list, and an id without a verb
+/// (`app_logs_live`) fails. MCP tool names and CLI commands derive from these ids.
+const OPERATION_VERBS: &[&str] = &[
+    "analyze",
+    "apply",
+    "approve",
+    "archive",
+    "authorize",
+    "backup",
+    "cancel",
+    "check",
+    "clone",
+    "complete",
+    "create",
+    "delete",
+    "deploy",
+    "diff",
+    "dismiss",
+    "download",
+    "drain",
+    "export",
+    "generate",
+    "get",
+    "import",
+    "install",
+    "invoke",
+    "issue",
+    "list",
+    "login",
+    "logout",
+    "open",
+    "preview",
+    "purge",
+    "quarantine",
+    "receive",
+    "refresh",
+    "reflect",
+    "register",
+    "reject",
+    "replay",
+    "request",
+    "reset",
+    "resolve",
+    "restore",
+    "revoke",
+    "rollback",
+    "rotate",
+    "run",
+    "stream",
+    "subscribe",
+    "sync",
+    "terminate",
+    "test",
+    "unban",
+    "undrain",
+    "unquarantine",
+    "update",
+    "upgrade",
+    "upload",
+    "vacuum",
+    "verify",
+];
+
+/// Operation ids outside the verb rule: the Kubernetes probe names that load balancers expect.
+const VERB_EXCEPTIONS: &[&str] = &["healthz", "readyz"];
+
+fn check_operation_verbs(operation_ids: &BTreeSet<String>) {
+    let wrong = operation_ids
+        .iter()
+        .filter(|id| !VERB_EXCEPTIONS.contains(&id.as_str()))
+        .filter(|id| !OPERATION_VERBS.contains(&id.split('_').next().unwrap_or_default()))
+        .collect::<Vec<_>>();
+    assert!(
+        wrong.is_empty(),
+        "operation ids without an allowed verb: {wrong:?}"
+    );
 }
 
 /// Returns the method, the path and the operation id of every operation in the document.

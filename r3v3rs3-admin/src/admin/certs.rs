@@ -125,7 +125,7 @@ pub async fn get(
     post,
     path = "/self_sign",
     tag = "certs",
-    operation_id = "self_sign_cert",
+    operation_id = "create_self_signed_cert",
     request_body = SelfSignedCertRequest,
     responses((status = 200, description = "The certificate is created."), NotFoundResponse, ErrorResponses)
 )]

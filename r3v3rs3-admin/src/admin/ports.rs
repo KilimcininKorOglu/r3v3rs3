@@ -85,7 +85,7 @@ pub async fn delete(
     post,
     path = "/",
     tag = "ports",
-    operation_id = "add_port",
+    operation_id = "create_port",
     request_body = Port,
     responses((status = 200, description = "The port is added."), ErrorResponses)
 )]

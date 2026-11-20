@@ -50,7 +50,7 @@ pub async fn get(
     post,
     path = "/",
     tag = "acme",
-    operation_id = "add_acme",
+    operation_id = "create_acme",
     request_body = AcmeRequest,
     responses((status = 200, description = "The ACME request is added."), ErrorResponses)
 )]

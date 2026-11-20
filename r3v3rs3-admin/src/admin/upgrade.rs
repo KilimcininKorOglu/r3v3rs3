@@ -80,7 +80,7 @@ fn log_upgrade_failure(err: &anyhow::Error, message: &str) -> Error {
     get,
     path = "/status",
     tag = "upgrade",
-    operation_id = "upgrade_status",
+    operation_id = "get_upgrade_status",
     responses((status = 200, description = "The current upgrade step.", body = UpgradeStageResponse), ErrorResponses)
 )]
 pub async fn status(

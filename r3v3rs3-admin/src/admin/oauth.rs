@@ -38,7 +38,7 @@ pub struct CallbackQuery {
     get,
     path = "/git/callback",
     tag = "platform",
-    operation_id = "git_oauth_callback",
+    operation_id = "complete_git_oauth",
     security(()),
     params(CallbackQuery),
     responses((status = 200, description = "A page that opens the connections page of the WebUI with the result.", content_type = "text/html"))

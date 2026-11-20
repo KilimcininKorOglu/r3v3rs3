@@ -95,7 +95,7 @@ pub async fn list_targets(
     post,
     path = "/",
     tag = "platform",
-    operation_id = "add_target",
+    operation_id = "create_target",
     request_body = TargetRequest,
     responses((status = 200, description = "The target with its enrollment token.", body = TargetToken), ErrorResponses)
 )]
@@ -125,7 +125,7 @@ pub async fn add_target(
     post,
     path = "/{id}/token",
     tag = "platform",
-    operation_id = "new_target_token",
+    operation_id = "create_target_token",
     params(("id" = ShortId, Path, description = "Target id.")),
     responses((status = 200, description = "The target with its new enrollment token.", body = TargetToken), NotFoundResponse, ErrorResponses)
 )]
@@ -260,7 +260,7 @@ pub async fn undrain_target(
     put,
     path = "/{id}/region",
     tag = "platform",
-    operation_id = "set_target_region",
+    operation_id = "update_target_region",
     params(("id" = ShortId, Path, description = "Target id.")),
     request_body = SetTargetRegionRequest,
     responses((status = 200, description = "The target with its updated region.", body = TargetEntry), NotFoundResponse, ErrorResponses)
@@ -347,7 +347,7 @@ pub(super) fn without_databases(apps: Vec<AppEntry>) -> Vec<AppEntry> {
     post,
     path = "/",
     tag = "platform",
-    operation_id = "add_app",
+    operation_id = "create_app",
     request_body = AppRequest,
     responses((status = 200, description = "The new app.", body = AppEntry), ErrorResponses)
 )]
@@ -633,7 +633,7 @@ pub async fn resolve_compose_env(
     put,
     path = "/{id}/git_token",
     tag = "platform",
-    operation_id = "set_app_git_token",
+    operation_id = "update_app_git_token",
     params(("id" = ShortId, Path, description = "App id.")),
     request_body = GitTokenRequest,
     responses((status = 200, description = "The app.", body = AppEntry), NotFoundResponse, ErrorResponses)
@@ -694,7 +694,7 @@ pub async fn delete_git_token(
     post,
     path = "/{id}/webhook_secret",
     tag = "platform",
-    operation_id = "new_app_webhook_secret",
+    operation_id = "create_app_webhook_secret",
     params(("id" = ShortId, Path, description = "App id.")),
     responses((status = 200, description = "The new secret.", body = WebhookSecret), NotFoundResponse, ErrorResponses)
 )]
@@ -923,7 +923,7 @@ pub struct AppLogLiveQuery {
     get,
     path = "/{id}/logs/live",
     tag = "platform",
-    operation_id = "app_logs_live",
+    operation_id = "stream_app_logs",
     params(
         ("id" = ShortId, Path, description = "App id."),
         AppLogLiveQuery
@@ -1500,7 +1500,7 @@ pub async fn cancel_deployment(
     get,
     path = "/{id}/commands",
     tag = "platform",
-    operation_id = "get_app_scheduled_commands",
+    operation_id = "list_app_scheduled_commands",
     params(("id" = ShortId, Path, description = "The app id.")),
     responses((status = 200, description = "The scheduled commands.", body = Vec<AppScheduledCommand>), NotFoundResponse, ErrorResponses)
 )]
@@ -1871,7 +1871,7 @@ pub async fn list_registries(
     post,
     path = "/",
     tag = "platform",
-    operation_id = "add_registry",
+    operation_id = "create_registry",
     request_body = RegistryRequest,
     responses((status = 200, description = "The created registry.", body = RegistryEntry), ErrorResponses)
 )]
@@ -2505,7 +2505,7 @@ pub async fn get_environment_env(
     put,
     path = "/{id}/environments/{env_id}/env",
     tag = "platform",
-    operation_id = "put_environment_env",
+    operation_id = "update_environment_env",
     params(
         ("id" = ShortId, Path, description = "The project id"),
         ("env_id" = ShortId, Path, description = "The environment id")

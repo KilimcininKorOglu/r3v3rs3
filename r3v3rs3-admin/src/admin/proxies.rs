@@ -154,7 +154,7 @@ pub async fn purge_cache_post(
     post,
     path = "/",
     tag = "proxies",
-    operation_id = "add_proxy",
+    operation_id = "create_proxy",
     request_body = Proxy,
     responses((status = 200, description = "The proxy is added."), ErrorResponses)
 )]
@@ -214,7 +214,7 @@ pub async fn get_priority(
     put,
     path = "/{id}/priority",
     tag = "proxies",
-    operation_id = "set_proxy_stream_priority",
+    operation_id = "update_proxy_stream_priority",
     params(("id" = ShortId, Path, description = "Proxy id.")),
     request_body = r3v3rs3_api::priority::SetStreamPriorityRequest,
     responses((status = 200, description = "Stream priority updated."), NotFoundResponse, ErrorResponses)
@@ -242,7 +242,7 @@ pub async fn put_priority(
     post,
     path = "/dry-run",
     tag = "proxies",
-    operation_id = "dry_run_proxy",
+    operation_id = "preview_proxy",
     request_body = ProxyDryRunRequest,
     responses((status = 200, description = "The dry-run result.", body = ProxyDryRunResult), ErrorResponses)
 )]

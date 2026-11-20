@@ -33,7 +33,7 @@ pub async fn list(
     post,
     path = "/",
     tag = "access_lists",
-    operation_id = "add_access_list",
+    operation_id = "create_access_list",
     request_body = AccessList,
     responses((status = 200, description = "The access list is added."), ErrorResponses)
 )]

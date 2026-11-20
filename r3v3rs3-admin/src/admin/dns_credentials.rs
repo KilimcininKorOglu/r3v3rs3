@@ -51,7 +51,7 @@ pub async fn get(
     post,
     path = "/",
     tag = "dns_credentials",
-    operation_id = "add_dns_credential",
+    operation_id = "create_dns_credential",
     request_body = DnsCredentialRequest,
     responses((status = 200, description = "The DNS credential is created.", body = DnsCredentialInfo), ErrorResponses)
 )]

@@ -142,7 +142,7 @@ fn get_proxy_grpc_service(proxy: &Proxy, body_service: Option<String>) -> String
     post,
     path = "/{id}/grpc/health",
     tag = "proxies",
-    operation_id = "health_proxy_grpc",
+    operation_id = "check_proxy_grpc_health",
     params(("id" = ShortId, Path, description = "Proxy id.")),
     request_body(content = Option<GrpcHealthCheckRequest>),
     responses(
@@ -245,7 +245,7 @@ pub async fn invoke_standalone(
     post,
     path = "/health",
     tag = "grpc",
-    operation_id = "health_grpc",
+    operation_id = "check_grpc_health",
     request_body = GrpcHealthCheckRequest,
     responses(
         (status = 200, description = "gRPC health check response and serving status.", body = GrpcHealthCheckResponse),

@@ -35,7 +35,7 @@ pub async fn list(
     post,
     path = "/",
     tag = "error_page_themes",
-    operation_id = "add_error_page_theme",
+    operation_id = "create_error_page_theme",
     request_body = ErrorPageTheme,
     responses(
         (status = 200, description = "The error page theme was created.", body = ShortId),

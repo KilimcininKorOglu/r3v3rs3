@@ -169,7 +169,7 @@ pub async fn list_connections(
     post,
     path = "/",
     tag = "platform",
-    operation_id = "add_git_connection",
+    operation_id = "create_git_connection",
     request_body = GitConnectionRequest,
     responses((status = 200, description = "The new connection.", body = GitConnectionEntry), ErrorResponses)
 )]

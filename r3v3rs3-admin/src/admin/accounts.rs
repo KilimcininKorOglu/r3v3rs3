@@ -29,7 +29,7 @@ pub async fn list(
     post,
     path = "/",
     tag = "accounts",
-    operation_id = "add_account",
+    operation_id = "create_account",
     request_body = NewAccount,
     responses(
         (status = 200, description = "The account is added.", body = AccountCreated),

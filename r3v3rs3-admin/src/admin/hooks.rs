@@ -39,7 +39,7 @@ pub struct WebhookQuery {
     post,
     path = "/apps/{id}",
     tag = "platform",
-    operation_id = "app_webhook",
+    operation_id = "receive_app_webhook",
     security(()),
     params(
         ("id" = ShortId, Path, description = "App id."),

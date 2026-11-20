@@ -929,7 +929,7 @@ fn scopes_of(scope: &Option<String>) -> Vec<String> {
     get,
     path = "/.well-known/oauth-authorization-server",
     tag = "mcp",
-    operation_id = "oauth_authorization_server_metadata",
+    operation_id = "get_oauth_authorization_server_metadata",
     security(()),
     responses((status = 200, description = "The authorization server metadata."))
 )]
@@ -956,7 +956,7 @@ pub async fn authorization_server_metadata(
     get,
     path = "/.well-known/oauth-protected-resource",
     tag = "mcp",
-    operation_id = "oauth_protected_resource_metadata",
+    operation_id = "get_oauth_protected_resource_metadata",
     security(()),
     responses((status = 200, description = "The protected resource metadata."))
 )]
@@ -979,7 +979,7 @@ pub async fn protected_resource_metadata(
     get,
     path = "/authorize",
     tag = "mcp",
-    operation_id = "mcp_authorize",
+    operation_id = "authorize_mcp_client",
     params(AuthorizeQuery),
     responses((status = 200, description = "The consent form.", content_type = "text/html"))
 )]
@@ -1147,7 +1147,7 @@ fn consent_redirect_uri(
     post,
     path = "/authorize",
     tag = "mcp",
-    operation_id = "mcp_consent",
+    operation_id = "approve_mcp_client",
     request_body = ConsentForm,
     responses((status = 303, description = "The redirect to the client with the code or an error."))
 )]
@@ -1363,7 +1363,7 @@ fn validate_client_metadata(body: &RegistrationBody) -> Result<(), (&'static str
     post,
     path = "/register",
     tag = "mcp",
-    operation_id = "oauth_register",
+    operation_id = "register_oauth_client",
     security(()),
     request_body = RegistrationBody,
     responses((status = 201, description = "The registered client."), ErrorResponses)
@@ -1411,7 +1411,7 @@ pub async fn register(
     post,
     path = "/token",
     tag = "mcp",
-    operation_id = "oauth_token",
+    operation_id = "issue_oauth_token",
     security(()),
     request_body = TokenForm,
     responses((status = 200, description = "The access and refresh tokens."), ErrorResponses)
