@@ -2092,6 +2092,30 @@ apps:
         port: 80
 ```
 
+## Host firewall
+
+With `[firewall] enabled = true` (or `R3V3RS3_FIREWALL_ENABLED=true`), r3v3rs3 keeps one nftables table, `inet r3v3rs3`, on the server. It is off by default. The table covers IPv4 and IPv6 and drops every incoming connection except:
+
+- replies to connections the host opened, the loopback interface, and ICMP and ICMPv6;
+- the SSH ports of `/etc/ssh/sshd_config` and `sshd_config.d/*.conf`, and port 22 always;
+- every port that listens on an address other than `127.0.0.1` or `::1` (TCP, or UDP for UDP and QUIC ports);
+- the `host_ports` of the running apps on this server (see the platform page);
+- `extra_ports`, such as `["udp/51820", "tcp/8000-8010"]`.
+
+```toml
+[firewall]
+enabled = true
+extra_ports = ["udp/51820"]
+```
+
+r3v3rs3 replaces the table in one `nft -f` transaction each time a port, an app or the setting changes, so a half-written table never exists. Turning the setting off removes the table. The table filters only the `input` hook; the Docker NAT and forward rules stay as they are. Agent targets keep the same table on their host with the `host_ports` of their apps.
+
+- The server needs `CAP_NET_ADMIN`; the unit that `install.sh` writes gives it.
+- r3v3rs3 must be the only firewall that drops traffic. nftables runs the input chain of every table, so a drop in a firewalld, ufw or `iptables-persistent` table still blocks a port this table opens. Stop the other tool first (`systemctl disable --now firewalld`, `ufw disable`, or `systemctl disable --now netfilter-persistent`). The **Host Firewall** card of the settings page, `GET /api/firewall`, the MCP tool `get_firewall_status` and `r3 security firewall status` list each such table as a warning, and the port list shows **Firewall open, another firewall found**.
+- A container that publishes a port with Docker (`-p 8080:80`) is reached through the forward hook, so this table does not block it.
+
+Rollback: set `enabled = false`, or run `nft delete table inet r3v3rs3` on the host, then start the previous firewall again. Save its rules first (`nft list ruleset > /root/ruleset.nft`) and restore them with `nft -f /root/ruleset.nft`.
+
 ## Stored data
 
 r3v3rs3 stores ACME entries in `acme.toml` in the configuration directory. The file contains the private key of each ACME account and the DNS provider credentials in plain text. On Unix, r3v3rs3 creates and writes the file with mode `0600`, so only the owner of the process can read it. The admin API and the WebUI never return the credentials. The ACME list shows only the provider name, for example `Let's Encrypt (DNS-01, Cloudflare)`.

@@ -2092,6 +2092,30 @@ apps:
         port: 80
 ```
 
+## Sunucu güvenlik duvarı
+
+`[firewall] enabled = true` (veya `R3V3RS3_FIREWALL_ENABLED=true`) ayarıyla r3v3rs3, sunucuda `inet r3v3rs3` adlı tek bir nftables tablosu tutar. Ayar varsayılan olarak kapalıdır. Tablo IPv4 ve IPv6'yı kapsar ve şunlar dışındaki bütün gelen bağlantıları düşürür:
+
+- host'un açtığı bağlantıların yanıtları, loopback arayüzü, ICMP ve ICMPv6;
+- `/etc/ssh/sshd_config` ve `sshd_config.d/*.conf` dosyalarındaki SSH portları ve her zaman port 22;
+- `127.0.0.1` veya `::1` dışındaki bir adreste dinleyen her port (TCP; UDP ve QUIC portları için UDP);
+- bu sunucuda çalışan uygulamaların `host_ports` alanı (platform sayfasına bakın);
+- `["udp/51820", "tcp/8000-8010"]` gibi `extra_ports` değerleri.
+
+```toml
+[firewall]
+enabled = true
+extra_ports = ["udp/51820"]
+```
+
+Bir port, bir uygulama veya ayar her değiştiğinde r3v3rs3 tabloyu tek bir `nft -f` işlemiyle değiştirir. Bu yüzden yarım yazılmış bir tablo oluşmaz. Ayar kapatılınca tablo silinir. Tablo yalnız `input` hook'unu filtreler. Docker'ın NAT ve forward kuralları değişmez. Agent hedefleri de kendi host'larında aynı tabloyu, kendi uygulamalarının `host_ports` değerleriyle tutar.
+
+- Sunucunun `CAP_NET_ADMIN` yetkisine ihtiyacı vardır. `install.sh` dosyasının yazdığı unit bu yetkiyi verir.
+- Trafiği düşüren tek güvenlik duvarı r3v3rs3 olmalıdır. nftables her tablonun input zincirini çalıştırır. Bu yüzden firewalld, ufw veya `iptables-persistent` tablosundaki bir drop kuralı, bu tablonun açtığı bir portu yine engeller. Önce diğer aracı durdurun (`systemctl disable --now firewalld`, `ufw disable` veya `systemctl disable --now netfilter-persistent`). Ayarlar sayfasındaki **Sunucu Güvenlik Duvarı** kartı, `GET /api/firewall`, MCP aracı `get_firewall_status` ve `r3 security firewall status` böyle her tabloyu bir uyarı olarak listeler. Port listesi de **Güvenlik duvarı açık, başka bir güvenlik duvarı var** gösterir.
+- Docker ile port yayınlayan bir container'a (`-p 8080:80`) forward hook'u üzerinden ulaşılır. Bu yüzden bu tablo onu engellemez.
+
+Geri dönüş: `enabled = false` yapın veya host'ta `nft delete table inet r3v3rs3` çalıştırın. Sonra önceki güvenlik duvarını yeniden başlatın. Önce onun kurallarını kaydedin (`nft list ruleset > /root/ruleset.nft`) ve `nft -f /root/ruleset.nft` ile geri yükleyin.
+
 ## Saklanan veriler
 
 r3v3rs3, ACME kayıtlarını yapılandırma dizinindeki `acme.toml` dosyasında saklar. Dosya, her ACME hesabının private key'ini ve DNS sağlayıcısının kimlik bilgilerini düz metin olarak içerir. Unix'te r3v3rs3 dosyayı `0600` izniyle oluşturur ve yazar. Böylece dosyayı yalnız sürecin sahibi okuyabilir. Yönetim API'si ve WebUI kimlik bilgilerini hiçbir zaman döndürmez. ACME listesi yalnız sağlayıcının adını gösterir, örneğin `Let's Encrypt (DNS-01, Cloudflare)`.
