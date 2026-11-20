@@ -289,8 +289,9 @@ Group=r3v3rs3
 SupplementaryGroups=docker
 # The container logs of Docker belong to root: reading their size and emptying them needs the
 # DAC capabilities. The docker group gives the same reach through the engine already.
-AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+# CAP_NET_ADMIN lets the server keep its nftables table when [firewall] enabled is set.
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_NET_ADMIN
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
