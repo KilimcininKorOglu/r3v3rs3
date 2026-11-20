@@ -12,6 +12,7 @@ use reqwest::redirect::Policy;
 use reqwest::{Client, StatusCode};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use tracing_subscriber::filter::LevelFilter;
@@ -982,12 +983,15 @@ async fn assert_mcp_tool_names(
     assert!(names.contains(&"list_targets"), "{names:?}");
     assert!(names.contains(&"list_projects"), "{names:?}");
     assert!(names.contains(&"list_env_groups"), "{names:?}");
-    assert!(names.contains(&"list_dr_backups"), "{names:?}");
+    assert!(
+        names.contains(&"list_disaster_recovery_backups"),
+        "{names:?}"
+    );
     assert!(names.contains(&"get_system_metrics"), "{names:?}");
     assert!(names.contains(&"test_database_backup"), "{names:?}");
     assert!(names.contains(&"get_database_pitr_range"), "{names:?}");
     assert!(names.contains(&"restore_database_pitr"), "{names:?}");
-    assert!(names.contains(&"archive_database_wal_segment"), "{names:?}");
+    assert!(names.contains(&"archive_database_wal"), "{names:?}");
     assert!(names.contains(&"list_database_wal_segments"), "{names:?}");
     for name in [
         "get_database_credentials",
@@ -997,12 +1001,12 @@ async fn assert_mcp_tool_names(
     ] {
         assert!(names.contains(&name), "{names:?}");
     }
-    assert!(names.contains(&"generate_target_token"), "{names:?}");
+    assert!(names.contains(&"create_target_token"), "{names:?}");
     assert!(names.contains(&"upgrade_target"), "{names:?}");
     assert!(names.contains(&"upgrade_all_targets"), "{names:?}");
-    assert!(names.contains(&"get_server_upgrade_status"), "{names:?}");
-    assert!(names.contains(&"run_server_upgrade"), "{names:?}");
-    assert!(names.contains(&"set_port_transparent"), "{names:?}");
+    assert!(names.contains(&"get_upgrade_status"), "{names:?}");
+    assert!(names.contains(&"upgrade_server"), "{names:?}");
+    assert!(names.contains(&"update_port_transparent"), "{names:?}");
     Ok(())
 }
 
@@ -1078,7 +1082,7 @@ async fn assert_mcp_port_mutations(
 ) -> anyhow::Result<String> {
     let add_res = mcp_call(
         client,
-        "add_port",
+        "create_port",
         json!({
             "port": {
                 "name": "p-mcp",
@@ -1122,7 +1126,7 @@ async fn assert_mcp_port_mutations(
     Ok(port_id)
 }
 
-/// `set_port_transparent` changes only the transparent option of the port, and the change is
+/// `update_port_transparent` changes only the transparent option of the port, and the change is
 /// saved: `get_port` reads it back each time.
 async fn assert_mcp_transparent_toggle(
     client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
@@ -1130,7 +1134,7 @@ async fn assert_mcp_transparent_toggle(
 ) -> anyhow::Result<()> {
     for enabled in [true, false] {
         let args = json!({ "id": port_id, "enabled": enabled });
-        mcp_call(client, "set_port_transparent", args).await?;
+        mcp_call(client, "update_port_transparent", args).await?;
         let port: Value =
             serde_json::from_str(&mcp_call(client, "get_port", json!({ "id": port_id })).await?)?;
         // The port JSON leaves out an option that is off.
@@ -1147,7 +1151,7 @@ async fn assert_mcp_proxy_mutations(
 ) -> anyhow::Result<()> {
     let add_res = mcp_call(
         client,
-        "add_proxy",
+        "create_proxy",
         json!({
             "proxy": {
                 "name": "px-mcp",
@@ -1221,7 +1225,7 @@ async fn assert_mcp_config_backup(
     assert!(saved.contains("udp/51820"), "{backup}");
     mcp_call(
         client,
-        "set_firewall",
+        "update_firewall",
         json!({ "extra_ports": ["udp/60000"] }),
     )
     .await?;
@@ -1240,7 +1244,7 @@ async fn assert_mcp_config_backup(
     Ok(())
 }
 
-/// The DNS credential tools reach the same API as the panel (OpenAPI `add_dns_credential`,
+/// The DNS credential tools reach the same API as the panel (OpenAPI `create_dns_credential`,
 /// `get_dns_credential`, `update_dns_credential`, `delete_dns_credential`): a credential is
 /// added, read without its token, renamed and deleted.
 async fn assert_mcp_dns_credentials(
@@ -1251,7 +1255,12 @@ async fn assert_mcp_dns_credentials(
         json!({ "provider": "webhook", "url": "https://dns.example.com/hook", "token": secret });
     let request = json!({ "name": "mcp-dns", "dns_provider": provider });
     let added: Value = serde_json::from_str(
-        &mcp_call(client, "add_dns_credential", json!({ "request": request })).await?,
+        &mcp_call(
+            client,
+            "create_dns_credential",
+            json!({ "request": request }),
+        )
+        .await?,
     )?;
     let id = added["id"]
         .as_str()
@@ -1268,13 +1277,13 @@ async fn assert_mcp_dns_credentials(
     Ok(())
 }
 
-/// `set_firewall` saves the extra ports of the host firewall table, and a port outside
+/// `update_firewall` saves the extra ports of the host firewall table, and a port outside
 /// 1-65535 is refused before anything changes. The table stays off, so no `nft` runs.
 async fn assert_mcp_firewall(
     client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
 ) -> anyhow::Result<()> {
     let ports = json!({ "enabled": false, "extra_ports": ["udp/51820", "tcp/8000-8010"] });
-    mcp_call(client, "set_firewall", ports).await?;
+    mcp_call(client, "update_firewall", ports).await?;
     let config: Value = serde_json::from_str(&mcp_call(client, "get_config", json!({})).await?)?;
     let saved = config["firewall"]["extra_ports"].to_string();
     assert!(
@@ -1282,7 +1291,7 @@ async fn assert_mcp_firewall(
         "{config}"
     );
     let bad = json!({ "extra_ports": ["udp/99999"] });
-    let refused = mcp_call(client, "set_firewall", bad).await;
+    let refused = mcp_call(client, "update_firewall", bad).await;
     assert!(
         refused.is_err(),
         "an invalid port was accepted: {refused:?}"
@@ -1723,26 +1732,26 @@ fn git_app(name: &str) -> Value {
         "port": 8080 } })
 }
 
-/// The app and deployment tools reach their endpoints (OpenAPI `set_app_git_token`,
-/// `delete_app_git_token`, `new_app_webhook_secret`, `delete_app_webhook_secret`,
+/// The app and deployment tools reach their endpoints (OpenAPI `update_app_git_token`,
+/// `delete_app_git_token`, `create_app_webhook_secret`, `delete_app_webhook_secret`,
 /// `get_deployment`, `approve_deployment`, `reject_deployment`, `get_app_metrics`,
 /// `get_app_services`, `get_app_topology`, `upgrade_app_catalog`, `install_app_hook`).
 async fn assert_mcp_apps(
     client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
 ) -> anyhow::Result<()> {
     let added: Value = serde_json::from_str(
-        &mcp_call(client, "add_app", json!({ "app": git_app("mcp-app") })).await?,
+        &mcp_call(client, "create_app", json!({ "app": git_app("mcp-app") })).await?,
     )?;
     let id = added["id"].as_str().context("no app id")?.to_string();
     let with_token = mcp_call(
         client,
-        "set_app_git_token",
+        "update_app_git_token",
         json!({ "id": id, "token": GIT_TOKEN }),
     )
     .await?;
     assert!(!with_token.contains(GIT_TOKEN), "{with_token}");
     mcp_call(client, "delete_app_git_token", json!({ "id": id })).await?;
-    let secret = mcp_call(client, "new_app_webhook_secret", json!({ "id": id })).await?;
+    let secret = mcp_call(client, "create_app_webhook_secret", json!({ "id": id })).await?;
     assert!(secret.contains("secret"), "{secret}");
     mcp_call(client, "delete_app_webhook_secret", json!({ "id": id })).await?;
     for name in ["get_deployment", "approve_deployment", "reject_deployment"] {
@@ -1920,8 +1929,8 @@ async fn assert_mcp_environments(
     project: &str,
 ) -> anyhow::Result<()> {
     let create = |name: &str| json!({ "project_id": project, "name": name });
-    let env = id_of(&mcp_call(client, "create_project_environment", create("staging")).await?)?;
-    let other = id_of(&mcp_call(client, "create_project_environment", create("prod")).await?)?;
+    let env = id_of(&mcp_call(client, "create_environment", create("staging")).await?)?;
+    let other = id_of(&mcp_call(client, "create_environment", create("prod")).await?)?;
     let pair = json!({ "project_id": project, "environment_id": env });
     let rename =
         json!({ "project_id": project, "environment_id": env, "request": { "name": "stage" } });
@@ -1943,7 +1952,7 @@ async fn assert_mcp_environment_vars(
     let vars = json!([{ "key": "API_KEY", "value": ENV_SECRET, "secret": true }]);
     mcp_call(
         client,
-        "update_project_env",
+        "update_environment_env",
         json!({ "environment_id": env, "variables": vars }),
     )
     .await?;
@@ -2151,7 +2160,7 @@ async fn assert_mcp_git(
 ) -> anyhow::Result<()> {
     let add = json!({ "name": "mcp-gitea", "provider": "gitea", "url": "https://gitea.example.com",
         "client_id": "mcp-client-id", "client_secret": GIT_SECRET });
-    let id = id_of(&mcp_call(client, "add_git_connection", add).await?)?;
+    let id = id_of(&mcp_call(client, "create_git_connection", add).await?)?;
     let request = json!({ "name": "mcp-gitea-2", "provider": "gitea",
         "url": "https://gitea.example.com", "client_id": "mcp-client-id" });
     let updated = mcp_call(
@@ -2290,13 +2299,13 @@ fn cert_id(listing: &str, name: &str) -> anyhow::Result<String> {
 
 /// The certificate tools sign, upload, read and delete certificates. A downloaded chain never
 /// holds the private key, a broken PEM is refused, and a missing ACME entry is not found
-/// (OpenAPI `self_sign_cert`, `upload_cert`, `download_cert`, `delete_certs`, `verify_cname`,
+/// (OpenAPI `create_self_signed_cert`, `upload_cert`, `download_cert`, `delete_certs`, `verify_cname`,
 /// `update_acme`).
 async fn assert_mcp_certs(
     client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
 ) -> anyhow::Result<()> {
     let sign = json!({ "request": { "san": ["signed.example.test"] } });
-    mcp_call(client, "self_sign_cert", sign).await?;
+    mcp_call(client, "create_self_signed_cert", sign).await?;
     let (chain, key) = pem_pair("uploaded.example.test")?;
     mcp_call(client, "upload_cert", json!({ "chain": chain, "key": key })).await?;
     let broken = mcp_call(
@@ -2449,7 +2458,7 @@ async fn assert_mcp_traffic(
 /// The anomaly rule tools store the rules they are given, the header analysis reports a missing
 /// Strict-Transport-Security header (OWASP Secure Headers), and the dry run matches the route
 /// (OpenAPI `get_anomaly_rules`, `update_anomaly_rules`, `dismiss_anomalies`,
-/// `analyze_security_headers`, `dry_run_proxy`).
+/// `analyze_security_headers`, `preview_proxy`).
 async fn assert_mcp_checks(
     client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
 ) -> anyhow::Result<()> {
@@ -2474,7 +2483,7 @@ async fn assert_mcp_checks(
     );
     let run = mcp_call(
         client,
-        "dry_run_proxy",
+        "preview_proxy",
         json!({ "request": dry_run_request() }),
     )
     .await?;
@@ -2667,7 +2676,7 @@ async fn assert_mcp_grpc(
         "payload": {}, "metadata": {} });
     let calls = [
         (
-            "health_grpc",
+            "check_grpc_health",
             json!({ "request": { "target_url": CLOSED_GRPC } }),
         ),
         ("invoke_grpc", json!({ "request": invoke })),
@@ -3033,8 +3042,9 @@ async fn assert_dr_download_matches(
     path: &str,
 ) -> anyhow::Result<()> {
     let client = mcp_client(addr, token).await?;
-    let listed: Value =
-        serde_json::from_str(&mcp_call(&client, "list_dr_backups", json!({})).await?)?;
+    let listed: Value = serde_json::from_str(
+        &mcp_call(&client, "list_disaster_recovery_backups", json!({})).await?,
+    )?;
     let id = listed[0]["id"].as_str().context("no DR backup listed")?;
     cli_ok(
         binary,
@@ -3654,10 +3664,7 @@ async fn unknown_choices_are_refused() -> anyhow::Result<()> {
                 "update_account",
                 json!({ "username": "editor", "role": "edtor" }),
             ),
-            (
-                "create_auth_token",
-                json!({ "name": "ci", "scope": "write" }),
-            ),
+            ("create_token", json!({ "name": "ci", "scope": "write" })),
         ];
         for (tool, args) in calls {
             let err = mcp_call(&client, tool, args)
@@ -3705,6 +3712,205 @@ async fn invalid_proxy_ids_of_an_account_are_refused() -> anyhow::Result<()> {
     .await
 }
 
+/// MCP tools that have no API operation of their own, with the reason.
+const MCP_ONLY_TOOLS: &[(&str, &str)] = &[
+    ("server_status", "the version and the workers in one call"),
+    (
+        "get_system_metrics",
+        "JSON of the process metrics that get_metrics serves as text",
+    ),
+    ("update_firewall", "the firewall field of update_config"),
+    (
+        "update_port_transparent",
+        "the transparent field of update_port",
+    ),
+    (
+        "update_port_early_data",
+        "the early data field of update_port",
+    ),
+    (
+        "install_store_app",
+        "create_app and deploy_app of a catalog entry",
+    ),
+    (
+        "list_project_environments",
+        "the environments of get_project",
+    ),
+    (
+        "list_compression_dictionaries",
+        "the dictionaries field of get_proxy",
+    ),
+    ("get_compression_dictionary", "one dictionary of get_proxy"),
+    (
+        "create_compression_dictionary",
+        "the dictionaries field of update_proxy",
+    ),
+    (
+        "delete_compression_dictionary",
+        "the dictionaries field of update_proxy",
+    ),
+];
+
+/// API operations without an MCP tool. Out of scope by decision: browser sign-in, passkeys,
+/// the OAuth server itself, provider callbacks, health probes and the event stream. CLI only:
+/// binary files, live streams and the terminal (MCP returns small text and the last records).
+/// `purge_proxy_cache_post` is the POST twin of `purge_proxy_cache`.
+const OPERATIONS_WITHOUT_TOOL: &[&str] = &[
+    "approve_mcp_client",
+    "authorize_mcp_client",
+    "complete_git_oauth",
+    "delete_passkey",
+    "download_database_backup",
+    "download_disaster_recovery_backup",
+    "download_s3_database_backup",
+    "download_volume_backup",
+    "export_volume_archive",
+    "get_oauth_authorization_server_metadata",
+    "get_oauth_protected_resource_metadata",
+    "get_passkey_challenge",
+    "get_session",
+    "healthz",
+    "import_volume_archive",
+    "issue_oauth_token",
+    "login",
+    "logout",
+    "open_app_terminal",
+    "purge_proxy_cache_post",
+    "readyz",
+    "receive_app_webhook",
+    "register_oauth_client",
+    "register_passkey",
+    "restore_disaster_recovery_upload",
+    "stream_app_logs",
+    "stream_traffic",
+    "subscribe_events",
+];
+
+/// Project naming rule: an MCP tool carries the operation id of the API operation it runs, so
+/// an agent, a CLI user and the OpenAPI document name one action the same way.
+#[tokio::test]
+async fn every_tool_is_named_after_its_api_operation() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-tool-names")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = mcp_client(addr, &access_token(&addr).await?).await?;
+        let tools = client.list_all_tools().await?;
+        client.cancel().await?;
+        let tools = tools
+            .iter()
+            .map(|tool| tool.name.to_string())
+            .collect::<BTreeSet<_>>();
+        let operations = operation_ids(addr).await?;
+        let mcp_only = MCP_ONLY_TOOLS
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect();
+        let named_apart = tools
+            .difference(&operations)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            named_apart, mcp_only,
+            "tools named apart from an operation id"
+        );
+        let without_tool = operations
+            .difference(&tools)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let expected = OPERATIONS_WITHOUT_TOOL
+            .iter()
+            .map(|id| id.to_string())
+            .collect();
+        assert_eq!(without_tool, expected, "operations without a tool");
+        Ok(())
+    })
+    .await
+}
+
+/// `update_config` saves the settings that `get_config` returned with a change. A masked secret
+/// in that round trip keeps the saved secret (the API never returns secrets, so an agent can
+/// only send the mask back), and an editor cannot replace the settings.
+#[tokio::test]
+async fn the_settings_round_trip_through_mcp_keeps_secrets() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-update-config")?;
+    with_admin(&dir.0, |addr| async move {
+        let client = mcp_client(addr, &access_token(&addr).await?).await?;
+        save_a_secret_then_round_trip(&client).await?;
+        let saved = rest_config(addr).await?;
+        assert_eq!(saved["upgrade"]["check_interval"], "2h", "{saved}");
+        assert_eq!(
+            saved["geoip"]["license_key_set"], true,
+            "the round trip erased the secret"
+        );
+        let workers = mcp_call(&client, "get_workers", json!({})).await?;
+        assert!(serde_json::from_str::<Value>(&workers).is_ok(), "{workers}");
+        client.cancel().await?;
+        assert_editor_cannot_update_config(addr, saved).await
+    })
+    .await
+}
+
+/// An editor account is refused when it sends the settings back.
+async fn assert_editor_cannot_update_config(addr: SocketAddr, config: Value) -> anyhow::Result<()> {
+    let editor = mcp_client(addr, &access_token_for(&addr, "editor", "password").await?).await?;
+    let refused = mcp_call(&editor, "update_config", json!({ "request": config })).await;
+    assert!(refused.is_err(), "an editor replaced the settings");
+    editor.cancel().await?;
+    Ok(())
+}
+
+/// Saves a GeoIP license key, then sends the masked settings back with a changed interval.
+async fn save_a_secret_then_round_trip(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let mut config: Value =
+        serde_json::from_str(&mcp_call(client, "get_config", json!({})).await?)?;
+    config["geoip"]["license_key"] = json!("license-secret");
+    mcp_call(client, "update_config", json!({ "request": config })).await?;
+    let mut config: Value =
+        serde_json::from_str(&mcp_call(client, "get_config", json!({})).await?)?;
+    assert!(
+        !config.to_string().contains("license-secret"),
+        "get_config shows the secret"
+    );
+    config["upgrade"]["check_interval"] = json!("2h");
+    mcp_call(client, "update_config", json!({ "request": config })).await?;
+    Ok(())
+}
+
+/// The settings as `GET /api/config` returns them to the admin.
+async fn rest_config(addr: SocketAddr) -> anyhow::Result<Value> {
+    let cookie = session_cookie(addr, "admin", "password").await?;
+    Ok(Client::new()
+        .get(format!("http://{addr}/api/config"))
+        .header(reqwest::header::COOKIE, cookie)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
+}
+
+/// The operation ids of the OpenAPI document the server serves.
+async fn operation_ids(addr: SocketAddr) -> anyhow::Result<BTreeSet<String>> {
+    let cookie = session_cookie(addr, "admin", "password").await?;
+    let document: Value = Client::new()
+        .get(format!("http://{addr}/api/openapi.json"))
+        .header(reqwest::header::COOKIE, cookie)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let paths = document["paths"].as_object().context("no paths")?;
+    Ok(paths
+        .values()
+        .filter_map(Value::as_object)
+        .flat_map(|item| item.values())
+        .filter_map(|operation| operation["operationId"].as_str())
+        .map(str::to_string)
+        .collect())
+}
+
 /// An argument that the server needs is required in the tool schema, so an agent sends it instead
 /// of learning about it from an error.
 #[tokio::test]
@@ -3714,10 +3920,10 @@ async fn needed_arguments_are_required_in_the_schema() -> anyhow::Result<()> {
         let client = mcp_client(addr, &access_token(&addr).await?).await?;
         let tools = client.list_all_tools().await?;
         let expected = [
-            ("create_dr_backup", "passphrase"),
-            ("restore_dr_backup", "passphrase"),
-            ("add_git_connection", "client_secret"),
-            ("add_registry", "password"),
+            ("create_disaster_recovery_backup", "passphrase"),
+            ("restore_disaster_recovery_backup", "passphrase"),
+            ("create_git_connection", "client_secret"),
+            ("create_registry", "password"),
         ];
         for (name, field) in expected {
             let tool = tools
@@ -3810,7 +4016,7 @@ async fn run_server_upgrade_rejects_non_admin() -> anyhow::Result<()> {
         );
         let client = serve_client(TestClient, transport).await?;
         let err = client
-            .call_tool(CallToolRequestParams::new("run_server_upgrade"))
+            .call_tool(CallToolRequestParams::new("upgrade_server"))
             .await
             .unwrap_err();
         assert!(
@@ -3958,7 +4164,7 @@ async fn mcp_mutation_tools_enforce_edit_scope() -> anyhow::Result<()> {
         let client = serve_client(TestClient, transport).await?;
         let err = mcp_call(
             &client,
-            "add_port",
+            "create_port",
             json!({
                 "port": {
                     "name": "p-fail",

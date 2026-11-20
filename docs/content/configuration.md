@@ -257,7 +257,7 @@ listen = "/ip4/0.0.0.0/udp/49160-49240"
 transparent = true
 ```
 
-Via CLI or MCP (`set_port_transparent`):
+Via CLI or MCP (`update_port_transparent`):
 ```bash
 r3 port set-transparent <PORT_ID> --enable true
 r3 port set-transparent <PORT_ID> --enable false
@@ -607,7 +607,7 @@ The active health check runs when `health_check.interval` is above `0s` (default
 
 You can also run ad-hoc gRPC health checks directly:
 - **CLI**: `r3 proxy grpc-health <PROXY_ID> [--service <SERVICE>]`
-- **MCP Tool**: `check_grpc_health` (parameters: `proxy_id` or `target_url`, `service`)
+- **MCP Tool**: `check_proxy_grpc_health` (parameters: `proxy_id` or `target_url`, `service`)
 - **REST API**: `POST /api/proxies/{id}/grpc/health` or `POST /api/grpc/health`
 
 `health_check.timeout` (default `5s`) limits each check. A server that fails the check is unhealthy until a check passes, also when `max_fails = 0`. A successful request does not end this state.
@@ -1186,7 +1186,7 @@ r3 proxy security-headers apply <PROXY_ID> strict
 
 #### MCP Tools
 
-AI agents can inspect and apply security profiles using `list_security_header_profiles`, `analyze_proxy_security_headers`, and `apply_security_header_profile`.
+AI agents can inspect and apply security profiles using `list_security_header_profiles`, `get_proxy_security_headers`, and `apply_proxy_security_header_profile`.
 
 ## Compression
 
@@ -1210,7 +1210,7 @@ r3v3rs3 supports Compression Dictionary Transport (RFC 9842) for Chromium and co
 - **Serving Dictionaries**: Dictionaries configured on an HTTP proxy are directly served by r3v3rs3 at their configured `path` with `Content-Type: application/octet-stream`, `Use-As-Dictionary: match="<match_pattern>", id="<id>"`, `Cache-Control: public, max-age=31536000, immutable`, and `ETag: "<sha256>"`.
 - **Content Negotiation & Encoding**: When an incoming request includes `Available-Dictionary` (or `Sec-Available-Dictionary`) matching a configured dictionary's SHA-256 hash and path, and the client accepts `dcz` or `dcb`, r3v3rs3 compresses the response against the dictionary. The response carries `Content-Encoding: dcz` (or `dcb`) and `Vary: Available-Dictionary, Accept-Encoding`. The body starts with the fixed header of the encoding and the SHA-256 digest of the dictionary, so the client can check that it decodes with the right dictionary. RFC 9842 allows dictionary compression only in a secure context, so requests over plain HTTP get the standard algorithms.
 - **Bandwidth Reduction**: By eliminating static JSON schemas, recurring object keys, and repetitive HTML wrappers, shared dictionary compression delivers 80% to 95% bandwidth savings on recurring API traffic.
-- **Management**: Compression dictionaries can be added, inspected, and removed via the WebUI Proxy Configuration page, MCP tools (`list_compression_dictionaries`, `get_compression_dictionary`, `add_compression_dictionary`, `delete_compression_dictionary`), or the CLI (`r3 proxy dictionary list/get/add/delete`).
+- **Management**: Compression dictionaries can be added, inspected, and removed via the WebUI Proxy Configuration page, MCP tools (`list_compression_dictionaries`, `get_compression_dictionary`, `create_compression_dictionary`, `delete_compression_dictionary`), or the CLI (`r3 proxy dictionary list/get/add/delete`).
 
 r3v3rs3 compresses a response only when all of these conditions are true:
 
@@ -1633,11 +1633,11 @@ r3 cert ct dismiss <ENTRY_ID>
 ## Model Context Protocol (MCP)
 
 AI agents can inspect and manage CT logs autonomously via MCP tools:
-- `get_ct_monitor_config`: Retrieve current monitoring configuration.
-- `update_ct_monitor_config`: Update check intervals, domains, and allowed CAs.
-- `get_ct_monitor_status`: Get real-time status, active alerts, and last check time.
-- `list_ct_log_entries`: Query discovered records with filtering.
-- `check_ct_logs_now`: Trigger an immediate log query.
+- `get_ct_config`: Retrieve current monitoring configuration.
+- `update_ct_config`: Update check intervals, domains, and allowed CAs.
+- `get_ct_status`: Get real-time status, active alerts, and last check time.
+- `list_ct_entries`: Query discovered records with filtering.
+- `check_ct_now`: Trigger an immediate log query.
 - `dismiss_ct_alert`: Acknowledge or resolve an alert.
 
 ## Worker Processes
@@ -1732,7 +1732,7 @@ r3 proxy priority <PROXY_ID> --enable --inject-header --adaptive-concurrency
 r3 traffic priority
 ```
 
-MCP tools: `get_stream_priority`, `set_stream_priority`, `get_stream_priority_stats`.
+MCP tools: `get_proxy_stream_priority`, `update_proxy_stream_priority`, `get_traffic_priority_stats`.
 
 ### WebUI Management & Telemetry
 
@@ -1870,21 +1870,21 @@ The admin API exposes its complete tool suite over the Model Context Protocol at
 
 | Category | Tools & Operations | Description |
 |---|---|---|
-| **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database`, `get_server_upgrade_status`, `run_server_upgrade`, `get_traffic`, `get_traffic_entry`, `get_traffic_geo`, `replay_traffic_request`, `get_anomaly_rules`, `update_anomaly_rules`, `dismiss_anomalies`, `analyze_security_headers`, `dry_run_proxy`, `get_cdn_status`, `refresh_cdn_ranges`, `list_discovery_status`, `get_logs`, `get_dashboard`, `health_grpc`, `invoke_grpc`, `reflect_grpc`, `invoke_proxy_grpc`, `reflect_proxy_grpc`, `rotate_platform_key`, `list_mcp_sessions`, `revoke_mcp_session`, `get_app_info`, `get_metrics`, `get_grafana_dashboard` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, fail2ban brute-force bans, threat auto-quarantine, automated GeoIP MMDB database management, and seamless live server self-upgrade execution. |
-| **Ports** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Complete port listener lifecycle: bind addresses, TLS termination options, socket reset/reload, and host interface enumeration. |
-| **Proxies** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | Reverse proxy configuration for HTTP, WebSocket, TCP, UDP, TLS, and HTTP/3, upstream health status, and path-selective cache purging. |
-| **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials`, `get_dns_credential`, `add_dns_credential`, `update_dns_credential`, `delete_dns_credential`, `get_ct_monitor_config`, `update_ct_monitor_config`, `get_ct_monitor_status`, `list_ct_log_entries`, `check_ct_logs_now`, `dismiss_ct_alert`, `update_acme`, `self_sign_cert`, `upload_cert`, `download_cert` (chain only, never the private key), `delete_certs`, `verify_cname` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegation, instant certificate orders/renewals, DNS credential management, and Certificate Transparency rogue detection. |
-| **Access Lists** | `list_access_lists`, `add_access_list`, `update_access_list`, `delete_access_list` | Access control lists with CIDR IP filtering, HTTP basic authentication, and custom bearer tokens. |
-| **PaaS Applications** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update`, `list_app_scheduled_commands`, `add_app_scheduled_command`, `update_app_scheduled_command`, `delete_app_scheduled_command`, `run_app_scheduled_command`, `get_deployment`, `approve_deployment`, `reject_deployment`, `get_app_metrics`, `get_app_services`, `get_app_topology`, `upgrade_app_catalog`, `set_app_git_token`, `delete_app_git_token`, `new_app_webhook_secret`, `delete_app_webhook_secret`, `install_app_hook`, `list_app_files`, `download_app_file` (UTF-8 text up to 1 MiB), `upload_app_file` (UTF-8 text up to 1 MiB), `delete_app_file`, `list_volume_backups`, `create_volume_backup`, `restore_volume_backup`, `delete_volume_backup` | Autonomous PaaS container lifecycle: image/git/compose app deployment, container log streaming, environment variable injection, deployment rollbacks, scheduled cron commands management and immediate in-container execution, and Docker registry update detection. |
+| **System & Monitoring** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unquarantine_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database`, `get_upgrade_status`, `upgrade_server`, `get_workers`, `update_config`, `get_traffic`, `get_traffic_entry`, `get_traffic_geo`, `replay_traffic_request`, `get_anomaly_rules`, `update_anomaly_rules`, `dismiss_anomalies`, `analyze_security_headers`, `preview_proxy`, `get_cdn_status`, `refresh_cdn_ranges`, `list_discovery_status`, `get_logs`, `get_dashboard`, `check_grpc_health`, `invoke_grpc`, `reflect_grpc`, `invoke_proxy_grpc`, `reflect_proxy_grpc`, `rotate_platform_key`, `list_mcp_sessions`, `revoke_mcp_session`, `get_app_info`, `get_metrics`, `get_grafana_dashboard` | Runtime version, worker processes, masked system configuration, tamper-evident audit trail, process open FDs/memory/lag, real-time anomaly alerts, fail2ban brute-force bans, threat auto-quarantine, automated GeoIP MMDB database management, and seamless live server self-upgrade execution. |
+| **Ports** | `list_ports`, `get_port`, `get_port_status`, `create_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Complete port listener lifecycle: bind addresses, TLS termination options, socket reset/reload, and host interface enumeration. |
+| **Proxies** | `list_proxies`, `get_proxy`, `get_proxy_status`, `create_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | Reverse proxy configuration for HTTP, WebSocket, TCP, UDP, TLS, and HTTP/3, upstream health status, and path-selective cache purging. |
+| **Certificates & ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `create_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials`, `get_dns_credential`, `create_dns_credential`, `update_dns_credential`, `delete_dns_credential`, `get_ct_config`, `update_ct_config`, `get_ct_status`, `list_ct_entries`, `check_ct_now`, `dismiss_ct_alert`, `update_acme`, `create_self_signed_cert`, `upload_cert`, `download_cert` (chain only, never the private key), `delete_certs`, `verify_cname` | TLS certificate inspection, domain coverage verification, ACME automated issuance (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegation, instant certificate orders/renewals, DNS credential management, and Certificate Transparency rogue detection. |
+| **Access Lists** | `list_access_lists`, `create_access_list`, `update_access_list`, `delete_access_list` | Access control lists with CIDR IP filtering, HTTP basic authentication, and custom bearer tokens. |
+| **PaaS Applications** | `list_apps`, `get_app`, `create_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update`, `list_app_scheduled_commands`, `create_app_scheduled_command`, `update_app_scheduled_command`, `delete_app_scheduled_command`, `run_app_scheduled_command`, `get_deployment`, `approve_deployment`, `reject_deployment`, `get_app_metrics`, `get_app_services`, `get_app_topology`, `upgrade_app_catalog`, `update_app_git_token`, `delete_app_git_token`, `create_app_webhook_secret`, `delete_app_webhook_secret`, `install_app_hook`, `list_app_files`, `download_app_file` (UTF-8 text up to 1 MiB), `upload_app_file` (UTF-8 text up to 1 MiB), `delete_app_file`, `list_volume_backups`, `create_volume_backup`, `restore_volume_backup`, `delete_volume_backup` | Autonomous PaaS container lifecycle: image/git/compose app deployment, container log streaming, environment variable injection, deployment rollbacks, scheduled cron commands management and immediate in-container execution, and Docker registry update detection. |
 | **App Store Catalog** | `get_store`, `refresh_store`, `install_store_app` | Instant deployment of curated one-click templates (databases, dashboards, CMS, wikis, analytics) directly from the store into fully configured and routed applications. |
-| **Managed Databases & Backups** | `list_databases`, `list_database_engines`, `create_database`, `get_database_credentials`, `list_database_tenants`, `reset_database_password`, `delete_database_tenant`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config`, `test_database_backup`, `get_database_pitr_range`, `restore_database_pitr`, `archive_database_wal_segment`, `list_database_wal_segments`, `delete_database`, `clone_database`, `list_database_replicas`, `create_database_replica`, `restore_database_backup`, `run_database_backup_now`, `list_all_backups`, `get_backups_overview`, `list_s3_database_backups`, `restore_s3_database_backup`, `refresh_database_engines` | Provisioning PostgreSQL, MySQL, Redis, MariaDB, and MongoDB with automated credentials, immediate backup creation, snapshot deletion, backup integrity verification, PITR point-in-time recovery with branching, WAL archive operations, and remote storage configuration. |
-| **Agent Target Nodes** | `list_targets`, `add_target`, `delete_target`, `set_target_region`, `drain_target`, `undrain_target`, `generate_target_token`, `upgrade_target`, `upgrade_all_targets` | Multi-node Docker agent infrastructure, one-time enrollment token issuance, target decommissioning, geo-region assignment, traffic draining/undraining, and remote target binary upgrades. |
-| **Projects & Env Groups** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_project_environment`, `update_project_env`, `sync_project_env`, `get_project`, `update_project`, `get_environment`, `update_environment`, `delete_environment`, `get_environment_env`, `diff_environments`, `get_env_group`, `update_env_group` | Project organization, multi-environment isolation, shared environment variable groups, and cross-environment configuration synchronization with selective key cloning. |
-| **Outbound Webhooks** | `list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook` | Outbound event notification webhook dispatchers: endpoint management, HMAC-SHA256 signature secret validation, fine-grained event subscriptions, and end-to-end webhook delivery testing. |
-| **Container Registries** | `list_registries`, `add_registry`, `update_registry`, `delete_registry` | Private Docker and OCI container registry credentials: credential storage, secure pull authentication, and server target endpoints. |
-| **Git Connections** | `list_git_connections`, `get_git_connection`, `add_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches`, `update_git_connection`, `authorize_git_connection`, `create_github_app`, `install_github_app` | Git provider connections (GitHub App, GitLab, Gitea): OAuth link management, accessible repository browsing, and remote branch enumeration. |
-| **Accounts & Auth Tokens** | `list_accounts`, `create_account`, `update_account`, `delete_account`, `list_auth_tokens`, `create_auth_token`, `delete_auth_token` | User account administration: roles (admin, editor, viewer), proxy isolation scopes, password management, and persistent scoped API token issuance. |
-| **Disaster Recovery** | `list_dr_backups`, `create_dr_backup` | Full system snapshot archives with optional AES-256-GCM encryption and automatic S3 replication. |
+| **Managed Databases & Backups** | `list_databases`, `list_database_engines`, `create_database`, `get_database_credentials`, `list_database_tenants`, `reset_database_password`, `delete_database_tenant`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config`, `test_database_backup`, `get_database_pitr_range`, `restore_database_pitr`, `archive_database_wal`, `list_database_wal_segments`, `delete_database`, `clone_database`, `list_database_replicas`, `create_database_replica`, `restore_database_backup`, `run_database_backup_now`, `list_all_backups`, `get_backups_overview`, `list_s3_database_backups`, `restore_s3_database_backup`, `refresh_database_engines` | Provisioning PostgreSQL, MySQL, Redis, MariaDB, and MongoDB with automated credentials, immediate backup creation, snapshot deletion, backup integrity verification, PITR point-in-time recovery with branching, WAL archive operations, and remote storage configuration. |
+| **Agent Target Nodes** | `list_targets`, `create_target`, `delete_target`, `update_target_region`, `drain_target`, `undrain_target`, `create_target_token`, `upgrade_target`, `upgrade_all_targets` | Multi-node Docker agent infrastructure, one-time enrollment token issuance, target decommissioning, geo-region assignment, traffic draining/undraining, and remote target binary upgrades. |
+| **Projects & Env Groups** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_environment`, `update_environment_env`, `sync_environment_env`, `get_project`, `update_project`, `get_environment`, `update_environment`, `delete_environment`, `get_environment_env`, `diff_environments`, `get_env_group`, `update_env_group` | Project organization, multi-environment isolation, shared environment variable groups, and cross-environment configuration synchronization with selective key cloning. |
+| **Outbound Webhooks** | `list_outbound_webhooks`, `get_outbound_webhook`, `create_outbound_webhook`, `update_outbound_webhook`, `delete_outbound_webhook`, `test_outbound_webhook` | Outbound event notification webhook dispatchers: endpoint management, HMAC-SHA256 signature secret validation, fine-grained event subscriptions, and end-to-end webhook delivery testing. |
+| **Container Registries** | `list_registries`, `create_registry`, `update_registry`, `delete_registry` | Private Docker and OCI container registry credentials: credential storage, secure pull authentication, and server target endpoints. |
+| **Git Connections** | `list_git_connections`, `get_git_connection`, `create_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches`, `update_git_connection`, `authorize_git_connection`, `create_github_app`, `install_github_app` | Git provider connections (GitHub App, GitLab, Gitea): OAuth link management, accessible repository browsing, and remote branch enumeration. |
+| **Accounts & Auth Tokens** | `list_accounts`, `create_account`, `update_account`, `delete_account`, `list_tokens`, `create_token`, `delete_token` | User account administration: roles (admin, editor, viewer), proxy isolation scopes, password management, and persistent scoped API token issuance. |
+| **Disaster Recovery** | `list_disaster_recovery_backups`, `create_disaster_recovery_backup`, `restore_disaster_recovery_backup`, `delete_disaster_recovery_backup` | Full system snapshot archives with optional AES-256-GCM encryption and automatic S3 replication. |
 
 The MCP server is off by default. The settings page of the panel turns it on while the server runs and holds the clients that may sign in. `config.toml` carries the same section:
 
@@ -2242,7 +2242,7 @@ enabled = true
 extra_ports = ["udp/51820"]
 ```
 
-The settings page, the MCP tool `set_firewall` and `r3 security firewall set --enabled true --extra-ports udp/51820` change the same two settings.
+The settings page, the MCP tool `update_firewall` and `r3 security firewall set --enabled true --extra-ports udp/51820` change the same two settings.
 
 r3v3rs3 replaces the table in one `nft -f` transaction each time a port, an app or the setting changes, so a half-written table never exists. Turning the setting off removes the table. The table filters only the `input` hook; the Docker NAT and forward rules stay as they are. Agent targets keep the same table on their host with the `host_ports` of their apps.
 
@@ -2505,8 +2505,8 @@ r3 traffic connections close con_01j7xyz
 ### Model Context Protocol (MCP)
 
 AI agents can inspect and manage active connections autonomously via MCP tools:
-- `list_active_connections`: Lists all active long-lived connections and streams with protocol, client IP, target, duration, transferred bytes, and throughput rate. Supports optional `proxy_id` filter.
-- `terminate_active_connection`: Immediately terminates an active connection by its unique ID. Requires the `edit` permission.
+- `list_traffic_connections`: Lists all active long-lived connections and streams with protocol, client IP, target, duration, transferred bytes, and throughput rate. Supports optional `proxy_id` filter.
+- `terminate_traffic_connection`: Immediately terminates an active connection by its unique ID. Requires the `edit` permission.
 
 ### Admin API
 

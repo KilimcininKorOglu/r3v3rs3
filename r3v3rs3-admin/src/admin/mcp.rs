@@ -85,7 +85,7 @@ pub struct ListActiveConnectionsParams {
     pub proxy_id: Option<String>,
 }
 
-/// The `{ "port": {...} }` argument of `add_port`.
+/// The `{ "port": {...} }` argument of `create_port`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddPortParams {
     /// The port configuration, in the same form as the body of POST /api/ports.
@@ -99,7 +99,7 @@ pub struct UpdatePortParams {
     pub entry: r3v3rs3_api::port::PortEntry,
 }
 
-/// The argument of `set_port_early_data`.
+/// The argument of `update_port_early_data`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SetPortEarlyDataParams {
     /// The id of the port.
@@ -108,7 +108,7 @@ pub struct SetPortEarlyDataParams {
     pub enabled: bool,
 }
 
-/// The argument of `set_port_transparent`.
+/// The argument of `update_port_transparent`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SetPortTransparentParams {
     /// The id of the port.
@@ -275,7 +275,7 @@ pub struct AppMetricsParams {
     pub hours: Option<u32>,
 }
 
-/// The arguments of `set_app_git_token`.
+/// The arguments of `update_app_git_token`.
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 pub struct GitTokenParams {
     /// The id of the app.
@@ -308,7 +308,7 @@ fn json_arg<T: serde::de::DeserializeOwned>(
         .map_err(|err| ErrorData::invalid_params(err.to_string(), None))
 }
 
-/// The argument of `add_dns_credential`.
+/// The argument of `create_dns_credential`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DnsCredentialParams {
     /// The body of POST /api/dns_credentials.
@@ -324,7 +324,7 @@ pub struct UpdateDnsCredentialParams {
     pub request: r3v3rs3_api::acme::DnsCredentialRequest,
 }
 
-/// The argument of `set_firewall`.
+/// The argument of `update_firewall`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SetFirewallParams {
     /// Whether r3v3rs3 keeps the host firewall table.
@@ -333,7 +333,7 @@ pub struct SetFirewallParams {
     pub extra_ports: Option<Vec<String>>,
 }
 
-/// Applies the given fields of `set_firewall`; an invalid port is refused before anything changes.
+/// Applies the given fields of `update_firewall`; an invalid port is refused before anything changes.
 fn apply_firewall_params(
     firewall: &mut r3v3rs3_api::firewall::FirewallConfig,
     params: SetFirewallParams,
@@ -351,7 +351,7 @@ fn apply_firewall_params(
     Ok(())
 }
 
-/// The argument of `update_ct_monitor_config`.
+/// The argument of `update_ct_config`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateCtConfigParams {
     /// Whether CT monitoring is enabled.
@@ -370,7 +370,7 @@ pub struct UpdateCtConfigParams {
     pub ct_api_url: Option<String>,
 }
 
-/// The argument of `list_ct_log_entries`.
+/// The argument of `list_ct_entries`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ListCtEntriesParams {
     /// Optional domain filter.
@@ -381,7 +381,7 @@ pub struct ListCtEntriesParams {
     pub limit: Option<usize>,
 }
 
-/// The argument of `check_ct_logs_now`.
+/// The argument of `check_ct_now`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CheckCtParams {
     /// Specific domain to check. If omitted, checks all configured and discovered domains.
@@ -397,7 +397,7 @@ pub struct DismissCtAlertParams {
     pub status: Option<String>,
 }
 
-/// The `{ "proxy": {...} }` argument of `add_proxy`, in the form of the admin API.
+/// The `{ "proxy": {...} }` argument of `create_proxy`, in the form of the admin API.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddProxyParams {
     /// The proxy configuration, in the same form as the body of POST /api/proxies.
@@ -421,7 +421,7 @@ pub struct PurgeProxyCacheParams {
     pub path: Option<String>,
 }
 
-/// The argument of `set_stream_priority`.
+/// The argument of `update_proxy_stream_priority`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SetStreamPriorityParams {
     /// The id of the proxy.
@@ -441,14 +441,14 @@ pub struct CertCoverageParams {
     pub domains: Vec<String>,
 }
 
-/// The `{ "request": {...} }` argument of `add_acme`.
+/// The `{ "request": {...} }` argument of `create_acme`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddAcmeParams {
     /// The ACME certificate request configuration.
     pub request: r3v3rs3_api::acme::AcmeRequest,
 }
 
-/// The `{ "list": {...} }` argument of `add_access_list`.
+/// The `{ "list": {...} }` argument of `create_access_list`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddAccessListParams {
     /// The access control list configuration.
@@ -462,7 +462,7 @@ pub struct UpdateAccessListParams {
     pub entry: r3v3rs3_api::access_list::AccessListEntry,
 }
 
-/// The `{ "app": {...} }` argument of `add_app`.
+/// The `{ "app": {...} }` argument of `create_app`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddAppParams {
     /// The application specification, in the same form as the body of POST /api/apps.
@@ -527,7 +527,7 @@ pub struct RollbackParams {
     pub deployment_id: String,
 }
 
-/// The arguments of `add_app_scheduled_command`.
+/// The arguments of `create_app_scheduled_command`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddAppScheduledCommandParams {
     /// The id of the application.
@@ -568,7 +568,7 @@ pub struct AppCommandTargetParams {
     pub command_id: String,
 }
 
-/// The arguments of `add_webhook`.
+/// The arguments of `create_outbound_webhook`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddWebhookParams {
     /// Name of the webhook.
@@ -583,7 +583,7 @@ pub struct AddWebhookParams {
     pub events: Vec<String>,
 }
 
-/// The arguments of `update_webhook`.
+/// The arguments of `update_outbound_webhook`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateWebhookParams {
     /// Webhook ID to update.
@@ -600,7 +600,7 @@ pub struct UpdateWebhookParams {
     pub events: Option<Vec<String>>,
 }
 
-/// The arguments of `test_webhook`.
+/// The arguments of `test_outbound_webhook`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct TestWebhookParams {
     /// Optional ID of an existing webhook to test.
@@ -613,7 +613,7 @@ pub struct TestWebhookParams {
     pub event: Option<String>,
 }
 
-/// The arguments of `add_registry`.
+/// The arguments of `create_registry`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddRegistryParams {
     /// Container registry server address (e.g. "docker.io", "ghcr.io", "registry.gitlab.com").
@@ -637,7 +637,7 @@ pub struct UpdateRegistryParams {
     pub password: Option<String>,
 }
 
-/// The arguments of `add_git_connection`.
+/// The arguments of `create_git_connection`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddGitConnectionParams {
     /// Distinct identifier name for the connection (e.g. "github-org", "company-gitlab").
@@ -707,7 +707,7 @@ pub struct DeleteAccountParams {
     pub username: String,
 }
 
-/// The arguments of `create_auth_token`.
+/// The arguments of `create_token`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateAuthTokenParams {
     /// Descriptive label for the token (e.g. "CI Deploy Token").
@@ -796,14 +796,14 @@ pub struct UpdateBackupConfigParams {
     pub config: r3v3rs3_api::platform::BackupConfig,
 }
 
-/// The `{ "request": {...} }` argument of `add_target`.
+/// The `{ "request": {...} }` argument of `create_target`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddTargetParams {
     /// Target node request (`{"name": "node-1"}`).
     pub request: r3v3rs3_api::platform::TargetRequest,
 }
 
-/// The arguments of `set_target_region`.
+/// The arguments of `update_target_region`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SetTargetRegionParams {
     /// Target node ID.
@@ -829,7 +829,7 @@ pub struct CreateEnvGroupParams {
     pub group: r3v3rs3_api::platform::EnvGroupSpec,
 }
 
-/// The arguments of `create_project_environment`.
+/// The arguments of `create_environment`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateProjectEnvironmentParams {
     /// Project ID to create the environment in.
@@ -840,7 +840,7 @@ pub struct CreateProjectEnvironmentParams {
     pub description: Option<String>,
 }
 
-/// The arguments of `update_project_env`.
+/// The arguments of `update_environment_env`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateProjectEnvParams {
     /// Environment ID to update variables for.
@@ -849,7 +849,7 @@ pub struct UpdateProjectEnvParams {
     pub variables: Vec<r3v3rs3_api::platform::EnvEntry>,
 }
 
-/// The arguments of `sync_project_env`.
+/// The arguments of `sync_environment_env`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SyncProjectEnvParams {
     /// Project ID owning the environments.
@@ -864,7 +864,7 @@ pub struct SyncProjectEnvParams {
     pub keys: Option<Vec<String>>,
 }
 
-/// The arguments of `create_dr_backup`.
+/// The arguments of `create_disaster_recovery_backup`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateDrBackupParams {
     /// The passphrase that encrypts the bundle with AES-256-GCM; a restore needs the same one.
@@ -873,7 +873,7 @@ pub struct CreateDrBackupParams {
     pub upload_s3: Option<bool>,
 }
 
-/// The arguments of `restore_dr_backup`.
+/// The arguments of `restore_disaster_recovery_backup`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RestoreDrBackupParams {
     /// Identifier of the disaster recovery backup snapshot to restore.
@@ -882,14 +882,14 @@ pub struct RestoreDrBackupParams {
     pub passphrase: String,
 }
 
-/// The arguments of `delete_dr_backup`.
+/// The arguments of `delete_disaster_recovery_backup`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DeleteDrBackupParams {
     /// Identifier of the disaster recovery backup snapshot to delete.
     pub backup_id: String,
 }
 
-/// The arguments of `vacuum_all_logs`.
+/// The arguments of `vacuum_platform_logs`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct VacuumLogsParams {
     /// Optional size threshold in megabytes. Only the containers whose log files exceed this
@@ -959,7 +959,7 @@ pub struct UpdateGeoIpConfigParams {
     pub update_interval_days: Option<u32>,
 }
 
-/// The arguments of `add_error_page_theme`.
+/// The arguments of `create_error_page_theme`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddErrorPageThemeParams {
     /// Human-friendly display name of the theme.
@@ -999,7 +999,7 @@ pub struct ProxyDictIdParams {
     pub dict_id: String,
 }
 
-/// The arguments of `add_compression_dictionary`.
+/// The arguments of `create_compression_dictionary`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddCompressionDictionaryParams {
     /// The id of the proxy.
@@ -1026,7 +1026,7 @@ fn resolve_mcp_grpc_target(params_target: Option<String>, proxy: &Proxy) -> Opti
     })
 }
 
-/// The arguments of `check_grpc_health`.
+/// The arguments of `check_proxy_grpc_health`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CheckGrpcHealthParams {
     /// The id of the proxy (optional if target_url is provided).
@@ -1037,7 +1037,7 @@ pub struct CheckGrpcHealthParams {
     pub service: Option<String>,
 }
 
-/// The arguments of `apply_security_header_profile`.
+/// The arguments of `apply_proxy_security_header_profile`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ApplySecurityHeaderProfileParams {
     /// The id of the proxy.
@@ -1285,7 +1285,7 @@ fn parse_optional_choice<T: serde::de::DeserializeOwned>(
     value.map_or(Ok(default), |value| parse_choice(field, value))
 }
 
-/// The validated sync request of `sync_project_env`.
+/// The validated sync request of `sync_environment_env`.
 fn sync_request(
     params: &SyncProjectEnvParams,
 ) -> Result<r3v3rs3_api::platform::EnvironmentSyncRequest, ErrorData> {
@@ -1487,9 +1487,9 @@ impl McpServer {
 
     /// Get the current status and step of the server self-upgrade.
     #[tool(
-        description = "Show the stage of the server self-upgrade that runs at the moment: `checking_release`, `downloading`, `installing`, `handing_over` or `done`; `null` when no upgrade runs. Poll it after `run_server_upgrade` until the stage is `done`. Takes no arguments. Read-only; any account can call it."
+        description = "Show the stage of the server self-upgrade that runs at the moment: `checking_release`, `downloading`, `installing`, `handing_over` or `done`; `null` when no upgrade runs. Poll it after `upgrade_server` until the stage is `done`. Takes no arguments. Read-only; any account can call it."
     )]
-    async fn get_server_upgrade_status(
+    async fn get_upgrade_status(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -1505,9 +1505,9 @@ impl McpServer {
 
     /// Run server self-upgrade to the latest release.
     #[tool(
-        description = "Upgrade this server to the newest GitHub release: download and install the binary, start the new version and hand the listening sockets over to it, so open connections are not dropped. The call returns the release tag as soon as the upgrade starts; follow it with `get_server_upgrade_status`. Takes no arguments. Needs a token with the edit scope and an admin account."
+        description = "Upgrade this server to the newest GitHub release: download and install the binary, start the new version and hand the listening sockets over to it, so open connections are not dropped. The call returns the release tag as soon as the upgrade starts; follow it with `get_upgrade_status`. Takes no arguments. Needs a token with the edit scope and an admin account."
     )]
-    async fn run_server_upgrade(
+    async fn upgrade_server(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -1617,7 +1617,7 @@ impl McpServer {
 
     /// Unban a client IP address.
     #[tool(
-        description = "Lift the sign-in ban of one client address (`ip`, IPv4 or IPv6), so it can sign in to the panel again at once. It does not release a quarantine; use `unban_quarantined_ip` for that. Needs a token with the edit scope and an admin account."
+        description = "Lift the sign-in ban of one client address (`ip`, IPv4 or IPv6), so it can sign in to the panel again at once. It does not release a quarantine; use `unquarantine_ip` for that. Needs a token with the edit scope and an admin account."
     )]
     async fn unban_ip(
         &self,
@@ -1688,7 +1688,7 @@ impl McpServer {
     #[tool(
         description = "Release one client address (`ip`) from quarantine before its end time, so its traffic is served again. To keep it from returning to quarantine, add it to `allowed_ips` with `update_quarantine_config`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn unban_quarantined_ip(
+    async fn unquarantine_ip(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<IpParams>,
@@ -1755,7 +1755,7 @@ impl McpServer {
 
     /// The host firewall table that r3v3rs3 keeps.
     #[tool(
-        description = "Show the host firewall table (nftables `inet r3v3rs3`) that r3v3rs3 keeps: whether it is enabled, the TCP and UDP ports it opens (`tcp/443`, `udp/49160-49240`), warnings about other firewalls of the host that can still drop these ports, and the error of the last update. Turn it on and set extra ports with `set_firewall`. Takes no arguments. Read-only; any account can call it."
+        description = "Show the host firewall table (nftables `inet r3v3rs3`) that r3v3rs3 keeps: whether it is enabled, the TCP and UDP ports it opens (`tcp/443`, `udp/49160-49240`), warnings about other firewalls of the host that can still drop these ports, and the error of the last update. Turn it on and set extra ports with `update_firewall`. Takes no arguments. Read-only; any account can call it."
     )]
     async fn get_firewall_status(
         &self,
@@ -1834,7 +1834,7 @@ impl McpServer {
     #[tool(
         description = "Turn the host firewall table (nftables `inet r3v3rs3`) on or off (`enabled`) and replace its extra ports (`extra_ports`, such as [\"udp/51820\", \"tcp/8443\"]; an empty list clears them). Omitted fields keep their value. The table always opens the SSH ports and the ports of r3v3rs3; check the result and the warnings with `get_firewall_status`. Needs a token with the edit scope and an admin account."
     )]
-    async fn set_firewall(
+    async fn update_firewall(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<SetFirewallParams>,
@@ -1930,7 +1930,7 @@ impl McpServer {
 
     /// The ports with their state.
     #[tool(
-        description = "List every port (listener) of the server with its id, name, listen address in multiaddr form (for example `/ip4/0.0.0.0/tcp/443/https`), TLS termination settings and current state. A port is the listening socket; a proxy names the ids of the ports it serves in its `ports` list. Use the ids from here for the other port tools and for `add_proxy`. Takes no arguments. Read-only; any account can call it."
+        description = "List every port (listener) of the server with its id, name, listen address in multiaddr form (for example `/ip4/0.0.0.0/tcp/443/https`), TLS termination settings and current state. A port is the listening socket; a proxy names the ids of the ports it serves in its `ports` list. Use the ids from here for the other port tools and for `create_proxy`. Takes no arguments. Read-only; any account can call it."
     )]
     async fn list_ports(
         &self,
@@ -1966,7 +1966,7 @@ impl McpServer {
 
     /// Port runtime socket and TLS status.
     #[tool(
-        description = "Show the runtime state of one port by its `id`: `listening`, `inactive`, `address_already_in_use`, `permission_denied`, `address_not_available` or `error`, and since when it listens. Use it after `add_port`, `update_port` or `reset_port` to confirm that the listener is up. Read-only; any account can call it."
+        description = "Show the runtime state of one port by its `id`: `listening`, `inactive`, `address_already_in_use`, `permission_denied`, `address_not_available` or `error`, and since when it listens. Use it after `create_port`, `update_port` or `reset_port` to confirm that the listener is up. Read-only; any account can call it."
     )]
     async fn get_port_status(
         &self,
@@ -1987,7 +1987,7 @@ impl McpServer {
     #[tool(
         description = "Create a port and start listening on it. `port` is the same JSON object as the body of POST /api/ports, for example {\"name\": \"https\", \"listen\": \"/ip4/0.0.0.0/tcp/443/https\"}; the protocol at the end of `listen` (tcp, tls, http, https, udp, quic) selects the handler. A plain TCP or UDP port can name a range such as `/ip4/0.0.0.0/udp/49160-49240` (at most 16384 ports; its proxies need upstream ranges of the same size, and each port goes to the upstream port at its position), and `opts.transparent: true` makes the upstream servers see the client address. Returns the name of the new port; read its id with `list_ports`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn add_port(
+    async fn create_port(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddPortParams>,
@@ -2064,7 +2064,7 @@ impl McpServer {
     #[tool(
         description = "Turn the transparent option on or off for one TCP or UDP port (`id`, `enabled`). A transparent port opens its upstream connections from the client address, so the upstream server (a TURN server, for example) sees the real client IP; r3v3rs3 keeps the nftables table and policy route for the replies. It needs CAP_NET_ADMIN on the server, fails on an HTTP or QUIC port, and fails when a proxy of the port has a loopback upstream server. Other port settings stay unchanged. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn set_port_transparent(
+    async fn update_port_transparent(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<SetPortTransparentParams>,
@@ -2089,7 +2089,7 @@ impl McpServer {
     #[tool(
         description = "Turn TLS 1.3 0-RTT early data on or off for one port (`id`, `enabled`). Early data lets a returning client send its first request in the handshake; r3v3rs3 guards it against replay. Enabling fails on a port without TLS termination. Other port settings stay unchanged. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn set_port_early_data(
+    async fn update_port_early_data(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<SetPortEarlyDataParams>,
@@ -2197,7 +2197,7 @@ impl McpServer {
     #[tool(
         description = "Call `grpc.health.v1.Health/Check` on a gRPC server now and report whether it serves, the gRPC status and the latency. Give `target_url` (for example `http://127.0.0.1:50051`; `https://` uses TLS, anything else plaintext HTTP/2) or `proxy_id` (the first upstream server of its routes is checked; `target_url` wins when both are given). `service` checks one service; empty checks the whole server. The timeout is 5 seconds. Read-only; any account can call it."
     )]
-    async fn check_grpc_health(
+    async fn check_proxy_grpc_health(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<CheckGrpcHealthParams>,
@@ -2239,7 +2239,7 @@ impl McpServer {
 
     /// List all predefined OWASP security hardening profiles.
     #[tool(
-        description = "List the built-in security header profiles (`strict`, `balanced`, `api_only`, `spa_frontend`) with the response headers each one sets (for example Content-Security-Policy, Strict-Transport-Security, X-Frame-Options). Use it to choose a profile for `apply_security_header_profile`. Takes no arguments. Read-only; any account can call it."
+        description = "List the built-in security header profiles (`strict`, `balanced`, `api_only`, `spa_frontend`) with the response headers each one sets (for example Content-Security-Policy, Strict-Transport-Security, X-Frame-Options). Use it to choose a profile for `apply_proxy_security_header_profile`. Takes no arguments. Read-only; any account can call it."
     )]
     async fn list_security_header_profiles(
         &self,
@@ -2258,7 +2258,7 @@ impl McpServer {
     #[tool(
         description = "Grade the response header rules configured on one HTTP proxy (`id`) from A+ to F, with the score and, for each security header, whether it is set and which risk a missing one leaves open. It reads the configuration, not live responses. Fails for TCP and UDP proxies. Read-only; any account can call it."
     )]
-    async fn analyze_proxy_security_headers(
+    async fn get_proxy_security_headers(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<IdParams>,
@@ -2286,9 +2286,9 @@ impl McpServer {
 
     /// Apply a predefined OWASP security profile to an HTTP proxy.
     #[tool(
-        description = "Set the security response headers of one HTTP proxy (`proxy_id`) to a built-in profile: `strict`, `balanced`, `api_only` or `spa_frontend` (see `list_security_header_profiles`). It changes the live proxy at once and returns the new grade, as `analyze_proxy_security_headers` gives it. A strict Content-Security-Policy can break a site that loads scripts from other origins. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
+        description = "Set the security response headers of one HTTP proxy (`proxy_id`) to a built-in profile: `strict`, `balanced`, `api_only` or `spa_frontend` (see `list_security_header_profiles`). It changes the live proxy at once and returns the new grade, as `get_proxy_security_headers` gives it. A strict Content-Security-Policy can break a site that loads scripts from other origins. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
     )]
-    async fn apply_security_header_profile(
+    async fn apply_proxy_security_header_profile(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<ApplySecurityHeaderProfileParams>,
@@ -2309,7 +2309,7 @@ impl McpServer {
     #[tool(
         description = "Show the HTTP/2 and HTTP/3 stream priority settings (RFC 9218) of one HTTP proxy (`id`): whether adaptive priority is on, whether a `Priority` header is sent upstream, and whether adaptive concurrency backpressure is on. Fails for TCP and UDP proxies. Read-only; any account can call it."
     )]
-    async fn get_stream_priority(
+    async fn get_proxy_stream_priority(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<IdParams>,
@@ -2334,7 +2334,7 @@ impl McpServer {
     #[tool(
         description = "Turn RFC 9218 adaptive stream priority on or off for one HTTP proxy (`id`, `enabled`). `inject_header` sends the `Priority` header to the upstream servers; `adaptive_concurrency` limits concurrent streams when the upstream slows down. An omitted optional flag keeps its value. Applies at once. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
     )]
-    async fn set_stream_priority(
+    async fn update_proxy_stream_priority(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<SetStreamPriorityParams>,
@@ -2363,7 +2363,7 @@ impl McpServer {
     #[tool(
         description = "Show the server-wide counters of the stream priority scheduler since the start: streams per RFC 9218 urgency class and how often adaptive backpressure throttled streams. Takes no arguments. Read-only; any account can call it."
     )]
-    async fn get_stream_priority_stats(
+    async fn get_traffic_priority_stats(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -2375,7 +2375,7 @@ impl McpServer {
     #[tool(
         description = "Create a proxy and start serving it on its ports at once. `proxy` is the same JSON object as the body of POST /api/proxies: `name`, `ports` (the port ids from `list_ports`), `protocol` (`http`, `tcp` or `udp`) and the fields of that protocol on the same level, for example {\"name\": \"site\", \"ports\": [\"<port id>\"], \"protocol\": \"http\", \"vhosts\": [\"example.com\"], \"routes\": [{\"path\": \"/\", \"servers\": [{\"url\": \"http://127.0.0.1:8080/\"}]}]}; a TCP proxy takes {\"protocol\": \"tcp\", \"upstream_servers\": [{\"addr\": \"/dns/db.internal/tcp/5432\"}]}. Returns the name of the new proxy; read its id with `list_proxies`. Needs a token with the edit scope and an editor or admin account."
     )]
-    async fn add_proxy(
+    async fn create_proxy(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddProxyParams>,
@@ -2524,7 +2524,7 @@ impl McpServer {
     #[tool(
         description = "Add a compression dictionary to one HTTP proxy (`proxy_id`). The proxy serves `raw_data` at `path` with a `Use-As-Dictionary: match=\"<match_pattern>\"` header, computes its SHA-256 hash itself, and compresses later responses whose URL matches `match_pattern` against it. Returns the new dictionary id and its hash. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
     )]
-    async fn add_compression_dictionary(
+    async fn create_compression_dictionary(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddCompressionDictionaryParams>,
@@ -2726,7 +2726,7 @@ impl McpServer {
     #[tool(
         description = "Create an ACME request that obtains a certificate and renews it automatically. `request` is the body of POST /api/acme: `server_url` (the CA directory, for example Let's Encrypt), `contacts`, `identifiers` (the domain names), `challenge_type` (`http-01` needs port 80, `tls-alpn-01` needs port 443, `dns-01` is required for wildcards and needs `dns_credential` from `list_dns_credentials` or an inline `dns_provider`), optional `dns_alias` and `eab`, and `renewal_days`. The first order starts in the background; follow it with `list_acme` and `list_certs`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn add_acme(
+    async fn create_acme(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddAcmeParams>,
@@ -2800,7 +2800,7 @@ impl McpServer {
 
     /// List configured DNS provider credentials.
     #[tool(
-        description = "List the stored DNS provider credentials that `dns-01` ACME requests reference, with their id, name and provider (for example `cloudflare`). The API keys themselves are never returned. Pass an id from here as `dns_credential` in `add_acme`. Takes no arguments. Read-only; any account can call it."
+        description = "List the stored DNS provider credentials that `dns-01` ACME requests reference, with their id, name and provider (for example `cloudflare`). The API keys themselves are never returned. Pass an id from here as `dns_credential` in `create_acme`. Takes no arguments. Read-only; any account can call it."
     )]
     async fn list_dns_credentials(
         &self,
@@ -2840,7 +2840,7 @@ impl McpServer {
     #[tool(
         description = "Create an access list. `list` is the body of POST /api/access_lists: `name`, `ip_filter` and `auth`. Reference the new list from an HTTP proxy or route with its `access_list` field (read the id with `list_access_lists`). Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn add_access_list(
+    async fn create_access_list(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddAccessListParams>,
@@ -2918,7 +2918,7 @@ impl McpServer {
     #[tool(
         description = "Create a named DNS credential that ACME `dns-01` requests reference by id. `request` is the body of POST /api/dns_credentials: `name` and `dns_provider` (for example {\"provider\": \"cloudflare\", \"api_token\": \"...\"}). The secret is sealed and never returned. Needs a token with the edit scope and an admin account."
     )]
-    async fn add_dns_credential(
+    async fn create_dns_credential(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<DnsCredentialParams>,
@@ -3030,7 +3030,7 @@ impl McpServer {
     #[tool(
         description = "Create an error page theme from `name`, an optional `description` and `pages`, a list of {\"status\": <HTTP status code>, \"body\": \"<HTML>\"}. Returns the id of the new theme; set it as `error_page_theme` of an HTTP proxy to use it. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn add_error_page_theme(
+    async fn create_error_page_theme(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddErrorPageThemeParams>,
@@ -3191,7 +3191,7 @@ impl McpServer {
     #[tool(
         description = "Create an app on the deployment platform without starting it. `app` is the body of POST /api/apps: `name`, `target` (`local` for the Docker engine of this server, or an agent target id from `list_targets`) and `spec` with `source` ({\"type\": \"image\", \"image\": \"nginx:1.27\"}, {\"type\": \"git\", \"repository\": \"https://...\", \"branch\": \"main\"} or {\"type\": \"compose\", ...}), the container `port`, `domains` and the listener `ports` that route to it. Returns the new app with its id. Set environment variables with `update_app_env`, then start it with `deploy_app`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn add_app(
+    async fn create_app(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddAppParams>,
@@ -3617,7 +3617,7 @@ impl McpServer {
     #[tool(
         description = "Add a command that runs on a schedule inside the running container of an app: `app_id`, `name`, `schedule` (cron syntax, for example `0 3 * * *` or `@daily`), `command` (a shell command) and `enabled` (default true). Returns the new command with its id. Needs a token with the edit scope and an admin account."
     )]
-    async fn add_app_scheduled_command(
+    async fn create_app_scheduled_command(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddAppScheduledCommandParams>,
@@ -4263,7 +4263,7 @@ impl McpServer {
     #[tool(
         description = "Create a self-signed certificate. `request` holds `san` (the subject names), optional `ca_cert` (the id of the CA that signs it; without it a new CA is created and stored) and `kind` (`server` or `client`). Needs a token with the edit scope and an account that may edit."
     )]
-    async fn self_sign_cert(
+    async fn create_self_signed_cert(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<JsonRequestParams>,
@@ -4667,7 +4667,7 @@ impl McpServer {
     #[tool(
         description = "Run grpc.health.v1.Health/Check against `request.target_url`, optionally for `request.service`. Needs a token with the edit scope and an account that may edit."
     )]
-    async fn health_grpc(
+    async fn check_grpc_health(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<JsonRequestParams>,
@@ -5018,9 +5018,9 @@ impl McpServer {
 
     /// Show where a proxy would send a request.
     #[tool(
-        description = "Run a request through a proxy definition without sending it. `request` holds `proxy` (an HTTP proxy as in `add_proxy`), `url`, optional `method` and `client_ip`. Returns whether a route matched, the route, the upstream URL or the redirect. Read-only."
+        description = "Run a request through a proxy definition without sending it. `request` holds `proxy` (an HTTP proxy as in `create_proxy`), `url`, optional `method` and `client_ip`. Returns whether a route matched, the route, the upstream URL or the redirect. Read-only."
     )]
-    async fn dry_run_proxy(
+    async fn preview_proxy(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<JsonRequestParams>,
@@ -5031,6 +5031,46 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         json_result(result.0)
+    }
+
+    /// The worker processes that serve the ports.
+    #[tool(
+        description = "Show the state of the worker processes that serve the ports: the mode (`workers = off` means the master serves them itself), and the pid, start time and restart count of each worker. Takes no arguments. Read-only; any account can call it."
+    )]
+    async fn get_workers(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let workers = super::workers::list(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(workers.0)
+    }
+
+    /// Replace the global settings.
+    #[tool(
+        description = "Replace the global settings of the server. `request` is the whole settings object as `get_config` returns it, with your changes: read it first, change the fields, and send it back. Masked secret values keep the saved secret, so a round trip does not erase keys or passwords. Needs a token with the edit scope and an admin account."
+    )]
+    async fn update_config(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let config: r3v3rs3_api::app::AppConfig = json_arg(params.request)?;
+        let saved = super::config::put(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(config),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(saved.0)
     }
 
     /// Replace a Git connection.
@@ -5487,7 +5527,7 @@ impl McpServer {
     #[tool(
         description = "Set the access `token` that clones the private repository of the Git or Compose app `id` without a Git connection. The token is sealed and never returned. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn set_app_git_token(
+    async fn update_app_git_token(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<GitTokenParams>,
@@ -5535,7 +5575,7 @@ impl McpServer {
     #[tool(
         description = "Create a new push webhook secret for the app `id` and return it with the webhook URL. The secret is shown only in this answer; the old one stops working. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn new_app_webhook_secret(
+    async fn create_app_webhook_secret(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<IdParams>,
@@ -5788,7 +5828,7 @@ impl McpServer {
     #[tool(
         description = "Capture the current change log of a running managed database (`id`) and archive it now (PostgreSQL WAL, MySQL and MariaDB binary log, MongoDB oplog, Redis AOF), so the point-in-time recovery window reaches the present. Returns the archived segment. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn archive_database_wal_segment(
+    async fn archive_database_wal(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<IdParams>,
@@ -5858,7 +5898,7 @@ impl McpServer {
     #[tool(
         description = "Add an agent target (another server that runs apps for this one). `request` holds `name` and an optional `region`. Returns the target, a one-time enrollment token and the agent host and port to dial; run the agent on the remote server with them (`r3-server agent`). The token appears only in this answer. Needs a token with the edit scope and an admin account."
     )]
-    async fn add_target(
+    async fn create_target(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddTargetParams>,
@@ -5901,7 +5941,7 @@ impl McpServer {
     #[tool(
         description = "Set the region label of a target (`id`, `region`, for example `eu`, `na`, `tr` or `apac`; null clears it). GeoIP steering sends clients to targets of their region. Returns the updated target. Needs a token with the edit scope and an admin account."
     )]
-    async fn set_target_region(
+    async fn update_target_region(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<SetTargetRegionParams>,
@@ -5970,7 +6010,7 @@ impl McpServer {
     #[tool(
         description = "Replace the enrollment token of an agent target (`id`), for example when the old token leaked or a server is reinstalled. The enrolled agent keeps working until an agent enrolls with the new token. Returns the new token (shown only here) with the agent host and port. Needs a token with the edit scope and an admin account."
     )]
-    async fn generate_target_token(
+    async fn create_target_token(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<IdParams>,
@@ -6168,7 +6208,7 @@ impl McpServer {
 
     /// List all environments belonging to a project.
     #[tool(
-        description = "List the environments of a project (`id`) with their id, name, description, number of variables and number of apps (the variables themselves are not listed). Use an environment id for `update_project_env`, `sync_project_env` or the `environment_id` of an app. Read-only; any account without a proxy list."
+        description = "List the environments of a project (`id`) with their id, name, description, number of variables and number of apps (the variables themselves are not listed). Use an environment id for `update_environment_env`, `sync_environment_env` or the `environment_id` of an app. Read-only; any account without a proxy list."
     )]
     async fn list_project_environments(
         &self,
@@ -6188,9 +6228,9 @@ impl McpServer {
 
     /// Create a new environment within a project. Needs the edit scope.
     #[tool(
-        description = "Create an environment in a project (`project_id`, `name` such as `staging` or `preview`, optional `description`). It starts without variables; set them with `update_project_env` or copy them with `sync_project_env`. Returns the new environment with its id. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+        description = "Create an environment in a project (`project_id`, `name` such as `staging` or `preview`, optional `description`). It starts without variables; set them with `update_environment_env` or copy them with `sync_environment_env`. Returns the new environment with its id. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn create_project_environment(
+    async fn create_environment(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<CreateProjectEnvironmentParams>,
@@ -6225,7 +6265,7 @@ impl McpServer {
     #[tool(
         description = "Replace the whole variable list of a project environment (`environment_id`) with `variables` ([{key, value, secret}]); a variable missing from the list is deleted. The apps of the environment get the new values at their next deployment. Returns the stored variables. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn update_project_env(
+    async fn update_environment_env(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<UpdateProjectEnvParams>,
@@ -6261,7 +6301,7 @@ impl McpServer {
     #[tool(
         description = "Copy variables from one environment of a project to another (`project_id`, `source_env_id`, `target_env_id`). `mode`: `sync_missing` (default) adds only the keys the target lacks; `clone_all` replaces all target variables with the source ones; `selected_keys` copies only the keys in `keys`. Returns how many variables were synced and which keys were added or updated. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn sync_project_env(
+    async fn sync_environment_env(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<SyncProjectEnvParams>,
@@ -6299,7 +6339,7 @@ impl McpServer {
     #[tool(
         description = "List the disaster recovery bundles stored on this server with their id, creation time, size, whether they are encrypted and the number of files they hold. Takes no arguments. Read-only; admin accounts only."
     )]
-    async fn list_dr_backups(
+    async fn list_disaster_recovery_backups(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -6317,7 +6357,7 @@ impl McpServer {
     #[tool(
         description = "Pack the whole server state into one AES-256-GCM encrypted disaster recovery bundle: settings, ports, proxies, access lists, certificates, accounts, the platform database and the platform secrets key. `passphrase` encrypts it; keep it safe, because the bundle cannot be restored without it. `upload_s3` (default true) also copies the bundle to the S3 bucket of the backup settings. Returns the new bundle entry. Needs a token with the edit scope and an admin account."
     )]
-    async fn create_dr_backup(
+    async fn create_disaster_recovery_backup(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<CreateDrBackupParams>,
@@ -6340,9 +6380,9 @@ impl McpServer {
 
     /// Restore a full system disaster recovery backup snapshot by ID.
     #[tool(
-        description = "Overwrite the current server state with a disaster recovery bundle (`backup_id` from `list_dr_backups`), decrypted with its `passphrase`. Every setting, proxy, account and platform record made after the bundle is lost. The server must be restarted afterwards to load the restored state. Returns the number of restored files. Needs a token with the edit scope and an admin account."
+        description = "Overwrite the current server state with a disaster recovery bundle (`backup_id` from `list_disaster_recovery_backups`), decrypted with its `passphrase`. Every setting, proxy, account and platform record made after the bundle is lost. The server must be restarted afterwards to load the restored state. Returns the number of restored files. Needs a token with the edit scope and an admin account."
     )]
-    async fn restore_dr_backup(
+    async fn restore_disaster_recovery_backup(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<RestoreDrBackupParams>,
@@ -6371,7 +6411,7 @@ impl McpServer {
     #[tool(
         description = "Delete one disaster recovery bundle (`backup_id`) from this server. A copy in S3 is not deleted. Needs a token with the edit scope and an admin account."
     )]
-    async fn delete_dr_backup(
+    async fn delete_disaster_recovery_backup(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<DeleteDrBackupParams>,
@@ -6394,7 +6434,7 @@ impl McpServer {
     #[tool(
         description = "Delete the rotated container log files of every app on the platform to free disk space at once; with `threshold_mb` only the containers whose log files are larger than that many megabytes lose them. The active log files stay. The deleted lines are lost. Returns the number of deleted files and the bytes freed. Needs a token with the edit scope and an admin account."
     )]
-    async fn vacuum_all_logs(
+    async fn vacuum_platform_logs(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<VacuumLogsParams>,
@@ -6424,7 +6464,7 @@ impl McpServer {
     #[tool(
         description = "Run the Docker disk cleanup now on the Docker host of the r3v3rs3 server and on every agent target, with the switches of the prune policy (`get_prune_policy`): unused images, stopped containers, build cache, unused volumes and large container logs. On an agent host only the stopped platform containers, the dangling image layers, the build cache and the rotated logs of the platform apps go. The newest builds of each app stay for rollback. An offline agent fails the call with its name after the server host is cleaned. Returns the bytes reclaimed. Takes no arguments. Needs a token with the edit scope and an admin account."
     )]
-    async fn run_platform_prune(
+    async fn run_prune(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -6556,7 +6596,7 @@ impl McpServer {
     #[tool(
         description = "List the open long-lived connections with their connection id, protocol (`web_socket`, `tcp`, `sse` or `http_upgrade` for other HTTP upgrades and HTTP/2 CONNECT), client address, proxy id and name, upstream address, start time and uptime, bytes sent and received and current rate in bytes per second. `proxy_id` limits the list to one proxy. An account with a proxy list sees only the connections of its proxies. Read-only; any account can call it."
     )]
-    async fn list_active_connections(
+    async fn list_traffic_connections(
         &self,
         Parameters(params): Parameters<ListActiveConnectionsParams>,
         Extension(parts): Extension<Parts>,
@@ -6581,9 +6621,9 @@ impl McpServer {
 
     /// Terminate an active connection or stream by its unique ID.
     #[tool(
-        description = "Close one open long-lived connection now by its connection `id` from `list_active_connections`. The client may reconnect. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+        description = "Close one open long-lived connection now by its connection `id` from `list_traffic_connections`. The client may reconnect. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn terminate_active_connection(
+    async fn terminate_traffic_connection(
         &self,
         Parameters(params): Parameters<IdParams>,
         Extension(parts): Extension<Parts>,
@@ -6613,7 +6653,7 @@ impl McpServer {
     #[tool(
         description = "Show the settings of the Certificate Transparency monitor, which searches public CT logs for certificates issued for your domains: whether it runs, the check interval, the monitored domains, whether domains are discovered from your certificates and ACME requests, the trusted CA issuers, whether an unknown issuer raises an alert, and the CT search API URL. Takes no arguments. Read-only; any account can call it."
     )]
-    async fn get_ct_monitor_config(
+    async fn get_ct_config(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -6628,7 +6668,7 @@ impl McpServer {
     #[tool(
         description = "Change the settings of the Certificate Transparency monitor. Pass only the fields to change; every omitted field keeps its value, and a list you pass replaces the whole list. Returns the stored settings. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn update_ct_monitor_config(
+    async fn update_ct_config(
         &self,
         Parameters(params): Parameters<UpdateCtConfigParams>,
         Extension(parts): Extension<Parts>,
@@ -6657,7 +6697,7 @@ impl McpServer {
     #[tool(
         description = "Show the state of the Certificate Transparency monitor: the time of the last check, the next scheduled check, the number of open rogue certificate alerts and the number of log entries it tracks. Takes no arguments. Read-only; any account can call it."
     )]
-    async fn get_ct_monitor_status(
+    async fn get_ct_status(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -6672,7 +6712,7 @@ impl McpServer {
     #[tool(
         description = "List the certificates that the CT monitor found in public logs for your domains, with entry id, domain, issuer, common name, SAN, serial number, log time, validity, whether it is rogue and why, and its alert state. A certificate from an issuer outside the trusted list is flagged as rogue. `domain` filters by domain, `rogue_only` returns only flagged entries, `limit` caps the count (default 50). Read-only; any account can call it."
     )]
-    async fn list_ct_log_entries(
+    async fn list_ct_entries(
         &self,
         Parameters(params): Parameters<ListCtEntriesParams>,
         Extension(parts): Extension<Parts>,
@@ -6693,7 +6733,7 @@ impl McpServer {
     #[tool(
         description = "Query the public Certificate Transparency logs now, for `domain` or, without it, for every monitored and discovered domain, and wait for the result. Returns the number of new rogue certificates found. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
-    async fn check_ct_logs_now(
+    async fn check_ct_now(
         &self,
         Parameters(params): Parameters<CheckCtParams>,
         Extension(parts): Extension<Parts>,
@@ -6722,7 +6762,7 @@ impl McpServer {
 
     /// Dismiss or resolve a Certificate Transparency rogue certificate alert.
     #[tool(
-        description = "Set the alert state of one CT log entry (`id` from `list_ct_log_entries`): `dismissed` (default, a known and expected certificate), `investigating`, or `confirmed_rogue`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+        description = "Set the alert state of one CT log entry (`id` from `list_ct_entries`): `dismissed` (default, a known and expected certificate), `investigating`, or `confirmed_rogue`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
     )]
     async fn dismiss_ct_alert(
         &self,
@@ -6764,7 +6804,7 @@ impl McpServer {
     #[tool(
         description = "List every outbound notification webhook with its id, name, delivery URL, whether a signing secret is set (never the secret), enabled flag and subscribed events. r3v3rs3 POSTs a JSON payload to the URL when one of the events happens. Takes no arguments. Read-only; admin accounts only."
     )]
-    async fn list_webhooks(
+    async fn list_outbound_webhooks(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -6782,7 +6822,7 @@ impl McpServer {
     #[tool(
         description = "Show one outbound notification webhook by its `id`: name, URL, whether a secret is set, enabled flag, events and times. Read-only; admin accounts only."
     )]
-    async fn get_webhook(
+    async fn get_outbound_webhook(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<IdParams>,
@@ -6802,7 +6842,7 @@ impl McpServer {
     #[tool(
         description = "Create an outbound notification webhook: `name` (at most 100 characters), the delivery `url` (http or https; private, loopback and link-local addresses are refused), the `events` to send (at least one), `enabled` (default true) and an optional `secret` (at most 256 characters; each delivery then carries an `X-R3v3rs3-Signature: sha256=<hex HMAC-SHA256 of the body>` header). Event names (`_` may replace `.`): deploy.success, deploy.failure, deploy.pending_approval, app.crashed, app.cpu_throttled, backup.success, backup.failure, backup.upload_failed, backup.restored, backup.verification_failed, cert.expiring, cert.renewed, cert.renewal_failed, cert.rogue_detected, cert.ct_check_failed, security.ip_banned, security.threat_detected, target.offline, system.disk_pressure, system.disk_low, system.bandwidth_spike, system.high_latency, system.high_error_rate, system.traffic_spike, system.event_loop_lag, system.fd_exhaustion, system.socket_exhaustion, system.oom_kill, system.geoip_updated, system.geoip_update_failed. Returns the new webhook. Needs a token with the edit scope and an admin account."
     )]
-    async fn add_webhook(
+    async fn create_outbound_webhook(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddWebhookParams>,
@@ -6838,9 +6878,9 @@ impl McpServer {
 
     /// Update an existing outbound notification webhook.
     #[tool(
-        description = "Change an outbound notification webhook by its `id`. Pass only the fields to change: `name`, `url`, `secret` (an empty string removes the secret), `enabled`, or `events` (replaces the whole event list; names as in `add_webhook`). Returns the updated webhook. Needs a token with the edit scope and an admin account."
+        description = "Change an outbound notification webhook by its `id`. Pass only the fields to change: `name`, `url`, `secret` (an empty string removes the secret), `enabled`, or `events` (replaces the whole event list; names as in `create_outbound_webhook`). Returns the updated webhook. Needs a token with the edit scope and an admin account."
     )]
-    async fn update_webhook(
+    async fn update_outbound_webhook(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<UpdateWebhookParams>,
@@ -6882,7 +6922,7 @@ impl McpServer {
     #[tool(
         description = "Delete an outbound notification webhook by its `id`; it receives no more events. Needs a token with the edit scope and an admin account."
     )]
-    async fn delete_webhook(
+    async fn delete_outbound_webhook(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<IdParams>,
@@ -6916,7 +6956,7 @@ impl McpServer {
     #[tool(
         description = "Send one test delivery and report whether the receiver accepted it, with its HTTP status code, a message and the elapsed time. Give `webhook_id` to test a saved webhook, or `url` (and optional `secret`) to test an address before saving it. `event` sets the sample event (default `test.ping`). Needs a token with the edit scope and an admin account."
     )]
-    async fn test_webhook(
+    async fn test_outbound_webhook(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<TestWebhookParams>,
@@ -6986,7 +7026,7 @@ impl McpServer {
     #[tool(
         description = "Store a login for a private container registry: `server` (for example `ghcr.io` or `registry.gitlab.com`; one login per server), `username` and `password` (required: a password or an access token with pull rights). Deployments of images from that server use it. Returns the new entry without the password. Needs a token with the edit scope and an admin account."
     )]
-    async fn add_registry(
+    async fn create_registry(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddRegistryParams>,
@@ -7119,7 +7159,7 @@ impl McpServer {
     #[tool(
         description = "Add a GitLab or Gitea connection from an OAuth application that you registered at the provider: `name`, `provider` (`gitlab` or `gitea`), `url` (required for Gitea and for a self-hosted GitLab; gitlab.com without it), `client_id` and `client_secret`. A GitHub connection cannot be added here; it is created as a GitHub App from the panel. The new connection has the status `not_connected` until an account authorizes it in the panel. Needs a token with the edit scope and an admin account."
     )]
-    async fn add_git_connection(
+    async fn create_git_connection(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddGitConnectionParams>,
@@ -7354,7 +7394,7 @@ impl McpServer {
     #[tool(
         description = "List the API tokens of the account that this MCP session signed in as, with their id, name, scope (`read` or `edit`) and creation time; the token values are never returned. Takes no arguments. Read-only; any account can call it."
     )]
-    async fn list_auth_tokens(
+    async fn list_tokens(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -7382,7 +7422,7 @@ impl McpServer {
     #[tool(
         description = "Create an API token for the account of this session, for scripts and the `r3` command line client: `name` labels it, `scope` is `read` (default; the token acts as a viewer) or `edit` (the token gets the role of the account). A viewer account can create only `read` tokens. The token value is returned once, in this answer only. Needs a token with the edit scope; any account can call it."
     )]
-    async fn create_auth_token(
+    async fn create_token(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<CreateAuthTokenParams>,
@@ -7416,9 +7456,9 @@ impl McpServer {
 
     /// Delete an API token belonging to the current account. Needs the edit scope.
     #[tool(
-        description = "Revoke one API token (`id` from `list_auth_tokens`) of the account of this session; requests with it fail from now on. Needs a token with the edit scope; any account can call it."
+        description = "Revoke one API token (`id` from `list_tokens`) of the account of this session; requests with it fail from now on. Needs a token with the edit scope; any account can call it."
     )]
-    async fn delete_auth_token(
+    async fn delete_token(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<IdParams>,

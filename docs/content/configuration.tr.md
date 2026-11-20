@@ -257,7 +257,7 @@ listen = "/ip4/0.0.0.0/udp/49160-49240"
 transparent = true
 ```
 
-CLI veya MCP (`set_port_transparent`) üzerinden:
+CLI veya MCP (`update_port_transparent`) üzerinden:
 ```bash
 r3 port set-transparent <PORT_ID> --enable true
 r3 port set-transparent <PORT_ID> --enable false
@@ -607,7 +607,7 @@ Aktif sağlık kontrolü, `health_check.interval` değeri `0s`'den büyükse ça
 
 Anlık gRPC sağlık kontrolü komutları:
 - **CLI**: `r3 proxy grpc-health <PROXY_ID> [--service <SERVICE>]`
-- **MCP Aracı**: `check_grpc_health` (parametreler: `proxy_id` veya `target_url`, `service`)
+- **MCP Aracı**: `check_proxy_grpc_health` (parametreler: `proxy_id` veya `target_url`, `service`)
 - **REST API**: `POST /api/proxies/{id}/grpc/health` veya `POST /api/grpc/health`
 
 `health_check.timeout` (varsayılan `5s`) her kontrolü sınırlar. Kontrolü geçemeyen sunucu, bir kontrol başarılı olana kadar sağlıksız kalır. Bu kural `max_fails = 0` olduğunda da geçerlidir. Başarılı bir istek bu durumu bitirmez.
@@ -1186,7 +1186,7 @@ r3 proxy security-headers apply <PROXY_ID> strict
 
 #### MCP Araçları
 
-Yapay zeka ajanları `list_security_header_profiles`, `analyze_proxy_security_headers` ve `apply_security_header_profile` araçlarını kullanarak güvenlik profillerini inceleyebilir ve uygulayabilir.
+Yapay zeka ajanları `list_security_header_profiles`, `get_proxy_security_headers` ve `apply_proxy_security_header_profile` araçlarını kullanarak güvenlik profillerini inceleyebilir ve uygulayabilir.
 
 ## Sıkıştırma
 
@@ -1210,7 +1210,7 @@ r3v3rs3, Chromium ve uyumlu modern HTTP istemcileri için Sıkıştırma Sözlü
 - **Sözlük Sunumu**: HTTP proxy'sinde yapılandırılan sözlükler, belirlenen `path` yolunda r3v3rs3 tarafından doğrudan `Content-Type: application/octet-stream`, `Use-As-Dictionary: match="<match_pattern>", id="<id>"`, `Cache-Control: public, max-age=31536000, immutable` ve `ETag: "<sha256>"` başlıklarıyla sunulur.
 - **İçerik Müzakeresi ve Kodlama**: Gelen istekte yapılandırılmış bir sözlüğün SHA-256 hash'i ve yoluyla eşleşen `Available-Dictionary` (veya `Sec-Available-Dictionary`) başlığı bulunduğunda ve istemci `dcz` ya da `dcb` encoding'ini kabul ettiğinde, r3v3rs3 yanıtı sözlükle sıkıştırır. Yanıta `Content-Encoding: dcz` (veya `dcb`) ve `Vary: Available-Dictionary, Accept-Encoding` eklenir. Gövde, encoding'in sabit başlığı ve sözlüğün SHA-256 özetiyle başlar. İstemci bu özetle doğru sözlüğü kullandığını denetler. RFC 9842 sözlükle sıkıştırmaya yalnız güvenli bağlantıda izin verir. Bu yüzden düz HTTP üzerinden gelen istekler standart algoritmalarla sıkıştırılır.
 - **Bant Genişliği Tasarrufu**: Statik JSON şemalarını, yinelenen nesne anahtarlarını ve tekrarlayan HTML kalıplarını ortadan kaldırarak yinelenen API trafiğinde %80 ile %95 arasında bant genişliği tasarrufu sağlar.
-- **Yönetim**: Sıkıştırma sözlükleri WebUI Proxy Yapılandırması sayfasından, MCP araçlarından (`list_compression_dictionaries`, `get_compression_dictionary`, `add_compression_dictionary`, `delete_compression_dictionary`) veya CLI üzerinden (`r3 proxy dictionary list/get/add/delete`) yönetilebilir.
+- **Yönetim**: Sıkıştırma sözlükleri WebUI Proxy Yapılandırması sayfasından, MCP araçlarından (`list_compression_dictionaries`, `get_compression_dictionary`, `create_compression_dictionary`, `delete_compression_dictionary`) veya CLI üzerinden (`r3 proxy dictionary list/get/add/delete`) yönetilebilir.
 
 r3v3rs3 bir yanıtı yalnız şu koşulların hepsi sağlanırsa sıkıştırır:
 
@@ -1633,11 +1633,11 @@ r3 cert ct dismiss <ENTRY_ID>
 ## Model Context Protocol (MCP)
 
 Yapay zeka agent'ları CT günlüklerini MCP araçları üzerinden otonom olarak denetleyebilir ve yönetebilir:
-- `get_ct_monitor_config`: Güncel izleme konfigürasyonunu alır.
-- `update_ct_monitor_config`: Tarama aralığını, alan adlarını ve izin verilen CA listesini günceller.
-- `get_ct_monitor_status`: Gerçek zamanlı durumu, aktif alarmları ve son tarama zamanını getirir.
-- `list_ct_log_entries`: Keşfedilen kayıtları filtrelerle listeler.
-- `check_ct_logs_now`: Anlık bir günlük sorgusu başlatır.
+- `get_ct_config`: Güncel izleme konfigürasyonunu alır.
+- `update_ct_config`: Tarama aralığını, alan adlarını ve izin verilen CA listesini günceller.
+- `get_ct_status`: Gerçek zamanlı durumu, aktif alarmları ve son tarama zamanını getirir.
+- `list_ct_entries`: Keşfedilen kayıtları filtrelerle listeler.
+- `check_ct_now`: Anlık bir günlük sorgusu başlatır.
 - `dismiss_ct_alert`: Bir sahte sertifika alarmını onaylar veya kapatır.
 
 ## Worker Süreçleri
@@ -1732,7 +1732,7 @@ r3 proxy priority <PROXY_ID> --enable --inject-header --adaptive-concurrency
 r3 traffic priority
 ```
 
-MCP araçları: `get_stream_priority`, `set_stream_priority`, `get_stream_priority_stats`.
+MCP araçları: `get_proxy_stream_priority`, `update_proxy_stream_priority`, `get_traffic_priority_stats`.
 
 ### WebUI Yönetimi ve Telemetri
 
@@ -1870,21 +1870,21 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 
 | Kategori | Araçlar ve İşlemler | Açıklama |
 |---|---|---|
-| **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unban_quarantined_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database`, `get_server_upgrade_status`, `run_server_upgrade`, `get_traffic`, `get_traffic_entry`, `get_traffic_geo`, `replay_traffic_request`, `get_anomaly_rules`, `update_anomaly_rules`, `dismiss_anomalies`, `analyze_security_headers`, `dry_run_proxy`, `get_cdn_status`, `refresh_cdn_ranges`, `list_discovery_status`, `get_logs`, `get_dashboard`, `health_grpc`, `invoke_grpc`, `reflect_grpc`, `invoke_proxy_grpc`, `reflect_proxy_grpc`, `rotate_platform_key`, `list_mcp_sessions`, `revoke_mcp_session`, `get_app_info`, `get_metrics`, `get_grafana_dashboard` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları, fail2ban kaba kuvvet IP engeli, tehdit otomatik karantina yönetimi, otomatik GeoIP MMDB veritabanı yönetimi ve kesintisiz canlı sunucu kendini güncelleme işlemi. |
-| **Portlar** | `list_ports`, `get_port`, `get_port_status`, `add_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Dinleyici port yaşam döngüsü: dinleme adresleri, TLS sonlandırma ayarları, soket yeniden başlatma/yenileme ve sunucu ağ arayüzlerini listeleme. |
-| **Proxy'ler** | `list_proxies`, `get_proxy`, `get_proxy_status`, `add_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | HTTP, WebSocket, TCP, UDP, TLS ve HTTP/3 için ters proxy yapılandırması, upstream sağlık durumu ve yol bazlı önbellek temizleme (purge). |
-| **Sertifikalar ve ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `add_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials`, `get_dns_credential`, `add_dns_credential`, `update_dns_credential`, `delete_dns_credential`, `get_ct_monitor_config`, `update_ct_monitor_config`, `get_ct_monitor_status`, `list_ct_log_entries`, `check_ct_logs_now`, `dismiss_ct_alert`, `update_acme`, `self_sign_cert`, `upload_cert`, `download_cert` (yalnız zincir, private key asla dönmez), `delete_certs`, `verify_cname` | TLS sertifikası inceleme, alan adı kapsam kontrolü, otomatik ACME sertifika talepleri (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegasyonu, anlık sertifika yenileme, DNS sağlayıcı kimlik bilgileri yönetimi ve Sertifika Şeffaflığı sahte sertifika denetimi. |
-| **Erişim Listeleri** | `list_access_lists`, `add_access_list`, `update_access_list`, `delete_access_list` | CIDR IP filtreleme, HTTP basic authentication ve özel bearer token'lar içeren erişim kontrol listeleri. |
-| **PaaS Uygulamaları** | `list_apps`, `get_app`, `add_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update`, `list_app_scheduled_commands`, `add_app_scheduled_command`, `update_app_scheduled_command`, `delete_app_scheduled_command`, `run_app_scheduled_command`, `get_deployment`, `approve_deployment`, `reject_deployment`, `get_app_metrics`, `get_app_services`, `get_app_topology`, `upgrade_app_catalog`, `set_app_git_token`, `delete_app_git_token`, `new_app_webhook_secret`, `delete_app_webhook_secret`, `install_app_hook`, `list_app_files`, `download_app_file` (en çok 1 MiB UTF-8 metin), `upload_app_file` (en çok 1 MiB UTF-8 metin), `delete_app_file`, `list_volume_backups`, `create_volume_backup`, `restore_volume_backup`, `delete_volume_backup` | Otonom PaaS konteyner yaşam döngüsü: Docker image/git/compose uygulaması dağıtımı, konteyner log akışı, ortam değişkeni yönetimi, önceki dağıtıma geri alma (rollback), zamanlanmış cron komutları yönetimi ile konteyner içinde anlık çalıştırma ve Docker registry güncelleme kontrolü. |
+| **Sistem ve İzleme** | `server_status`, `get_config`, `list_audit_log`, `get_system_metrics`, `get_system_anomalies`, `list_banned_ips`, `unban_ip`, `list_quarantined_ips`, `quarantine_ip`, `unquarantine_ip`, `get_quarantine_config`, `update_quarantine_config`, `get_geoip_status`, `update_geoip_config`, `update_geoip_database`, `get_upgrade_status`, `upgrade_server`, `get_workers`, `update_config`, `get_traffic`, `get_traffic_entry`, `get_traffic_geo`, `replay_traffic_request`, `get_anomaly_rules`, `update_anomaly_rules`, `dismiss_anomalies`, `analyze_security_headers`, `preview_proxy`, `get_cdn_status`, `refresh_cdn_ranges`, `list_discovery_status`, `get_logs`, `get_dashboard`, `check_grpc_health`, `invoke_grpc`, `reflect_grpc`, `invoke_proxy_grpc`, `reflect_proxy_grpc`, `rotate_platform_key`, `list_mcp_sessions`, `revoke_mcp_session`, `get_app_info`, `get_metrics`, `get_grafana_dashboard` | Çalışma zamanı sürümü, worker süreçleri, maskelenmiş sistem yapılandırması, değiştirilemez denetim kaydı (audit log), süreç dosya tanıtıcıları/bellek/lag, gerçek zamanlı anomali alarmları, fail2ban kaba kuvvet IP engeli, tehdit otomatik karantina yönetimi, otomatik GeoIP MMDB veritabanı yönetimi ve kesintisiz canlı sunucu kendini güncelleme işlemi. |
+| **Portlar** | `list_ports`, `get_port`, `get_port_status`, `create_port`, `update_port`, `delete_port`, `reset_port`, `list_network_interfaces` | Dinleyici port yaşam döngüsü: dinleme adresleri, TLS sonlandırma ayarları, soket yeniden başlatma/yenileme ve sunucu ağ arayüzlerini listeleme. |
+| **Proxy'ler** | `list_proxies`, `get_proxy`, `get_proxy_status`, `create_proxy`, `update_proxy`, `delete_proxy`, `purge_proxy_cache` | HTTP, WebSocket, TCP, UDP, TLS ve HTTP/3 için ters proxy yapılandırması, upstream sağlık durumu ve yol bazlı önbellek temizleme (purge). |
+| **Sertifikalar ve ACME** | `list_certs`, `get_cert`, `check_cert_coverage`, `delete_cert`, `list_acme`, `get_acme`, `create_acme`, `delete_acme`, `request_acme`, `get_acme_cname_instructions`, `list_dns_credentials`, `get_dns_credential`, `create_dns_credential`, `update_dns_credential`, `delete_dns_credential`, `get_ct_config`, `update_ct_config`, `get_ct_status`, `list_ct_entries`, `check_ct_now`, `dismiss_ct_alert`, `update_acme`, `create_self_signed_cert`, `upload_cert`, `download_cert` (yalnız zincir, private key asla dönmez), `delete_certs`, `verify_cname` | TLS sertifikası inceleme, alan adı kapsam kontrolü, otomatik ACME sertifika talepleri (HTTP-01, TLS-ALPN-01, DNS-01), RFC 8555 CNAME alias delegasyonu, anlık sertifika yenileme, DNS sağlayıcı kimlik bilgileri yönetimi ve Sertifika Şeffaflığı sahte sertifika denetimi. |
+| **Erişim Listeleri** | `list_access_lists`, `create_access_list`, `update_access_list`, `delete_access_list` | CIDR IP filtreleme, HTTP basic authentication ve özel bearer token'lar içeren erişim kontrol listeleri. |
+| **PaaS Uygulamaları** | `list_apps`, `get_app`, `create_app`, `update_app`, `delete_app`, `deploy_app`, `get_app_logs`, `get_app_env`, `update_app_env`, `list_app_deployments`, `rollback_deployment`, `check_app_update`, `list_app_scheduled_commands`, `create_app_scheduled_command`, `update_app_scheduled_command`, `delete_app_scheduled_command`, `run_app_scheduled_command`, `get_deployment`, `approve_deployment`, `reject_deployment`, `get_app_metrics`, `get_app_services`, `get_app_topology`, `upgrade_app_catalog`, `update_app_git_token`, `delete_app_git_token`, `create_app_webhook_secret`, `delete_app_webhook_secret`, `install_app_hook`, `list_app_files`, `download_app_file` (en çok 1 MiB UTF-8 metin), `upload_app_file` (en çok 1 MiB UTF-8 metin), `delete_app_file`, `list_volume_backups`, `create_volume_backup`, `restore_volume_backup`, `delete_volume_backup` | Otonom PaaS konteyner yaşam döngüsü: Docker image/git/compose uygulaması dağıtımı, konteyner log akışı, ortam değişkeni yönetimi, önceki dağıtıma geri alma (rollback), zamanlanmış cron komutları yönetimi ile konteyner içinde anlık çalıştırma ve Docker registry güncelleme kontrolü. |
 | **App Store Kataloğu** | `get_store`, `refresh_store`, `install_store_app` | Küratörlü tek tıkla kurulum şablonlarının (veritabanları, paneller, CMS, analitik) katalogdan doğrudan tam yapılandırılmış ve yönlendirilmiş uygulamalar olarak otonom kurulumu. |
-| **Yönetilen Veritabanları ve Yedekler** | `list_databases`, `list_database_engines`, `create_database`, `get_database_credentials`, `list_database_tenants`, `reset_database_password`, `delete_database_tenant`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config`, `test_database_backup`, `get_database_pitr_range`, `restore_database_pitr`, `archive_database_wal_segment`, `list_database_wal_segments`, `delete_database`, `clone_database`, `list_database_replicas`, `create_database_replica`, `restore_database_backup`, `run_database_backup_now`, `list_all_backups`, `get_backups_overview`, `list_s3_database_backups`, `restore_s3_database_backup`, `refresh_database_engines` | Otomatik üretilen kimlik bilgileriyle PostgreSQL, MySQL, Redis, MariaDB ve MongoDB sağlama, anlık yedek alma, yedek silme, yedek bütünlüğü testi, dallanabilir PITR belirli bir zamana geri dönme, WAL arşivleme ve uzak depolama ayarları. |
-| **Agent Hedef Düğümleri** | `list_targets`, `add_target`, `delete_target`, `set_target_region`, `drain_target`, `undrain_target`, `generate_target_token`, `upgrade_target`, `upgrade_all_targets` | Çok düğümlü Docker agent altyapısı, tek kullanımlık kayıt token'ı üretme, hedef düğümleri kaldırma, coğrafi bölge atama, trafik boşaltma/geri alma ve uzak hedef ikili dosya güncellemeleri. |
-| **Projeler ve Ortam Grupları** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_project_environment`, `update_project_env`, `sync_project_env`, `get_project`, `update_project`, `get_environment`, `update_environment`, `delete_environment`, `get_environment_env`, `diff_environments`, `get_env_group`, `update_env_group` | Proje organizasyonu, çoklu ortam izolasyonu, paylaşılan ortam değişkeni grupları ve seçici anahtar kopyalama ile ortamlar arası yapılandırma senkronizasyonu. |
-| **Dışa Dönük Webhook'lar** | `list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook` | Dışa dönük olay bildirim webhook dağıtıcıları: uç nokta yönetimi, HMAC-SHA256 imza sırrı doğrulaması, ayrıntılı olay abonelikleri ve uçtan uca webhook teslimat testi. |
-| **Konteyner Registry'leri** | `list_registries`, `add_registry`, `update_registry`, `delete_registry` | Özel Docker ve OCI konteyner registry kimlik bilgileri: güvenli kimlik doğrulama, pull izinleri ve sunucu hedef uç noktaları. |
-| **Git Bağlantıları** | `list_git_connections`, `get_git_connection`, `add_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches`, `update_git_connection`, `authorize_git_connection`, `create_github_app`, `install_github_app` | Git sağlayıcı bağlantıları (GitHub App, GitLab, Gitea): OAuth bağlantı yönetimi, erişilebilir depo tarama ve uzak dal (branch) listeleme. |
-| **Hesaplar ve Yetki Token'ları** | `list_accounts`, `create_account`, `update_account`, `delete_account`, `list_auth_tokens`, `create_auth_token`, `delete_auth_token` | Kullanıcı hesap yönetimi: roller (admin, editor, viewer), proxy erişim kapsamları, parola yönetimi ve kalıcı yetkilendirilmiş API token üretimi. |
-| **Felaket Kurtarma** | `list_dr_backups`, `create_dr_backup` | İsteğe bağlı AES-256-GCM şifrelemeli ve otomatik S3 replikasyonlu tam sistem yedek anlık görüntüleri. |
+| **Yönetilen Veritabanları ve Yedekler** | `list_databases`, `list_database_engines`, `create_database`, `get_database_credentials`, `list_database_tenants`, `reset_database_password`, `delete_database_tenant`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config`, `test_database_backup`, `get_database_pitr_range`, `restore_database_pitr`, `archive_database_wal`, `list_database_wal_segments`, `delete_database`, `clone_database`, `list_database_replicas`, `create_database_replica`, `restore_database_backup`, `run_database_backup_now`, `list_all_backups`, `get_backups_overview`, `list_s3_database_backups`, `restore_s3_database_backup`, `refresh_database_engines` | Otomatik üretilen kimlik bilgileriyle PostgreSQL, MySQL, Redis, MariaDB ve MongoDB sağlama, anlık yedek alma, yedek silme, yedek bütünlüğü testi, dallanabilir PITR belirli bir zamana geri dönme, WAL arşivleme ve uzak depolama ayarları. |
+| **Agent Hedef Düğümleri** | `list_targets`, `create_target`, `delete_target`, `update_target_region`, `drain_target`, `undrain_target`, `create_target_token`, `upgrade_target`, `upgrade_all_targets` | Çok düğümlü Docker agent altyapısı, tek kullanımlık kayıt token'ı üretme, hedef düğümleri kaldırma, coğrafi bölge atama, trafik boşaltma/geri alma ve uzak hedef ikili dosya güncellemeleri. |
+| **Projeler ve Ortam Grupları** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_environment`, `update_environment_env`, `sync_environment_env`, `get_project`, `update_project`, `get_environment`, `update_environment`, `delete_environment`, `get_environment_env`, `diff_environments`, `get_env_group`, `update_env_group` | Proje organizasyonu, çoklu ortam izolasyonu, paylaşılan ortam değişkeni grupları ve seçici anahtar kopyalama ile ortamlar arası yapılandırma senkronizasyonu. |
+| **Dışa Dönük Webhook'lar** | `list_outbound_webhooks`, `get_outbound_webhook`, `create_outbound_webhook`, `update_outbound_webhook`, `delete_outbound_webhook`, `test_outbound_webhook` | Dışa dönük olay bildirim webhook dağıtıcıları: uç nokta yönetimi, HMAC-SHA256 imza sırrı doğrulaması, ayrıntılı olay abonelikleri ve uçtan uca webhook teslimat testi. |
+| **Konteyner Registry'leri** | `list_registries`, `create_registry`, `update_registry`, `delete_registry` | Özel Docker ve OCI konteyner registry kimlik bilgileri: güvenli kimlik doğrulama, pull izinleri ve sunucu hedef uç noktaları. |
+| **Git Bağlantıları** | `list_git_connections`, `get_git_connection`, `create_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches`, `update_git_connection`, `authorize_git_connection`, `create_github_app`, `install_github_app` | Git sağlayıcı bağlantıları (GitHub App, GitLab, Gitea): OAuth bağlantı yönetimi, erişilebilir depo tarama ve uzak dal (branch) listeleme. |
+| **Hesaplar ve Yetki Token'ları** | `list_accounts`, `create_account`, `update_account`, `delete_account`, `list_tokens`, `create_token`, `delete_token` | Kullanıcı hesap yönetimi: roller (admin, editor, viewer), proxy erişim kapsamları, parola yönetimi ve kalıcı yetkilendirilmiş API token üretimi. |
+| **Felaket Kurtarma** | `list_disaster_recovery_backups`, `create_disaster_recovery_backup`, `restore_disaster_recovery_backup`, `delete_disaster_recovery_backup` | İsteğe bağlı AES-256-GCM şifrelemeli ve otomatik S3 replikasyonlu tam sistem yedek anlık görüntüleri. |
 
 MCP sunucusu varsayılan olarak kapalıdır. Panelin ayarlar sayfası onu sunucu çalışırken açar ve giriş yapmasına izin verilecek client'ları tutar. `config.toml` aynı bölümü taşır:
 
@@ -2242,7 +2242,7 @@ enabled = true
 extra_ports = ["udp/51820"]
 ```
 
-Ayarlar sayfası, MCP aracı `set_firewall` ve `r3 security firewall set --enabled true --extra-ports udp/51820` komutu aynı iki ayarı değiştirir.
+Ayarlar sayfası, MCP aracı `update_firewall` ve `r3 security firewall set --enabled true --extra-ports udp/51820` komutu aynı iki ayarı değiştirir.
 
 Bir port, bir uygulama veya ayar her değiştiğinde r3v3rs3 tabloyu tek bir `nft -f` işlemiyle değiştirir. Bu yüzden yarım yazılmış bir tablo oluşmaz. Ayar kapatılınca tablo silinir. Tablo yalnız `input` hook'unu filtreler. Docker'ın NAT ve forward kuralları değişmez. Agent hedefleri de kendi host'larında aynı tabloyu, kendi uygulamalarının `host_ports` değerleriyle tutar.
 
@@ -2505,8 +2505,8 @@ r3 traffic connections close con_01j7xyz
 ### Model Context Protocol (MCP)
 
 Yapay zeka agent'ları aktif bağlantıları MCP araçlarıyla otonom olarak denetleyebilir ve yönetebilir:
-- `list_active_connections`: Protokol, istemci IP, hedef, süre, aktarılan bayt ve hız metrikleriyle tüm aktif uzun ömürlü bağlantıları listeler. İsteğe bağlı `proxy_id` filtresi destekler.
-- `terminate_active_connection`: Belirtilen ID'ye sahip aktif bağlantıyı derhal sonlandırır. `edit` yetkisi gerektirir.
+- `list_traffic_connections`: Protokol, istemci IP, hedef, süre, aktarılan bayt ve hız metrikleriyle tüm aktif uzun ömürlü bağlantıları listeler. İsteğe bağlı `proxy_id` filtresi destekler.
+- `terminate_traffic_connection`: Belirtilen ID'ye sahip aktif bağlantıyı derhal sonlandırır. `edit` yetkisi gerektirir.
 
 ### Yönetim API'si (Admin API)
 
