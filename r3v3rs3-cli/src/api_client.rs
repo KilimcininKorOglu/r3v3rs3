@@ -1964,33 +1964,8 @@ impl ApiClient {
         let target_path = output
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("{backup_id}.r3bundle"));
-        let url = format!(
-            "{}/api/disaster-recovery/backups/{backup_id}/download",
-            self.server
-        );
-        let resp = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send()
-            .await
-            .context("failed to request disaster recovery bundle download")?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            bail!("download failed ({status}): {text}");
-        }
-        let bytes = resp
-            .bytes()
-            .await
-            .context("failed to read response bytes")?;
-        std::fs::write(&target_path, &bytes)
-            .with_context(|| format!("failed to write bundle to {target_path}"))?;
-        println!(
-            "Disaster recovery bundle saved to {target_path} ({} bytes)",
-            bytes.len()
-        );
-        Ok(())
+        let path = format!("/api/disaster-recovery/backups/{backup_id}/download");
+        self.download_to(&path, &target_path).await
     }
 
     pub async fn restore_dr_file(
@@ -4039,6 +4014,46 @@ protocol: http
     #[test]
     fn load_payload_rejects_garbage() {
         assert!(load_payload("").is_err());
+    }
+
+    /// The temporary files that `write_atomic` leaves next to `target`.
+    fn leftovers(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .filter(|name| name.ends_with(".part"))
+            .collect()
+    }
+
+    /// A download replaces the whole file in one rename and leaves no temporary file, so a
+    /// reader never sees a half-written file.
+    #[test]
+    fn write_atomic_replaces_the_whole_file() -> anyhow::Result<()> {
+        let dir = std::env::temp_dir().join(format!("r3-atomic-ok-{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let target = dir.join("bundle.r3bundle");
+        std::fs::write(&target, b"an older and much longer bundle")?;
+        write_atomic(&target, b"new")?;
+        assert_eq!(std::fs::read(&target)?, b"new");
+        assert!(leftovers(&dir).is_empty(), "{:?}", leftovers(&dir));
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    /// When the final rename fails, the target stays as it was and the temporary file is
+    /// removed instead of left behind.
+    #[test]
+    fn write_atomic_cleans_up_after_a_failed_rename() -> anyhow::Result<()> {
+        let dir = std::env::temp_dir().join(format!("r3-atomic-fail-{}", std::process::id()));
+        let target = dir.join("bundle.r3bundle");
+        std::fs::create_dir_all(target.join("occupied"))?;
+        assert!(write_atomic(&target, b"new").is_err());
+        assert!(target.join("occupied").is_dir(), "the target was replaced");
+        assert!(leftovers(&dir).is_empty(), "{:?}", leftovers(&dir));
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
     }
 
     /// RFC 6455 section 3: a WebSocket on an `http` server uses `ws`, on an `https` server

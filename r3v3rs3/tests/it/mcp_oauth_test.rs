@@ -3024,6 +3024,75 @@ async fn the_live_streams_are_reachable_from_the_cli() -> anyhow::Result<()> {
     .await
 }
 
+/// Downloads the first DR bundle to `path` with the CLI, compares it with the bytes the API
+/// serves, and removes the file.
+async fn assert_dr_download_matches(
+    binary: &Path,
+    addr: SocketAddr,
+    token: &str,
+    path: &str,
+) -> anyhow::Result<()> {
+    let client = mcp_client(addr, token).await?;
+    let listed: Value =
+        serde_json::from_str(&mcp_call(&client, "list_dr_backups", json!({})).await?)?;
+    let id = listed[0]["id"].as_str().context("no DR backup listed")?;
+    cli_ok(
+        binary,
+        &addr,
+        token,
+        &["dr", "download", id, "--output", path],
+    )
+    .await?;
+    let url = format!("http://{addr}/api/disaster-recovery/backups/{id}/download");
+    let served = Client::new()
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await?
+        .bytes()
+        .await?;
+    assert_eq!(
+        std::fs::read(path)?,
+        served.to_vec(),
+        "the saved bundle differs"
+    );
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+/// `r3 dr download` saves the same bytes the API serves (OpenAPI
+/// `download_disaster_recovery_backup`), and a failed download leaves no file behind.
+#[tokio::test]
+async fn the_dr_download_saves_the_whole_bundle() -> anyhow::Result<()> {
+    let dir = TempDir::new("cli-dr-download")?;
+    with_admin_config(&dir.0, mcp_config(), |addr| async move {
+        let token = access_token(&addr).await?;
+        let binary = client_binary()?;
+        let create = [
+            "dr",
+            "create",
+            "--no-s3",
+            "--passphrase",
+            "dr-test-passphrase",
+        ];
+        cli_ok(&binary, &addr, &token, &create).await?;
+        let file = std::env::temp_dir().join(format!("r3-dr-{}.r3bundle", std::process::id()));
+        let path = file.to_string_lossy().to_string();
+        assert_dr_download_matches(&binary, addr, &token, &path).await?;
+        let out = run_client(
+            &binary,
+            &addr,
+            &token,
+            &["dr", "download", MISSING_DB, "--output", &path],
+        )
+        .await?;
+        assert!(!out.status.success(), "a missing bundle was saved");
+        assert!(!file.exists(), "a failed download left a file");
+        Ok(())
+    })
+    .await
+}
+
 /// Volume backup and archive operations are reachable from MCP and the CLI.
 #[tokio::test]
 async fn the_volume_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
