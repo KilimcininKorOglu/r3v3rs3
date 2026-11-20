@@ -131,7 +131,7 @@ r3v3rs3 supports six types of ports:
 - TCP over TLS
 - UDP
 
-The `listen` address of a port starts with `/ip4/<address>` or `/ip6/<address>`, followed by `/tcp/<port>` (TCP), `/tcp/<port>/tls` (TCP over TLS), `/tcp/<port>/http` (HTTP), `/tcp/<port>/https` (HTTPS), `/udp/<port>` (UDP) or `/udp/<port>/quic/http` (HTTP over QUIC). `name` is an optional name of the port. Turn off "Active" (`active = false`) to stop a port or a proxy without deleting it.
+The `listen` address of a port starts with `/ip4/<address>` or `/ip6/<address>`, followed by `/tcp/<port>` (TCP), `/tcp/<port>/tls` (TCP over TLS), `/tcp/<port>/http` (HTTP), `/tcp/<port>/https` (HTTPS), `/udp/<port>` (UDP) or `/udp/<port>/quic/http` (HTTP over QUIC). A TCP or UDP port can name a range instead of one port, such as `/udp/49160-49240` (see "Port Ranges"). `name` is an optional name of the port. Turn off "Active" (`active = false`) to stop a port or a proxy without deleting it.
 
 ## Server Names
 
@@ -221,6 +221,52 @@ proxy_protocol = { trusted = ["10.0.0.0/8"], accept = "v2", timeout = "5s" }
 ```
 
 `accept` is `any` (the default), `v1` or `v2`.
+
+## Port Ranges
+
+A TCP or UDP port can listen on a range of ports, for example the relay ports of a TURN server: `/ip4/0.0.0.0/udp/49160-49240`. A range holds at most 16384 ports. TCP over TLS, HTTP, HTTPS and HTTP over QUIC ports take a single port only.
+
+- Each port of the range goes to the upstream port at the same position. With the range `49160-49240` and the upstream `/ip4/10.0.0.5/udp/50000-50080`, a packet to port 49165 goes to port 50005. Every upstream server of the proxy needs a range of the same size; r3v3rs3 refuses a single upstream port or a range of another size.
+- A range cannot cover a port that another TCP or UDP port of the same protocol or the SSH server listens on.
+- r3v3rs3 opens one socket on the first port and keeps an nftables table (`inet r3v3rs3_tproxy`) and a policy route (firewall mark `0x7233`, routing table 7233) that send the whole range to it with TPROXY. A UDP reply leaves from the port the client sent to.
+- The table and the route need `CAP_NET_ADMIN`. `install.sh` gives it to the `r3-server` unit. r3v3rs3 removes the table and the route when the last range or transparent port goes away.
+- The TPROXY rule runs before the Docker port forwarding, so a range also takes the packets of a published container port inside it.
+- When the host firewall table is on, it opens the whole range.
+
+```toml
+[turn-relay]
+listen = "/ip4/0.0.0.0/udp/49160-49240"
+```
+
+## Transparent Mode
+
+By default an upstream server sees the address of r3v3rs3 as the source of every connection. Turn on "Transparent Mode" (`transparent = true`) on a TCP, TCP over TLS or UDP port when the upstream must see the address of the client, for example a TURN server that builds its relay addresses from it. The option also works on a single port. HTTP, HTTPS and HTTP over QUIC ports refuse it; they pass the client address in the `Forwarded` and `X-Forwarded-For` headers instead.
+
+- r3v3rs3 opens each upstream connection from the client address and marks it (firewall mark `0x7234`). The `inet r3v3rs3_tproxy` table and the policy route bring the replies back to r3v3rs3.
+- The upstream must answer through this server: it runs on this host (a container or a host network service) or uses this server as its route back to the clients.
+- An upstream on a loopback address (`127.0.0.1`, `::1`) cannot work, because Linux refuses a packet with a foreign source address to a loopback address. r3v3rs3 refuses such an upstream on a transparent port. Bind the upstream to another address of the host.
+- The client and the upstream server need the same address family (IPv4 or IPv6).
+
+```toml
+[turn-relay]
+listen = "/ip4/0.0.0.0/udp/49160-49240"
+transparent = true
+```
+
+Via CLI or MCP (`set_port_transparent`):
+```bash
+r3 port set-transparent <PORT_ID> --enable true
+r3 port set-transparent <PORT_ID> --enable false
+```
+
+To remove the network rules by hand after r3v3rs3 is uninstalled:
+```bash
+nft delete table inet r3v3rs3_tproxy
+ip rule del fwmark 0x7233 lookup 7233
+ip route flush table 7233
+ip -6 rule del fwmark 0x7233 lookup 7233
+ip -6 route flush table 7233
+```
 
 ## Resetting a Port
 

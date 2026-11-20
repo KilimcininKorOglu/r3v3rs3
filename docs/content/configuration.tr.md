@@ -131,7 +131,7 @@ r3v3rs3 altı port türünü destekler:
 - TLS üzerinden TCP
 - UDP
 
-Portun `listen` adresi `/ip4/<adres>` veya `/ip6/<adres>` ile başlar. Ardından `/tcp/<port>` (TCP), `/tcp/<port>/tls` (TLS üzerinden TCP), `/tcp/<port>/http` (HTTP), `/tcp/<port>/https` (HTTPS), `/udp/<port>` (UDP) veya `/udp/<port>/quic/http` (QUIC üzerinden HTTP) gelir. `name` portun isteğe bağlı adıdır. Bir portu veya proxy'yi silmeden durdurmak için "Aktif" seçeneğini kapatın (`active = false`).
+Portun `listen` adresi `/ip4/<adres>` veya `/ip6/<adres>` ile başlar. Ardından `/tcp/<port>` (TCP), `/tcp/<port>/tls` (TLS üzerinden TCP), `/tcp/<port>/http` (HTTP), `/tcp/<port>/https` (HTTPS), `/udp/<port>` (UDP) veya `/udp/<port>/quic/http` (QUIC üzerinden HTTP) gelir. TCP veya UDP portu tek bir port yerine `/udp/49160-49240` gibi bir aralık alabilir ("Port aralıkları" bölümüne bakın). `name` portun isteğe bağlı adıdır. Bir portu veya proxy'yi silmeden durdurmak için "Aktif" seçeneğini kapatın (`active = false`).
 
 ## Sunucu adları
 
@@ -221,6 +221,52 @@ proxy_protocol = { trusted = ["10.0.0.0/8"], accept = "v2", timeout = "5s" }
 ```
 
 `accept` değeri `any` (varsayılan), `v1` veya `v2` olur.
+
+## Port aralıkları
+
+TCP veya UDP portu bir port aralığında dinleyebilir. Örneğin bir TURN sunucusunun relay portları için `/ip4/0.0.0.0/udp/49160-49240` kullanılır. Bir aralık en fazla 16384 port içerir. TLS üzerinden TCP, HTTP, HTTPS ve QUIC üzerinden HTTP portları yalnız tek port alır.
+
+- Aralıktaki her port, upstream aralığında aynı sıradaki porta gider. Aralık `49160-49240` ve upstream `/ip4/10.0.0.5/udp/50000-50080` ise 49165 portuna gelen paket 50005 portuna gider. Proxy'nin her upstream sunucusu aynı uzunlukta bir aralık içermelidir. r3v3rs3 tek bir upstream portunu veya farklı uzunluktaki bir aralığı reddeder.
+- Bir aralık, aynı protokoldeki başka bir TCP veya UDP portunun ya da SSH sunucusunun dinlediği portu içeremez.
+- r3v3rs3 ilk portta tek bir socket açar. Ardından bir nftables tablosu (`inet r3v3rs3_tproxy`) ve bir policy route (firewall işareti `0x7233`, routing tablosu 7233) kurar. Bu kurallar bütün aralığı TPROXY ile bu socket'e gönderir. UDP yanıtı, istemcinin gönderdiği porttan çıkar.
+- Tablo ve route `CAP_NET_ADMIN` yetkisi ister. `install.sh` bu yetkiyi `r3-server` unit'ine verir. Son aralık veya şeffaf port silinince r3v3rs3 tabloyu ve route'u kaldırır.
+- TPROXY kuralı Docker port yönlendirmesinden önce çalışır. Bu yüzden aralık, içindeki yayınlanmış bir container portunun paketlerini de alır.
+- Sunucu güvenlik duvarı tablosu açıksa bütün aralığı açar.
+
+```toml
+[turn-relay]
+listen = "/ip4/0.0.0.0/udp/49160-49240"
+```
+
+## Şeffaf mod
+
+Upstream sunucusu varsayılan olarak her bağlantının kaynağını r3v3rs3'ün adresi olarak görür. Upstream istemcinin adresini görmeliyse TCP, TLS üzerinden TCP veya UDP portunda "Şeffaf Mod" seçeneğini açın (`transparent = true`). Örneğin bir TURN sunucusu relay adreslerini istemcinin adresinden oluşturur. Bu seçenek tek portlu portlarda da çalışır. HTTP, HTTPS ve QUIC üzerinden HTTP portları bu seçeneği reddeder. Bu portlar istemcinin adresini `Forwarded` ve `X-Forwarded-For` header'larıyla iletir.
+
+- r3v3rs3 her upstream bağlantısını istemcinin adresinden açar ve işaretler (firewall işareti `0x7234`). `inet r3v3rs3_tproxy` tablosu ve policy route yanıtları r3v3rs3'e geri getirir.
+- Upstream yanıtlarını bu sunucu üzerinden göndermelidir. Upstream bu sunucuda çalışır (bir container veya host ağındaki bir servis) ya da istemcilere dönüş yolu olarak bu sunucuyu kullanır.
+- Loopback adresindeki (`127.0.0.1`, `::1`) bir upstream çalışmaz. Linux, kaynağı başka bir adres olan paketi loopback adresine göndermez. r3v3rs3 şeffaf bir portta böyle bir upstream'i reddeder. Upstream'i sunucunun başka bir adresine bağlayın.
+- İstemci ve upstream sunucusu aynı adres ailesinde (IPv4 veya IPv6) olmalıdır.
+
+```toml
+[turn-relay]
+listen = "/ip4/0.0.0.0/udp/49160-49240"
+transparent = true
+```
+
+CLI veya MCP (`set_port_transparent`) üzerinden:
+```bash
+r3 port set-transparent <PORT_ID> --enable true
+r3 port set-transparent <PORT_ID> --enable false
+```
+
+r3v3rs3 kaldırıldıktan sonra ağ kurallarını elle silmek için:
+```bash
+nft delete table inet r3v3rs3_tproxy
+ip rule del fwmark 0x7233 lookup 7233
+ip route flush table 7233
+ip -6 rule del fwmark 0x7233 lookup 7233
+ip -6 route flush table 7233
+```
 
 ## Portu sıfırlama
 
