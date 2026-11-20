@@ -117,6 +117,33 @@ pub struct SetPortTransparentParams {
     pub enabled: bool,
 }
 
+/// The argument of `set_firewall`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SetFirewallParams {
+    /// Whether r3v3rs3 keeps the host firewall table.
+    pub enabled: Option<bool>,
+    /// The extra ports the table opens, such as `udp/51820` or `tcp/8000-8010`; replaces the list.
+    pub extra_ports: Option<Vec<String>>,
+}
+
+/// Applies the given fields of `set_firewall`; an invalid port is refused before anything changes.
+fn apply_firewall_params(
+    firewall: &mut r3v3rs3_api::firewall::FirewallConfig,
+    params: SetFirewallParams,
+) -> Result<(), ErrorData> {
+    if let Some(ports) = params.extra_ports {
+        firewall.extra_ports = ports
+            .iter()
+            .map(|port| port.trim().parse())
+            .collect::<Result<_, _>>()
+            .map_err(|err| ErrorData::invalid_params(format!("{err}"), None))?;
+    }
+    if let Some(enabled) = params.enabled {
+        firewall.enabled = enabled;
+    }
+    Ok(())
+}
+
 /// The argument of `update_ct_monitor_config`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateCtConfigParams {
@@ -1445,7 +1472,7 @@ impl McpServer {
 
     /// The host firewall table that r3v3rs3 keeps.
     #[tool(
-        description = "Show the host firewall table (nftables `inet r3v3rs3`) that r3v3rs3 keeps: whether it is enabled, the TCP and UDP ports it opens (`tcp/443`, `udp/49160-49240`), warnings about other firewalls of the host that can still drop these ports, and the error of the last update. Turn it on and add extra ports with `update_config` (`firewall.enabled`, `firewall.extra_ports`). Takes no arguments. Read-only; any account can call it."
+        description = "Show the host firewall table (nftables `inet r3v3rs3`) that r3v3rs3 keeps: whether it is enabled, the TCP and UDP ports it opens (`tcp/443`, `udp/49160-49240`), warnings about other firewalls of the host that can still drop these ports, and the error of the last update. Turn it on and set extra ports with `set_firewall`. Takes no arguments. Read-only; any account can call it."
     )]
     async fn get_firewall_status(
         &self,
@@ -1459,6 +1486,35 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(status.0)
+    }
+
+    /// Turn the host firewall table on or off and set its extra ports.
+    #[tool(
+        description = "Turn the host firewall table (nftables `inet r3v3rs3`) on or off (`enabled`) and replace its extra ports (`extra_ports`, such as [\"udp/51820\", \"tcp/8443\"]; an empty list clears them). Omitted fields keep their value. The table always opens the SSH ports and the ports of r3v3rs3; check the result and the warnings with `get_firewall_status`. Needs a token with the edit scope and an admin account."
+    )]
+    async fn set_firewall(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<SetFirewallParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let current = super::config::get(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller.clone()),
+        )
+        .await
+        .map_err(any_error)?;
+        let mut config = *current.0;
+        apply_firewall_params(&mut config.firewall, params)?;
+        let _ = super::config::put(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(config),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(json!({ "status": "updated" }))
     }
 
     /// Get the current status and metadata of the loaded GeoIP database.

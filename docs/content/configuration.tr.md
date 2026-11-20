@@ -2154,6 +2154,8 @@ enabled = true
 extra_ports = ["udp/51820"]
 ```
 
+Ayarlar sayfası, MCP aracı `set_firewall` ve `r3 security firewall set --enabled true --extra-ports udp/51820` komutu aynı iki ayarı değiştirir.
+
 Bir port, bir uygulama veya ayar her değiştiğinde r3v3rs3 tabloyu tek bir `nft -f` işlemiyle değiştirir. Bu yüzden yarım yazılmış bir tablo oluşmaz. Ayar kapatılınca tablo silinir. Tablo yalnız `input` hook'unu filtreler. Docker'ın NAT ve forward kuralları değişmez. Agent hedefleri de kendi host'larında aynı tabloyu, kendi uygulamalarının `host_ports` değerleriyle tutar.
 
 - Sunucunun `CAP_NET_ADMIN` yetkisine ihtiyacı vardır. `install.sh` dosyasının yazdığı unit bu yetkiyi verir.

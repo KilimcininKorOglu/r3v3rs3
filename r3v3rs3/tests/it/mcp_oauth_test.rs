@@ -1205,6 +1205,34 @@ async fn assert_mcp_admin_mutations(
 ) -> anyhow::Result<()> {
     let unban = mcp_call(client, "unban_ip", json!({ "ip": "10.0.0.1" })).await?;
     assert!(unban.contains("10.0.0.1"), "{unban}");
+    assert_mcp_firewall(client).await
+}
+
+/// `set_firewall` saves the extra ports of the host firewall table, and a port outside
+/// 1-65535 is refused before anything changes. The table stays off, so no `nft` runs.
+async fn assert_mcp_firewall(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let ports = json!({ "enabled": false, "extra_ports": ["udp/51820", "tcp/8000-8010"] });
+    mcp_call(client, "set_firewall", ports).await?;
+    let config: Value = serde_json::from_str(&mcp_call(client, "get_config", json!({})).await?)?;
+    let saved = config["firewall"]["extra_ports"].to_string();
+    assert!(
+        saved.contains("udp/51820") && saved.contains("tcp/8000-8010"),
+        "{config}"
+    );
+    let bad = json!({ "extra_ports": ["udp/99999"] });
+    let refused = mcp_call(client, "set_firewall", bad).await;
+    assert!(
+        refused.is_err(),
+        "an invalid port was accepted: {refused:?}"
+    );
+    let config: Value = serde_json::from_str(&mcp_call(client, "get_config", json!({})).await?)?;
+    assert_eq!(
+        config["firewall"]["extra_ports"].to_string(),
+        saved,
+        "{config}"
+    );
     Ok(())
 }
 

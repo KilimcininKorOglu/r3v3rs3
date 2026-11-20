@@ -2154,6 +2154,8 @@ enabled = true
 extra_ports = ["udp/51820"]
 ```
 
+The settings page, the MCP tool `set_firewall` and `r3 security firewall set --enabled true --extra-ports udp/51820` change the same two settings.
+
 r3v3rs3 replaces the table in one `nft -f` transaction each time a port, an app or the setting changes, so a half-written table never exists. Turning the setting off removes the table. The table filters only the `input` hook; the Docker NAT and forward rules stay as they are. Agent targets keep the same table on their host with the `host_ports` of their apps.
 
 - The server needs `CAP_NET_ADMIN`; the unit that `install.sh` writes gives it.
