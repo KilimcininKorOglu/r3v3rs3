@@ -1257,6 +1257,14 @@ async fn assert_cli_port_mutations(
     let get_out = run_client(binary, addr, token, &["port", "get", &port_id]).await?;
     assert!(get_out.status.success());
     assert_cli_transparent(binary, addr, token, &port_id).await?;
+    // Turning early data off must be possible; the port has no TLS, so off is its only value.
+    let args = ["port", "set-early-data", &port_id, "--enable", "false"];
+    let out = run_client(binary, addr, token, &args).await?;
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     Ok(port_id)
 }
 

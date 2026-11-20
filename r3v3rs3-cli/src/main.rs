@@ -134,7 +134,8 @@ pub enum PortCommand {
     /// Enables or disables TLS 1.3 0-RTT early data on a port.
     SetEarlyData {
         id: String,
-        #[arg(long, default_value_t = true)]
+        /// `--enable false` turns early data off; a bare bool flag could only turn it on.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         enable: bool,
     },
     /// Makes the upstream servers of a TCP or UDP port see the client address (needs
