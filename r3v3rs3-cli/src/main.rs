@@ -1061,6 +1061,8 @@ pub enum ConfigCommand {
         #[arg(short = 'f', long = "file")]
         file: String,
     },
+    /// Sends a test notification to the saved notification webhook.
+    TestNotification,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1923,6 +1925,7 @@ async fn run_config(api: &api_client::ApiClient, cmd: ConfigCommand) -> anyhow::
         ConfigCommand::Get => api.get_config().await,
         ConfigCommand::Backup { output } => api.export_config_backup(output.as_deref()).await,
         ConfigCommand::Restore { file } => api.restore_config_backup(&file).await,
+        ConfigCommand::TestNotification => api.test_notification().await,
     }
 }
 

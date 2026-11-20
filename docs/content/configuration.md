@@ -47,6 +47,10 @@ $ r3 config restore -f r3v3rs3-backup.json
 $ cat r3v3rs3-backup.json | r3 config restore -f -
 ```
 
+### MCP
+
+The tools `backup_config` and `restore_config` do the same; pass the answer of `backup_config` as the `backup` argument of `restore_config`. `test_notification` (and `r3 config test-notification`) sends a test message to the saved notification webhook.
+
 ### REST API
 
 - `GET /api/config/backup`: Returns the complete `ConfigBackup` object. Requires `admin` permission.

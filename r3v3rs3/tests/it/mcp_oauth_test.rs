@@ -1206,7 +1206,38 @@ async fn assert_mcp_admin_mutations(
     let unban = mcp_call(client, "unban_ip", json!({ "ip": "10.0.0.1" })).await?;
     assert!(unban.contains("10.0.0.1"), "{unban}");
     assert_mcp_firewall(client).await?;
+    assert_mcp_config_backup(client).await?;
     assert_mcp_dns_credentials(client).await
+}
+
+/// `backup_config` and `restore_config` reach the panel's backup API (OpenAPI `backup_config`,
+/// `restore_config`): a setting changed after the backup returns to its saved value after the
+/// restore. `test_notification` refuses to run without a webhook.
+async fn assert_mcp_config_backup(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let backup: Value = serde_json::from_str(&mcp_call(client, "backup_config", json!({})).await?)?;
+    let saved = backup["config"]["firewall"]["extra_ports"].to_string();
+    assert!(saved.contains("udp/51820"), "{backup}");
+    mcp_call(
+        client,
+        "set_firewall",
+        json!({ "extra_ports": ["udp/60000"] }),
+    )
+    .await?;
+    mcp_call(client, "restore_config", json!({ "backup": backup })).await?;
+    let config: Value = serde_json::from_str(&mcp_call(client, "get_config", json!({})).await?)?;
+    assert_eq!(
+        config["firewall"]["extra_ports"].to_string(),
+        saved,
+        "{config}"
+    );
+    let refused = mcp_call(client, "test_notification", json!({})).await;
+    assert!(
+        refused.is_err(),
+        "a test without a webhook was accepted: {refused:?}"
+    );
+    Ok(())
 }
 
 /// The DNS credential tools reach the same API as the panel (OpenAPI `add_dns_credential`,
@@ -1557,6 +1588,12 @@ async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
         assert_cli_proxy_mutations(&binary, &addr, &token, &port_id).await?;
         assert_cli_access_lists(&binary, &addr, &token).await?;
         assert_cli_dns_credentials(&binary, &addr, &token).await?;
+        // POST /api/config/notifications/test answers notification_webhook_missing
+        // while no webhook is saved; the command must reach that endpoint.
+        let out = run_client(&binary, &addr, &token, &["config", "test-notification"]).await?;
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{stderr}");
+        assert!(stderr.contains("notification_webhook_missing"), "{stderr}");
         Ok(())
     })
     .await

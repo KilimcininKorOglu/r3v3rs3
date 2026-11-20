@@ -117,6 +117,13 @@ pub struct SetPortTransparentParams {
     pub enabled: bool,
 }
 
+/// The argument of `restore_config`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RestoreConfigParams {
+    /// The backup object, as `backup_config` returns it.
+    pub backup: serde_json::Map<String, serde_json::Value>,
+}
+
 /// The argument of `add_dns_credential`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DnsCredentialParams {
@@ -1502,6 +1509,67 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(status.0)
+    }
+
+    /// Export the configuration backup.
+    #[tool(
+        description = "Export the configuration backup: the settings, ports, proxies, certificates requests and other stored configuration, with secrets masked and accounts left out. Pass the whole answer to `restore_config` to restore it. Takes no arguments. Needs an admin account."
+    )]
+    async fn backup_config(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let backup = super::config::backup(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(backup.0)
+    }
+
+    /// Restore a configuration backup.
+    #[tool(
+        description = "Restore a configuration backup (`backup`, the answer of `backup_config`). The stored configuration is replaced by the backup; masked secrets keep their current values. Needs a token with the edit scope and an admin account."
+    )]
+    async fn restore_config(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<RestoreConfigParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let backup: r3v3rs3_api::config_backup::ConfigBackup =
+            serde_json::from_value(serde_json::Value::Object(params.backup))
+                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?;
+        let _ = super::config::restore(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(backup),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(json!({ "restored": true }))
+    }
+
+    /// Send a test notification to the saved webhook.
+    #[tool(
+        description = "Send a test notification to the notification webhook of the saved settings. It fails with `notification_webhook_missing` when no webhook is saved, and with the delivery error when the webhook does not accept it. Takes no arguments. Needs a token with the edit scope and an admin account."
+    )]
+    async fn test_notification(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let _ = super::config::test_notification(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(json!({ "delivered": true }))
     }
 
     /// Turn the host firewall table on or off and set its extra ports.

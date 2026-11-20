@@ -47,6 +47,10 @@ $ r3 config restore -f r3v3rs3-backup.json
 $ cat r3v3rs3-backup.json | r3 config restore -f -
 ```
 
+### MCP
+
+`backup_config` ve `restore_config` araçları aynı işi yapar. `backup_config` aracının yanıtını `restore_config` aracına `backup` argümanı olarak verin. `test_notification` aracı ve `r3 config test-notification` komutu, kayıtlı bildirim webhook'una bir test mesajı gönderir.
+
 ### REST API
 
 - `GET /api/config/backup`: Tam `ConfigBackup` nesnesini döner. `admin` yetkisi gerektirir.

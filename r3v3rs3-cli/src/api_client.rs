@@ -3277,6 +3277,13 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn test_notification(&self) -> anyhow::Result<()> {
+        self.request(Method::POST, "/api/config/notifications/test", None)
+            .await?;
+        println!("test notification delivered");
+        Ok(())
+    }
+
     pub async fn restore_config_backup(&self, file: &str) -> anyhow::Result<()> {
         let content = if file == "-" {
             let mut buf = String::new();
