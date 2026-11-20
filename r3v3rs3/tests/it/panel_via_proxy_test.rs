@@ -258,21 +258,31 @@ fn spawn_admin(listen: bool, dir: &std::path::Path, admin: SocketAddr, channels:
     }
 }
 
-/// Waits until the proxy forwards to the admin API.
+/// Waits until the proxy forwards to the admin API. A timeout names the last answer (a status
+/// or a connection error), so a failure shows where the request stopped.
 async fn wait_for_panel(panel: &Panel) -> anyhow::Result<()> {
     let client = panel.browser("203.0.113.1")?;
     let url = panel.url("/.well-known/oauth-protected-resource");
+    let last = Arc::new(std::sync::Mutex::new(String::from("no request")));
     let ready = || {
-        let (client, url) = (client.clone(), url.clone());
+        let (client, url, last) = (client.clone(), url.clone(), last.clone());
         async move {
-            Ok(client
-                .get(url)
-                .send()
-                .await
-                .is_ok_and(|res| res.status() == StatusCode::OK))
+            let answer = match client.get(url).send().await {
+                Ok(res) => res.status().to_string(),
+                Err(err) => format!("{err:?}"),
+            };
+            let ok = answer == StatusCode::OK.to_string();
+            if let Ok(mut slot) = last.lock() {
+                *slot = answer;
+            }
+            Ok(ok)
         }
     };
-    wait_until(ready, "the proxy does not forward to the admin API").await
+    let waited = wait_until(ready, "the proxy does not forward to the admin API").await;
+    waited.map_err(|err| {
+        let answer = last.lock().map(|a| a.clone()).unwrap_or_default();
+        anyhow::anyhow!("{err}; last answer: {answer}")
+    })
 }
 
 /// Signs in through the proxy and returns the `Set-Cookie` header of the session.
