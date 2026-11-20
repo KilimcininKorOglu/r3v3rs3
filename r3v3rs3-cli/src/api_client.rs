@@ -395,6 +395,26 @@ impl ApiClient {
         print_json(&self.request(Method::POST, path, Some(body)).await?)
     }
 
+    /// Sends a PUT request with a JSON body and prints the JSON answer.
+    pub async fn print_put(&self, path: &str, body: &Value) -> anyhow::Result<()> {
+        print_json(&self.request(Method::PUT, path, Some(body)).await?)
+    }
+
+    /// Lists the environment variable groups as id, name and variable count.
+    pub async fn list_env_groups(&self) -> anyhow::Result<()> {
+        let groups: Vec<Value> = self.get_json("/api/env-groups").await?;
+        println!("{:<26} {:<30} VARIABLES", "ID", "NAME");
+        for group in &groups {
+            let count = group["variables"].as_array().map_or(0, Vec::len);
+            let (id, name) = (
+                group["id"].as_str().unwrap_or(""),
+                group["name"].as_str().unwrap_or(""),
+            );
+            println!("{id:<26} {name:<30} {count}");
+        }
+        Ok(())
+    }
+
     /// Sends a DELETE request and prints the JSON answer.
     pub async fn print_delete(&self, path: &str) -> anyhow::Result<()> {
         print_json(&self.request(Method::DELETE, path, None).await?)

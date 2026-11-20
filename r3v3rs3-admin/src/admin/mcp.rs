@@ -140,6 +140,61 @@ pub struct IdJsonRequestParams {
     pub request: serde_json::Map<String, serde_json::Value>,
 }
 
+/// The arguments of `update_project`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateProjectParams {
+    /// The id of the project.
+    pub id: String,
+    /// The new name, description and default environments.
+    pub spec: r3v3rs3_api::platform::ProjectSpec,
+}
+
+/// A project and one of its environments.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ProjectEnvironmentParams {
+    /// The id of the project.
+    pub project_id: String,
+    /// The id of the environment.
+    pub environment_id: String,
+}
+
+impl ProjectEnvironmentParams {
+    fn ids(&self) -> Result<(ShortId, ShortId), ErrorData> {
+        Ok((parse_id(&self.project_id)?, parse_id(&self.environment_id)?))
+    }
+}
+
+/// The arguments of `update_environment`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateEnvironmentParams {
+    /// The id of the project.
+    pub project_id: String,
+    /// The id of the environment.
+    pub environment_id: String,
+    /// The new `name` and optional `description`.
+    pub request: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The arguments of `diff_environments`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DiffEnvironmentsParams {
+    /// The id of the project.
+    pub project_id: String,
+    /// The environment compared from.
+    pub source_id: String,
+    /// The environment compared to.
+    pub target_id: String,
+}
+
+/// The arguments of `update_env_group`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateEnvGroupParams {
+    /// The id of the group.
+    pub id: String,
+    /// The new name, description and variables.
+    pub group: r3v3rs3_api::platform::EnvGroupSpec,
+}
+
 /// The arguments of `get_app_metrics`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AppMetricsParams {
@@ -4031,6 +4086,210 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(engines.0)
+    }
+
+    /// Read one project.
+    #[tool(
+        description = "Show the project `id` with its environments. Read-only; any account can call it."
+    )]
+    async fn get_project(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let project = super::platform::get_project(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(project.0)
+    }
+
+    /// Rename a project or change its description.
+    #[tool(
+        description = "Replace the `spec` of the project `id`: `name`, `description` and `default_environments`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn update_project(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateProjectParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let project = super::platform::update_project(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(params.spec),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(project.0)
+    }
+
+    /// Read one environment of a project.
+    #[tool(
+        description = "Show the environment `environment_id` of the project `project_id`. Read-only; any account can call it."
+    )]
+    async fn get_environment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<ProjectEnvironmentParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let path = params.ids()?;
+        let env = super::platform::get_environment(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(path),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(env.0)
+    }
+
+    /// Rename an environment or change its description.
+    #[tool(
+        description = "Change the environment `environment_id` of the project `project_id`. `request` holds the new `name` and optional `description`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn update_environment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateEnvironmentParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let path = (
+            parse_id(&params.project_id)?,
+            parse_id(&params.environment_id)?,
+        );
+        let request: r3v3rs3_api::platform::EnvironmentSpec = json_arg(params.request)?;
+        let env = super::platform::update_environment(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(path),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(env.0)
+    }
+
+    /// Delete an environment of a project.
+    #[tool(
+        description = "Delete the environment `environment_id` of the project `project_id`. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn delete_environment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<ProjectEnvironmentParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let path = params.ids()?;
+        let env = super::platform::delete_environment(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(path),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(env.0)
+    }
+
+    /// Read the variables of an environment.
+    #[tool(
+        description = "List the variables of the environment `environment_id` of the project `project_id`. Secret values are never returned. Read-only; any account can call it."
+    )]
+    async fn get_environment_env(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<ProjectEnvironmentParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let path = params.ids()?;
+        let vars = super::platform::get_environment_env(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(path),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(vars.0)
+    }
+
+    /// Compare the variables of two environments.
+    #[tool(
+        description = "Compare the variables of the environments `source_id` and `target_id` of the project `project_id`: keys only in one, and keys whose values differ. Secret values are never returned. Read-only; any account can call it."
+    )]
+    async fn diff_environments(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<DiffEnvironmentsParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let path = (
+            parse_id(&params.project_id)?,
+            parse_id(&params.source_id)?,
+            parse_id(&params.target_id)?,
+        );
+        let report = super::platform::diff_environments(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(path),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(report.0)
+    }
+
+    /// Read one env group.
+    #[tool(
+        description = "Show the environment variable group `id` with its variables. Secret values are never returned. Read-only; any account can call it."
+    )]
+    async fn get_env_group(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let group = super::platform::get_env_group(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(group.0)
+    }
+
+    /// Replace an env group.
+    #[tool(
+        description = "Replace the environment variable group `id` with `group` (`name`, `description`, `variables`). A secret variable sent without a value keeps its stored value. Apps that use the group get the new variables at their next deployment. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn update_env_group(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UpdateEnvGroupParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let group = super::platform::update_env_group(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(params.group),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(group.0)
     }
 
     /// Read one deployment.

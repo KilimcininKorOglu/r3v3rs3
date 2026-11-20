@@ -1879,7 +1879,7 @@ Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable 
 | **App Store Kataloğu** | `get_store`, `refresh_store`, `install_store_app` | Küratörlü tek tıkla kurulum şablonlarının (veritabanları, paneller, CMS, analitik) katalogdan doğrudan tam yapılandırılmış ve yönlendirilmiş uygulamalar olarak otonom kurulumu. |
 | **Yönetilen Veritabanları ve Yedekler** | `list_databases`, `list_database_engines`, `create_database`, `get_database_credentials`, `list_database_tenants`, `reset_database_password`, `delete_database_tenant`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config`, `test_database_backup`, `get_database_pitr_range`, `restore_database_pitr`, `archive_database_wal_segment`, `list_database_wal_segments`, `delete_database`, `clone_database`, `list_database_replicas`, `create_database_replica`, `restore_database_backup`, `run_database_backup_now`, `list_all_backups`, `get_backups_overview`, `list_s3_database_backups`, `restore_s3_database_backup`, `refresh_database_engines` | Otomatik üretilen kimlik bilgileriyle PostgreSQL, MySQL, Redis, MariaDB ve MongoDB sağlama, anlık yedek alma, yedek silme, yedek bütünlüğü testi, dallanabilir PITR belirli bir zamana geri dönme, WAL arşivleme ve uzak depolama ayarları. |
 | **Agent Hedef Düğümleri** | `list_targets`, `add_target`, `delete_target`, `set_target_region`, `drain_target`, `undrain_target`, `generate_target_token`, `upgrade_target`, `upgrade_all_targets` | Çok düğümlü Docker agent altyapısı, tek kullanımlık kayıt token'ı üretme, hedef düğümleri kaldırma, coğrafi bölge atama, trafik boşaltma/geri alma ve uzak hedef ikili dosya güncellemeleri. |
-| **Projeler ve Ortam Grupları** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_project_environment`, `update_project_env`, `sync_project_env` | Proje organizasyonu, çoklu ortam izolasyonu, paylaşılan ortam değişkeni grupları ve seçici anahtar kopyalama ile ortamlar arası yapılandırma senkronizasyonu. |
+| **Projeler ve Ortam Grupları** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_project_environment`, `update_project_env`, `sync_project_env`, `get_project`, `update_project`, `get_environment`, `update_environment`, `delete_environment`, `get_environment_env`, `diff_environments`, `get_env_group`, `update_env_group` | Proje organizasyonu, çoklu ortam izolasyonu, paylaşılan ortam değişkeni grupları ve seçici anahtar kopyalama ile ortamlar arası yapılandırma senkronizasyonu. |
 | **Dışa Dönük Webhook'lar** | `list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook` | Dışa dönük olay bildirim webhook dağıtıcıları: uç nokta yönetimi, HMAC-SHA256 imza sırrı doğrulaması, ayrıntılı olay abonelikleri ve uçtan uca webhook teslimat testi. |
 | **Konteyner Registry'leri** | `list_registries`, `add_registry`, `update_registry`, `delete_registry` | Özel Docker ve OCI konteyner registry kimlik bilgileri: güvenli kimlik doğrulama, pull izinleri ve sunucu hedef uç noktaları. |
 | **Git Bağlantıları** | `list_git_connections`, `get_git_connection`, `add_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches` | Git sağlayıcı bağlantıları (GitHub App, GitLab, Gitea): OAuth bağlantı yönetimi, erişilebilir depo tarama ve uzak dal (branch) listeleme. |
@@ -2054,6 +2054,19 @@ r3 <server> project get <id>
 r3 <server> project add --name my-project [--description "Ana servisler"]
 r3 <server> project sync-env <project-id> --from staging --to production
 r3 <server> project delete <id>
+r3 <server> project update <id> --name my-project [--description "Core apps"]
+r3 <server> project env-create <project-id> --name staging
+r3 <server> project env-get <project-id> <env-id>
+r3 <server> project env-update <project-id> <env-id> --name stage
+r3 <server> project env-delete <project-id> <env-id>
+r3 <server> project env-vars <project-id> <env-id>
+r3 <server> project env-set-vars <project-id> <env-id> <vars.json|yaml|->
+r3 <server> project env-diff <project-id> <source-env-id> <target-env-id>
+r3 <server> env-group list
+r3 <server> env-group get <id>
+r3 <server> env-group add <group.json|yaml|->
+r3 <server> env-group update <id> <group.json|yaml|->
+r3 <server> env-group delete <id>
 
 # Uygulama Kataloğu (App Store)
 r3 <server> store list

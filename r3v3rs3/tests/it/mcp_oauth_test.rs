@@ -1883,6 +1883,261 @@ async fn the_app_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Resu
     .await
 }
 
+const ENV_SECRET: &str = "env-secret-value-never-shown";
+
+/// The id field of a JSON answer.
+fn id_of(answer: &str) -> anyhow::Result<String> {
+    let value: Value = serde_json::from_str(answer)?;
+    Ok(value["id"]
+        .as_str()
+        .context("no id in the answer")?
+        .to_string())
+}
+
+/// The project tools read and rename a project (OpenAPI `get_project`, `update_project`).
+async fn assert_mcp_project(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<String> {
+    let spec = json!({ "name": "mcp-proj", "default_environments": [] });
+    let id = id_of(&mcp_call(client, "create_project", json!({ "spec": spec })).await?)?;
+    let renamed = json!({ "name": "mcp-proj-2", "default_environments": [] });
+    mcp_call(
+        client,
+        "update_project",
+        json!({ "id": id, "spec": renamed }),
+    )
+    .await?;
+    let shown = mcp_call(client, "get_project", json!({ "id": id })).await?;
+    assert!(shown.contains("mcp-proj-2"), "{shown}");
+    Ok(id)
+}
+
+/// The environment tools read, rename, compare and delete environments, and the variables
+/// of an environment never show a secret value (OpenAPI `get_environment`,
+/// `update_environment`, `get_environment_env`, `diff_environments`, `delete_environment`).
+async fn assert_mcp_environments(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+    project: &str,
+) -> anyhow::Result<()> {
+    let create = |name: &str| json!({ "project_id": project, "name": name });
+    let env = id_of(&mcp_call(client, "create_project_environment", create("staging")).await?)?;
+    let other = id_of(&mcp_call(client, "create_project_environment", create("prod")).await?)?;
+    let pair = json!({ "project_id": project, "environment_id": env });
+    let rename =
+        json!({ "project_id": project, "environment_id": env, "request": { "name": "stage" } });
+    mcp_call(client, "update_environment", rename).await?;
+    let shown = mcp_call(client, "get_environment", pair.clone()).await?;
+    assert!(shown.contains("stage"), "{shown}");
+    assert_mcp_environment_vars(client, project, &env, &other).await
+}
+
+/// The variables of an environment and the comparison of two environments never show a
+/// secret value, and a deleted environment is not found.
+async fn assert_mcp_environment_vars(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+    project: &str,
+    env: &str,
+    other: &str,
+) -> anyhow::Result<()> {
+    let pair = json!({ "project_id": project, "environment_id": env });
+    let vars = json!([{ "key": "API_KEY", "value": ENV_SECRET, "secret": true }]);
+    mcp_call(
+        client,
+        "update_project_env",
+        json!({ "environment_id": env, "variables": vars }),
+    )
+    .await?;
+    let listed = mcp_call(client, "get_environment_env", pair.clone()).await?;
+    assert!(
+        listed.contains("API_KEY") && !listed.contains(ENV_SECRET),
+        "{listed}"
+    );
+    let diff = json!({ "project_id": project, "source_id": env, "target_id": other });
+    let report = mcp_call(client, "diff_environments", diff).await?;
+    assert!(
+        report.contains("API_KEY") && !report.contains(ENV_SECRET),
+        "{report}"
+    );
+    mcp_call(client, "delete_environment", pair.clone()).await?;
+    let gone = mcp_call(client, "get_environment", pair).await.err();
+    assert_not_found(
+        "get_environment",
+        &gone.map(|e| e.to_string()).unwrap_or_default(),
+    );
+    Ok(())
+}
+
+/// The env group tools read and rename a group without its secret values (OpenAPI
+/// `get_env_group`, `update_env_group`).
+async fn assert_mcp_env_groups(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let vars = json!([{ "key": "TOKEN", "value": ENV_SECRET, "secret": true }]);
+    let group = json!({ "name": "mcp-grp", "variables": vars });
+    let id = id_of(&mcp_call(client, "create_env_group", json!({ "group": group })).await?)?;
+    let shown = mcp_call(client, "get_env_group", json!({ "id": id })).await?;
+    assert!(
+        shown.contains("TOKEN") && !shown.contains(ENV_SECRET),
+        "{shown}"
+    );
+    let renamed = json!({ "id": id, "group": { "name": "mcp-grp-2", "variables": [] } });
+    mcp_call(client, "update_env_group", renamed).await?;
+    let shown = mcp_call(client, "get_env_group", json!({ "id": id })).await?;
+    assert!(shown.contains("mcp-grp-2"), "{shown}");
+    Ok(())
+}
+
+/// `r3 project` and `r3 env-group` reach the same endpoints, without secret values.
+async fn assert_cli_projects(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["project", "add", "--name", "cli-proj"],
+    )
+    .await?;
+    let id = listed_id(
+        &cli_ok(binary, addr, token, &["project", "list"]).await?,
+        "cli-proj",
+    )?;
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["project", "update", &id, "--name", "cli-proj-2"],
+    )
+    .await?;
+    let shown = cli_ok(binary, addr, token, &["project", "get", &id]).await?;
+    assert!(shown.contains("cli-proj-2"), "{shown}");
+    assert_cli_project_envs(binary, addr, token, &id).await?;
+    assert_cli_env_groups(binary, addr, token).await
+}
+
+/// `r3 project env-*` creates, renames and reads environments of the project `id`.
+async fn assert_cli_project_envs(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let env = id_of(
+        &cli_ok(
+            binary,
+            addr,
+            token,
+            &["project", "env-create", id, "--name", "qa"],
+        )
+        .await?,
+    )?;
+    let other = id_of(
+        &cli_ok(
+            binary,
+            addr,
+            token,
+            &["project", "env-create", id, "--name", "live"],
+        )
+        .await?,
+    )?;
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["project", "env-update", id, &env, "--name", "qa-2"],
+    )
+    .await?;
+    let shown = cli_ok(binary, addr, token, &["project", "env-get", id, &env]).await?;
+    assert!(shown.contains("qa-2"), "{shown}");
+    assert_cli_env_vars(binary, addr, token, id, (&env, &other)).await
+}
+
+/// `r3 project env-set-vars`, `env-vars` and `env-diff` never show a secret value, and
+/// `env-delete` removes the environment.
+async fn assert_cli_env_vars(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    id: &str,
+    (env, other): (&str, &str),
+) -> anyhow::Result<()> {
+    let vars = json!({ "variables": [{ "key": "API_KEY", "value": ENV_SECRET, "secret": true }] });
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["project", "env-set-vars", id, env, &vars.to_string()],
+    )
+    .await?;
+    let listed = cli_ok(binary, addr, token, &["project", "env-vars", id, env]).await?;
+    assert!(
+        listed.contains("API_KEY") && !listed.contains(ENV_SECRET),
+        "{listed}"
+    );
+    let report = cli_ok(
+        binary,
+        addr,
+        token,
+        &["project", "env-diff", id, env, other],
+    )
+    .await?;
+    assert!(!report.contains(ENV_SECRET), "{report}");
+    cli_ok(binary, addr, token, &["project", "env-delete", id, env]).await?;
+    Ok(())
+}
+
+async fn assert_cli_env_groups(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+) -> anyhow::Result<()> {
+    let vars = json!([{ "key": "TOKEN", "value": ENV_SECRET, "secret": true }]);
+    let group = json!({ "name": "cli-grp", "variables": vars });
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["env-group", "add", &group.to_string()],
+    )
+    .await?;
+    let id = listed_id(
+        &cli_ok(binary, addr, token, &["env-group", "list"]).await?,
+        "cli-grp",
+    )?;
+    let shown = cli_ok(binary, addr, token, &["env-group", "get", &id]).await?;
+    assert!(
+        shown.contains("TOKEN") && !shown.contains(ENV_SECRET),
+        "{shown}"
+    );
+    let renamed = json!({ "name": "cli-grp-2", "variables": [] });
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["env-group", "update", &id, &renamed.to_string()],
+    )
+    .await?;
+    cli_ok(binary, addr, token, &["env-group", "delete", &id]).await?;
+    let listing = cli_ok(binary, addr, token, &["env-group", "list"]).await?;
+    assert!(!listing.contains("cli-grp"), "{listing}");
+    Ok(())
+}
+
+/// Project, environment and env group operations are reachable from MCP and the CLI.
+#[tokio::test]
+async fn the_project_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-projects")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    with_admin_config(&dir.0, config, |addr| async move {
+        let token = access_token(&addr).await?;
+        let client = mcp_client(addr, &token).await?;
+        let project = assert_mcp_project(&client).await?;
+        assert_mcp_environments(&client, &project).await?;
+        assert_mcp_env_groups(&client).await?;
+        assert_cli_projects(&client_binary()?, &addr, &token).await
+    })
+    .await
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {

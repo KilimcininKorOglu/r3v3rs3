@@ -1879,7 +1879,7 @@ The admin API exposes its complete tool suite over the Model Context Protocol at
 | **App Store Catalog** | `get_store`, `refresh_store`, `install_store_app` | Instant deployment of curated one-click templates (databases, dashboards, CMS, wikis, analytics) directly from the store into fully configured and routed applications. |
 | **Managed Databases & Backups** | `list_databases`, `list_database_engines`, `create_database`, `get_database_credentials`, `list_database_tenants`, `reset_database_password`, `delete_database_tenant`, `list_database_backups`, `create_database_backup`, `delete_database_backup`, `get_backup_config`, `update_backup_config`, `test_database_backup`, `get_database_pitr_range`, `restore_database_pitr`, `archive_database_wal_segment`, `list_database_wal_segments`, `delete_database`, `clone_database`, `list_database_replicas`, `create_database_replica`, `restore_database_backup`, `run_database_backup_now`, `list_all_backups`, `get_backups_overview`, `list_s3_database_backups`, `restore_s3_database_backup`, `refresh_database_engines` | Provisioning PostgreSQL, MySQL, Redis, MariaDB, and MongoDB with automated credentials, immediate backup creation, snapshot deletion, backup integrity verification, PITR point-in-time recovery with branching, WAL archive operations, and remote storage configuration. |
 | **Agent Target Nodes** | `list_targets`, `add_target`, `delete_target`, `set_target_region`, `drain_target`, `undrain_target`, `generate_target_token`, `upgrade_target`, `upgrade_all_targets` | Multi-node Docker agent infrastructure, one-time enrollment token issuance, target decommissioning, geo-region assignment, traffic draining/undraining, and remote target binary upgrades. |
-| **Projects & Env Groups** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_project_environment`, `update_project_env`, `sync_project_env` | Project organization, multi-environment isolation, shared environment variable groups, and cross-environment configuration synchronization with selective key cloning. |
+| **Projects & Env Groups** | `list_projects`, `create_project`, `delete_project`, `list_env_groups`, `create_env_group`, `delete_env_group`, `list_project_environments`, `create_project_environment`, `update_project_env`, `sync_project_env`, `get_project`, `update_project`, `get_environment`, `update_environment`, `delete_environment`, `get_environment_env`, `diff_environments`, `get_env_group`, `update_env_group` | Project organization, multi-environment isolation, shared environment variable groups, and cross-environment configuration synchronization with selective key cloning. |
 | **Outbound Webhooks** | `list_webhooks`, `get_webhook`, `add_webhook`, `update_webhook`, `delete_webhook`, `test_webhook` | Outbound event notification webhook dispatchers: endpoint management, HMAC-SHA256 signature secret validation, fine-grained event subscriptions, and end-to-end webhook delivery testing. |
 | **Container Registries** | `list_registries`, `add_registry`, `update_registry`, `delete_registry` | Private Docker and OCI container registry credentials: credential storage, secure pull authentication, and server target endpoints. |
 | **Git Connections** | `list_git_connections`, `get_git_connection`, `add_git_connection`, `delete_git_connection`, `list_git_repositories`, `list_git_branches` | Git provider connections (GitHub App, GitLab, Gitea): OAuth link management, accessible repository browsing, and remote branch enumeration. |
@@ -2054,6 +2054,19 @@ r3 <server> project get <id>
 r3 <server> project add --name my-project [--description "Core apps"]
 r3 <server> project sync-env <project-id> --from staging --to production
 r3 <server> project delete <id>
+r3 <server> project update <id> --name my-project [--description "Core apps"]
+r3 <server> project env-create <project-id> --name staging
+r3 <server> project env-get <project-id> <env-id>
+r3 <server> project env-update <project-id> <env-id> --name stage
+r3 <server> project env-delete <project-id> <env-id>
+r3 <server> project env-vars <project-id> <env-id>
+r3 <server> project env-set-vars <project-id> <env-id> <vars.json|yaml|->
+r3 <server> project env-diff <project-id> <source-env-id> <target-env-id>
+r3 <server> env-group list
+r3 <server> env-group get <id>
+r3 <server> env-group add <group.json|yaml|->
+r3 <server> env-group update <id> <group.json|yaml|->
+r3 <server> env-group delete <id>
 
 # App Store & One-Click Templates
 r3 <server> store list

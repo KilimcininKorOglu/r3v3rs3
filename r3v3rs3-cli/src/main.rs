@@ -75,6 +75,9 @@ enum Command {
     /// Manage projects and shared environment variables.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Manage environment variable groups shared by apps.
+    #[command(subcommand)]
+    EnvGroup(EnvGroupCommand),
     /// Browse and install applications from the App Store catalog.
     #[command(subcommand)]
     Store(StoreCommand),
@@ -780,6 +783,65 @@ pub enum ProjectCommand {
         #[arg(long)]
         to: String,
     },
+    /// Renames a project or changes its description.
+    Update {
+        id: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Creates an environment in a project.
+    EnvCreate {
+        project: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Shows an environment of a project.
+    EnvGet { project: String, env: String },
+    /// Renames an environment or changes its description.
+    EnvUpdate {
+        project: String,
+        env: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Deletes an environment of a project.
+    EnvDelete { project: String, env: String },
+    /// Lists the variables of an environment; secret values are never shown.
+    EnvVars { project: String, env: String },
+    /// Replaces the variables of an environment from inline JSON/YAML, a file path, or stdin ('-').
+    EnvSetVars {
+        project: String,
+        env: String,
+        payload: String,
+    },
+    /// Compares the variables of two environments of a project.
+    EnvDiff {
+        project: String,
+        source: String,
+        target: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum EnvGroupCommand {
+    /// Lists the environment variable groups.
+    #[command(alias = "ls")]
+    List,
+    /// Shows a group; secret values are never shown.
+    Get { id: String },
+    /// Adds a group from inline JSON/YAML, a file path, or stdin ('-').
+    Add { payload: String },
+    /// Replaces a group from inline JSON/YAML, a file path, or stdin ('-').
+    Update { id: String, payload: String },
+    /// Deletes a group.
+    #[command(alias = "rm")]
+    Delete { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1331,6 +1393,7 @@ async fn run_api_auth(api: &api_client::ApiClient, cmd: Command) -> anyhow::Resu
 async fn run_api_system(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()> {
     match cmd {
         Command::Project(c) => run_project(api, c).await,
+        Command::EnvGroup(c) => run_env_group(api, c).await,
         Command::Store(c) => run_store(api, c).await,
         Command::Security(c) => run_security(api, c).await,
         Command::Config(c) => run_config(api, c).await,
@@ -1875,6 +1938,94 @@ async fn run_project(api: &api_client::ApiClient, cmd: ProjectCommand) -> anyhow
         ProjectCommand::SyncEnv { project, from, to } => {
             api.sync_project_env(&project, &from, &to).await
         }
+        ProjectCommand::Update {
+            id,
+            name,
+            description,
+        } => {
+            let spec = serde_json::json!({ "name": name, "description": description });
+            api.print_put(&format!("/api/projects/{id}"), &spec).await
+        }
+        environment => run_project_env(api, environment).await,
+    }
+}
+
+/// The commands of the environments of a project.
+async fn run_project_env(api: &api_client::ApiClient, cmd: ProjectCommand) -> anyhow::Result<()> {
+    let env_path = |project: &str, env: &str| format!("/api/projects/{project}/environments/{env}");
+    match cmd {
+        ProjectCommand::EnvCreate {
+            project,
+            name,
+            description,
+        } => {
+            let spec = serde_json::json!({ "name": name, "description": description });
+            api.print_post(&format!("/api/projects/{project}/environments"), &spec)
+                .await
+        }
+        ProjectCommand::EnvGet { project, env } => api.print_get(&env_path(&project, &env)).await,
+        ProjectCommand::EnvUpdate {
+            project,
+            env,
+            name,
+            description,
+        } => {
+            let spec = serde_json::json!({ "name": name, "description": description });
+            api.print_put(&env_path(&project, &env), &spec).await
+        }
+        ProjectCommand::EnvDelete { project, env } => {
+            api.print_delete(&env_path(&project, &env)).await
+        }
+        other => run_project_vars(api, other).await,
+    }
+}
+
+/// The commands of the variables of project environments.
+async fn run_project_vars(api: &api_client::ApiClient, cmd: ProjectCommand) -> anyhow::Result<()> {
+    match cmd {
+        ProjectCommand::EnvVars { project, env } => {
+            api.print_get(&format!("/api/projects/{project}/environments/{env}/env"))
+                .await
+        }
+        ProjectCommand::EnvSetVars {
+            project,
+            env,
+            payload,
+        } => {
+            let body = api_client::load_payload(&payload)?;
+            api.print_put(
+                &format!("/api/projects/{project}/environments/{env}/env"),
+                &body,
+            )
+            .await
+        }
+        ProjectCommand::EnvDiff {
+            project,
+            source,
+            target,
+        } => {
+            api.print_get(&format!(
+                "/api/projects/{project}/environments/{source}/diff/{target}"
+            ))
+            .await
+        }
+        other => anyhow::bail!("{other:?} is not a project environment command"),
+    }
+}
+
+async fn run_env_group(api: &api_client::ApiClient, cmd: EnvGroupCommand) -> anyhow::Result<()> {
+    match cmd {
+        EnvGroupCommand::List => api.list_env_groups().await,
+        EnvGroupCommand::Get { id } => api.print_get(&format!("/api/env-groups/{id}")).await,
+        EnvGroupCommand::Add { payload } => {
+            let body = api_client::load_payload(&payload)?;
+            api.print_post("/api/env-groups", &body).await
+        }
+        EnvGroupCommand::Update { id, payload } => {
+            let body = api_client::load_payload(&payload)?;
+            api.print_put(&format!("/api/env-groups/{id}"), &body).await
+        }
+        EnvGroupCommand::Delete { id } => api.print_delete(&format!("/api/env-groups/{id}")).await,
     }
 }
 
