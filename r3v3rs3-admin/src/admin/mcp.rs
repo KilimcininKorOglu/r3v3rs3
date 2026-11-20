@@ -140,6 +140,26 @@ pub struct IdJsonRequestParams {
     pub request: serde_json::Map<String, serde_json::Value>,
 }
 
+/// The arguments of `upload_cert`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UploadCertParams {
+    /// The PEM certificate chain.
+    pub chain: String,
+    /// The optional PEM private key.
+    pub key: Option<String>,
+    /// `server` (default), `client` or `root`.
+    pub kind: Option<String>,
+}
+
+/// The arguments of `verify_cname`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct VerifyCnameParams {
+    /// The domain whose CNAME record is checked.
+    pub domain: String,
+    /// The host the CNAME must point at; default: the host of the public URL.
+    pub expected_target: Option<String>,
+}
+
 /// The arguments of `update_project`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateProjectParams {
@@ -4086,6 +4106,139 @@ impl McpServer {
         .await
         .map_err(any_error)?;
         json_result(engines.0)
+    }
+
+    /// Replace the settings of an ACME entry.
+    #[tool(
+        description = "Replace the settings of the ACME entry `id`. `request` is the body of PUT /api/acme/{id}: `active`, `renewal_days` and the other AcmeConfig fields. Needs a token with the edit scope and an account that may edit."
+    )]
+    async fn update_acme(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdJsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let config: r3v3rs3_api::acme::AcmeConfig = json_arg(params.request)?;
+        let done = super::acme::put(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(config),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(done.0)
+    }
+
+    /// Create a self-signed certificate.
+    #[tool(
+        description = "Create a self-signed certificate. `request` holds `san` (the subject names), optional `ca_cert` (the id of the CA that signs it; without it a new CA is created and stored) and `kind` (`server` or `client`). Needs a token with the edit scope and an account that may edit."
+    )]
+    async fn self_sign_cert(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request: r3v3rs3_api::cert::SelfSignedCertRequest = json_arg(params.request)?;
+        let done = super::certs::self_sign(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(done.0)
+    }
+
+    /// Store an uploaded PEM certificate.
+    #[tool(
+        description = "Store a PEM certificate. `chain` is the PEM certificate chain, `key` the optional PEM private key, and `kind` one of `server` (default), `client` or `root`. Each value holds at most 1 MiB. Needs a token with the edit scope and an account that may edit."
+    )]
+    async fn upload_cert(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<UploadCertParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let kind = match params.kind {
+            Some(kind) => serde_json::from_value(serde_json::Value::String(kind))
+                .map_err(|err| ErrorData::invalid_params(err.to_string(), None))?,
+            None => r3v3rs3_api::cert::CertKind::Server,
+        };
+        let key = params.key.map(String::into_bytes);
+        let done =
+            super::certs::add_pem(&self.state, &caller, kind, params.chain.into_bytes(), key)
+                .await
+                .map_err(any_error)?;
+        json_result(done)
+    }
+
+    /// Read the PEM chain of a certificate.
+    #[tool(
+        description = "Return the PEM certificate chain of the certificate `id`. The private key is never returned; the CLI command `r3 cert download` saves the full archive. Read-only; any account can call it."
+    )]
+    async fn download_cert(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let pem = super::certs::chain_pem(&self.state, &caller, id)
+            .await
+            .map_err(any_error)?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(pem)]))
+    }
+
+    /// Delete several certificates at once.
+    #[tool(
+        description = "Delete the certificates whose ids `request.ids` lists (at most 200) and report the result for each one. Needs a token with the edit scope and an account that may edit."
+    )]
+    async fn delete_certs(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<JsonRequestParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let request: r3v3rs3_api::cert::DeleteCertsRequest = json_arg(params.request)?;
+        let results = super::certs::delete_many(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(results.0)
+    }
+
+    /// Check the CNAME record of a domain.
+    #[tool(
+        description = "Check that `domain` has a CNAME record that points at `expected_target` (default: the host of the public URL of this panel). Returns `resolved_cname`, `is_valid` and a message. Read-only; any account can call it."
+    )]
+    async fn verify_cname(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<VerifyCnameParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let query = super::certs::CnameVerifyQuery {
+            domain: params.domain,
+            expected_target: params.expected_target,
+        };
+        let result = super::certs::verify_cname(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Query(query),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(result.0)
     }
 
     /// Replace a Git connection.

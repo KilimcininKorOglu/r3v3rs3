@@ -298,6 +298,38 @@ pub enum CertCommand {
     /// Certificate Transparency log monitor commands.
     #[command(subcommand)]
     Ct(CtCommand),
+    /// Creates a self-signed certificate; without --ca a new CA is created and stored.
+    SelfSign {
+        /// A subject name; repeat for several names.
+        #[arg(long = "san", required = true)]
+        san: Vec<String>,
+        /// The id of the CA certificate that signs it.
+        #[arg(long)]
+        ca: Option<String>,
+        /// `server` (default) or `client`.
+        #[arg(long)]
+        kind: Option<String>,
+    },
+    /// Saves the certificate archive (chain and private key, tar.gz) to a file.
+    Download {
+        id: String,
+        /// The file to write; default: `<id>.tar.gz`.
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Deletes several certificates at once.
+    DeleteMany {
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
+    /// Checks that a domain has a CNAME record pointing at the expected host.
+    VerifyCname {
+        #[arg(long)]
+        domain: String,
+        /// The host the CNAME must point at; default: the host of the public URL.
+        #[arg(long)]
+        expected_target: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1607,6 +1639,40 @@ async fn run_cert(api: &api_client::ApiClient, cmd: CertCommand) -> anyhow::Resu
         CertCommand::Delete { id } => api.delete_cert(&id).await,
         CertCommand::Coverage => api.cert_coverage().await,
         CertCommand::Ct(ct_cmd) => run_ct(api, ct_cmd).await,
+        other => run_cert_more(api, other).await,
+    }
+}
+
+/// The certificate commands that sign, save, delete in bulk or check DNS.
+async fn run_cert_more(api: &api_client::ApiClient, cmd: CertCommand) -> anyhow::Result<()> {
+    match cmd {
+        CertCommand::SelfSign { san, ca, kind } => {
+            let body = serde_json::json!({ "san": san, "ca_cert": ca,
+                "kind": kind.unwrap_or_else(|| "server".to_string()) });
+            api.print_post("/api/certs/self_sign", &body).await
+        }
+        CertCommand::Download { id, output } => {
+            let target = output.unwrap_or_else(|| format!("{id}.tar.gz"));
+            api.download_to(&format!("/api/certs/{id}/download"), &target)
+                .await
+        }
+        CertCommand::DeleteMany { ids } => {
+            let body = serde_json::json!({ "ids": ids });
+            api.print_post("/api/certs/delete", &body).await
+        }
+        CertCommand::VerifyCname {
+            domain,
+            expected_target,
+        } => {
+            let mut query = url::form_urlencoded::Serializer::new(String::new());
+            query.append_pair("domain", &domain);
+            if let Some(target) = &expected_target {
+                query.append_pair("expected_target", target);
+            }
+            api.print_get(&format!("/api/certs/verify_cname?{}", query.finish()))
+                .await
+        }
+        other => anyhow::bail!("{other:?} is not a certificate command"),
     }
 }
 

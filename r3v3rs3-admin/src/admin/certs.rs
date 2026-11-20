@@ -16,7 +16,7 @@ use axum::{
 use r3v3rs3_api::{
     audit::AuditAction,
     cert::{
-        CertInfo, CertPostBody, DeleteCertResult, DeleteCertsRequest, SelfSignedCertKind,
+        CertInfo, CertKind, CertPostBody, DeleteCertResult, DeleteCertsRequest, SelfSignedCertKind,
         SelfSignedCertRequest, UploadQuery,
     },
     cert_coverage::{CnameVerifyResult, DomainCoverageInfo},
@@ -218,8 +218,41 @@ pub async fn upload(
     multipart: Multipart,
 ) -> Result<Json<Box<()>>, AppError> {
     let (chain, key) = parse_upload_fields(multipart).await?;
-    let cert = Arc::new(Cert::new(query.kind, chain, key)?);
-    Ok(Json(state.call(&caller, AddCert { cert }).await?))
+    Ok(Json(
+        add_pem(&state, &caller, query.kind, chain, key).await?,
+    ))
+}
+
+/// Stores a PEM certificate chain and an optional PEM private key, with the same size limit as
+/// the multipart upload.
+pub async fn add_pem(
+    state: &AppState,
+    caller: &Caller,
+    kind: CertKind,
+    chain: Vec<u8>,
+    key: Option<Vec<u8>>,
+) -> Result<Box<()>, AppError> {
+    let largest = chain.len().max(key.as_ref().map_or(0, Vec::len));
+    if largest > MAX_CERT_FIELD_SIZE {
+        return Err(Error::CertFieldTooLarge {
+            max: MAX_CERT_FIELD_SIZE,
+        }
+        .into());
+    }
+    if chain.is_empty() {
+        return Err(AppError::BadRequest(
+            "missing or empty certificate chain".to_string(),
+        ));
+    }
+    let cert = Arc::new(Cert::new(kind, chain, key)?);
+    Ok(state.call(caller, AddCert { cert }).await?)
+}
+
+/// The PEM chain of a certificate, without its private key.
+pub async fn chain_pem(state: &AppState, caller: &Caller, id: ShortId) -> Result<String, AppError> {
+    let cert = state.call(caller, GetCert { id }).await?;
+    String::from_utf8(cert.pem_chain.clone())
+        .map_err(|_| AppError::BadRequest("the certificate chain is not text".to_string()))
 }
 
 /// Deletes a certificate.

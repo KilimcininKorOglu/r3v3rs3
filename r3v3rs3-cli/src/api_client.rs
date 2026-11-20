@@ -395,6 +395,28 @@ impl ApiClient {
         print_json(&self.request(Method::POST, path, Some(body)).await?)
     }
 
+    /// Downloads `path` into the file `target`. The bytes go to a temporary file in the same
+    /// directory first, which is synced and then renamed over `target`, so a failed download
+    /// never leaves a partial file.
+    pub async fn download_to(&self, path: &str, target: &str) -> anyhow::Result<()> {
+        let res = self
+            .client
+            .get(format!("{}{path}", self.server))
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .await
+            .context("failed to communicate with server")?;
+        let status = res.status();
+        if !status.is_success() {
+            let text = res.text().await.unwrap_or_default();
+            bail!("API error {status}: {text}");
+        }
+        let bytes = res.bytes().await.context("failed to read the download")?;
+        write_atomic(std::path::Path::new(target), &bytes)?;
+        println!("saved {} bytes to {target}", bytes.len());
+        Ok(())
+    }
+
     /// Sends a PUT request with a JSON body and prints the JSON answer.
     pub async fn print_put(&self, path: &str, body: &Value) -> anyhow::Result<()> {
         print_json(&self.request(Method::PUT, path, Some(body)).await?)
@@ -3701,6 +3723,27 @@ fn engine_key(engine: &str) -> String {
 fn print_json(val: &Value) -> anyhow::Result<()> {
     let text = serde_json::to_string_pretty(val)?;
     println!("{text}");
+    Ok(())
+}
+
+/// Writes `bytes` to a temporary file next to `target`, syncs it and renames it over `target`.
+fn write_atomic(target: &std::path::Path, bytes: &[u8]) -> anyhow::Result<()> {
+    use std::io::Write;
+    let name = target
+        .file_name()
+        .context("the output path has no file name")?
+        .to_string_lossy();
+    let temp = target.with_file_name(format!(".{name}.{}.part", std::process::id()));
+    let written = (|| -> std::io::Result<()> {
+        let mut file = std::fs::File::create(&temp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temp, target)
+    })();
+    if let Err(err) = written {
+        let _cleanup = std::fs::remove_file(&temp);
+        return Err(err).with_context(|| format!("failed to write {}", target.display()));
+    }
     Ok(())
 }
 

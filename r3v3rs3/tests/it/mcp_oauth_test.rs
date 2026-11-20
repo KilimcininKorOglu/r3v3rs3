@@ -2266,6 +2266,140 @@ async fn the_git_connection_operations_are_reachable_from_mcp_and_the_cli() -> a
     .await
 }
 
+/// A PEM certificate and its private key for `name`.
+fn pem_pair(name: &str) -> anyhow::Result<(String, String)> {
+    let pair = rcgen::generate_simple_self_signed(vec![name.to_string()])?;
+    Ok((pair.cert.pem(), pair.signing_key.serialize_pem()))
+}
+
+/// The id of the certificate whose SAN list names `name`.
+fn cert_id(listing: &str, name: &str) -> anyhow::Result<String> {
+    let certs: Value = serde_json::from_str(listing)?;
+    let found = certs.as_array().into_iter().flatten().find(|cert| {
+        cert["san"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|san| san == name)
+    });
+    Ok(found.context(format!("no certificate for {name}"))?["id"]
+        .as_str()
+        .context("no id")?
+        .to_string())
+}
+
+/// The certificate tools sign, upload, read and delete certificates. A downloaded chain never
+/// holds the private key, a broken PEM is refused, and a missing ACME entry is not found
+/// (OpenAPI `self_sign_cert`, `upload_cert`, `download_cert`, `delete_certs`, `verify_cname`,
+/// `update_acme`).
+async fn assert_mcp_certs(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let sign = json!({ "request": { "san": ["signed.example.test"] } });
+    mcp_call(client, "self_sign_cert", sign).await?;
+    let (chain, key) = pem_pair("uploaded.example.test")?;
+    mcp_call(client, "upload_cert", json!({ "chain": chain, "key": key })).await?;
+    let broken = mcp_call(
+        client,
+        "upload_cert",
+        json!({ "chain": "not a pem", "key": key }),
+    )
+    .await;
+    assert!(broken.is_err(), "a broken PEM was stored");
+    assert_reached("upload_cert", &broken.map_err(|e| e.to_string()));
+    assert_mcp_cert_download(client).await
+}
+
+/// `download_cert` returns the chain without the private key, and `delete_certs` removes both
+/// certificates.
+async fn assert_mcp_cert_download(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let listing = mcp_call(client, "list_certs", json!({})).await?;
+    let uploaded = cert_id(&listing, "uploaded.example.test")?;
+    let signed = cert_id(&listing, "signed.example.test")?;
+    let pem = mcp_call(client, "download_cert", json!({ "id": uploaded })).await?;
+    assert!(
+        pem.contains("BEGIN CERTIFICATE") && !pem.contains("PRIVATE KEY"),
+        "{pem}"
+    );
+    let deleted = json!({ "request": { "ids": [uploaded, signed] } });
+    mcp_call(client, "delete_certs", deleted).await?;
+    let listing = mcp_call(client, "list_certs", json!({})).await?;
+    assert!(!listing.contains("uploaded.example.test"), "{listing}");
+    assert_mcp_cert_checks(client).await
+}
+
+/// `verify_cname` reports a domain without a CNAME as invalid (RFC 6761: `.invalid` never
+/// resolves), and `update_acme` on a missing entry is not found.
+async fn assert_mcp_cert_checks(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let check = json!({ "domain": "cname.invalid" });
+    let cname = mcp_call(client, "verify_cname", check).await?;
+    assert!(cname.contains("\"is_valid\": false"), "{cname}");
+    let acme = json!({ "id": MISSING_DB, "request": {} });
+    let missing = mcp_call(client, "update_acme", acme).await.err();
+    assert_not_found(
+        "update_acme",
+        &missing.map(|e| e.to_string()).unwrap_or_default(),
+    );
+    Ok(())
+}
+
+/// `r3 cert` signs, downloads, deletes and checks certificates the same way.
+async fn assert_cli_certs(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["cert", "self-sign", "--san", "cli.example.test"],
+    )
+    .await?;
+    let listing = cli_ok(binary, addr, token, &["cert", "list"]).await?;
+    let id = listed_id(&listing, "cli.example.test")?;
+    let out = std::env::temp_dir().join(format!("r3-cert-{id}.tar.gz"));
+    let out_path = out.to_string_lossy().to_string();
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["cert", "download", &id, "--output", &out_path],
+    )
+    .await?;
+    let archive = std::fs::read(&out)?;
+    std::fs::remove_file(&out)?;
+    assert_eq!(
+        archive.get(..2),
+        Some(&[0x1f, 0x8b][..]),
+        "not a gzip archive (RFC 1952)"
+    );
+    let cname = cli_ok(
+        binary,
+        addr,
+        token,
+        &["cert", "verify-cname", "--domain", "cname.invalid"],
+    )
+    .await?;
+    assert!(cname.contains("\"is_valid\": false"), "{cname}");
+    cli_ok(binary, addr, token, &["cert", "delete-many", &id]).await?;
+    let listing = cli_ok(binary, addr, token, &["cert", "list"]).await?;
+    assert!(!listing.contains("cli.example.test"), "{listing}");
+    Ok(())
+}
+
+/// Certificate operations are reachable from MCP and the CLI.
+#[tokio::test]
+async fn the_certificate_operations_are_reachable_from_mcp_and_the_cli() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-certs")?;
+    with_admin_config(&dir.0, mcp_config(), |addr| async move {
+        let token = access_token(&addr).await?;
+        assert_mcp_certs(&mcp_client(addr, &token).await?).await?;
+        assert_cli_certs(&client_binary()?, &addr, &token).await
+    })
+    .await
+}
+
 /// The command line client connects with an explicit `--token` and runs commands.
 #[tokio::test]
 async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
