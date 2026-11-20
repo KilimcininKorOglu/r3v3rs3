@@ -29,3 +29,4 @@ pub mod release;
 pub mod sessions;
 pub mod stats;
 pub mod system_metrics;
+pub mod tproxy;

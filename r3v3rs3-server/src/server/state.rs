@@ -114,6 +114,9 @@ pub struct ServerState {
     update_interval: watch::Sender<std::time::Duration>,
     /// Keeps the host firewall table; only the master has it.
     firewall: Option<crate::firewall_control::FirewallControl>,
+    /// Keeps the tproxy table and policy route of range and transparent ports; only the master
+    /// has it.
+    tproxy: Option<crate::tproxy::TproxyControl>,
     /// The host ports of the running apps of the local target, from the platform.
     app_host_ports: Vec<r3v3rs3_api::firewall::HostPort>,
 }
@@ -380,6 +383,7 @@ impl ServerState {
             update_interval: watch::Sender::new(check_interval),
             firewall: leader
                 .then(|| crate::firewall_control::FirewallControl::spawn("/etc/ssh".into())),
+            tproxy: leader.then(crate::tproxy::TproxyControl::spawn),
             app_host_ports: Vec::new(),
         };
         this.initialize(role, listeners).await;
@@ -451,6 +455,7 @@ impl ServerState {
         // The table survives a restart, but a port list changed while the server was down must
         // reach it, so the start applies it once.
         self.sync_firewall(self.config.firewall.enabled);
+        self.sync_tproxy();
         self.update_certs().await;
         self.publish_proxies();
         self.update_acmes().await;
@@ -1297,6 +1302,7 @@ impl ServerState {
             self.publish_proxies();
         }
         self.sync_firewall(self.config.firewall.enabled);
+        self.sync_tproxy();
         if self.broadcast_events {
             for (entry, ctx) in self.ports.entries().cloned().zip(self.ports.as_slice()) {
                 let _ = self.br_sender.send(ServerEvent::PortStatusUpdated {
@@ -1325,6 +1331,20 @@ impl ServerState {
             &self.app_host_ports,
             was_enabled,
         );
+    }
+
+    /// Hands the active range and transparent ports to the tproxy task.
+    fn sync_tproxy(&self) {
+        let Some(tproxy) = &self.tproxy else {
+            return;
+        };
+        let ports = self
+            .ports
+            .entries()
+            .filter(|entry| entry.port.active)
+            .filter_map(|e| crate::tproxy::TproxyPort::of(&e.port.listen, e.port.opts.transparent))
+            .collect();
+        tproxy.update(ports);
     }
 
     /// The status of a port with the state of its host firewall hole.

@@ -78,11 +78,11 @@ impl FirewallStatus {
             true => Transport::Udp,
             false => Transport::Tcp,
         };
-        let port = listen.port().ok()?;
+        let span = listen.port_range().ok()?;
         let open = self
             .ports
             .iter()
-            .any(|p| p.transport == transport && (p.first..=p.last).contains(&port));
+            .any(|p| p.transport == transport && p.first <= span.first && span.last <= p.last);
         Some(match (open, self.warnings.is_empty()) {
             (false, _) => PortFirewall::Closed,
             (true, true) => PortFirewall::Open,
@@ -232,6 +232,11 @@ mod tests {
         assert_eq!(status.port_state(&relay), Some(PortFirewall::Open));
         let outside = addr("/ip4/0.0.0.0/udp/49241");
         assert_eq!(status.port_state(&outside), Some(PortFirewall::Closed));
+        // A range is open only when every one of its ports is.
+        let inside = addr("/ip4/0.0.0.0/udp/49160-49240");
+        assert_eq!(status.port_state(&inside), Some(PortFirewall::Open));
+        let wider = addr("/ip4/0.0.0.0/udp/49160-49241");
+        assert_eq!(status.port_state(&wider), Some(PortFirewall::Closed));
         assert_eq!(status.port_state(&addr("/ip4/127.0.0.1/tcp/443")), None);
         status.warnings.push("firewalld is active".into());
         assert_eq!(

@@ -108,8 +108,12 @@ pub fn wanted_ports<'a>(
             true => Transport::Udp,
             false => Transport::Tcp,
         };
-        let port = addr.port().ok()?;
-        (!loopback).then_some(HostPort::single(transport, port))
+        let span = addr.port_range().ok()?;
+        (!loopback).then_some(HostPort {
+            transport,
+            first: span.first,
+            last: span.last,
+        })
     });
     let mut all: Vec<HostPort> = ports
         .chain(config.extra_ports.iter().copied())
@@ -194,6 +198,7 @@ mod tests {
             addr("/ip4/0.0.0.0/tcp/443/https"),
             addr("/ip6/::/udp/443/quic/http"),
             addr("/ip4/0.0.0.0/udp/3478"),
+            addr("/ip4/0.0.0.0/tcp/8000-8010"),
             addr("/ip4/10.0.0.5/tcp/5349/tls"),
             addr("/ip4/127.0.0.1/tcp/8080/http"),
             addr("/ip6/::1/tcp/9090"),
@@ -213,6 +218,7 @@ mod tests {
             [
                 "tcp/443",
                 "tcp/5349",
+                "tcp/8000-8010",
                 "udp/443",
                 "udp/3478",
                 "udp/49160-49240",
