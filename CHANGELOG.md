@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.4] - 2026-11-20
+
+### Added
+- Host firewall: with `[firewall] enabled` (off by default, or `R3V3RS3_FIREWALL_ENABLED`), r3v3rs3 keeps an nftables table `inet r3v3rs3` that opens its own non-loopback ports, the SSH ports, `extra_ports` and the host ports of running apps, and drops every other incoming connection. The table is replaced in one atomic `nft` transaction on every change and removed when the setting is turned off. `GET /api/firewall`, the MCP tool `get_firewall_status`, `r3 security firewall status|set` and a settings card show and change it.
+- Firewall warnings: firewalld, ufw and input chains of other nftables tables that drop traffic are listed as warnings, and each port shows its firewall state in the port list and the port status.
+- App host ports: `host_ports` (such as `udp/49160-49240`) opens the ports of a host-network service while the app runs, on this server or on the agent host of its target. Agents get the new `SetFirewall` request; older agents are refused with the release to upgrade to.
+- Watch paths: `watch_paths` makes a branch push deploy a Git or Compose app only when a commit changes a listed file or directory.
+- The `r3-server` systemd unit written by `install.sh` gets `CAP_NET_ADMIN` for the firewall table.
+
+### Fixed
+- A Compose service on the host network is checked and routed on `127.0.0.1:<port>`, so its deployment no longer fails the health check.
+
+### Changed
+- Docs: a TCP upstream behind a TLS-terminating TCP proxy sees the client as `127.0.0.1` unless PROXY protocol is sent.
+
 ## [3.5.3] - 2026-11-19
 
 ### Changed
