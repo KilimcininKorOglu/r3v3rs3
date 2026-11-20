@@ -4,6 +4,7 @@
 
 mod api_client;
 mod oauth;
+mod terminal;
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
@@ -546,6 +547,13 @@ pub enum AppCommand {
     /// Backs up, restores, exports and imports the volumes of an app.
     #[command(subcommand)]
     Volumes(AppVolumesCommand),
+    /// Opens an interactive shell in the container of an app; exit the shell to leave.
+    Terminal {
+        id: String,
+        /// The shell to start, for example `/bin/bash`; default: the server's choice.
+        #[arg(long)]
+        shell: Option<String>,
+    },
     /// Prints the container log of an app as it is written, until Ctrl-C.
     LogsLive {
         id: String,
@@ -2261,6 +2269,7 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
         AppCommand::List => api.list_apps().await,
         AppCommand::Files(cmd) => run_app_files(api, cmd).await,
         AppCommand::Volumes(cmd) => run_app_volumes(api, cmd).await,
+        AppCommand::Terminal { id, shell } => terminal::run(api, &id, shell.as_deref()).await,
         AppCommand::LogsLive { id, tail, service } => {
             let query =
                 query_string(&[("tail", tail.map(|t| t.to_string())), ("service", service)]);

@@ -2100,6 +2100,7 @@ r3 <server> traffic list [--resource-id <proxy-id>] [--status 502] [--search /ap
 r3 <server> traffic get <log-entry-id>
 r3 <server> traffic live [--resource-id <proxy-id>] [--status 502] [--search /api] [--country DE]
 r3 <server> app logs-live <id> [--tail 100] [--service web]
+r3 <server> app terminal <id> [--shell /bin/bash]
 r3 <server> traffic replay-request <request.json|yaml|->
 r3 <server> security anomalies
 r3 <server> security anomaly-rules

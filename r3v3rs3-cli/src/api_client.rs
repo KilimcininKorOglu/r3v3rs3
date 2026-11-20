@@ -447,16 +447,16 @@ impl ApiClient {
         Ok(())
     }
 
-    /// Prints the messages of the WebSocket at `path` until the server closes it.
-    pub async fn stream_websocket(&self, path: &str) -> anyhow::Result<()> {
-        use futures::StreamExt;
-        use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+    /// Opens the WebSocket at `path` with the bearer token; a refused upgrade becomes an
+    /// `API error <status>: <body>` like every other request.
+    pub async fn open_websocket(&self, path: &str) -> anyhow::Result<WebSocket> {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
         let url = websocket_url(&self.server, path)?;
         let mut request = url.as_str().into_client_request()?;
         let bearer = format!("Bearer {}", self.token).parse()?;
         request.headers_mut().insert("Authorization", bearer);
-        let (mut socket, _) = match tokio_tungstenite::connect_async(request).await {
-            Ok(connected) => connected,
+        match tokio_tungstenite::connect_async(request).await {
+            Ok((socket, _)) => Ok(socket),
             Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
                 let body = response.body().as_deref().unwrap_or_default();
                 bail!(
@@ -465,8 +465,15 @@ impl ApiClient {
                     String::from_utf8_lossy(body)
                 );
             }
-            Err(err) => return Err(err).context("failed to open the WebSocket"),
-        };
+            Err(err) => Err(err).context("failed to open the WebSocket"),
+        }
+    }
+
+    /// Prints the messages of the WebSocket at `path` until the server closes it.
+    pub async fn stream_websocket(&self, path: &str) -> anyhow::Result<()> {
+        use futures::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+        let mut socket = self.open_websocket(path).await?;
         eprintln!("streaming {path}; press Ctrl-C to stop");
         while let Some(message) = socket.next().await {
             match message.context("the stream broke")? {
@@ -3812,6 +3819,10 @@ fn print_json(val: &Value) -> anyhow::Result<()> {
     println!("{text}");
     Ok(())
 }
+
+/// An open WebSocket to the server.
+pub type WebSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// The `ws://` or `wss://` URL of `path` on the server `server` (`http://` or `https://`).
 fn websocket_url(server: &str, path: &str) -> anyhow::Result<String> {

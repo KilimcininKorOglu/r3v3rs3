@@ -3015,6 +3015,10 @@ async fn the_live_streams_are_reachable_from_the_cli() -> anyhow::Result<()> {
         let out = run_client(&binary, &addr, &token, &["app", "logs-live", MISSING_DB]).await?;
         assert!(!out.status.success());
         assert_not_found("app logs-live", &String::from_utf8_lossy(&out.stderr));
+        // OpenAPI `open_app_terminal`: the terminal of a missing app is not found.
+        let out = run_client(&binary, &addr, &token, &["app", "terminal", MISSING_DB]).await?;
+        assert!(!out.status.success());
+        assert_not_found("app terminal", &String::from_utf8_lossy(&out.stderr));
         Ok(())
     })
     .await
