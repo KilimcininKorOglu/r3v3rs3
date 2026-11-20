@@ -471,8 +471,9 @@ pub enum AppCommand {
     /// Generates cryptographically secure secrets for missing or placeholder environment variables of an application.
     GenerateEnv {
         id: String,
-        /// Save the generated secrets directly to the application.
-        #[arg(long, default_value_t = true)]
+        /// Save the generated secrets directly to the application; `--save false` only shows
+        /// them.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         save: bool,
         /// Overwrite existing non-empty values.
         #[arg(long)]
@@ -2139,6 +2140,23 @@ fn unpack(archive: &[u8]) -> anyhow::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `--save false` must let a user preview the generated secrets without saving them; the
+    /// default stays saving.
+    #[test]
+    fn generate_env_can_be_told_not_to_save() {
+        let parse = |extra: &[&str]| {
+            let mut argv = vec!["r3", "http://127.0.0.1:1", "app", "generate-env", "abc"];
+            argv.extend_from_slice(extra);
+            match Args::try_parse_from(argv).map(|a| a.command) {
+                Ok(Command::App(AppCommand::GenerateEnv { save, .. })) => Ok(save),
+                other => Err(format!("{other:?}")),
+            }
+        };
+        assert_eq!(parse(&[]), Ok(true));
+        assert_eq!(parse(&["--save", "false"]), Ok(false));
+        assert_eq!(parse(&["--save", "true"]), Ok(true));
+    }
 
     #[test]
     fn a_newer_version_is_detected_by_number_not_by_text() {
