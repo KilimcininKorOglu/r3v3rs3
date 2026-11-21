@@ -2069,6 +2069,10 @@ pub struct AppEntry {
     /// A newer version of this app is available in the app store catalog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_update: Option<CatalogUpdateStatus>,
+    /// Whether an account stopped the app: its containers do not run, its domains answer 503,
+    /// and automatic deployments and scheduled commands are skipped until it starts again.
+    #[serde(default)]
+    pub stopped: bool,
     /// The Unix time in milliseconds.
     pub created_at: u64,
     /// The Unix time in milliseconds.
@@ -3655,6 +3659,7 @@ EMPTY_VAL=
             hook: None,
             update: None,
             catalog_update: None,
+            stopped: false,
             created_at: 1000,
             updated_at: 1000,
         };

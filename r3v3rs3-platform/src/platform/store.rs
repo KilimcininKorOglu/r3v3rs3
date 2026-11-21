@@ -270,7 +270,7 @@ pub const WEBHOOK_SECRET: &str = "webhook_secret";
 macro_rules! select_apps {
     ($rest:literal) => {
         concat!(
-            "SELECT id, name, target_id, spec, created_at, apps.updated_at AS updated_at,
+            "SELECT id, name, target_id, spec, stopped, created_at, apps.updated_at AS updated_at,
                 EXISTS (SELECT 1 FROM app_secrets s WHERE s.app_id = apps.id
                     AND s.name = 'git_token') AS git_token_set,
                 EXISTS (SELECT 1 FROM app_secrets s WHERE s.app_id = apps.id
@@ -465,6 +465,11 @@ const ADDED_COLUMNS: &[AddedColumn] = &[
         "node_alert_rules",
         "max_time_wait_sockets",
         "ALTER TABLE node_alert_rules ADD COLUMN max_time_wait_sockets INTEGER",
+    ),
+    added(
+        "apps",
+        "stopped",
+        "ALTER TABLE apps ADD COLUMN stopped INTEGER NOT NULL DEFAULT 0",
     ),
 ];
 
@@ -786,6 +791,16 @@ impl PlatformStore {
             0 => Write::NotFound,
             _ => Write::Done,
         }))
+    }
+
+    /// Marks an app stopped or running. Returns false when the app does not exist.
+    pub async fn set_app_stopped(&self, id: ShortId, stopped: bool) -> anyhow::Result<bool> {
+        let done = sqlx::query("UPDATE apps SET stopped = ? WHERE id = ?")
+            .bind(stopped)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected() > 0)
     }
 
     /// Deletes an app with its environment and its deployments. Returns false when the app does
@@ -1260,6 +1275,7 @@ fn app_of(row: &SqliteRow) -> anyhow::Result<AppEntry> {
         hook,
         update,
         catalog_update: None,
+        stopped: row.try_get("stopped")?,
         created_at: time_of(row, "created_at")?,
         updated_at: time_of(row, "updated_at")?,
     })
@@ -1456,6 +1472,7 @@ mod tests {
             hook: None,
             update: None,
             catalog_update: None,
+            stopped: false,
             created_at: 10,
             updated_at: 10,
         }
@@ -1646,6 +1663,43 @@ mod tests {
         let missing = app("zzz-zzz", "none");
         assert_eq!(store.update_app(&missing).await?, Write::NotFound);
         Ok(())
+    }
+
+    /// A new app runs; a stopped app stays stopped across an edit of its settings and a restart
+    /// of the server, until it is started again.
+    #[tokio::test]
+    async fn the_stopped_state_survives_an_edit_and_a_restart() -> anyhow::Result<()> {
+        let (store, path) = store().await?;
+        let mut shop = app("abc-def", "shop");
+        store.insert_app(&shop).await?;
+        assert!(!is_stopped(&store, shop.id).await?);
+
+        assert!(store.set_app_stopped(shop.id, true).await?);
+        shop.updated_at = 20;
+        assert_eq!(store.update_app(&shop).await?, Write::Done);
+        store.pool().close().await;
+        let store = PlatformStore::open(&path.0).await?;
+        assert!(is_stopped(&store, shop.id).await?);
+        assert!(store.apps().await?.iter().all(|app| app.stopped));
+        Ok(())
+    }
+
+    /// Starting clears the mark; an unknown app reports that it does not exist.
+    #[tokio::test]
+    async fn a_start_clears_the_stopped_mark() -> anyhow::Result<()> {
+        let (store, _path) = store().await?;
+        let shop = app("abc-def", "shop");
+        store.insert_app(&shop).await?;
+        assert!(store.set_app_stopped(shop.id, true).await?);
+        assert!(store.set_app_stopped(shop.id, false).await?);
+        assert!(!is_stopped(&store, shop.id).await?);
+        assert!(!store.set_app_stopped("zzz-zzz".parse()?, true).await?);
+        Ok(())
+    }
+
+    async fn is_stopped(store: &PlatformStore, id: ShortId) -> anyhow::Result<bool> {
+        let app = store.app(id).await?.context("the app is missing")?;
+        Ok(app.stopped)
     }
 
     #[tokio::test]

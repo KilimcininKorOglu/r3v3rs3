@@ -1857,6 +1857,7 @@ mod tests {
             hook: None,
             update: None,
             catalog_update: None,
+            stopped: false,
             created_at: 0,
             updated_at: 0,
         };

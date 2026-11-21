@@ -618,6 +618,7 @@ impl Platform {
             hook: None,
             update: None,
             catalog_update: None,
+            stopped: false,
             created_at: now,
             updated_at: now,
         };
@@ -669,6 +670,7 @@ impl Platform {
             hook: None,
             update: current.update,
             catalog_update: None,
+            stopped: current.stopped,
             created_at: current.created_at,
             updated_at: now,
         };
