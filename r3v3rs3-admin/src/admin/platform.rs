@@ -90,6 +90,28 @@ pub async fn list_targets(
     Ok(Json(platform.targets().await.map_err(platform_error)?))
 }
 
+/// Returns one Docker host that runs apps.
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    tag = "platform",
+    operation_id = "get_target",
+    params(("id" = ShortId, Path, description = "Target id.")),
+    responses((status = 200, description = "The target.", body = TargetEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_target(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<TargetEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let targets = platform.targets().await.map_err(platform_error)?;
+    let target = targets.into_iter().find(|target| target.id == id);
+    Ok(Json(
+        target.ok_or_else(|| Error::IdNotFound { id: id.to_string() })?,
+    ))
+}
+
 /// Adds an agent target and returns its one-time enrollment token.
 #[utoipa::path(
     post,

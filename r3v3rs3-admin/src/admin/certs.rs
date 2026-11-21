@@ -278,7 +278,7 @@ pub async fn delete(
     post,
     path = "/delete",
     tag = "certs",
-    operation_id = "delete_certs",
+    operation_id = "delete_many_certs",
     request_body = DeleteCertsRequest,
     responses((status = 200, description = "The result of each certificate.", body = Vec<DeleteCertResult>), ErrorResponses)
 )]

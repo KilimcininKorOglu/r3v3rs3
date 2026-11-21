@@ -795,7 +795,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
             OpenApiRouter::new()
                 .routes(routes!(platform::list_targets, platform::add_target))
                 .routes(routes!(platform::upgrade_all_targets))
-                .routes(routes!(platform::delete_target))
+                .routes(routes!(platform::get_target, platform::delete_target))
                 .routes(routes!(platform::new_target_token))
                 .routes(routes!(platform::upgrade_target))
                 .routes(routes!(platform::drain_target))
@@ -1108,7 +1108,11 @@ fn proxy_routes() -> OpenApiRouter<AppState> {
 fn access_list_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(access_lists::list, access_lists::add))
-        .routes(routes!(access_lists::put, access_lists::delete))
+        .routes(routes!(
+            access_lists::get,
+            access_lists::put,
+            access_lists::delete
+        ))
 }
 
 fn error_page_theme_routes() -> OpenApiRouter<AppState> {

@@ -2299,7 +2299,7 @@ fn cert_id(listing: &str, name: &str) -> anyhow::Result<String> {
 
 /// The certificate tools sign, upload, read and delete certificates. A downloaded chain never
 /// holds the private key, a broken PEM is refused, and a missing ACME entry is not found
-/// (OpenAPI `create_self_signed_cert`, `upload_cert`, `download_cert`, `delete_certs`, `verify_cname`,
+/// (OpenAPI `create_self_signed_cert`, `upload_cert`, `download_cert`, `delete_many_certs`, `verify_cname`,
 /// `update_acme`).
 async fn assert_mcp_certs(
     client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
@@ -2319,7 +2319,7 @@ async fn assert_mcp_certs(
     assert_mcp_cert_download(client).await
 }
 
-/// `download_cert` returns the chain without the private key, and `delete_certs` removes both
+/// `download_cert` returns the chain without the private key, and `delete_many_certs` removes both
 /// certificates.
 async fn assert_mcp_cert_download(
     client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
@@ -2333,7 +2333,7 @@ async fn assert_mcp_cert_download(
         "{pem}"
     );
     let deleted = json!({ "request": { "ids": [uploaded, signed] } });
-    mcp_call(client, "delete_certs", deleted).await?;
+    mcp_call(client, "delete_many_certs", deleted).await?;
     let listing = mcp_call(client, "list_certs", json!({})).await?;
     assert!(!listing.contains("uploaded.example.test"), "{listing}");
     assert_mcp_cert_checks(client).await
@@ -3875,6 +3875,66 @@ async fn save_a_secret_then_round_trip(
     config["upgrade"]["check_interval"] = json!("2h");
     mcp_call(client, "update_config", json!({ "request": config })).await?;
     Ok(())
+}
+
+/// `get_access_list` and `get_target` (OpenAPI `get_access_list`, `get_target`) return the one
+/// resource that the id names, and an unknown id is not found instead of an empty answer.
+#[tokio::test]
+async fn single_access_lists_and_targets_are_readable() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-get-one")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    config.platform.agent_port = Some(alloc_tcp_port().await?.socket_addr().port());
+    with_admin_config(&dir.0, config, |addr| async move {
+        let client = mcp_client(addr, &access_token(&addr).await?).await?;
+        assert_one_access_list(&client).await?;
+        assert_one_target(&client).await?;
+        client.cancel().await?;
+        Ok(())
+    })
+    .await
+}
+
+/// `get_access_list` returns the list it names and refuses an unknown id.
+async fn assert_one_access_list(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let list = json!({ "name": "one-acl", "ip_filter": { "allow": ["10.0.0.0/8"] } });
+    mcp_call(client, "create_access_list", json!({ "list": list })).await?;
+    let lists: Value =
+        serde_json::from_str(&mcp_call(client, "list_access_lists", json!({})).await?)?;
+    let id = lists[0]["id"].as_str().context("no access list id")?;
+    let shown = mcp_call(client, "get_access_list", json!({ "id": id })).await?;
+    assert!(shown.contains("10.0.0.0/8"), "{shown}");
+    assert_not_found(
+        "get_access_list",
+        &tool_error_text(client, "get_access_list").await,
+    );
+    Ok(())
+}
+
+/// `get_target` returns the target it names and refuses an unknown id.
+async fn assert_one_target(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let target = json!({ "request": { "name": "one-target" } });
+    let created: Value = serde_json::from_str(&mcp_call(client, "create_target", target).await?)?;
+    let id = created["target"]["id"].as_str().context("no target id")?;
+    let shown = mcp_call(client, "get_target", json!({ "id": id })).await?;
+    assert!(shown.contains("one-target"), "{shown}");
+    assert_not_found("get_target", &tool_error_text(client, "get_target").await);
+    Ok(())
+}
+
+/// The error text of a read tool called with an id that names nothing.
+async fn tool_error_text(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+    name: &'static str,
+) -> String {
+    match mcp_call(client, name, json!({ "id": MISSING_DB })).await {
+        Ok(found) => format!("unexpected answer: {found}"),
+        Err(err) => format!("{err:#}"),
+    }
 }
 
 /// The settings as `GET /api/config` returns them to the admin.

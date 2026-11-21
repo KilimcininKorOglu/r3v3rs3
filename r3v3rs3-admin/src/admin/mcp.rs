@@ -2836,6 +2836,46 @@ impl McpServer {
         json_result(lists)
     }
 
+    /// Get one access control list.
+    #[tool(
+        description = "Show one access list by `id` (from `list_access_lists`): its name, IP filter and authentication policy. Secrets of its users and tokens are not returned. An unknown id is not found. Read-only; any account can call it."
+    )]
+    async fn get_access_list(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let entry = super::access_lists::get(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(parse_id(&params.id)?),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(entry.0)
+    }
+
+    /// Get one agent target.
+    #[tool(
+        description = "Show one deployment target by `id` (from `list_targets`): its name, kind, region, drain state and the last contact of its agent. An unknown id is not found. Read-only; any account with platform access can call it."
+    )]
+    async fn get_target(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let target = super::platform::get_target(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(parse_id(&params.id)?),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(target.0)
+    }
+
     /// Create an access control list.
     #[tool(
         description = "Create an access list. `list` is the body of POST /api/access_lists: `name`, `ip_filter` and `auth`. Reference the new list from an HTTP proxy or route with its `access_list` field (read the id with `list_access_lists`). Needs a token with the edit scope and an admin account or an editor without a proxy list."
@@ -4326,7 +4366,7 @@ impl McpServer {
     #[tool(
         description = "Delete the certificates whose ids `request.ids` lists (at most 200) and report the result for each one. Needs a token with the edit scope and an account that may edit."
     )]
-    async fn delete_certs(
+    async fn delete_many_certs(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<JsonRequestParams>,

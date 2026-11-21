@@ -10,6 +10,7 @@ use axum::{
 };
 use r3v3rs3_api::{
     access_list::{AccessList, AccessListEntry},
+    error::Error,
     id::ShortId,
 };
 
@@ -26,6 +27,27 @@ pub async fn list(
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<Box<Vec<AccessListEntry>>>, AppError> {
     Ok(Json(state.call(&caller, GetAccessLists).await?))
+}
+
+/// Returns one access list without the password hashes and the token digests.
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    tag = "access_lists",
+    operation_id = "get_access_list",
+    params(("id" = ShortId, Path, description = "Access list id.")),
+    responses((status = 200, description = "The access list.", body = AccessListEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AccessListEntry>, AppError> {
+    let lists = state.call(&caller, GetAccessLists).await?;
+    let entry = lists.into_iter().find(|entry| entry.id == id);
+    Ok(Json(
+        entry.ok_or_else(|| Error::IdNotFound { id: id.to_string() })?,
+    ))
 }
 
 /// Adds an access list.
