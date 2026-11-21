@@ -519,26 +519,38 @@ pub fn validate_dr_backup_id(id: &str) -> anyhow::Result<()> {
     {
         Ok(())
     } else {
-        anyhow::bail!("invalid disaster recovery backup id: {id}")
+        Err(r3v3rs3_api::error::Error::InvalidShortId { id: id.to_string() }.into())
+    }
+}
+
+/// The bundle path of an existing backup; an unknown id is `BackupNotFound`.
+fn existing_bundle(config_dir: &Path, id: &str) -> anyhow::Result<PathBuf> {
+    validate_dr_backup_id(id)?;
+    let path = dr_dir(config_dir).join(format!("{id}.r3bundle"));
+    if path.is_file() {
+        Ok(path)
+    } else {
+        Err(r3v3rs3_api::error::Error::BackupNotFound { id: id.to_string() }.into())
     }
 }
 
 /// Reads the raw encrypted `.r3bundle` of a backup.
 pub async fn download_dr_backup(config_dir: &Path, id: &str) -> anyhow::Result<Vec<u8>> {
-    validate_dr_backup_id(id)?;
-    let path = dr_dir(config_dir).join(format!("{id}.r3bundle"));
-    fs::read(&path).with_context(|| format!("disaster recovery backup not found: {id}"))
+    let path = existing_bundle(config_dir, id)?;
+    fs::read(&path).with_context(|| format!("cannot read {}", path.display()))
 }
 
-/// Deletes a backup and its manifest.
+/// Deletes a backup and its manifest. A bundle from an older release may have no manifest.
 pub async fn delete_dr_backup(config_dir: &Path, id: &str) -> anyhow::Result<()> {
-    validate_dr_backup_id(id)?;
-    let dir = dr_dir(config_dir);
-    let bundle = dir.join(format!("{id}.r3bundle"));
-    let manifest = dir.join(format!("{id}.json"));
-    let _ = fs::remove_file(bundle);
-    let _ = fs::remove_file(manifest);
-    Ok(())
+    let bundle = existing_bundle(config_dir, id)?;
+    fs::remove_file(&bundle).with_context(|| format!("cannot remove {}", bundle.display()))?;
+    let manifest = dr_dir(config_dir).join(format!("{id}.json"));
+    match fs::remove_file(&manifest) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+            Err(anyhow::Error::new(err).context(format!("cannot remove {}", manifest.display())))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Restores platform state from a local disaster recovery backup ID.

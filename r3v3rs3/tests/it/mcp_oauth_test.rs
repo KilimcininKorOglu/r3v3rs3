@@ -3344,6 +3344,48 @@ async fn a_dr_request_without_a_passphrase_is_refused_as_bad_request() -> anyhow
     .await
 }
 
+/// Sends `method` to `url` and returns the status with the body text.
+async fn dr_status(
+    method: reqwest::Method,
+    url: &str,
+    token: &str,
+) -> anyhow::Result<(u16, String)> {
+    let body = json!({ "passphrase": "p" });
+    let res = Client::new()
+        .request(method, url)
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await?;
+    Ok((res.status().as_u16(), res.text().await?))
+}
+
+/// A DR backup id that names no backup is 404 Not Found for download, delete and restore, and
+/// an id that is not a plain name (a path escape attempt) is 400 Bad Request (RFC 9110 15.5).
+#[tokio::test]
+async fn an_unknown_or_invalid_dr_backup_id_is_refused() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-dr-ids")?;
+    with_admin(&dir.0, |addr| async move {
+        let token = access_token(&addr).await?;
+        let base = format!("http://{addr}/api/disaster-recovery/backups");
+        let calls = [
+            (reqwest::Method::GET, "download"),
+            (reqwest::Method::DELETE, ""),
+            (reqwest::Method::POST, "restore"),
+        ];
+        for (method, tail) in calls {
+            for (id, expected) in [("dr-1-missing", 404), ("..%2e", 400)] {
+                let url = format!("{base}/{id}/{tail}");
+                let url = url.trim_end_matches('/');
+                let (status, text) = dr_status(method.clone(), url, &token).await?;
+                assert_eq!(status, expected, "{method} {url}: {text}");
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
 /// Downloads the first DR bundle to `path` with the CLI, compares it with the bytes the API
 /// serves, and removes the file.
 async fn assert_dr_download_matches(
