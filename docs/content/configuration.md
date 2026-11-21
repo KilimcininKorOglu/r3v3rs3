@@ -45,6 +45,10 @@ $ r3 config restore -f r3v3rs3-backup.json
 
 # Restore configuration from standard input
 $ cat r3v3rs3-backup.json | r3 config restore -f -
+
+# Show the settings, then save an edited copy (JSON or YAML file, or '-' for standard input)
+$ r3 config get > settings.json
+$ r3 config update settings.json
 ```
 
 ### MCP
@@ -2035,6 +2039,7 @@ r3 <server> db delete-tenant <id> <tenant>
 r3 <server> db delete <id>
 r3 <server> db list-replicas <id>
 r3 <server> db refresh-engines
+r3 <server> db list-engines
 
 # Backups, Automated Testing, Point-in-Time Recovery (PITR) & WAL
 r3 <server> backup get-config
@@ -2178,6 +2183,7 @@ r3 <server> token delete <id>
 
 # Platform Status & Maintenance
 r3 <server> platform get-app-info
+r3 <server> platform get-workers
 r3 <server> platform get-metrics
 r3 <server> platform run-prune
 r3 <server> platform vacuum-logs [--threshold-mb 50]

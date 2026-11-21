@@ -722,6 +722,8 @@ pub enum DbCommand {
     ListReplicas { id: String },
     /// Downloads the database engine catalog again.
     RefreshEngines,
+    /// Lists the database engines of the catalog and their versions.
+    ListEngines,
     /// Displays database container logs.
     GetAppLogs {
         id: String,
@@ -1496,6 +1498,8 @@ pub enum CronCommand {
 pub enum ConfigCommand {
     /// Shows the current application settings.
     Get,
+    /// Replaces the application settings with a JSON or YAML file, or '-' for standard input.
+    Update { payload: String },
     /// Exports all configuration to a backup file (secrets masked, accounts excluded).
     Backup {
         /// File path to save the backup to, or standard output if omitted.
@@ -1516,6 +1520,8 @@ pub enum ConfigCommand {
 pub enum PlatformCommand {
     /// Shows server status and runtime version.
     GetAppInfo,
+    /// Shows the worker processes that serve the ports and their state.
+    GetWorkers,
     /// Shows Prometheus system metrics and health.
     GetMetrics,
     /// Runs disk hygiene pruning (containers, unused images, build cache).
@@ -1977,6 +1983,7 @@ async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyh
             api.download_to("/api/metrics/grafana", &target).await
         }
         PlatformCommand::GetAppInfo => api.platform_status().await,
+        PlatformCommand::GetWorkers => api.print_get("/api/workers").await,
         PlatformCommand::GetMetrics => api.platform_metrics().await,
         PlatformCommand::RunPrune => api.platform_prune().await,
         PlatformCommand::GetPrunePolicy => api.get_prune_policy().await,
@@ -2393,6 +2400,7 @@ async fn run_db(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<(
             api.print_post("/api/databases/engines/refresh", &serde_json::json!({}))
                 .await
         }
+        DbCommand::ListEngines => api.print_get("/api/databases/engines").await,
         accounts => run_db_accounts(api, accounts).await,
     }
 }
@@ -2914,6 +2922,7 @@ async fn run_cron(api: &api_client::ApiClient, cmd: CronCommand) -> anyhow::Resu
 async fn run_config(api: &api_client::ApiClient, cmd: ConfigCommand) -> anyhow::Result<()> {
     match cmd {
         ConfigCommand::Get => api.get_config().await,
+        ConfigCommand::Update { payload } => api.update_config(&payload).await,
         ConfigCommand::Backup { output } => api.export_config_backup(output.as_deref()).await,
         ConfigCommand::Restore { file } => api.restore_config_backup(&file).await,
         ConfigCommand::TestNotification => api.test_notification().await,

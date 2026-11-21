@@ -3286,6 +3286,14 @@ impl ApiClient {
         print_json(&res)
     }
 
+    pub async fn update_config(&self, payload: &str) -> anyhow::Result<()> {
+        let config = load_payload(payload)?;
+        self.request(Method::PUT, "/api/config", Some(&config))
+            .await?;
+        println!("settings saved");
+        Ok(())
+    }
+
     pub async fn export_config_backup(&self, output: Option<&str>) -> anyhow::Result<()> {
         let res = self
             .request(Method::GET, "/api/config/backup", None)

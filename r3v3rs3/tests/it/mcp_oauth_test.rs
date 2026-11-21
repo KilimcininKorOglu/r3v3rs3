@@ -3516,6 +3516,83 @@ async fn the_client_binary_runs_commands() -> anyhow::Result<()> {
     .await
 }
 
+/// AGENTS.md: every Admin API operation is a CLI command. `r3 config update` saves the settings
+/// that `r3 config get` then shows, and a read-scope token cannot change them (403).
+/// `r3 platform get-workers` and `r3 db list-engines` answer with JSON, and the engine catalog
+/// holds the PostgreSQL engine that `r3 db create --engine postgres` names.
+#[tokio::test]
+async fn the_client_updates_settings_and_lists_workers_and_engines() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-cli-settings")?;
+    let mut config = mcp_config();
+    config.platform.enabled = true;
+    let file = dir.0.join("settings.json");
+    // `r3-server start` installs the embedded catalog before it serves; this harness starts the
+    // server without `main`, so it takes the same step.
+    r3v3rs3::engines::install_embedded();
+    with_admin_config(&dir.0, config, |addr| async move {
+        let binary = client_binary()?;
+        let token = access_token(&addr).await?;
+        let read_token = access_token_with_scope(&addr, "read").await?;
+        assert_cli_config_update(&binary, &addr, &token, &read_token, &file).await?;
+        cli_json(&binary, &addr, &read_token, &["platform", "get-workers"]).await?;
+        let engines = cli_json(&binary, &addr, &read_token, &["db", "list-engines"]).await?;
+        assert!(engines.to_string().contains("postgres"), "{engines}");
+        Ok(())
+    })
+    .await
+}
+
+/// `r3 config update` refuses a read-scope token (403) and saves what `r3 config get` shows.
+async fn assert_cli_config_update(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    read_token: &str,
+    file: &Path,
+) -> anyhow::Result<()> {
+    let mut settings = cli_json(binary, addr, token, &["config", "get"]).await?;
+    settings["shutdown_graceful_timeout"] = json!("17s");
+    std::fs::write(file, serde_json::to_vec(&settings)?)?;
+    let path = file.to_string_lossy().to_string();
+
+    let out = run_client(binary, addr, read_token, &["config", "update", &path]).await?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && stderr.contains("403"), "{stderr}");
+
+    cli_json_or_text(binary, addr, token, &["config", "update", &path]).await?;
+    let saved = cli_json(binary, addr, token, &["config", "get"]).await?;
+    assert_eq!(saved["shutdown_graceful_timeout"], json!("17s"));
+    Ok(())
+}
+
+/// Runs a client command that must succeed and returns its standard output.
+async fn cli_json_or_text(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    args: &[&str],
+) -> anyhow::Result<String> {
+    let out = run_client(binary, addr, token, args).await?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    anyhow::ensure!(
+        out.status.success(),
+        "{args:?}: {stdout} {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Ok(stdout)
+}
+
+/// Runs a client command that must succeed and print JSON.
+async fn cli_json(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    args: &[&str],
+) -> anyhow::Result<serde_json::Value> {
+    let stdout = cli_json_or_text(binary, addr, token, args).await?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
 async fn obtain_tokens_in_flow(addr: SocketAddr) -> anyhow::Result<(String, String)> {
     let client = Client::new();
     let cookie = session(&client, &addr).await?;
