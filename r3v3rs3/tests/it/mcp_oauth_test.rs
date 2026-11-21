@@ -2943,6 +2943,11 @@ async fn assert_mcp_grpc(
     }
     let reflect = json!({ "request": { "target_url": CLOSED_GRPC } });
     let listed = mcp_call(client, "reflect_grpc", reflect).await;
+    // A closed port is an error, not a server without services.
+    assert!(
+        listed.is_err(),
+        "reflect_grpc listed a closed port: {listed:?}"
+    );
     assert_reached("reflect_grpc", &listed.map_err(|e| e.to_string()));
     for tool in ["invoke_proxy_grpc", "reflect_proxy_grpc"] {
         let args = json!({ "id": MISSING_DB, "request": invoke });
@@ -2959,6 +2964,7 @@ async fn assert_cli_grpc(binary: &Path, addr: &SocketAddr, token: &str) -> anyho
         "payload": {}, "metadata": {} })
     .to_string();
     let out = run_client(binary, addr, token, &["grpc", "reflect", &target]).await?;
+    assert!(!out.status.success(), "grpc reflect listed a closed port");
     assert_reached(
         "grpc reflect",
         &Err(String::from_utf8_lossy(&out.stderr).to_string()),

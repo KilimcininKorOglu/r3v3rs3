@@ -35,31 +35,31 @@ async fn query_reflection_service(
         reflection::REFLECTION_METHOD
     );
 
-    let res = client
+    let response = client
         .post(&url)
         .header(reqwest::header::CONTENT_TYPE, "application/grpc")
         .header(reqwest::header::TE, "trailers")
         .body(request_bytes.to_vec())
         .send()
-        .await;
-
-    let response = match res {
-        Ok(r) if r.status().is_success() => r,
-        _ => return Ok(None),
-    };
-
-    let is_unimplemented = response
-        .headers()
-        .get("grpc-status")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|s| s == "12");
-
-    if is_unimplemented {
-        return Ok(None);
+        .await
+        .with_context(|| format!("cannot reach {url}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        anyhow::bail!("{url} answered HTTP {status}");
     }
-
+    match grpc_status(response.headers()) {
+        // UNIMPLEMENTED: the server does not offer this reflection version.
+        Some("12") => return Ok(None),
+        Some(code) if code != "0" => anyhow::bail!("{url} answered gRPC status {code}"),
+        _ => {}
+    }
     let bytes = response.bytes().await?;
     Ok(Some(bytes.to_vec()))
+}
+
+/// The `grpc-status` of a trailers-only answer, sent in the response headers.
+fn grpc_status(headers: &reqwest::header::HeaderMap) -> Option<&str> {
+    headers.get("grpc-status").and_then(|v| v.to_str().ok())
 }
 
 async fn discover_symbols(
@@ -108,7 +108,7 @@ pub async fn discover_grpc_services(target_url: &str) -> Result<GrpcReflectRespo
                 &list_req,
             )
             .await?
-            .unwrap_or_default()
+            .context("the server implements neither gRPC server reflection v1 nor v1alpha")?
         }
     };
 

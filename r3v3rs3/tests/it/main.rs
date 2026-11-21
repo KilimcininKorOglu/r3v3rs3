@@ -46,6 +46,7 @@ mod dns_credential_test;
 mod firewall_test;
 mod geoip_filter_test;
 mod grpc_health_test;
+mod grpc_reflection_test;
 mod grpc_web_test;
 mod h2_limit_test;
 mod header_rules_test;
