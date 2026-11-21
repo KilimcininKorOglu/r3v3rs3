@@ -1,6 +1,11 @@
 //! The OAuth 2.1 authorization server of the admin API: the metadata documents, the consent
 //! flow with PKCE and the token endpoint.
 
+/// The operation table of the CLI, shared so that this file checks it against the served
+/// OpenAPI document.
+#[path = "../../../r3v3rs3-cli/src/operations.rs"]
+mod cli_operations;
+
 use anyhow::Context as _;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -1332,7 +1337,7 @@ async fn assert_cli_port_mutations(
         "listen": "/ip4/127.0.0.1/tcp/0"
     })
     .to_string();
-    let add_out = run_client(binary, addr, token, &["port", "add", &payload]).await?;
+    let add_out = run_client(binary, addr, token, &["port", "create", &payload]).await?;
     assert!(
         add_out.status.success(),
         "{}",
@@ -1425,7 +1430,7 @@ async fn assert_cli_proxy_mutations(
         "ports": [port_id]
     })
     .to_string();
-    let add_out = run_client(binary, addr, token, &["proxy", "add", &payload]).await?;
+    let add_out = run_client(binary, addr, token, &["proxy", "create", &payload]).await?;
     assert!(
         add_out.status.success(),
         "{}",
@@ -1574,7 +1579,7 @@ async fn assert_cli_access_lists(
     token: &str,
 ) -> anyhow::Result<()> {
     let added = json!({ "name": "cli-acl", "ip_filter": { "allow": ["10.0.0.0/8"] } });
-    cli_ok(binary, addr, token, &["acl", "add", &added.to_string()]).await?;
+    cli_ok(binary, addr, token, &["acl", "create", &added.to_string()]).await?;
     let id = listed_id(
         &cli_ok(binary, addr, token, &["acl", "list"]).await?,
         "cli-acl",
@@ -1614,7 +1619,7 @@ async fn assert_cli_dns_credentials(
     let provider =
         json!({ "provider": "webhook", "url": "https://dns.example.com/hook", "token": secret });
     let added = json!({ "name": "cli-dns", "dns_provider": provider });
-    cli_ok(binary, addr, token, &["dns", "add", &added.to_string()]).await?;
+    cli_ok(binary, addr, token, &["dns", "create", &added.to_string()]).await?;
     let id = listed_id(
         &cli_ok(binary, addr, token, &["dns", "list"]).await?,
         "cli-dns",
@@ -1650,8 +1655,8 @@ fn client_binary() -> anyhow::Result<std::path::PathBuf> {
     Ok(binary)
 }
 
-/// `r3 target get` and `r3 target token` reach the target API (OpenAPI: `get_target` and
-/// `create_target_token` at `/api/targets/{id}/token`), and `r3 platform status` shows the release
+/// `r3 target get` and `r3 target create-token` reach the target API (OpenAPI: `get_target` and
+/// `create_target_token` at `/api/targets/{id}/token`), and `r3 platform get-app-info` shows the release
 /// version and the worker mode, the same data as the MCP tool `server_status`.
 #[tokio::test]
 async fn the_client_binary_reads_targets_and_the_server_status() -> anyhow::Result<()> {
@@ -1666,7 +1671,7 @@ async fn the_client_binary_reads_targets_and_the_server_status() -> anyhow::Resu
             &binary,
             &addr,
             &token,
-            &["target", "add", "--name", "cli-edge"],
+            &["target", "create", "--name", "cli-edge"],
         )
         .await?;
         let id = added
@@ -1676,9 +1681,9 @@ async fn the_client_binary_reads_targets_and_the_server_status() -> anyhow::Resu
             .context("no target id in the add output")?
             .to_string();
         assert_cli_target_get(&binary, &addr, &token, &id).await?;
-        let renewed = cli_ok(&binary, &addr, &token, &["target", "token", &id]).await?;
+        let renewed = cli_ok(&binary, &addr, &token, &["target", "create-token", &id]).await?;
         assert!(renewed.contains("\"token\""), "{renewed}");
-        let status = cli_ok(&binary, &addr, &token, &["platform", "status"]).await?;
+        let status = cli_ok(&binary, &addr, &token, &["platform", "get-app-info"]).await?;
         assert!(status.contains("\"version\""), "{status}");
         assert!(status.contains("\"mode\""), "{status}");
         Ok(())
@@ -1779,19 +1784,19 @@ fn assert_s3_not_configured(what: &str, err: &str) {
 async fn assert_cli_databases(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
     let all = cli_ok(binary, addr, token, &["backup", "list-all"]).await?;
     assert!(all.trim_start().starts_with('['), "{all}");
-    let overview = cli_ok(binary, addr, token, &["backup", "overview"]).await?;
+    let overview = cli_ok(binary, addr, token, &["backup", "get-overview"]).await?;
     assert!(overview.trim_start().starts_with('{'), "{overview}");
     let calls: [&[&str]; 2] = [
-        &["db", "replicas", MISSING_DB],
-        &["backup", "run", MISSING_DB],
+        &["db", "list-replicas", MISSING_DB],
+        &["backup", "run-now", MISSING_DB],
     ];
     for args in calls {
         let out = run_client(binary, addr, token, args).await?;
         assert_not_found(&args.join(" "), &String::from_utf8_lossy(&out.stderr));
     }
     let s3_calls: [&[&str]; 2] = [
-        &["backup", "s3-list"],
-        &["backup", "s3-restore", "x.sql.gz"],
+        &["backup", "list-s3"],
+        &["backup", "restore-s3", "x.sql.gz"],
     ];
     for args in s3_calls {
         let out = run_client(binary, addr, token, args).await?;
@@ -1944,7 +1949,7 @@ async fn assert_cli_apps(binary: &Path, addr: &SocketAddr, token: &str) -> anyho
         binary,
         addr,
         token,
-        &["app", "add", &git_app("cli-app").to_string()],
+        &["app", "create", &git_app("cli-app").to_string()],
     )
     .await?;
     let id = listed_id(
@@ -1955,7 +1960,7 @@ async fn assert_cli_apps(binary: &Path, addr: &SocketAddr, token: &str) -> anyho
         binary,
         addr,
         token,
-        &["app", "set-git-token", &id],
+        &["app", "update-git-token", &id],
         GIT_TOKEN,
     )
     .await?;
@@ -1967,7 +1972,7 @@ async fn assert_cli_apps(binary: &Path, addr: &SocketAddr, token: &str) -> anyho
     );
     assert!(!stdout.contains(GIT_TOKEN), "{stdout}");
     cli_ok(binary, addr, token, &["app", "delete-git-token", &id]).await?;
-    let secret = cli_ok(binary, addr, token, &["app", "new-webhook-secret", &id]).await?;
+    let secret = cli_ok(binary, addr, token, &["app", "create-webhook-secret", &id]).await?;
     assert!(secret.contains("secret"), "{secret}");
     cli_ok(binary, addr, token, &["app", "delete-webhook-secret", &id]).await?;
     assert_cli_app_reads(binary, addr, token, &id).await
@@ -1980,16 +1985,16 @@ async fn assert_cli_app_reads(
     token: &str,
     id: &str,
 ) -> anyhow::Result<()> {
-    let deployments = cli_ok(binary, addr, token, &["app", "deployments", id]).await?;
+    let deployments = cli_ok(binary, addr, token, &["app", "list-deployments", id]).await?;
     assert!(deployments.trim_start().starts_with('['), "{deployments}");
-    for cmd in ["deployment", "approve", "reject"] {
+    for cmd in ["get-deployment", "approve-deployment", "reject-deployment"] {
         let out = run_client(binary, addr, token, &["app", cmd, MISSING_DB]).await?;
         assert_not_found(cmd, &String::from_utf8_lossy(&out.stderr));
     }
     for cmd in [
-        "metrics",
-        "services",
-        "topology",
+        "get-metrics",
+        "get-services",
+        "get-topology",
         "upgrade-catalog",
         "install-hook",
         "check-update",
@@ -2130,7 +2135,7 @@ async fn assert_cli_projects(binary: &Path, addr: &SocketAddr, token: &str) -> a
         binary,
         addr,
         token,
-        &["project", "add", "--name", "cli-proj"],
+        &["project", "create", "--name", "cli-proj"],
     )
     .await?;
     let id = listed_id(
@@ -2162,7 +2167,7 @@ async fn assert_cli_project_envs(
             binary,
             addr,
             token,
-            &["project", "env-create", id, "--name", "qa"],
+            &["project", "create-environment", id, "--name", "qa"],
         )
         .await?,
     )?;
@@ -2171,7 +2176,7 @@ async fn assert_cli_project_envs(
             binary,
             addr,
             token,
-            &["project", "env-create", id, "--name", "live"],
+            &["project", "create-environment", id, "--name", "live"],
         )
         .await?,
     )?;
@@ -2179,15 +2184,21 @@ async fn assert_cli_project_envs(
         binary,
         addr,
         token,
-        &["project", "env-update", id, &env, "--name", "qa-2"],
+        &["project", "update-environment", id, &env, "--name", "qa-2"],
     )
     .await?;
-    let shown = cli_ok(binary, addr, token, &["project", "env-get", id, &env]).await?;
+    let shown = cli_ok(
+        binary,
+        addr,
+        token,
+        &["project", "get-environment", id, &env],
+    )
+    .await?;
     assert!(shown.contains("qa-2"), "{shown}");
     assert_cli_env_vars(binary, addr, token, id, (&env, &other)).await
 }
 
-/// `r3 project env-set-vars`, `env-vars` and `env-diff` never show a secret value, and
+/// `r3 project update-environment-env`, `env-vars` and `env-diff` never show a secret value, and
 /// `env-delete` removes the environment.
 async fn assert_cli_env_vars(
     binary: &Path,
@@ -2201,10 +2212,22 @@ async fn assert_cli_env_vars(
         binary,
         addr,
         token,
-        &["project", "env-set-vars", id, env, &vars.to_string()],
+        &[
+            "project",
+            "update-environment-env",
+            id,
+            env,
+            &vars.to_string(),
+        ],
     )
     .await?;
-    let listed = cli_ok(binary, addr, token, &["project", "env-vars", id, env]).await?;
+    let listed = cli_ok(
+        binary,
+        addr,
+        token,
+        &["project", "get-environment-env", id, env],
+    )
+    .await?;
     assert!(
         listed.contains("API_KEY") && !listed.contains(ENV_SECRET),
         "{listed}"
@@ -2213,11 +2236,17 @@ async fn assert_cli_env_vars(
         binary,
         addr,
         token,
-        &["project", "env-diff", id, env, other],
+        &["project", "diff-environments", id, env, other],
     )
     .await?;
     assert!(!report.contains(ENV_SECRET), "{report}");
-    cli_ok(binary, addr, token, &["project", "env-delete", id, env]).await?;
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["project", "delete-environment", id, env],
+    )
+    .await?;
     Ok(())
 }
 
@@ -2232,7 +2261,7 @@ async fn assert_cli_env_groups(
         binary,
         addr,
         token,
-        &["env-group", "add", &group.to_string()],
+        &["env-group", "create", &group.to_string()],
     )
     .await?;
     let id = listed_id(
@@ -2327,7 +2356,7 @@ async fn assert_mcp_git(
 async fn assert_cli_git(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
     let add = [
         "git",
-        "add",
+        "create",
         "--name",
         "cli-gitea",
         "--provider",
@@ -2371,7 +2400,7 @@ async fn assert_cli_git(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow
         token,
         &[
             "git",
-            "github-app",
+            "create-github-app",
             "--name",
             "cli-gh",
             "--redirect-uri",
@@ -2380,7 +2409,7 @@ async fn assert_cli_git(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow
     )
     .await?;
     assert!(form.contains("manifest"), "{form}");
-    let out = run_client(binary, addr, token, &["git", "install", &id]).await?;
+    let out = run_client(binary, addr, token, &["git", "install-github-app", &id]).await?;
     assert!(!out.status.success());
     assert_reached(
         "git install",
@@ -2490,7 +2519,7 @@ async fn assert_cli_certs(binary: &Path, addr: &SocketAddr, token: &str) -> anyh
         binary,
         addr,
         token,
-        &["cert", "self-sign", "--san", "cli.example.test"],
+        &["cert", "create-self-signed", "--san", "cli.example.test"],
     )
     .await?;
     let listing = cli_ok(binary, addr, token, &["cert", "list"]).await?;
@@ -2622,13 +2651,13 @@ async fn assert_mcp_checks(
     Ok(())
 }
 
-/// `r3 traffic`, `r3 security` and `r3 proxy dry-run` reach the same endpoints.
+/// `r3 traffic`, `r3 security` and `r3 proxy preview` reach the same endpoints.
 async fn assert_cli_traffic(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
     let listed = cli_ok(
         binary,
         addr,
         token,
-        &["traffic", "list", "--resource-id", MISSING_DB],
+        &["traffic", "get", "--resource-id", MISSING_DB],
     )
     .await?;
     assert_eq!(
@@ -2640,10 +2669,10 @@ async fn assert_cli_traffic(binary: &Path, addr: &SocketAddr, token: &str) -> an
         binary,
         addr,
         token,
-        &["traffic", "get", "18446744073709551615"],
+        &["traffic", "get-entry", "18446744073709551615"],
     )
     .await?;
-    assert_not_found("traffic get", &String::from_utf8_lossy(&out.stderr));
+    assert_not_found("traffic get-entry", &String::from_utf8_lossy(&out.stderr));
     let out = run_client(
         binary,
         addr,
@@ -2662,7 +2691,7 @@ async fn assert_cli_traffic(binary: &Path, addr: &SocketAddr, token: &str) -> an
     assert_cli_security_checks(binary, addr, token).await
 }
 
-/// `r3 security` stores anomaly rules and grades headers, and `r3 proxy dry-run` matches the
+/// `r3 security` stores anomaly rules and grades headers, and `r3 proxy preview` matches the
 /// route.
 async fn assert_cli_security_checks(
     binary: &Path,
@@ -2674,12 +2703,12 @@ async fn assert_cli_security_checks(
         binary,
         addr,
         token,
-        &["security", "set-anomaly-rules", &rules.to_string()],
+        &["security", "update-anomaly-rules", &rules.to_string()],
     )
     .await?;
-    let stored = cli_ok(binary, addr, token, &["security", "anomaly-rules"]).await?;
+    let stored = cli_ok(binary, addr, token, &["security", "get-anomaly-rules"]).await?;
     assert!(stored.contains("4321"), "{stored}");
-    cli_ok(binary, addr, token, &["security", "anomalies"]).await?;
+    cli_ok(binary, addr, token, &["security", "get-system-anomalies"]).await?;
     cli_ok(binary, addr, token, &["security", "dismiss-anomalies"]).await?;
     let audit = cli_ok(
         binary,
@@ -2696,7 +2725,7 @@ async fn assert_cli_security_checks(
         binary,
         addr,
         token,
-        &["proxy", "dry-run", &dry_run_request().to_string()],
+        &["proxy", "preview", &dry_run_request().to_string()],
     )
     .await?;
     assert!(run.contains("\"matched\": true"), "{run}");
@@ -2751,7 +2780,7 @@ async fn assert_viewer_cannot_refresh_cdn(addr: SocketAddr, binary: &Path) -> an
     let refused = mcp_call(&client, "refresh_cdn_ranges", json!({})).await;
     assert!(refused.is_err(), "a viewer refreshed the CDN ranges");
     assert_reached("refresh_cdn_ranges", &refused.map_err(|e| e.to_string()));
-    let out = run_client(binary, &addr, &token, &["cdn", "refresh"]).await?;
+    let out = run_client(binary, &addr, &token, &["cdn", "refresh-ranges"]).await?;
     assert!(!out.status.success(), "a viewer refreshed the CDN ranges");
     assert_reached(
         "cdn refresh",
@@ -2762,16 +2791,16 @@ async fn assert_viewer_cannot_refresh_cdn(addr: SocketAddr, binary: &Path) -> an
 
 /// `r3 cdn`, `discovery`, `logs`, `dashboard`, `audit` and `port` read the same endpoints.
 async fn assert_cli_status(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
-    let cdn = cli_ok(binary, addr, token, &["cdn", "status"]).await?;
+    let cdn = cli_ok(binary, addr, token, &["cdn", "get-status"]).await?;
     assert!(cdn.contains("\"providers\""), "{cdn}");
-    cli_ok(binary, addr, token, &["discovery", "list"]).await?;
-    cli_ok(binary, addr, token, &["logs", "server", "--limit", "5"]).await?;
-    let dashboard = cli_ok(binary, addr, token, &["dashboard"]).await?;
+    cli_ok(binary, addr, token, &["discovery", "list-status"]).await?;
+    cli_ok(binary, addr, token, &["get-logs", "server", "--limit", "5"]).await?;
+    let dashboard = cli_ok(binary, addr, token, &["get-dashboard"]).await?;
     assert!(dashboard.contains("\"proxies\""), "{dashboard}");
-    let audit = cli_ok(binary, addr, token, &["audit", "list", "--limit", "5"]).await?;
+    let audit = cli_ok(binary, addr, token, &["audit", "list-log", "--limit", "5"]).await?;
     assert!(serde_json::from_str::<Value>(&audit)?.is_array(), "{audit}");
-    cli_ok(binary, addr, token, &["port", "interfaces"]).await?;
-    let out = run_client(binary, addr, token, &["port", "status", MISSING_DB]).await?;
+    cli_ok(binary, addr, token, &["port", "list-network-interfaces"]).await?;
+    let out = run_client(binary, addr, token, &["port", "get-status", MISSING_DB]).await?;
     assert_not_found("port status", &String::from_utf8_lossy(&out.stderr));
     Ok(())
 }
@@ -2836,7 +2865,10 @@ async fn assert_cli_grpc(binary: &Path, addr: &SocketAddr, token: &str) -> anyho
         "grpc reflect",
         &Err(String::from_utf8_lossy(&out.stderr).to_string()),
     );
-    for args in [["grpc", "health", &target], ["grpc", "invoke", &invoke]] {
+    for args in [
+        ["grpc", "check-health", &target],
+        ["grpc", "invoke", &invoke],
+    ] {
         let out = run_client(binary, addr, token, &args).await?;
         assert!(!out.status.success(), "{args:?} reached a closed port");
         assert_reached(
@@ -2845,8 +2877,8 @@ async fn assert_cli_grpc(binary: &Path, addr: &SocketAddr, token: &str) -> anyho
         );
     }
     for args in [
-        ["proxy", "grpc-invoke", MISSING_DB, &invoke],
-        ["proxy", "grpc-reflect", MISSING_DB, &target],
+        ["proxy", "invoke-grpc", MISSING_DB, &invoke],
+        ["proxy", "reflect-grpc", MISSING_DB, &target],
     ] {
         let out = run_client(binary, addr, token, &args).await?;
         assert_not_found(&format!("{args:?}"), &String::from_utf8_lossy(&out.stderr));
@@ -2897,23 +2929,23 @@ async fn assert_mcp_platform_admin(
     Ok(())
 }
 
-/// `r3 backup set-config` stores the configuration that `r3 backup config` shows, and
+/// `r3 backup update-config` stores the configuration that `r3 backup get-config` shows, and
 /// `r3 platform` lists MCP sessions and saves the Grafana dashboard.
 async fn assert_cli_platform_admin(
     binary: &Path,
     addr: &SocketAddr,
     token: &str,
 ) -> anyhow::Result<()> {
-    let config = cli_ok(binary, addr, token, &["backup", "config"]).await?;
+    let config = cli_ok(binary, addr, token, &["backup", "get-config"]).await?;
     let config: Value = serde_json::from_str(&config)?;
     cli_ok(
         binary,
         addr,
         token,
-        &["backup", "set-config", &config.to_string()],
+        &["backup", "update-config", &config.to_string()],
     )
     .await?;
-    let sessions = cli_ok(binary, addr, token, &["platform", "mcp-sessions"]).await?;
+    let sessions = cli_ok(binary, addr, token, &["platform", "list-mcp-sessions"]).await?;
     assert!(sessions.contains(CLIENT_ID), "{sessions}");
     let out = run_client(
         binary,
@@ -2929,7 +2961,7 @@ async fn assert_cli_platform_admin(
         binary,
         addr,
         token,
-        &["platform", "grafana", "--output", &path],
+        &["platform", "get-grafana-dashboard", "--output", &path],
     )
     .await?;
     let dashboard: Value = serde_json::from_slice(&std::fs::read(&file)?)?;
@@ -3051,9 +3083,9 @@ async fn assert_cli_volumes(binary: &Path, addr: &SocketAddr, token: &str) -> an
     std::fs::write(&local, [0x1f, 0x8b])?;
     let local_path = local.to_string_lossy().to_string();
     let commands: [&[&str]; 7] = [
-        &["app", "volumes", "backups", MISSING_DB, "data"],
-        &["app", "volumes", "backup", MISSING_DB, "data"],
-        &["app", "volumes", "restore", MISSING_DB, "data", "b1"],
+        &["app", "volumes", "list-backups", MISSING_DB, "data"],
+        &["app", "volumes", "create-backup", MISSING_DB, "data"],
+        &["app", "volumes", "restore-backup", MISSING_DB, "data", "b1"],
         &["app", "volumes", "delete-backup", MISSING_DB, "data", "b1"],
         &[
             "app",
@@ -3063,11 +3095,11 @@ async fn assert_cli_volumes(binary: &Path, addr: &SocketAddr, token: &str) -> an
             "data",
             "b1",
         ],
-        &["app", "volumes", "export", MISSING_DB, "data"],
+        &["app", "volumes", "export-archive", MISSING_DB, "data"],
         &[
             "app",
             "volumes",
-            "import",
+            "import-archive",
             MISSING_DB,
             "data",
             "--file",
@@ -3082,7 +3114,7 @@ async fn assert_cli_volumes(binary: &Path, addr: &SocketAddr, token: &str) -> an
     Ok(())
 }
 
-/// `r3 backup download` and `r3 backup s3-download` reach the binary backup downloads that only
+/// `r3 backup download` and `r3 backup download-s3` reach the binary backup downloads that only
 /// the CLI offers (OpenAPI `download_database_backup`, `download_s3_database_backup`): a missing
 /// database is not found and an unset S3 bucket is reported.
 #[tokio::test]
@@ -3101,7 +3133,7 @@ async fn the_backup_downloads_are_reachable_from_the_cli() -> anyhow::Result<()>
         )
         .await?;
         assert_not_found("backup download", &String::from_utf8_lossy(&out.stderr));
-        let args = ["backup", "s3-download", "--key", "db/b1.sql.gz"];
+        let args = ["backup", "download-s3", "--key", "db/b1.sql.gz"];
         let out = run_client(&binary, &addr, &token, &args).await?;
         assert!(
             !out.status.success(),
@@ -3137,8 +3169,8 @@ async fn first_stderr_line(
     line.context("the client closed stderr without a line")
 }
 
-/// `r3 traffic live` opens the access log stream (OpenAPI `stream_traffic`, SSE) and
-/// `r3 app logs-live` refuses a missing app (OpenAPI `app_logs_live`, WebSocket).
+/// `r3 traffic stream` opens the access log stream (OpenAPI `stream_traffic`, SSE) and
+/// `r3 app stream-logs` refuses a missing app (OpenAPI `app_logs_live`, WebSocket).
 #[tokio::test]
 async fn the_live_streams_are_reachable_from_the_cli() -> anyhow::Result<()> {
     let dir = TempDir::new("cli-live-streams")?;
@@ -3147,13 +3179,19 @@ async fn the_live_streams_are_reachable_from_the_cli() -> anyhow::Result<()> {
     with_admin_config(&dir.0, config, |addr| async move {
         let token = access_token(&addr).await?;
         let binary = client_binary()?;
-        let line = first_stderr_line(&binary, &addr, &token, &["traffic", "live"]).await?;
+        let line = first_stderr_line(&binary, &addr, &token, &["traffic", "stream"]).await?;
         assert!(line.contains("streaming"), "{line}");
-        let out = run_client(&binary, &addr, &token, &["app", "logs-live", MISSING_DB]).await?;
+        let out = run_client(&binary, &addr, &token, &["app", "stream-logs", MISSING_DB]).await?;
         assert!(!out.status.success());
         assert_not_found("app logs-live", &String::from_utf8_lossy(&out.stderr));
         // OpenAPI `open_app_terminal`: the terminal of a missing app is not found.
-        let out = run_client(&binary, &addr, &token, &["app", "terminal", MISSING_DB]).await?;
+        let out = run_client(
+            &binary,
+            &addr,
+            &token,
+            &["app", "open-terminal", MISSING_DB],
+        )
+        .await?;
         assert!(!out.status.success());
         assert_not_found("app terminal", &String::from_utf8_lossy(&out.stderr));
         Ok(())
@@ -3928,9 +3966,31 @@ async fn every_tool_is_named_after_its_api_operation() -> anyhow::Result<()> {
             .map(|id| id.to_string())
             .collect();
         assert_eq!(without_tool, expected, "operations without a tool");
+        assert_cli_operations_exist(&tools, &operations);
         Ok(())
     })
     .await
+}
+
+/// Every `r3` command names an operation that the server serves, or an MCP tool that combines
+/// operations, so the CLI, MCP and the OpenAPI document share one name for an action.
+fn assert_cli_operations_exist(tools: &BTreeSet<String>, operations: &BTreeSet<String>) {
+    let mcp_only: BTreeSet<&str> = cli_operations::MCP_ONLY_OPERATIONS
+        .iter()
+        .copied()
+        .collect();
+    for name in &mcp_only {
+        assert!(tools.contains(*name), "{name} is no MCP tool");
+        assert!(!operations.contains(*name), "{name} is an API operation");
+    }
+    let unknown: Vec<_> = cli_operations::COMMAND_OPERATIONS
+        .iter()
+        .filter(|(_, id)| !operations.contains(*id) && !mcp_only.contains(id))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "commands with an unknown operation: {unknown:?}"
+    );
 }
 
 /// `update_config` saves the settings that `get_config` returned with a change. A masked secret

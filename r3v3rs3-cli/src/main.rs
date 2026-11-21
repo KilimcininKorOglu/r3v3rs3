@@ -4,6 +4,8 @@
 
 mod api_client;
 mod oauth;
+#[cfg(test)]
+mod operations;
 mod terminal;
 
 use anyhow::{Context, bail};
@@ -86,7 +88,7 @@ enum Command {
     #[command(subcommand)]
     Discovery(DiscoveryCommand),
     /// Read the log rows of `server` or of a port or proxy id.
-    Logs {
+    GetLogs {
         id: String,
         /// The oldest row, as Unix seconds.
         #[arg(long)]
@@ -99,7 +101,7 @@ enum Command {
         limit: Option<u32>,
     },
     /// Show the dashboard summary.
-    Dashboard,
+    GetDashboard,
     /// Check, call and list any gRPC server.
     #[command(subcommand)]
     Grpc(GrpcCommand),
@@ -154,11 +156,11 @@ pub enum PortCommand {
     /// Shows configuration of a port.
     Get { id: String },
     /// Shows whether a port listens and why it does not.
-    Status { id: String },
+    GetStatus { id: String },
     /// Lists the network interfaces and addresses a port can bind.
-    Interfaces,
+    ListNetworkInterfaces,
     /// Adds a port from inline JSON/YAML, a file path, or stdin ('-').
-    Add { payload: String },
+    Create { payload: String },
     /// Updates a port from inline JSON/YAML, a file path, or stdin ('-').
     Update { id: String, payload: String },
     /// Deletes a port.
@@ -191,11 +193,11 @@ pub enum ProxyCommand {
     /// Shows configuration of a proxy.
     Get { id: String },
     /// Adds a proxy from inline JSON/YAML, a file path, or stdin ('-').
-    Add { payload: String },
+    Create { payload: String },
     /// Updates a proxy from inline JSON/YAML, a file path, or stdin ('-').
     Update { id: String, payload: String },
     /// Shows live status of a proxy.
-    Status { id: String },
+    GetStatus { id: String },
     /// Deletes a proxy.
     #[command(alias = "rm")]
     Delete { id: String },
@@ -206,7 +208,7 @@ pub enum ProxyCommand {
         path: Option<String>,
     },
     /// Checks gRPC upstream health status using grpc.health.v1.Health/Check protocol.
-    GrpcHealth {
+    CheckGrpcHealth {
         id: String,
         /// Optional service name to check. Empty string checks overall server health.
         #[arg(short, long)]
@@ -221,12 +223,14 @@ pub enum ProxyCommand {
     /// Audits and hardens HTTP response security headers (OWASP/HSTS/CSP).
     #[command(subcommand)]
     SecurityHeaders(ProxySecurityHeadersCommand),
-    /// Manages RFC 9218 HTTP/2 & HTTP/3 stream priority and adaptive concurrency.
-    Priority {
+    /// Shows the RFC 9218 HTTP/2 & HTTP/3 stream priority settings of a proxy.
+    GetStreamPriority { id: String },
+    /// Changes the RFC 9218 stream priority and adaptive concurrency settings of a proxy.
+    UpdateStreamPriority {
         id: String,
-        /// Enable or disable stream priority optimization.
-        #[arg(long)]
-        enable: Option<bool>,
+        /// Enable or disable stream priority optimization (`--enable true` or `--enable false`).
+        #[arg(long, action = clap::ArgAction::Set)]
+        enable: bool,
         /// Forward RFC 9218 Priority header upstream.
         #[arg(long)]
         inject_header: Option<bool>,
@@ -236,28 +240,28 @@ pub enum ProxyCommand {
     },
     /// Calls a unary gRPC method on the upstream of a proxy; the payload (inline JSON/YAML, a
     /// file path, or stdin '-') holds `service`, `method`, `payload` and `metadata`.
-    GrpcInvoke { id: String, payload: String },
+    InvokeGrpc { id: String, payload: String },
     /// Lists the gRPC services behind a proxy through server reflection; the optional payload
     /// holds `service_name`.
-    GrpcReflect { id: String, payload: Option<String> },
+    ReflectGrpc { id: String, payload: Option<String> },
     /// Shows where a proxy definition would send a request, without sending it. The payload
     /// (inline JSON/YAML, a file path, or stdin '-') holds `proxy`, `url`, `method` and `client_ip`.
-    DryRun { payload: String },
+    Preview { payload: String },
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ProxySecurityHeadersCommand {
     /// Shows the security scorecard and missing headers of an HTTP proxy.
-    Audit { id: String },
+    Get { id: String },
     /// Applies a predefined OWASP security profile (strict, balanced, api-only, spa) to a proxy.
-    Apply {
+    ApplyProfile {
         id: String,
         /// Predefined profile: `strict`, `balanced`, `api-only`, or `spa`.
         profile: String,
     },
     /// Lists all available predefined OWASP security hardening profiles.
     #[command(alias = "ls")]
-    Profiles,
+    ListProfiles,
 }
 
 #[derive(Debug, Subcommand)]
@@ -291,14 +295,11 @@ pub enum TrafficCommand {
     #[command(subcommand)]
     Connections(ConnectionsCommand),
     /// Shows HTTP/2 & HTTP/3 stream priority and adaptive concurrency statistics.
-    Priority,
+    GetPriorityStats,
     /// Shows geographic traffic distribution by country.
-    Geo,
-    /// Replays a captured traffic log entry.
-    Replay { id: u64 },
+    GetGeo,
     /// Lists recent access log entries as JSON, newest first.
-    #[command(alias = "ls")]
-    List {
+    Get {
         /// Only entries of this proxy.
         #[arg(long)]
         resource_id: Option<String>,
@@ -314,9 +315,9 @@ pub enum TrafficCommand {
         limit: Option<usize>,
     },
     /// Shows one access log entry.
-    Get { id: u64 },
+    GetEntry { id: u64 },
     /// Prints new access log entries as they arrive, until Ctrl-C.
-    Live {
+    Stream {
         /// Only entries of this proxy.
         #[arg(long)]
         resource_id: Option<String>,
@@ -327,9 +328,16 @@ pub enum TrafficCommand {
         #[arg(long)]
         country: Option<String>,
     },
-    /// Sends an HTTP request from inline JSON/YAML, a file path, or stdin ('-'): `method`,
-    /// `url`, `headers`, `body`, `timeout_ms`, `allow_internal`.
-    ReplayRequest { payload: String },
+    /// Sends an HTTP request again: the captured access log entry `--entry <id>`, or a request
+    /// from inline JSON/YAML, a file path, or stdin ('-'): `method`, `url`, `headers`, `body`,
+    /// `timeout_ms`, `allow_internal`.
+    ReplayRequest {
+        #[arg(required_unless_present = "entry", conflicts_with = "entry")]
+        payload: Option<String>,
+        /// The id of the access log entry to send again.
+        #[arg(long)]
+        entry: Option<u64>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -342,8 +350,7 @@ pub enum ConnectionsCommand {
         proxy: Option<String>,
     },
     /// Terminates an active connection by its unique ID.
-    #[command(alias = "kill", alias = "terminate")]
-    Close {
+    Terminate {
         /// Active connection ID.
         id: String,
     },
@@ -369,12 +376,12 @@ pub enum CertCommand {
     #[command(alias = "rm")]
     Delete { id: String },
     /// Checks domain certificate coverage.
-    Coverage,
+    CheckCoverage,
     /// Certificate Transparency log monitor commands.
     #[command(subcommand)]
     Ct(CtCommand),
     /// Creates a self-signed certificate; without --ca a new CA is created and stored.
-    SelfSign {
+    CreateSelfSigned {
         /// A subject name; repeat for several names.
         #[arg(long = "san", required = true)]
         san: Vec<String>,
@@ -410,11 +417,11 @@ pub enum CertCommand {
 #[derive(Debug, Subcommand)]
 pub enum CtCommand {
     /// Shows Certificate Transparency monitor status.
-    Status,
+    GetStatus,
     /// Shows Certificate Transparency monitor configuration.
-    Config,
+    GetConfig,
     /// Updates Certificate Transparency monitor configuration.
-    SetConfig {
+    UpdateConfig {
         /// Enable or disable CT monitoring.
         #[arg(long)]
         enable: Option<bool>,
@@ -438,14 +445,14 @@ pub enum CtCommand {
         api_url: Option<String>,
     },
     /// Triggers an immediate check of Certificate Transparency logs.
-    Check {
+    CheckNow {
         /// Optional specific domain to check.
         #[arg(long)]
         domain: Option<String>,
     },
     /// Lists discovered Certificate Transparency log entries and rogue certificate alerts.
     #[command(alias = "ls")]
-    List {
+    ListEntries {
         /// Optional domain filter.
         #[arg(long)]
         domain: Option<String>,
@@ -457,7 +464,7 @@ pub enum CtCommand {
         limit: Option<usize>,
     },
     /// Dismisses or resolves a Certificate Transparency alert.
-    Dismiss {
+    DismissAlert {
         /// Unique entry ID to dismiss.
         id: String,
         /// Optional status (investigating, dismissed, confirmed_rogue).
@@ -474,16 +481,16 @@ pub enum AcmeCommand {
     /// Shows details of an ACME order.
     Get { id: String },
     /// Adds an ACME order from inline JSON/YAML, a file path, or stdin ('-').
-    Add { payload: String },
+    Create { payload: String },
     /// Updates an ACME order from inline JSON/YAML, a file path, or stdin ('-').
     Update { id: String, payload: String },
     /// Deletes an ACME order.
     #[command(alias = "rm")]
     Delete { id: String },
     /// Triggers immediate renewal/issuance order for an ACME entry.
-    Order { id: String },
+    Request { id: String },
     /// Shows CNAME delegation instructions and public DNS verification status for an ACME order.
-    CnameInstructions { id: String },
+    GetCnameInstructions { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -494,7 +501,7 @@ pub enum AclCommand {
     /// Shows details of an access list.
     Get { id: String },
     /// Adds an access list from inline JSON/YAML, a file path, or stdin ('-').
-    Add { payload: String },
+    Create { payload: String },
     /// Updates an access list from inline JSON/YAML, a file path, or stdin ('-').
     Update { id: String, payload: String },
     /// Deletes an access list.
@@ -510,14 +517,14 @@ pub enum ErrorPageThemeCommand {
     /// Shows an error page theme by id.
     Get { id: String },
     /// Adds an error page theme from inline JSON/YAML, a file path, or stdin ('-').
-    Add { payload: String },
+    Create { payload: String },
     /// Updates an error page theme from inline JSON/YAML, a file path, or stdin ('-').
     Update { id: String, payload: String },
     /// Deletes an error page theme.
     #[command(alias = "rm")]
     Delete { id: String },
     /// Resets error page themes to standard default templates.
-    ResetDefaults,
+    Reset,
 }
 
 #[derive(Debug, Subcommand)]
@@ -528,7 +535,7 @@ pub enum DnsCommand {
     /// Shows details of a DNS credential entry.
     Get { id: String },
     /// Adds a DNS credential entry from inline JSON/YAML, a file path, or stdin ('-').
-    Add { payload: String },
+    Create { payload: String },
     /// Updates a DNS credential entry from inline JSON/YAML, a file path, or stdin ('-').
     Update { id: String, payload: String },
     /// Deletes a DNS credential entry.
@@ -548,14 +555,14 @@ pub enum AppCommand {
     #[command(subcommand)]
     Volumes(AppVolumesCommand),
     /// Opens an interactive shell in the container of an app; exit the shell to leave.
-    Terminal {
+    OpenTerminal {
         id: String,
         /// The shell to start, for example `/bin/bash`; default: the server's choice.
         #[arg(long)]
         shell: Option<String>,
     },
     /// Prints the container log of an app as it is written, until Ctrl-C.
-    LogsLive {
+    StreamLogs {
         id: String,
         /// The log lines to print first (the server caps it).
         #[arg(long)]
@@ -567,17 +574,17 @@ pub enum AppCommand {
     /// Shows configuration of an application.
     Get { id: String },
     /// Shows unified dashboard summary of an application.
-    Dashboard { id: String },
+    GetDashboard { id: String },
     /// Adds an application from inline JSON/YAML, a file path, or stdin ('-').
-    Add { payload: String },
+    Create { payload: String },
     /// Updates an application from inline JSON/YAML, a file path, or stdin ('-').
     Update { id: String, payload: String },
     /// Triggers a deployment for an application.
     Deploy { id: String },
     /// Cancels an in-progress or pending deployment.
-    CancelDeploy { id: String },
+    CancelDeployment { id: String },
     /// Rolls back an application to the previous deployment.
-    Rollback { id: String },
+    RollbackDeployment { id: String },
     /// Starts an application container.
     Start { id: String },
     /// Stops an application container.
@@ -588,21 +595,21 @@ pub enum AppCommand {
     #[command(alias = "rm")]
     Delete { id: String },
     /// Displays application logs.
-    Logs {
+    GetLogs {
         id: String,
         #[arg(long, default_value = "100")]
         tail: usize,
     },
     /// Shows environment variables of an application.
-    Env { id: String },
+    GetEnv { id: String },
     /// Updates environment variables of an application (KEY=VALUE pairs).
-    SetEnv {
+    UpdateEnv {
         id: String,
         #[arg(required = true)]
         pairs: Vec<String>,
     },
     /// Generates cryptographically secure secrets for missing or placeholder environment variables of an application.
-    GenerateEnv {
+    GenerateEnvSecrets {
         id: String,
         /// Save the generated secrets directly to the application; `--save false` only shows
         /// them.
@@ -613,7 +620,7 @@ pub enum AppCommand {
         overwrite: bool,
     },
     /// Resolves an environment variable template (.env text or file) and generates cryptographically secure secrets.
-    ResolveTemplate {
+    ResolveComposeEnvTemplate {
         /// Raw template string to resolve.
         #[arg(long)]
         template: Option<String>,
@@ -625,11 +632,11 @@ pub enum AppCommand {
         overwrite: bool,
     },
     /// Shows container log file sizes of an application.
-    LogSize { id: String },
+    GetLogSize { id: String },
     /// Deletes the rotated container log files of an application.
     VacuumLogs { id: String },
     /// Shows live container resource throttling, CFS quota, and OOM diagnostic status.
-    Diagnostics { id: String },
+    GetResourceDiagnostics { id: String },
     /// Shows or updates lifecycle hooks (pre-deploy, post-deploy) of an application.
     Hooks {
         id: String,
@@ -646,32 +653,32 @@ pub enum AppCommand {
     /// Checks the registry for a newer image tag or digest of an app.
     CheckUpdate { id: String },
     /// Lists the deployments of an app.
-    Deployments { id: String },
+    ListDeployments { id: String },
     /// Shows one deployment.
-    Deployment { id: String },
+    GetDeployment { id: String },
     /// Approves a deployment that waits for approval.
-    Approve { id: String },
+    ApproveDeployment { id: String },
     /// Rejects a deployment that waits for approval.
-    Reject { id: String },
+    RejectDeployment { id: String },
     /// Shows the CPU, memory and network history of an app.
-    Metrics {
+    GetMetrics {
         id: String,
         /// How far back the history goes, from 1 to 24 hours.
         #[arg(long)]
         hours: Option<u32>,
     },
     /// Shows the state of each service of a Compose app.
-    Services { id: String },
+    GetServices { id: String },
     /// Shows the service graph of a Compose app.
-    Topology { id: String },
+    GetTopology { id: String },
     /// Updates an App Store app to the image of its newer catalog entry.
     UpgradeCatalog { id: String },
     /// Sets the Git token of an app, read from standard input so it stays out of the process list.
-    SetGitToken { id: String },
+    UpdateGitToken { id: String },
     /// Removes the Git token of an app.
     DeleteGitToken { id: String },
     /// Creates a new push webhook secret; the answer shows it once.
-    NewWebhookSecret { id: String },
+    CreateWebhookSecret { id: String },
     /// Removes the push webhook secret of an app.
     DeleteWebhookSecret { id: String },
     /// Installs the push webhook in the repository through the app's Git connection.
@@ -684,7 +691,7 @@ pub enum DbCommand {
     #[command(alias = "ls")]
     List,
     /// Shows configuration of a database.
-    Get { id: String },
+    GetApp { id: String },
     /// Provisions a new database container. The server generates its password.
     Create {
         #[arg(long)]
@@ -707,25 +714,25 @@ pub enum DbCommand {
         name: String,
     },
     /// Creates a read replica of a database.
-    Replica {
+    CreateReplica {
         id: String,
         #[arg(long)]
         name: String,
     },
     /// Lists the read replicas of a database.
-    Replicas { id: String },
+    ListReplicas { id: String },
     /// Downloads the database engine catalog again.
     RefreshEngines,
     /// Displays database container logs.
-    Logs {
+    GetAppLogs {
         id: String,
         #[arg(long, default_value = "100")]
         tail: usize,
     },
     /// Shows the root account and every tenant with their passwords (Admin, audited).
-    Credentials { id: String },
+    GetCredentials { id: String },
     /// Lists the tenants of a shared database server and the apps of each.
-    Tenants { id: String },
+    ListTenants { id: String },
     /// Gives the root account or a tenant a new password and redeploys its apps (Admin).
     ResetPassword {
         id: String,
@@ -756,20 +763,20 @@ pub enum BackupCommand {
         backup_id: String,
     },
     /// Shows backup configuration.
-    Config,
+    GetConfig,
     /// Replaces the backup configuration from inline JSON/YAML, a file path, or stdin ('-'),
     /// in the form that `backup config` prints.
-    SetConfig { payload: String },
+    UpdateConfig { payload: String },
     /// Tests decompression and format integrity of a database backup.
     Test {
         database_id: String,
         backup_id: String,
     },
     /// Shows the point-in-time recovery window of a database over every timeline of its archive.
-    PitrRange { database_id: String },
+    GetPitrRange { database_id: String },
     /// Restores a database to a point in time, to the second, from its base backup and its
     /// archived change log (WAL, binary log, oplog or AOF).
-    PitrRestore {
+    RestorePitr {
         database_id: String,
         target_time: u64,
         #[arg(long)]
@@ -779,20 +786,17 @@ pub enum BackupCommand {
     },
     /// Archives the change log of the running database now, so the recovery window reaches the
     /// present.
-    WalArchive { database_id: String },
+    ArchiveWal { database_id: String },
     /// Lists the archived log files of a database.
-    WalSegments { database_id: String },
-    /// Manages full platform disaster recovery (.r3bundle) snapshots.
-    #[command(subcommand)]
-    Dr(DrCommand),
+    ListWalSegments { database_id: String },
     /// Lists the backups of every database.
     ListAll,
     /// Summarizes the backups of every database.
-    Overview,
+    GetOverview,
     /// Runs a backup of a database now, with the retention and S3 replication of the settings.
-    Run { database_id: String },
+    RunNow { database_id: String },
     /// Lists the backup snapshots in the S3 bucket of the backup settings.
-    S3List {
+    ListS3 {
         /// Only the snapshots of this database name.
         #[arg(long)]
         database: Option<String>,
@@ -806,7 +810,7 @@ pub enum BackupCommand {
         output: Option<String>,
     },
     /// Saves an S3 backup snapshot to a local file.
-    S3Download {
+    DownloadS3 {
         /// The S3 object key from `backup s3-list`.
         #[arg(long)]
         key: String,
@@ -815,7 +819,7 @@ pub enum BackupCommand {
         output: Option<String>,
     },
     /// Restores a database from an S3 snapshot, into a database or into a new one.
-    S3Restore {
+    RestoreS3 {
         /// The S3 object key from `backup s3-list`.
         key: String,
         /// The database to restore into.
@@ -862,7 +866,7 @@ pub enum DrCommand {
         output: Option<String>,
     },
     /// Restores a disaster recovery bundle (.r3bundle) from a local file.
-    RestoreFile {
+    RestoreUpload {
         /// Path to the .r3bundle file to restore.
         #[arg(short, long)]
         file: String,
@@ -880,7 +884,7 @@ pub enum TargetCommand {
     /// Shows details of a target node.
     Get { id: String },
     /// Enrolls a new target node.
-    Add {
+    Create {
         #[arg(long)]
         name: String,
         #[arg(long)]
@@ -894,13 +898,13 @@ pub enum TargetCommand {
     /// Undrains a target node, restoring it to traffic.
     Undrain { id: String },
     /// Sets or clears the geographical region of a target node (e.g. "eu", "na", "tr", "apac").
-    SetRegion {
+    UpdateRegion {
         id: String,
         #[arg(long)]
         region: Option<String>,
     },
     /// Replaces the enrollment token of an agent target; the old token stops working.
-    Token { id: String },
+    CreateToken { id: String },
     /// Upgrades the agent binary on a target node.
     Upgrade { id: String },
     /// Triggers binary upgrade on all connected agent target nodes.
@@ -915,7 +919,7 @@ pub enum ProjectCommand {
     /// Shows details of a project.
     Get { id: String },
     /// Creates a new project.
-    Add {
+    Create {
         #[arg(long)]
         name: String,
         #[arg(long)]
@@ -925,7 +929,7 @@ pub enum ProjectCommand {
     #[command(alias = "rm")]
     Delete { id: String },
     /// Synchronizes shared environment variables between project environments.
-    SyncEnv {
+    SyncEnvironmentEnv {
         #[arg(long)]
         project: String,
         #[arg(long)]
@@ -942,7 +946,7 @@ pub enum ProjectCommand {
         description: Option<String>,
     },
     /// Creates an environment in a project.
-    EnvCreate {
+    CreateEnvironment {
         project: String,
         #[arg(long)]
         name: String,
@@ -950,9 +954,9 @@ pub enum ProjectCommand {
         description: Option<String>,
     },
     /// Shows an environment of a project.
-    EnvGet { project: String, env: String },
+    GetEnvironment { project: String, env: String },
     /// Renames an environment or changes its description.
-    EnvUpdate {
+    UpdateEnvironment {
         project: String,
         env: String,
         #[arg(long)]
@@ -961,17 +965,17 @@ pub enum ProjectCommand {
         description: Option<String>,
     },
     /// Deletes an environment of a project.
-    EnvDelete { project: String, env: String },
+    DeleteEnvironment { project: String, env: String },
     /// Lists the variables of an environment; secret values are never shown.
-    EnvVars { project: String, env: String },
+    GetEnvironmentEnv { project: String, env: String },
     /// Replaces the variables of an environment from inline JSON/YAML, a file path, or stdin ('-').
-    EnvSetVars {
+    UpdateEnvironmentEnv {
         project: String,
         env: String,
         payload: String,
     },
     /// Compares the variables of two environments of a project.
-    EnvDiff {
+    DiffEnvironments {
         project: String,
         source: String,
         target: String,
@@ -981,9 +985,9 @@ pub enum ProjectCommand {
 #[derive(Debug, Subcommand)]
 pub enum CdnCommand {
     /// Shows the loaded CDN IP ranges per provider and the last download errors.
-    Status,
+    GetStatus,
     /// Downloads the CDN IP ranges from every provider now and applies them.
-    Refresh,
+    RefreshRanges,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1028,11 +1032,11 @@ pub enum AppFilesCommand {
 #[derive(Debug, Subcommand)]
 pub enum AppVolumesCommand {
     /// Lists the stored backups of a volume.
-    Backups { id: String, volume: String },
+    ListBackups { id: String, volume: String },
     /// Stores a snapshot backup of a volume now.
-    Backup { id: String, volume: String },
+    CreateBackup { id: String, volume: String },
     /// Replaces the content of a volume with a stored backup.
-    Restore {
+    RestoreBackup {
         id: String,
         volume: String,
         backup_id: String,
@@ -1053,7 +1057,7 @@ pub enum AppVolumesCommand {
         output: Option<String>,
     },
     /// Saves the whole content of a volume as a tar.gz archive.
-    Export {
+    ExportArchive {
         id: String,
         volume: String,
         /// The file to write; default: `<volume>-export.tar.gz`.
@@ -1061,7 +1065,7 @@ pub enum AppVolumesCommand {
         output: Option<String>,
     },
     /// Extracts a local tar or tar.gz archive into a volume.
-    Import {
+    ImportArchive {
         id: String,
         volume: String,
         /// The local archive to send.
@@ -1074,7 +1078,7 @@ pub enum AppVolumesCommand {
 pub enum GrpcCommand {
     /// Runs grpc.health.v1.Health/Check; the payload (inline JSON/YAML, a file path, or stdin
     /// '-') holds `target_url` and `service`.
-    Health { payload: String },
+    CheckHealth { payload: String },
     /// Calls a unary method; the payload holds `target_url`, `service`, `method`, `payload`
     /// and `metadata`.
     Invoke { payload: String },
@@ -1087,14 +1091,14 @@ pub enum GrpcCommand {
 pub enum DiscoveryCommand {
     /// Lists the discovery sources with their state and last sync.
     #[command(alias = "ls")]
-    List,
+    ListStatus,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum AuditCommand {
     /// Lists audit records as JSON, newest first.
     #[command(alias = "ls")]
-    List {
+    ListLog {
         /// Only records after this time, as Unix milliseconds.
         #[arg(long)]
         since: Option<u64>,
@@ -1123,7 +1127,7 @@ pub enum EnvGroupCommand {
     /// Shows a group; secret values are never shown.
     Get { id: String },
     /// Adds a group from inline JSON/YAML, a file path, or stdin ('-').
-    Add { payload: String },
+    Create { payload: String },
     /// Replaces a group from inline JSON/YAML, a file path, or stdin ('-').
     Update { id: String, payload: String },
     /// Deletes a group.
@@ -1135,11 +1139,11 @@ pub enum EnvGroupCommand {
 pub enum StoreCommand {
     /// Lists available applications in the App Store catalog.
     #[command(alias = "ls")]
-    List,
+    Get,
     /// Refreshes the local App Store catalog from the upstream repository.
     Refresh,
     /// Installs and routes an application from the App Store catalog.
-    Install {
+    InstallApp {
         #[arg(long)]
         app_id: String,
         #[arg(long)]
@@ -1153,13 +1157,13 @@ pub enum StoreCommand {
 pub enum SecurityCommand {
     /// Lists all banned IP addresses.
     #[command(alias = "ls")]
-    BannedIps,
+    ListBannedIps,
     /// Unbans an IP address.
-    Unban { ip: String },
+    UnbanIp { ip: String },
     /// Lists all quarantined IP addresses.
-    QuarantinedIps,
+    ListQuarantinedIps,
     /// Quarantines an IP address manually.
-    Quarantine {
+    QuarantineIp {
         /// Target IP address to quarantine.
         ip: String,
         /// Reason for quarantine.
@@ -1170,14 +1174,14 @@ pub enum SecurityCommand {
         duration_seconds: Option<u64>,
     },
     /// Releases an IP address from quarantine.
-    Unquarantine {
+    UnquarantineIp {
         /// Target IP address to release.
         ip: String,
     },
     /// Shows auto-quarantine threat detection configuration.
-    QuarantineConfig,
+    GetQuarantineConfig,
     /// Updates auto-quarantine threat detection configuration.
-    SetQuarantineConfig {
+    UpdateQuarantineConfig {
         /// Whether threat detection and quarantine is enabled.
         #[arg(long)]
         enabled: Option<bool>,
@@ -1208,11 +1212,11 @@ pub enum SecurityCommand {
     #[command(subcommand)]
     Firewall(FirewallCommand),
     /// Shows the current system anomalies.
-    Anomalies,
+    GetSystemAnomalies,
     /// Shows the anomaly alert rules.
-    AnomalyRules,
+    GetAnomalyRules,
     /// Replaces the anomaly alert rules from inline JSON/YAML, a file path, or stdin ('-').
-    SetAnomalyRules { payload: String },
+    UpdateAnomalyRules { payload: String },
     /// Dismisses every current anomaly alert.
     DismissAnomalies,
     /// Grades response header rules against the OWASP secure header recommendations. The
@@ -1223,9 +1227,9 @@ pub enum SecurityCommand {
 #[derive(Debug, Subcommand)]
 pub enum FirewallCommand {
     /// Shows whether the table is enabled, its open ports, warnings and the last error.
-    Status,
+    GetStatus,
     /// Turns the table on or off and sets the extra ports.
-    Set {
+    Update {
         /// Whether r3v3rs3 keeps the table.
         #[arg(long)]
         enabled: Option<bool>,
@@ -1238,15 +1242,11 @@ pub enum FirewallCommand {
 #[derive(Debug, Subcommand)]
 pub enum GeoipCommand {
     /// Shows GeoIP MMDB database status, build timestamp, and auto-update configuration.
-    #[command(alias = "info")]
-    Status,
+    GetStatus,
     /// Downloads and hot-reloads the latest GeoLite2-Country database from MaxMind.
-    #[command(alias = "refresh")]
-    Update,
-    /// Shows the current GeoIP configuration.
-    Config,
+    UpdateDatabase,
     /// Updates GeoIP configuration, MaxMind license key, and auto-update interval.
-    SetConfig {
+    UpdateConfig {
         /// MaxMind account ID.
         #[arg(long)]
         account_id: Option<String>,
@@ -1273,7 +1273,7 @@ pub enum WebhookCommand {
     /// Shows details of an outbound webhook.
     Get { id: String },
     /// Adds an outbound webhook from inline JSON/YAML, a file path, or stdin ('-').
-    Add { payload: String },
+    Create { payload: String },
     /// Updates an outbound webhook from inline JSON/YAML, a file path, or stdin ('-').
     Update { id: String, payload: String },
     /// Deletes an outbound webhook.
@@ -1289,7 +1289,7 @@ pub enum RegistryCommand {
     #[command(alias = "ls")]
     List,
     /// Adds container registry credentials.
-    Add {
+    Create {
         /// Server URL (e.g. docker.io, ghcr.io).
         #[arg(long)]
         server: Option<String>,
@@ -1331,7 +1331,7 @@ pub enum GitCommand {
     /// Shows details of a Git provider connection.
     Get { id: String },
     /// Adds a Git provider connection (GitLab or Gitea).
-    Add {
+    Create {
         /// Connection name (e.g. gitlab-work).
         #[arg(long)]
         name: Option<String>,
@@ -1354,7 +1354,7 @@ pub enum GitCommand {
     #[command(alias = "rm")]
     Delete { id: String },
     /// Lists accessible Git repositories for a connection.
-    Repos {
+    ListRepositories {
         /// Connection ID.
         id: String,
         /// Filter repositories by keyword search.
@@ -1365,7 +1365,7 @@ pub enum GitCommand {
         page: Option<u32>,
     },
     /// Lists remote branches for a repository.
-    Branches {
+    ListBranches {
         /// Connection ID.
         id: String,
         /// Full repository name (e.g. owner/repo).
@@ -1383,7 +1383,7 @@ pub enum GitCommand {
         redirect_uri: String,
     },
     /// Prints the manifest form that registers a private GitHub App.
-    GithubApp {
+    CreateGithubApp {
         #[arg(long)]
         name: String,
         /// The `/oauth/git/callback` URL of this panel; GitHub returns the browser there.
@@ -1397,7 +1397,7 @@ pub enum GitCommand {
         organization: Option<String>,
     },
     /// Reads and stores the installation of a GitHub App connection.
-    Install { id: String },
+    InstallGithubApp { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1464,7 +1464,7 @@ pub enum CronCommand {
     #[command(alias = "ls")]
     List { app_id: String },
     /// Adds a scheduled command to an application.
-    Add {
+    Create {
         app_id: String,
         #[arg(long)]
         cron: String,
@@ -1490,7 +1490,6 @@ pub enum CronCommand {
     #[command(alias = "rm")]
     Delete { app_id: String, id: String },
     /// Runs a scheduled command immediately.
-    #[command(alias = "test")]
     Run { app_id: String, id: String },
 }
 
@@ -1517,15 +1516,15 @@ pub enum ConfigCommand {
 #[derive(Debug, Subcommand)]
 pub enum PlatformCommand {
     /// Shows server status and runtime version.
-    Status,
+    GetAppInfo,
     /// Shows Prometheus system metrics and health.
-    Metrics,
+    GetMetrics,
     /// Runs disk hygiene pruning (containers, unused images, build cache).
-    Prune,
+    RunPrune,
     /// Shows the Docker disk hygiene and garbage collector prune policy.
-    PrunePolicy,
+    GetPrunePolicy,
     /// Updates the Docker disk hygiene and garbage collector prune policy.
-    SetPrunePolicy {
+    UpdatePrunePolicy {
         /// Enable or disable automated scheduled pruning.
         #[arg(long)]
         enable: Option<bool>,
@@ -1566,11 +1565,11 @@ pub enum PlatformCommand {
     /// Rotates the platform encryption key and re-encrypts all stored secrets.
     RotateKey,
     /// Lists the MCP sessions that hold a valid token.
-    McpSessions,
+    ListMcpSessions,
     /// Revokes an MCP session and its tokens.
     RevokeMcpSession { id: String },
     /// Saves the Grafana dashboard for the Prometheus metrics to a file.
-    Grafana {
+    GetGrafanaDashboard {
         /// The file to write; default: `r3v3rs3-grafana.json`.
         #[arg(long)]
         output: Option<String>,
@@ -1582,9 +1581,9 @@ pub enum PlatformCommand {
         threshold_mb: Option<u64>,
     },
     /// Shows the host node resource threshold alert rules.
-    NodeAlerts,
+    GetNodeAlerts,
     /// Updates the host node resource threshold alert rules.
-    SetNodeAlerts {
+    UpdateNodeAlerts {
         /// Enable or disable node alerts (default: true).
         #[arg(long, default_value = "true")]
         enabled: bool,
@@ -1602,11 +1601,9 @@ pub enum PlatformCommand {
         max_time_wait: Option<u32>,
     },
     /// Triggers zero-downtime server binary upgrade to the latest release.
-    #[command(alias = "server-upgrade")]
-    Upgrade,
+    UpgradeServer,
     /// Shows the current progress of a running server upgrade.
-    #[command(alias = "server-upgrade-status")]
-    UpgradeStatus,
+    GetUpgradeStatus,
 }
 
 fn http_client() -> anyhow::Result<reqwest::Client> {
@@ -1685,10 +1682,9 @@ async fn run_api(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()
 async fn run_traffic(api: &api_client::ApiClient, cmd: TrafficCommand) -> anyhow::Result<()> {
     match cmd {
         TrafficCommand::Connections(conn_cmd) => run_traffic_connections(api, conn_cmd).await,
-        TrafficCommand::Priority => api.get_traffic_priority_stats().await,
-        TrafficCommand::Geo => api.traffic_geo().await,
-        TrafficCommand::Replay { id } => api.traffic_replay(id).await,
-        TrafficCommand::List {
+        TrafficCommand::GetPriorityStats => api.get_traffic_priority_stats().await,
+        TrafficCommand::GetGeo => api.traffic_geo().await,
+        TrafficCommand::Get {
             resource_id,
             status,
             search,
@@ -1711,8 +1707,8 @@ async fn run_traffic(api: &api_client::ApiClient, cmd: TrafficCommand) -> anyhow
             api.print_get(&format!("/api/traffic?{}", query.finish()))
                 .await
         }
-        TrafficCommand::Get { id } => api.print_get(&format!("/api/traffic/{id}")).await,
-        TrafficCommand::Live {
+        TrafficCommand::GetEntry { id } => api.print_get(&format!("/api/traffic/{id}")).await,
+        TrafficCommand::Stream {
             resource_id,
             status,
             search,
@@ -1727,10 +1723,17 @@ async fn run_traffic(api: &api_client::ApiClient, cmd: TrafficCommand) -> anyhow
             api.stream_events(&format!("/api/traffic/live?{query}"))
                 .await
         }
-        TrafficCommand::ReplayRequest { payload } => {
+        TrafficCommand::ReplayRequest {
+            entry: Some(id), ..
+        } => api.traffic_replay(id).await,
+        TrafficCommand::ReplayRequest {
+            payload: Some(payload),
+            ..
+        } => {
             let body = api_client::load_payload(&payload)?;
             api.print_post("/api/traffic/replay", &body).await
         }
+        TrafficCommand::ReplayRequest { .. } => bail!("give a payload or --entry <id>"),
     }
 }
 
@@ -1740,7 +1743,7 @@ async fn run_traffic_connections(
 ) -> anyhow::Result<()> {
     match cmd {
         ConnectionsCommand::List { proxy } => api.list_active_connections(proxy.as_deref()).await,
-        ConnectionsCommand::Close { id } => api.terminate_active_connection(&id).await,
+        ConnectionsCommand::Terminate { id } => api.terminate_active_connection(&id).await,
     }
 }
 
@@ -1783,13 +1786,13 @@ async fn run_api_system(api: &api_client::ApiClient, cmd: Command) -> anyhow::Re
 /// The read commands for CDN ranges, discovery, logs, the dashboard and the audit log.
 async fn run_api_status(api: &api_client::ApiClient, cmd: Command) -> anyhow::Result<()> {
     match cmd {
-        Command::Cdn(CdnCommand::Status) => api.print_get("/api/cdn").await,
-        Command::Cdn(CdnCommand::Refresh) => {
+        Command::Cdn(CdnCommand::GetStatus) => api.print_get("/api/cdn").await,
+        Command::Cdn(CdnCommand::RefreshRanges) => {
             api.print_post("/api/cdn/refresh", &serde_json::json!({}))
                 .await
         }
-        Command::Discovery(DiscoveryCommand::List) => api.print_get("/api/discovery").await,
-        Command::Logs {
+        Command::Discovery(DiscoveryCommand::ListStatus) => api.print_get("/api/discovery").await,
+        Command::GetLogs {
             id,
             since,
             until,
@@ -1802,17 +1805,17 @@ async fn run_api_status(api: &api_client::ApiClient, cmd: Command) -> anyhow::Re
             ]);
             api.print_get(&format!("/api/logs/{id}?{query}")).await
         }
-        Command::Dashboard => api.print_get("/api/dashboard").await,
+        Command::GetDashboard => api.print_get("/api/dashboard").await,
         Command::Grpc(cmd) => {
             let (path, payload) = match cmd {
-                GrpcCommand::Health { payload } => ("/api/grpc/health", payload),
+                GrpcCommand::CheckHealth { payload } => ("/api/grpc/health", payload),
                 GrpcCommand::Invoke { payload } => ("/api/grpc/invoke", payload),
                 GrpcCommand::Reflect { payload } => ("/api/grpc/reflect", payload),
             };
             api.print_post(path, &api_client::load_payload(&payload)?)
                 .await
         }
-        Command::Audit(AuditCommand::List {
+        Command::Audit(AuditCommand::ListLog {
             since,
             until,
             username,
@@ -1867,15 +1870,15 @@ async fn run_app_volumes(
 ) -> anyhow::Result<()> {
     let base = |id: &str, volume: &str| format!("/api/apps/{id}/volumes/{volume}");
     match cmd {
-        AppVolumesCommand::Backups { id, volume } => {
+        AppVolumesCommand::ListBackups { id, volume } => {
             api.print_get(&format!("{}/backups", base(&id, &volume)))
                 .await
         }
-        AppVolumesCommand::Backup { id, volume } => {
+        AppVolumesCommand::CreateBackup { id, volume } => {
             let path = format!("{}/backups", base(&id, &volume));
             api.print_post(&path, &serde_json::json!({})).await
         }
-        AppVolumesCommand::Restore {
+        AppVolumesCommand::RestoreBackup {
             id,
             volume,
             backup_id,
@@ -1912,12 +1915,12 @@ async fn run_app_volume_files(
             let path = format!("{}/backups/{backup_id}/download", base(&id, &volume));
             api.download_to(&path, &target).await
         }
-        AppVolumesCommand::Export { id, volume, output } => {
+        AppVolumesCommand::ExportArchive { id, volume, output } => {
             let target = output.unwrap_or_else(|| format!("{volume}-export.tar.gz"));
             api.download_to(&format!("{}/archive", base(&id, &volume)), &target)
                 .await
         }
-        AppVolumesCommand::Import { id, volume, file } => {
+        AppVolumesCommand::ImportArchive { id, volume, file } => {
             let bytes = std::fs::read(&file).with_context(|| format!("failed to read {file}"))?;
             let path = format!("{}/archive", base(&id, &volume));
             api.send_bytes(reqwest::Method::POST, &path, bytes).await
@@ -1942,8 +1945,8 @@ async fn run_platform_node_alerts(
     cmd: PlatformCommand,
 ) -> anyhow::Result<()> {
     match cmd {
-        PlatformCommand::NodeAlerts => api.get_node_alerts().await,
-        PlatformCommand::SetNodeAlerts {
+        PlatformCommand::GetNodeAlerts => api.get_node_alerts().await,
+        PlatformCommand::UpdateNodeAlerts {
             enabled,
             min_disk_percent,
             bandwidth_spike,
@@ -1966,19 +1969,19 @@ async fn run_platform_node_alerts(
 async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyhow::Result<()> {
     match cmd {
         PlatformCommand::RotateKey => api.rotate_platform_key().await,
-        PlatformCommand::McpSessions => api.print_get("/api/mcp/sessions").await,
+        PlatformCommand::ListMcpSessions => api.print_get("/api/mcp/sessions").await,
         PlatformCommand::RevokeMcpSession { id } => {
             api.print_delete(&format!("/api/mcp/sessions/{id}")).await
         }
-        PlatformCommand::Grafana { output } => {
+        PlatformCommand::GetGrafanaDashboard { output } => {
             let target = output.unwrap_or_else(|| "r3v3rs3-grafana.json".to_string());
             api.download_to("/api/metrics/grafana", &target).await
         }
-        PlatformCommand::Status => api.platform_status().await,
-        PlatformCommand::Metrics => api.platform_metrics().await,
-        PlatformCommand::Prune => api.platform_prune().await,
-        PlatformCommand::PrunePolicy => api.get_prune_policy().await,
-        PlatformCommand::SetPrunePolicy {
+        PlatformCommand::GetAppInfo => api.platform_status().await,
+        PlatformCommand::GetMetrics => api.platform_metrics().await,
+        PlatformCommand::RunPrune => api.platform_prune().await,
+        PlatformCommand::GetPrunePolicy => api.get_prune_policy().await,
+        PlatformCommand::UpdatePrunePolicy {
             enable,
             interval,
             disk_pressure,
@@ -2011,11 +2014,11 @@ async fn run_platform(api: &api_client::ApiClient, cmd: PlatformCommand) -> anyh
         PlatformCommand::VacuumLogs { threshold_mb } => {
             api.vacuum_platform_logs(threshold_mb).await
         }
-        alerts @ (PlatformCommand::NodeAlerts | PlatformCommand::SetNodeAlerts { .. }) => {
+        alerts @ (PlatformCommand::GetNodeAlerts | PlatformCommand::UpdateNodeAlerts { .. }) => {
             run_platform_node_alerts(api, alerts).await
         }
-        PlatformCommand::Upgrade => api.upgrade_server().await,
-        PlatformCommand::UpgradeStatus => api.get_server_upgrade_status().await,
+        PlatformCommand::UpgradeServer => api.upgrade_server().await,
+        PlatformCommand::GetUpgradeStatus => api.get_server_upgrade_status().await,
     }
 }
 
@@ -2023,7 +2026,7 @@ async fn run_port(api: &api_client::ApiClient, cmd: PortCommand) -> anyhow::Resu
     match cmd {
         PortCommand::List => api.list_ports().await,
         PortCommand::Get { id } => api.get_port(&id).await,
-        PortCommand::Add { payload } => api.add_port(&payload).await,
+        PortCommand::Create { payload } => api.add_port(&payload).await,
         PortCommand::Update { id, payload } => api.update_port(&id, &payload).await,
         PortCommand::Delete { id } => api.delete_port(&id).await,
         PortCommand::Reset { id } => api.reset_port(&id).await,
@@ -2033,23 +2036,8 @@ async fn run_port(api: &api_client::ApiClient, cmd: PortCommand) -> anyhow::Resu
         PortCommand::UpdateTransparent { id, enable } => {
             api.update_port_transparent(&id, enable).await
         }
-        PortCommand::Status { id } => api.print_get(&format!("/api/ports/{id}/status")).await,
-        PortCommand::Interfaces => api.print_get("/api/ports/interfaces").await,
-    }
-}
-
-async fn run_proxy_priority(
-    api: &api_client::ApiClient,
-    id: &str,
-    enable: Option<bool>,
-    inject_header: Option<bool>,
-    adaptive_concurrency: Option<bool>,
-) -> anyhow::Result<()> {
-    if let Some(enable) = enable {
-        api.set_stream_priority(id, enable, inject_header, adaptive_concurrency)
-            .await
-    } else {
-        api.get_stream_priority(id).await
+        PortCommand::GetStatus { id } => api.print_get(&format!("/api/ports/{id}/status")).await,
+        PortCommand::ListNetworkInterfaces => api.print_get("/api/ports/interfaces").await,
     }
 }
 
@@ -2057,12 +2045,12 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
     match cmd {
         ProxyCommand::List => api.list_proxies().await,
         ProxyCommand::Get { id } => api.get_proxy(&id).await,
-        ProxyCommand::Add { payload } => api.add_proxy(&payload).await,
+        ProxyCommand::Create { payload } => api.add_proxy(&payload).await,
         ProxyCommand::Update { id, payload } => api.update_proxy(&id, &payload).await,
-        ProxyCommand::Status { id } => api.proxy_status(&id).await,
+        ProxyCommand::GetStatus { id } => api.proxy_status(&id).await,
         ProxyCommand::Delete { id } => api.delete_proxy(&id).await,
         ProxyCommand::PurgeCache { id, path } => api.purge_cache(&id, path.as_deref()).await,
-        ProxyCommand::GrpcHealth {
+        ProxyCommand::CheckGrpcHealth {
             id,
             service,
             target_url,
@@ -2072,18 +2060,22 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
         }
         ProxyCommand::Dictionary(dict_cmd) => run_proxy_dictionary(api, dict_cmd).await,
         ProxyCommand::SecurityHeaders(sec_cmd) => run_proxy_security_headers(api, sec_cmd).await,
-        ProxyCommand::Priority {
+        ProxyCommand::GetStreamPriority { id } => api.get_stream_priority(&id).await,
+        ProxyCommand::UpdateStreamPriority {
             id,
             enable,
             inject_header,
             adaptive_concurrency,
-        } => run_proxy_priority(api, &id, enable, inject_header, adaptive_concurrency).await,
-        ProxyCommand::GrpcInvoke { id, payload } => {
+        } => {
+            api.set_stream_priority(&id, enable, inject_header, adaptive_concurrency)
+                .await
+        }
+        ProxyCommand::InvokeGrpc { id, payload } => {
             let body = api_client::load_payload(&payload)?;
             api.print_post(&format!("/api/proxies/{id}/grpc/invoke"), &body)
                 .await
         }
-        ProxyCommand::GrpcReflect { id, payload } => {
+        ProxyCommand::ReflectGrpc { id, payload } => {
             let body = match payload {
                 Some(payload) => api_client::load_payload(&payload)?,
                 None => serde_json::json!({}),
@@ -2091,7 +2083,7 @@ async fn run_proxy(api: &api_client::ApiClient, cmd: ProxyCommand) -> anyhow::Re
             api.print_post(&format!("/api/proxies/{id}/grpc/reflect"), &body)
                 .await
         }
-        ProxyCommand::DryRun { payload } => {
+        ProxyCommand::Preview { payload } => {
             let body = api_client::load_payload(&payload)?;
             api.print_post("/api/proxies/dry-run", &body).await
         }
@@ -2103,11 +2095,11 @@ async fn run_proxy_security_headers(
     cmd: ProxySecurityHeadersCommand,
 ) -> anyhow::Result<()> {
     match cmd {
-        ProxySecurityHeadersCommand::Audit { id } => api.audit_proxy_security_headers(&id).await,
-        ProxySecurityHeadersCommand::Apply { id, profile } => {
+        ProxySecurityHeadersCommand::Get { id } => api.audit_proxy_security_headers(&id).await,
+        ProxySecurityHeadersCommand::ApplyProfile { id, profile } => {
             api.apply_proxy_security_profile(&id, &profile).await
         }
-        ProxySecurityHeadersCommand::Profiles => api.list_security_profiles().await,
+        ProxySecurityHeadersCommand::ListProfiles => api.list_security_profiles().await,
     }
 }
 
@@ -2144,7 +2136,7 @@ async fn run_cert(api: &api_client::ApiClient, cmd: CertCommand) -> anyhow::Resu
             api.upload_cert(&cert, &key, kind.as_deref()).await
         }
         CertCommand::Delete { id } => api.delete_cert(&id).await,
-        CertCommand::Coverage => api.cert_coverage().await,
+        CertCommand::CheckCoverage => api.cert_coverage().await,
         CertCommand::Ct(ct_cmd) => run_ct(api, ct_cmd).await,
         other => run_cert_more(api, other).await,
     }
@@ -2153,7 +2145,7 @@ async fn run_cert(api: &api_client::ApiClient, cmd: CertCommand) -> anyhow::Resu
 /// The certificate commands that sign, save, delete in bulk or check DNS.
 async fn run_cert_more(api: &api_client::ApiClient, cmd: CertCommand) -> anyhow::Result<()> {
     match cmd {
-        CertCommand::SelfSign { san, ca, kind } => {
+        CertCommand::CreateSelfSigned { san, ca, kind } => {
             let body = serde_json::json!({ "san": san, "ca_cert": ca,
                 "kind": kind.unwrap_or_else(|| "server".to_string()) });
             api.print_post("/api/certs/self_sign", &body).await
@@ -2185,9 +2177,9 @@ async fn run_cert_more(api: &api_client::ApiClient, cmd: CertCommand) -> anyhow:
 
 async fn run_ct(api: &api_client::ApiClient, cmd: CtCommand) -> anyhow::Result<()> {
     match cmd {
-        CtCommand::Status => api.get_ct_status().await,
-        CtCommand::Config => api.get_ct_config().await,
-        CtCommand::SetConfig {
+        CtCommand::GetStatus => api.get_ct_status().await,
+        CtCommand::GetConfig => api.get_ct_config().await,
+        CtCommand::UpdateConfig {
             enable,
             domains,
             auto_discover,
@@ -2207,8 +2199,8 @@ async fn run_ct(api: &api_client::ApiClient, cmd: CtCommand) -> anyhow::Result<(
             })
             .await
         }
-        CtCommand::Check { domain } => api.check_ct_logs(domain.as_deref()).await,
-        CtCommand::List {
+        CtCommand::CheckNow { domain } => api.check_ct_logs(domain.as_deref()).await,
+        CtCommand::ListEntries {
             domain,
             rogue_only,
             limit,
@@ -2216,7 +2208,9 @@ async fn run_ct(api: &api_client::ApiClient, cmd: CtCommand) -> anyhow::Result<(
             api.list_ct_entries(domain.as_deref(), rogue_only, limit)
                 .await
         }
-        CtCommand::Dismiss { id, status } => api.dismiss_ct_alert(&id, status.as_deref()).await,
+        CtCommand::DismissAlert { id, status } => {
+            api.dismiss_ct_alert(&id, status.as_deref()).await
+        }
     }
 }
 
@@ -2224,11 +2218,11 @@ async fn run_acme(api: &api_client::ApiClient, cmd: AcmeCommand) -> anyhow::Resu
     match cmd {
         AcmeCommand::List => api.list_acme().await,
         AcmeCommand::Get { id } => api.get_acme(&id).await,
-        AcmeCommand::Add { payload } => api.add_acme(&payload).await,
+        AcmeCommand::Create { payload } => api.add_acme(&payload).await,
         AcmeCommand::Update { id, payload } => api.update_acme(&id, &payload).await,
         AcmeCommand::Delete { id } => api.delete_acme(&id).await,
-        AcmeCommand::Order { id } => api.order_acme(&id).await,
-        AcmeCommand::CnameInstructions { id } => api.get_acme_cname_instructions(&id).await,
+        AcmeCommand::Request { id } => api.order_acme(&id).await,
+        AcmeCommand::GetCnameInstructions { id } => api.get_acme_cname_instructions(&id).await,
     }
 }
 
@@ -2236,7 +2230,7 @@ async fn run_acl(api: &api_client::ApiClient, cmd: AclCommand) -> anyhow::Result
     match cmd {
         AclCommand::List => api.list_acls().await,
         AclCommand::Get { id } => api.get_acl(&id).await,
-        AclCommand::Add { payload } => api.add_acl(&payload).await,
+        AclCommand::Create { payload } => api.add_acl(&payload).await,
         AclCommand::Update { id, payload } => api.update_acl(&id, &payload).await,
         AclCommand::Delete { id } => api.delete_acl(&id).await,
     }
@@ -2249,12 +2243,12 @@ async fn run_error_page_theme(
     match cmd {
         ErrorPageThemeCommand::List => api.list_error_page_themes().await,
         ErrorPageThemeCommand::Get { id } => api.get_error_page_theme(&id).await,
-        ErrorPageThemeCommand::Add { payload } => api.add_error_page_theme(&payload).await,
+        ErrorPageThemeCommand::Create { payload } => api.add_error_page_theme(&payload).await,
         ErrorPageThemeCommand::Update { id, payload } => {
             api.update_error_page_theme(&id, &payload).await
         }
         ErrorPageThemeCommand::Delete { id } => api.delete_error_page_theme(&id).await,
-        ErrorPageThemeCommand::ResetDefaults => api.reset_error_page_themes().await,
+        ErrorPageThemeCommand::Reset => api.reset_error_page_themes().await,
     }
 }
 
@@ -2262,7 +2256,7 @@ async fn run_dns(api: &api_client::ApiClient, cmd: DnsCommand) -> anyhow::Result
     match cmd {
         DnsCommand::List => api.list_dns().await,
         DnsCommand::Get { id } => api.get_dns(&id).await,
-        DnsCommand::Add { payload } => api.add_dns(&payload).await,
+        DnsCommand::Create { payload } => api.add_dns(&payload).await,
         DnsCommand::Update { id, payload } => api.update_dns(&id, &payload).await,
         DnsCommand::Delete { id } => api.delete_dns(&id).await,
     }
@@ -2273,33 +2267,33 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
         AppCommand::List => api.list_apps().await,
         AppCommand::Files(cmd) => run_app_files(api, cmd).await,
         AppCommand::Volumes(cmd) => run_app_volumes(api, cmd).await,
-        AppCommand::Terminal { id, shell } => terminal::run(api, &id, shell.as_deref()).await,
-        AppCommand::LogsLive { id, tail, service } => {
+        AppCommand::OpenTerminal { id, shell } => terminal::run(api, &id, shell.as_deref()).await,
+        AppCommand::StreamLogs { id, tail, service } => {
             let query =
                 query_string(&[("tail", tail.map(|t| t.to_string())), ("service", service)]);
             api.stream_websocket(&format!("/api/apps/{id}/logs/live?{query}"))
                 .await
         }
         AppCommand::Get { id } => api.get_app(&id).await,
-        AppCommand::Dashboard { id } => api.app_dashboard(&id).await,
-        AppCommand::Add { payload } => api.add_app(&payload).await,
+        AppCommand::GetDashboard { id } => api.app_dashboard(&id).await,
+        AppCommand::Create { payload } => api.add_app(&payload).await,
         AppCommand::Update { id, payload } => api.update_app(&id, &payload).await,
         AppCommand::Deploy { id } => api.deploy_app(&id).await,
-        AppCommand::CancelDeploy { id } => api.cancel_deployment(&id).await,
-        AppCommand::Rollback { id } => api.rollback_app(&id).await,
+        AppCommand::CancelDeployment { id } => api.cancel_deployment(&id).await,
+        AppCommand::RollbackDeployment { id } => api.rollback_app(&id).await,
         AppCommand::Start { id } => api.start_app(&id).await,
         AppCommand::Stop { id } => api.stop_app(&id).await,
         AppCommand::Restart { id } => api.restart_app(&id).await,
         AppCommand::Delete { id } => api.delete_app(&id).await,
-        AppCommand::Logs { id, tail } => api.app_logs(&id, tail).await,
-        AppCommand::Env { id } => api.get_app_env(&id).await,
-        AppCommand::SetEnv { id, pairs } => api.set_app_env(&id, &pairs).await,
-        AppCommand::GenerateEnv {
+        AppCommand::GetLogs { id, tail } => api.app_logs(&id, tail).await,
+        AppCommand::GetEnv { id } => api.get_app_env(&id).await,
+        AppCommand::UpdateEnv { id, pairs } => api.set_app_env(&id, &pairs).await,
+        AppCommand::GenerateEnvSecrets {
             id,
             save,
             overwrite,
         } => api.generate_app_env(&id, save, overwrite).await,
-        AppCommand::ResolveTemplate {
+        AppCommand::ResolveComposeEnvTemplate {
             template,
             file,
             overwrite,
@@ -2307,9 +2301,9 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
             api.resolve_env_template(template.as_deref(), file.as_deref(), overwrite)
                 .await
         }
-        AppCommand::LogSize { id } => api.app_log_size(&id).await,
+        AppCommand::GetLogSize { id } => api.app_log_size(&id).await,
         AppCommand::VacuumLogs { id } => api.vacuum_app_logs(&id).await,
-        AppCommand::Diagnostics { id } => api.app_diagnostics(&id).await,
+        AppCommand::GetResourceDiagnostics { id } => api.app_diagnostics(&id).await,
         AppCommand::Hooks {
             id,
             pre_deploy,
@@ -2328,25 +2322,25 @@ async fn run_app_more(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::R
             api.print_post(&format!("/api/apps/{id}/check_update"), &empty)
                 .await
         }
-        AppCommand::Deployments { id } => {
+        AppCommand::ListDeployments { id } => {
             api.print_get(&format!("/api/apps/{id}/deployments")).await
         }
-        AppCommand::Deployment { id } => api.print_get(&format!("/api/deployments/{id}")).await,
-        AppCommand::Approve { id } => {
+        AppCommand::GetDeployment { id } => api.print_get(&format!("/api/deployments/{id}")).await,
+        AppCommand::ApproveDeployment { id } => {
             api.print_post(&format!("/api/deployments/{id}/approve"), &empty)
                 .await
         }
-        AppCommand::Reject { id } => {
+        AppCommand::RejectDeployment { id } => {
             api.print_post(&format!("/api/deployments/{id}/reject"), &empty)
                 .await
         }
-        AppCommand::Metrics { id, hours } => {
+        AppCommand::GetMetrics { id, hours } => {
             let query = hours.map(|h| format!("?hours={h}")).unwrap_or_default();
             api.print_get(&format!("/api/apps/{id}/metrics{query}"))
                 .await
         }
-        AppCommand::Services { id } => api.print_get(&format!("/api/apps/{id}/services")).await,
-        AppCommand::Topology { id } => api.print_get(&format!("/api/apps/{id}/topology")).await,
+        AppCommand::GetServices { id } => api.print_get(&format!("/api/apps/{id}/services")).await,
+        AppCommand::GetTopology { id } => api.print_get(&format!("/api/apps/{id}/topology")).await,
         other => run_app_secrets(api, other).await,
     }
 }
@@ -2359,11 +2353,11 @@ async fn run_app_secrets(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow
             api.print_post(&format!("/api/apps/{id}/upgrade-catalog"), &empty)
                 .await
         }
-        AppCommand::SetGitToken { id } => api.set_app_git_token(&id).await,
+        AppCommand::UpdateGitToken { id } => api.set_app_git_token(&id).await,
         AppCommand::DeleteGitToken { id } => {
             api.print_delete(&format!("/api/apps/{id}/git_token")).await
         }
-        AppCommand::NewWebhookSecret { id } => {
+        AppCommand::CreateWebhookSecret { id } => {
             api.print_post(&format!("/api/apps/{id}/webhook_secret"), &empty)
                 .await
         }
@@ -2382,7 +2376,7 @@ async fn run_app_secrets(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow
 async fn run_db(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<()> {
     match cmd {
         DbCommand::List => api.list_dbs().await,
-        DbCommand::Get { id } => api.get_db(&id).await,
+        DbCommand::GetApp { id } => api.get_db(&id).await,
         DbCommand::Create {
             name,
             engine,
@@ -2390,9 +2384,9 @@ async fn run_db(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<(
         } => api.create_db(&name, &engine, version.as_deref()).await,
         DbCommand::Delete { id } => api.delete_db(&id).await,
         DbCommand::Clone { id, name } => api.clone_db(&id, &name).await,
-        DbCommand::Replica { id, name } => api.replica_db(&id, &name).await,
-        DbCommand::Logs { id, tail } => api.db_logs(&id, tail).await,
-        DbCommand::Replicas { id } => {
+        DbCommand::CreateReplica { id, name } => api.replica_db(&id, &name).await,
+        DbCommand::GetAppLogs { id, tail } => api.db_logs(&id, tail).await,
+        DbCommand::ListReplicas { id } => {
             api.print_get(&format!("/api/databases/{id}/replicas"))
                 .await
         }
@@ -2407,8 +2401,8 @@ async fn run_db(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<(
 /// The commands of the accounts and the tenants of a database.
 async fn run_db_accounts(api: &api_client::ApiClient, cmd: DbCommand) -> anyhow::Result<()> {
     match cmd {
-        DbCommand::Credentials { id } => api.db_credentials(&id).await,
-        DbCommand::Tenants { id } => api.db_tenants(&id).await,
+        DbCommand::GetCredentials { id } => api.db_credentials(&id).await,
+        DbCommand::ListTenants { id } => api.db_tenants(&id).await,
         DbCommand::ResetPassword { id, tenant } => {
             api.reset_db_password(&id, tenant.as_deref()).await
         }
@@ -2422,8 +2416,10 @@ async fn run_backup_pitr_wal(
     cmd: BackupCommand,
 ) -> anyhow::Result<()> {
     match cmd {
-        BackupCommand::PitrRange { database_id } => api.get_database_pitr_range(&database_id).await,
-        BackupCommand::PitrRestore {
+        BackupCommand::GetPitrRange { database_id } => {
+            api.get_database_pitr_range(&database_id).await
+        }
+        BackupCommand::RestorePitr {
             database_id,
             target_time,
             new_name,
@@ -2432,8 +2428,8 @@ async fn run_backup_pitr_wal(
             api.restore_database_pitr(&database_id, target_time, new_name.as_deref(), host_port)
                 .await
         }
-        BackupCommand::WalArchive { database_id } => api.archive_database_wal(&database_id).await,
-        BackupCommand::WalSegments { database_id } => {
+        BackupCommand::ArchiveWal { database_id } => api.archive_database_wal(&database_id).await,
+        BackupCommand::ListWalSegments { database_id } => {
             api.list_database_wal_segments(&database_id).await
         }
         _ => unreachable!(),
@@ -2456,21 +2452,20 @@ async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::
             database_id,
             backup_id,
         } => api.test_database_backup(&database_id, &backup_id).await,
-        BackupCommand::Config => api.backup_config().await,
-        BackupCommand::SetConfig { payload } => {
+        BackupCommand::GetConfig => api.backup_config().await,
+        BackupCommand::UpdateConfig { payload } => {
             api.print_put("/api/backup-config", &api_client::load_payload(&payload)?)
                 .await
         }
-        BackupCommand::Dr(c) => run_dr(api, c).await,
-        pitr_wal @ (BackupCommand::PitrRange { .. }
-        | BackupCommand::PitrRestore { .. }
-        | BackupCommand::WalArchive { .. }
-        | BackupCommand::WalSegments { .. }) => run_backup_pitr_wal(api, pitr_wal).await,
+        pitr_wal @ (BackupCommand::GetPitrRange { .. }
+        | BackupCommand::RestorePitr { .. }
+        | BackupCommand::ArchiveWal { .. }
+        | BackupCommand::ListWalSegments { .. }) => run_backup_pitr_wal(api, pitr_wal).await,
         all @ (BackupCommand::ListAll
-        | BackupCommand::Overview
-        | BackupCommand::Run { .. }
-        | BackupCommand::S3List { .. }
-        | BackupCommand::S3Restore { .. }) => run_backup_all(api, all).await,
+        | BackupCommand::GetOverview
+        | BackupCommand::RunNow { .. }
+        | BackupCommand::ListS3 { .. }
+        | BackupCommand::RestoreS3 { .. }) => run_backup_all(api, all).await,
         BackupCommand::Download {
             database_id,
             backup_id,
@@ -2479,7 +2474,7 @@ async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::
             let path = format!("/api/databases/{database_id}/backups/{backup_id}/download");
             api.download_to(&path, &output.unwrap_or(backup_id)).await
         }
-        BackupCommand::S3Download { key, output } => {
+        BackupCommand::DownloadS3 { key, output } => {
             let name = key.rsplit('/').next().filter(|n| !n.is_empty());
             let target = output
                 .or_else(|| name.map(str::to_string))
@@ -2495,10 +2490,10 @@ async fn run_backup(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::
 async fn run_backup_all(api: &api_client::ApiClient, cmd: BackupCommand) -> anyhow::Result<()> {
     match cmd {
         BackupCommand::ListAll => api.print_get("/api/backups").await,
-        BackupCommand::Overview => api.print_get("/api/backups/overview").await,
-        BackupCommand::Run { database_id } => api.run_backup_now(&database_id).await,
-        BackupCommand::S3List { database } => api.list_s3_backups(database.as_deref()).await,
-        BackupCommand::S3Restore {
+        BackupCommand::GetOverview => api.print_get("/api/backups/overview").await,
+        BackupCommand::RunNow { database_id } => api.run_backup_now(&database_id).await,
+        BackupCommand::ListS3 { database } => api.list_s3_backups(database.as_deref()).await,
+        BackupCommand::RestoreS3 {
             key,
             target_db,
             new_name,
@@ -2533,7 +2528,7 @@ async fn run_dr(api: &api_client::ApiClient, cmd: DrCommand) -> anyhow::Result<(
         DrCommand::Download { backup_id, output } => {
             api.download_dr_backup(&backup_id, output.as_deref()).await
         }
-        DrCommand::RestoreFile { file, passphrase } => {
+        DrCommand::RestoreUpload { file, passphrase } => {
             api.restore_dr_file(&file, passphrase.as_deref()).await
         }
     }
@@ -2543,14 +2538,14 @@ async fn run_target(api: &api_client::ApiClient, cmd: TargetCommand) -> anyhow::
     match cmd {
         TargetCommand::List => api.list_targets().await,
         TargetCommand::Get { id } => api.get_target(&id).await,
-        TargetCommand::Add { name, region } => api.add_target(&name, region.as_deref()).await,
+        TargetCommand::Create { name, region } => api.add_target(&name, region.as_deref()).await,
         TargetCommand::Delete { id } => api.delete_target(&id).await,
         TargetCommand::Drain { id } => api.drain_target(&id).await,
         TargetCommand::Undrain { id } => api.undrain_target(&id).await,
-        TargetCommand::SetRegion { id, region } => {
+        TargetCommand::UpdateRegion { id, region } => {
             api.set_target_region(&id, region.as_deref()).await
         }
-        TargetCommand::Token { id } => api.new_target_token(&id).await,
+        TargetCommand::CreateToken { id } => api.new_target_token(&id).await,
         TargetCommand::Upgrade { id } => api.upgrade_target(&id).await,
         TargetCommand::UpgradeAll => api.upgrade_all_targets().await,
     }
@@ -2560,11 +2555,11 @@ async fn run_project(api: &api_client::ApiClient, cmd: ProjectCommand) -> anyhow
     match cmd {
         ProjectCommand::List => api.list_projects().await,
         ProjectCommand::Get { id } => api.get_project(&id).await,
-        ProjectCommand::Add { name, description } => {
+        ProjectCommand::Create { name, description } => {
             api.create_project(&name, description.as_deref()).await
         }
         ProjectCommand::Delete { id } => api.delete_project(&id).await,
-        ProjectCommand::SyncEnv { project, from, to } => {
+        ProjectCommand::SyncEnvironmentEnv { project, from, to } => {
             api.sync_project_env(&project, &from, &to).await
         }
         ProjectCommand::Update {
@@ -2583,7 +2578,7 @@ async fn run_project(api: &api_client::ApiClient, cmd: ProjectCommand) -> anyhow
 async fn run_project_env(api: &api_client::ApiClient, cmd: ProjectCommand) -> anyhow::Result<()> {
     let env_path = |project: &str, env: &str| format!("/api/projects/{project}/environments/{env}");
     match cmd {
-        ProjectCommand::EnvCreate {
+        ProjectCommand::CreateEnvironment {
             project,
             name,
             description,
@@ -2592,8 +2587,10 @@ async fn run_project_env(api: &api_client::ApiClient, cmd: ProjectCommand) -> an
             api.print_post(&format!("/api/projects/{project}/environments"), &spec)
                 .await
         }
-        ProjectCommand::EnvGet { project, env } => api.print_get(&env_path(&project, &env)).await,
-        ProjectCommand::EnvUpdate {
+        ProjectCommand::GetEnvironment { project, env } => {
+            api.print_get(&env_path(&project, &env)).await
+        }
+        ProjectCommand::UpdateEnvironment {
             project,
             env,
             name,
@@ -2602,7 +2599,7 @@ async fn run_project_env(api: &api_client::ApiClient, cmd: ProjectCommand) -> an
             let spec = serde_json::json!({ "name": name, "description": description });
             api.print_put(&env_path(&project, &env), &spec).await
         }
-        ProjectCommand::EnvDelete { project, env } => {
+        ProjectCommand::DeleteEnvironment { project, env } => {
             api.print_delete(&env_path(&project, &env)).await
         }
         other => run_project_vars(api, other).await,
@@ -2612,11 +2609,11 @@ async fn run_project_env(api: &api_client::ApiClient, cmd: ProjectCommand) -> an
 /// The commands of the variables of project environments.
 async fn run_project_vars(api: &api_client::ApiClient, cmd: ProjectCommand) -> anyhow::Result<()> {
     match cmd {
-        ProjectCommand::EnvVars { project, env } => {
+        ProjectCommand::GetEnvironmentEnv { project, env } => {
             api.print_get(&format!("/api/projects/{project}/environments/{env}/env"))
                 .await
         }
-        ProjectCommand::EnvSetVars {
+        ProjectCommand::UpdateEnvironmentEnv {
             project,
             env,
             payload,
@@ -2628,7 +2625,7 @@ async fn run_project_vars(api: &api_client::ApiClient, cmd: ProjectCommand) -> a
             )
             .await
         }
-        ProjectCommand::EnvDiff {
+        ProjectCommand::DiffEnvironments {
             project,
             source,
             target,
@@ -2646,7 +2643,7 @@ async fn run_env_group(api: &api_client::ApiClient, cmd: EnvGroupCommand) -> any
     match cmd {
         EnvGroupCommand::List => api.list_env_groups().await,
         EnvGroupCommand::Get { id } => api.print_get(&format!("/api/env-groups/{id}")).await,
-        EnvGroupCommand::Add { payload } => {
+        EnvGroupCommand::Create { payload } => {
             let body = api_client::load_payload(&payload)?;
             api.print_post("/api/env-groups", &body).await
         }
@@ -2660,9 +2657,9 @@ async fn run_env_group(api: &api_client::ApiClient, cmd: EnvGroupCommand) -> any
 
 async fn run_store(api: &api_client::ApiClient, cmd: StoreCommand) -> anyhow::Result<()> {
     match cmd {
-        StoreCommand::List => api.list_store().await,
+        StoreCommand::Get => api.list_store().await,
         StoreCommand::Refresh => api.refresh_store().await,
-        StoreCommand::Install {
+        StoreCommand::InstallApp {
             app_id,
             name,
             domain,
@@ -2672,10 +2669,10 @@ async fn run_store(api: &api_client::ApiClient, cmd: StoreCommand) -> anyhow::Re
 
 async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyhow::Result<()> {
     match cmd {
-        SecurityCommand::BannedIps => api.list_banned_ips().await,
-        SecurityCommand::Unban { ip } => api.unban_ip(&ip).await,
-        SecurityCommand::QuarantinedIps => api.list_quarantined_ips().await,
-        SecurityCommand::Quarantine {
+        SecurityCommand::ListBannedIps => api.list_banned_ips().await,
+        SecurityCommand::UnbanIp { ip } => api.unban_ip(&ip).await,
+        SecurityCommand::ListQuarantinedIps => api.list_quarantined_ips().await,
+        SecurityCommand::QuarantineIp {
             ip,
             reason,
             duration_seconds,
@@ -2683,9 +2680,9 @@ async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyh
             api.quarantine_ip(&ip, reason.as_deref(), duration_seconds)
                 .await
         }
-        SecurityCommand::Unquarantine { ip } => api.unquarantine_ip(&ip).await,
-        SecurityCommand::QuarantineConfig => api.get_quarantine_config().await,
-        SecurityCommand::SetQuarantineConfig {
+        SecurityCommand::UnquarantineIp { ip } => api.unquarantine_ip(&ip).await,
+        SecurityCommand::GetQuarantineConfig => api.get_quarantine_config().await,
+        SecurityCommand::UpdateQuarantineConfig {
             enabled,
             max_violations,
             window_seconds,
@@ -2706,8 +2703,8 @@ async fn run_security(api: &api_client::ApiClient, cmd: SecurityCommand) -> anyh
             .await
         }
         SecurityCommand::Geoip(cmd) => run_geoip(api, cmd).await,
-        SecurityCommand::Firewall(FirewallCommand::Status) => api.get_firewall_status().await,
-        SecurityCommand::Firewall(FirewallCommand::Set {
+        SecurityCommand::Firewall(FirewallCommand::GetStatus) => api.get_firewall_status().await,
+        SecurityCommand::Firewall(FirewallCommand::Update {
             enabled,
             extra_ports,
         }) => api.set_firewall(enabled, extra_ports.as_deref()).await,
@@ -2722,9 +2719,9 @@ async fn run_security_checks(
 ) -> anyhow::Result<()> {
     let rules_path = "/api/system/anomalies/rules";
     match cmd {
-        SecurityCommand::Anomalies => api.print_get("/api/system/anomalies").await,
-        SecurityCommand::AnomalyRules => api.print_get(rules_path).await,
-        SecurityCommand::SetAnomalyRules { payload } => {
+        SecurityCommand::GetSystemAnomalies => api.print_get("/api/system/anomalies").await,
+        SecurityCommand::GetAnomalyRules => api.print_get(rules_path).await,
+        SecurityCommand::UpdateAnomalyRules { payload } => {
             api.print_put(rules_path, &api_client::load_payload(&payload)?)
                 .await
         }
@@ -2742,10 +2739,9 @@ async fn run_security_checks(
 
 async fn run_geoip(api: &api_client::ApiClient, cmd: GeoipCommand) -> anyhow::Result<()> {
     match cmd {
-        GeoipCommand::Status => api.get_geoip_status().await,
-        GeoipCommand::Update => api.update_geoip_database().await,
-        GeoipCommand::Config => api.get_geoip_config().await,
-        GeoipCommand::SetConfig {
+        GeoipCommand::GetStatus => api.get_geoip_status().await,
+        GeoipCommand::UpdateDatabase => api.update_geoip_database().await,
+        GeoipCommand::UpdateConfig {
             account_id,
             license_key,
             database,
@@ -2768,7 +2764,7 @@ async fn run_webhook(api: &api_client::ApiClient, cmd: WebhookCommand) -> anyhow
     match cmd {
         WebhookCommand::List => api.list_webhooks().await,
         WebhookCommand::Get { id } => api.get_webhook(&id).await,
-        WebhookCommand::Add { payload } => api.add_webhook(&payload).await,
+        WebhookCommand::Create { payload } => api.add_webhook(&payload).await,
         WebhookCommand::Update { id, payload } => api.update_webhook(&id, &payload).await,
         WebhookCommand::Delete { id } => api.delete_webhook(&id).await,
         WebhookCommand::Test { id } => api.test_webhook(&id).await,
@@ -2778,7 +2774,7 @@ async fn run_webhook(api: &api_client::ApiClient, cmd: WebhookCommand) -> anyhow
 async fn run_registry(api: &api_client::ApiClient, cmd: RegistryCommand) -> anyhow::Result<()> {
     match cmd {
         RegistryCommand::List => api.list_registries().await,
-        RegistryCommand::Add {
+        RegistryCommand::Create {
             server,
             username,
             password,
@@ -2802,7 +2798,7 @@ async fn run_git(api: &api_client::ApiClient, cmd: GitCommand) -> anyhow::Result
     match cmd {
         GitCommand::List => api.list_git_connections().await,
         GitCommand::Get { id } => api.get_git_connection(&id).await,
-        GitCommand::Add {
+        GitCommand::Create {
             name,
             provider,
             url,
@@ -2814,10 +2810,10 @@ async fn run_git(api: &api_client::ApiClient, cmd: GitCommand) -> anyhow::Result
                 .await
         }
         GitCommand::Delete { id } => api.delete_git_connection(&id).await,
-        GitCommand::Repos { id, search, page } => {
+        GitCommand::ListRepositories { id, search, page } => {
             api.list_git_repos(&id, search.as_deref(), page).await
         }
-        GitCommand::Branches { id, repo } => api.list_git_branches(&id, &repo).await,
+        GitCommand::ListBranches { id, repo } => api.list_git_branches(&id, &repo).await,
         other => run_git_setup(api, other).await,
     }
 }
@@ -2835,7 +2831,7 @@ async fn run_git_setup(api: &api_client::ApiClient, cmd: GitCommand) -> anyhow::
             api.print_post(&format!("{base}/{id}/authorize"), &body)
                 .await
         }
-        GitCommand::GithubApp {
+        GitCommand::CreateGithubApp {
             name,
             redirect_uri,
             url,
@@ -2845,7 +2841,7 @@ async fn run_git_setup(api: &api_client::ApiClient, cmd: GitCommand) -> anyhow::
                 "url": url, "organization": organization });
             api.print_post("/api/git/github_apps", &body).await
         }
-        GitCommand::Install { id } => {
+        GitCommand::InstallGithubApp { id } => {
             api.print_post(&format!("{base}/{id}/installation"), &serde_json::json!({}))
                 .await
         }
@@ -2887,7 +2883,7 @@ async fn run_token(api: &api_client::ApiClient, cmd: TokenCommand) -> anyhow::Re
 async fn run_cron(api: &api_client::ApiClient, cmd: CronCommand) -> anyhow::Result<()> {
     match cmd {
         CronCommand::List { app_id } => api.list_cron(&app_id).await,
-        CronCommand::Add {
+        CronCommand::Create {
             app_id,
             cron,
             command,
@@ -3142,16 +3138,174 @@ fn unpack(archive: &[u8]) -> anyhow::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::{COMMAND_OPERATIONS, MCP_ONLY_OPERATIONS};
+    use clap::CommandFactory;
+    use std::collections::BTreeSet;
+
+    /// The operation id words that each command group stands for.
+    const GROUP_NOUNS: &[(&str, &[&str])] = &[
+        ("", &[]),
+        ("account", &["account", "accounts"]),
+        ("acl", &["access", "list", "lists"]),
+        ("acme", &["acme"]),
+        ("app", &["app", "apps"]),
+        ("app files", &["app", "file", "files"]),
+        ("app volumes", &["app", "volume", "volumes"]),
+        ("audit", &["audit"]),
+        ("backup", &["database", "databases", "backup", "backups"]),
+        ("cdn", &["cdn"]),
+        ("cert", &["cert", "certs"]),
+        ("cert ct", &["cert", "certs", "ct"]),
+        ("config", &["config"]),
+        ("cron", &["app", "scheduled", "command", "commands"]),
+        ("db", &["database", "databases"]),
+        ("discovery", &["discovery"]),
+        ("dns", &["dns", "credential", "credentials"]),
+        ("dr", &["disaster", "recovery", "backup", "backups"]),
+        ("env-group", &["env", "group", "groups"]),
+        ("error-page-theme", &["error", "page", "theme", "themes"]),
+        ("git", &["git", "connection", "connections"]),
+        ("grpc", &["grpc"]),
+        ("platform", &["platform"]),
+        ("port", &["port", "ports"]),
+        ("project", &["project", "projects"]),
+        ("proxy", &["proxy", "proxies"]),
+        (
+            "proxy dictionary",
+            &["proxy", "compression", "dictionary", "dictionaries"],
+        ),
+        (
+            "proxy security-headers",
+            &["proxy", "security", "header", "headers"],
+        ),
+        ("registry", &["registry", "registries"]),
+        ("security", &["security"]),
+        ("security firewall", &["firewall"]),
+        ("security geoip", &["geoip"]),
+        ("store", &["store"]),
+        ("target", &["target", "targets"]),
+        ("token", &["token", "tokens"]),
+        ("traffic", &["traffic"]),
+        (
+            "traffic connections",
+            &["traffic", "connection", "connections"],
+        ),
+        ("webhook", &["outbound", "webhook", "webhooks"]),
+    ];
+
+    /// Commands without an API operation of their own, with the reason.
+    const COMMANDS_WITHOUT_OPERATION: &[(&str, &str)] = &[
+        (
+            "login",
+            "signs in with OAuth and stores the token on this machine",
+        ),
+        (
+            "apply",
+            "applies a manifest with several create and update operations",
+        ),
+        ("update", "replaces the r3 binary with the latest release"),
+        ("app start", "the API has no app start operation yet"),
+        ("app stop", "the API has no app stop operation yet"),
+        ("app restart", "the API has no app restart operation yet"),
+        ("app hooks", "the API has no app hook operations yet"),
+    ];
+
+    /// Collects the path of every command that has no subcommand of its own.
+    fn leaf_paths(command: &clap::Command, prefix: &str, out: &mut BTreeSet<String>) {
+        let subcommands: Vec<_> = command
+            .get_subcommands()
+            .filter(|sub| sub.get_name() != "help")
+            .collect();
+        if subcommands.is_empty() {
+            out.insert(prefix.to_string());
+        }
+        for sub in subcommands {
+            let path = format!("{prefix} {}", sub.get_name());
+            leaf_paths(sub, path.trim(), out);
+        }
+    }
+
+    /// The leaf name that the naming rule gives an operation id in a group: the verb, then the
+    /// words that the group does not stand for, joined with `-`.
+    fn rule_name(group: &str, operation: &str) -> Option<String> {
+        let nouns = GROUP_NOUNS.iter().find(|(name, _)| *name == group)?.1;
+        let mut words = operation.split('_');
+        let verb = words.next()?;
+        let rest = words.filter(|word| !nouns.contains(word));
+        Some(
+            std::iter::once(verb)
+                .chain(rest)
+                .collect::<Vec<_>>()
+                .join("-"),
+        )
+    }
+
+    /// Every command is either named after an API operation or listed with the reason it has
+    /// none, and the table names no command that does not exist.
+    #[test]
+    fn every_command_has_an_operation_or_a_reason() {
+        let mut leaves = BTreeSet::new();
+        leaf_paths(&Args::command(), "", &mut leaves);
+        let listed: BTreeSet<String> = COMMAND_OPERATIONS
+            .iter()
+            .map(|(path, _)| path.to_string())
+            .chain(
+                COMMANDS_WITHOUT_OPERATION
+                    .iter()
+                    .map(|(path, _)| path.to_string()),
+            )
+            .collect();
+        let unlisted: Vec<_> = leaves.difference(&listed).collect();
+        let unknown: Vec<_> = listed.difference(&leaves).collect();
+        assert!(
+            unlisted.is_empty(),
+            "commands without a table row: {unlisted:?}"
+        );
+        assert!(
+            unknown.is_empty(),
+            "table rows without a command: {unknown:?}"
+        );
+        let unused: Vec<_> = MCP_ONLY_OPERATIONS
+            .iter()
+            .filter(|id| !COMMAND_OPERATIONS.iter().any(|(_, op)| op == *id))
+            .collect();
+        assert!(
+            unused.is_empty(),
+            "MCP-only operations without a command: {unused:?}"
+        );
+    }
+
+    /// `r3 <group> <leaf>`: the leaf is the operation id without the nouns of the group, so the
+    /// CLI, the MCP tool and the API operation share one name.
+    #[test]
+    fn every_command_is_named_after_its_operation() {
+        let wrong: Vec<String> = COMMAND_OPERATIONS
+            .iter()
+            .filter_map(|(path, operation)| {
+                let (group, leaf) = path.rsplit_once(' ').unwrap_or(("", path));
+                let expected = rule_name(group, operation);
+                (expected.as_deref() != Some(leaf))
+                    .then(|| format!("r3 {path} ({operation}) should be {expected:?}"))
+            })
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
 
     /// `--save false` must let a user preview the generated secrets without saving them; the
     /// default stays saving.
     #[test]
     fn generate_env_can_be_told_not_to_save() {
         let parse = |extra: &[&str]| {
-            let mut argv = vec!["r3", "http://127.0.0.1:1", "app", "generate-env", "abc"];
+            let mut argv = vec![
+                "r3",
+                "http://127.0.0.1:1",
+                "app",
+                "generate-env-secrets",
+                "abc",
+            ];
             argv.extend_from_slice(extra);
             match Args::try_parse_from(argv).map(|a| a.command) {
-                Ok(Command::App(AppCommand::GenerateEnv { save, .. })) => Ok(save),
+                Ok(Command::App(AppCommand::GenerateEnvSecrets { save, .. })) => Ok(save),
                 other => Err(format!("{other:?}")),
             }
         };

@@ -318,7 +318,7 @@ Deploying Compose applications from the App Store catalog or external Git reposi
   - In the App Store pre-deployment form, click **Auto-generate Missing Secrets** (`apps.store_env_generate_secrets`) to immediately populate empty secret inputs with secure random tokens before starting the first deployment.
   - In the **Environment Variables** tab of an application (`/apps/{id}/env`), click **Auto-generate Missing Secrets** (`apps.env_generate_secrets`) to fill missing secret values into the form for inspection before saving.
 - **CLI & MCP Management**:
-  - CLI: `r3 app generate-env <APP_ID> [--save] [--overwrite]` and `r3 app resolve-template [--template <STR>] [--file <PATH>] [--overwrite]`.
+  - CLI: `r3 app generate-env-secrets <APP_ID> [--save] [--overwrite]` and `r3 app resolve-compose-env-template [--template <STR>] [--file <PATH>] [--overwrite]`.
   - MCP: `generate_app_env_secrets` and `resolve_compose_env_template`.
   - REST API: `POST /api/apps/{id}/env/generate` and `POST /api/compose/env/generate`.
 
@@ -647,7 +647,7 @@ To prevent containers from silently crashing due to Out Of Memory (OOM) kills or
 - **REST API Endpoint**: `GET /api/apps/{id}/diagnostics` returns the full `AppResourceDiagnostics` payload.
 - **100% MCP & CLI Parity**: Queryable autonomously with the `get_app_resource_diagnostics` MCP tool or the CLI command:
   ```bash
-  r3 app diagnostics <APP_ID>
+  r3 app get-resource-diagnostics <APP_ID>
   ```
 
 ### Deployment Lifecycle Hooks & Migration Runner
@@ -918,7 +918,7 @@ Clicking an application in the list opens its dedicated dashboard console at `/a
 - **Quick Actions Toolbar**: One-click **Deploy**, **Restart** container, **Rollback** to previous deployment, **Terminal**, and **Logs**.
 - **Compose Topology & Container Management**: Interactive visual architecture topology graph and service container inspection table for multi-service Compose applications.
 - **Recent Logs Tail**: Direct terminal preview of the latest 15 container log lines. The dashboard waits at most 5 seconds for the log. When the container runtime does not answer in time, the preview shows the reason (`logs_error` in the API response) and the rest of the dashboard loads without it.
-- **API, MCP & CLI Management**: Complete parity via `GET /api/apps/{id}/dashboard`, MCP tool `get_app_dashboard`, and CLI command `r3 app dashboard <APP_ID>`.
+- **API, MCP & CLI Management**: Complete parity via `GET /api/apps/{id}/dashboard`, MCP tool `get_app_dashboard`, and CLI command `r3 app get-dashboard <APP_ID>`.
 
 ### App Store
 
@@ -1023,7 +1023,7 @@ The **Targets** page also includes a **Disk Hygiene & Prune Policy** card to aut
 - **On-Demand Log Vacuum**: The **Logs** page of any application includes a **Vacuum Logs** button (`POST /api/apps/{id}/logs/vacuum`) to immediately reclaim disk space by deleting the rotated log files of that application's containers. In addition, the **Disk Hygiene & Prune Policy** card on the **Targets** page provides an on-demand **Vacuum Logs** button (`POST /api/platform/logs/vacuum`) to delete the rotated container log files across the entire platform in a single operation.
 - **Run Immediately**: Click **Prune Now** (or send `POST /api/platform/prune/run`) to trigger an immediate prune and view the freed disk space and deleted item counts in real time.
 - **Run Statistics**: Displays the timestamp of the last scheduled execution, the last emergency disk pressure execution, and the total reclaimed disk space.
-- **CLI & MCP Management**: Disk hygiene and prune policies are fully manageable via both CLI and MCP. Use `r3 platform prune-policy` to view the active policy, `r3 platform set-prune-policy --enable true --keep-cache-mb 5120 --kept-builds 5 --dangling-layers-only true` to update retention and prune parameters, and `r3 platform prune` to execute pruning immediately. In MCP, use `get_prune_policy`, `update_prune_policy`, and `run_prune`.
+- **CLI & MCP Management**: Disk hygiene and prune policies are fully manageable via both CLI and MCP. Use `r3 platform get-prune-policy` to view the active policy, `r3 platform update-prune-policy --enable true --keep-cache-mb 5120 --kept-builds 5 --dangling-layers-only true` to update retention and prune parameters, and `r3 platform run-prune` to execute pruning immediately. In MCP, use `get_prune_policy`, `update_prune_policy`, and `run_prune`.
 
 ### Node Threshold Alerts
 
@@ -1035,7 +1035,7 @@ The **Targets** page includes a **Node Threshold Alert Rules** configuration car
 - **Socket / TIME_WAIT Exhaustion Warning (`system.socket_exhaustion`)**: Parses socket allocations from `/proc/net/sockstat` and alerts when the count of TCP sockets in `TIME_WAIT` state exceeds the configured maximum threshold (e.g. 10,000 sockets), preventing local ephemeral port exhaustion under heavy concurrent traffic.
 - **Anti-Spam Cooldown**: Built-in 15-minute cooldown prevents alert flooding during persistent high traffic or prolonged low disk situations.
 - **Outbound Webhooks & Auditing**: Subscribed outbound webhooks receive JSON alerts under the `System` category, and rules configuration changes are tracked in the audit trail.
-- **CLI & MCP Parity**: Fully manageable via `r3 platform node-alerts` and `r3 platform set-node-alerts` CLI commands, as well as `get_node_alerts` and `update_node_alerts` MCP tools.
+- **CLI & MCP Parity**: Fully manageable via `r3 platform get-node-alerts` and `r3 platform update-node-alerts` CLI commands, as well as `get_node_alerts` and `update_node_alerts` MCP tools.
 
 ### Webhooks
 

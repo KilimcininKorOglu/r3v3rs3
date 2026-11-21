@@ -79,19 +79,19 @@ The `r3` CLI provides full remote management parity for disaster recovery:
 
 ```bash
 # List all full disaster recovery snapshots
-$ r3 backup dr list
+$ r3 dr list
 
 # Create an encrypted snapshot and replicate to remote S3
-$ r3 backup dr create --passphrase "my-secret-passphrase"
+$ r3 dr create --passphrase "my-secret-passphrase"
 
 # Restore platform state from a snapshot ID
-$ r3 backup dr restore <id> --passphrase "my-secret-passphrase"
+$ r3 dr restore <id> --passphrase "my-secret-passphrase"
 
 # Download a snapshot (.r3bundle)
-$ r3 backup dr download <id> -o backup.r3bundle
+$ r3 dr download <id> -o backup.r3bundle
 
 # Restore directly from a local bundle file
-$ r3 backup dr restore-file -f backup.r3bundle --passphrase "my-secret-passphrase"
+$ r3 dr restore-upload -f backup.r3bundle --passphrase "my-secret-passphrase"
 ```
 
 ### CLI (Single-Command Restoration on a New Server)
@@ -480,11 +480,11 @@ Instead of defining custom HTML pages repeatedly per proxy, r3v3rs3 provides a c
 
 - **Built-in Themes**: Ships with ready-to-use modern themes (`Minimalist Dark`, `Modern Glassmorphism`, `Developer Terminal`, `Illustration Card`, `Maintenance Notice`) pre-populated across all standard error status codes (`400`, `401`, `403`, `404`, `405`, `408`, `429`, `500`, `502`, `503`, `504`).
 - **Interactive Visual Editor Modal**: Create and customize themes directly in the WebUI with live responsive preview viewports (Desktop, Tablet, Mobile), HTML code editor, and status code templates.
-- **Custom Theme Management**: Add new custom themes with unique IDs and custom designs, or edit existing templates (`+ New Theme` in WebUI, or `r3 error-page-theme add` / `r3 error-page-theme update`).
+- **Custom Theme Management**: Add new custom themes with unique IDs and custom designs, or edit existing templates (`+ New Theme` in WebUI, or `r3 error-page-theme create` / `r3 error-page-theme update`).
 - **Proxy Theme Association**: Assign an error page theme to any proxy with `error_page_theme = "short_id"` via WebUI, CLI (`r3 proxy update <id> ...`), or REST API.
 - **Granular Per-Proxy Overrides**: Any proxy-specific `error_pages` entry takes precedence over the assigned theme for that specific status code.
 - **Suppress Software Branding**: Set `hide_branding = true` on the HTTP proxy to suppress the "Powered by r3v3rs3" link on default error pages.
-- **Reset to Defaults**: Built-in themes can be restored to default templates anytime via WebUI, CLI (`r3 error-page-theme reset-defaults`), or MCP (`reset_error_page_themes`).
+- **Reset to Defaults**: Built-in themes can be restored to default templates anytime via WebUI, CLI (`r3 error-page-theme reset`), or MCP (`reset_error_page_themes`).
 
 ### Dynamic Template Variables
 
@@ -607,7 +607,7 @@ The active health check runs when `health_check.interval` is above `0s` (default
 - A UDP proxy resolves the host name of each server.
 
 You can also run ad-hoc gRPC health checks directly:
-- **CLI**: `r3 proxy grpc-health <PROXY_ID> [--service <SERVICE>]`
+- **CLI**: `r3 proxy check-grpc-health <PROXY_ID> [--service <SERVICE>]`
 - **MCP Tool**: `check_proxy_grpc_health` (parameters: `proxy_id` or `target_url`, `service`)
 - **REST API**: `POST /api/proxies/{id}/grpc/health` or `POST /api/grpc/health`
 
@@ -772,11 +772,10 @@ r3v3rs3 includes an autonomous, zero-downtime updater for MaxMind GeoLite2-Count
 - **100% Operational Parity across WebUI, CLI, and MCP**:
   - **WebUI**: Dedicated "GeoIP" tab in Security Center (`/security`) displaying loaded state, database path, file size, build epoch date, license configuration status, and an immediate "Update Database Now" button.
   - **CLI**:
-    - `r3 security geoip status`: View loaded database status, build timestamp, size, and auto-update schedule.
-    - `r3 security geoip update`: Download and hot-reload the latest GeoLite2-Country MMDB.
-    - `r3 security geoip config`: Display GeoIP configuration.
-    - `r3 security geoip set-config --license-key <KEY> --auto-update true --interval-days 7`: Update GeoIP settings.
-  - **MCP Tools**: `get_geoip_status`, `update_geoip_database`, `get_geoip_config`, `update_geoip_config`.
+    - `r3 security geoip get-status`: View loaded database status, build timestamp, size, and auto-update schedule.
+    - `r3 security geoip update-database`: Download and hot-reload the latest GeoLite2-Country MMDB.
+    - `r3 security geoip update-config --license-key <KEY> --auto-update true --interval-days 7`: Update GeoIP settings.
+  - **MCP Tools**: `get_geoip_status`, `update_geoip_database`, `update_geoip_config`.
   - **REST API**:
     - `GET /api/security/geoip/status`
     - `PUT /api/security/geoip/config`
@@ -1176,13 +1175,13 @@ r3v3rs3 includes built-in OWASP security header profiles and an automated scorin
 
 ```bash
 # List available security profiles
-r3 proxy security-headers profiles
+r3 proxy security-headers list-profiles
 
 # Audit security headers of a proxy and inspect score and recommendations
-r3 proxy security-headers audit <PROXY_ID>
+r3 proxy security-headers get <PROXY_ID>
 
 # Apply an OWASP security hardening profile to a proxy
-r3 proxy security-headers apply <PROXY_ID> strict
+r3 proxy security-headers apply-profile <PROXY_ID> strict
 ```
 
 #### MCP Tools
@@ -1517,7 +1516,7 @@ When issuing certificates for external clients or third-party domains, clients o
 
 Inspect CNAME instructions and verification status via CLI or MCP:
 ```bash
-r3 acme cname-instructions <ACME_ID>
+r3 acme get-cname-instructions <ACME_ID>
 ```
 
 ## DNS webhook
@@ -1613,22 +1612,22 @@ Manage CT logs directly using the `r3 cert ct` command line tool:
 
 ```bash
 # View monitor status and active alerts count
-r3 cert ct status
+r3 cert ct get-status
 
 # View current configuration
-r3 cert ct config
+r3 cert ct get-config
 
 # Update configuration
-r3 cert ct set-config --enable true --domains "example.com,api.example.com" --interval 7200
+r3 cert ct update-config --enable true --domains "example.com,api.example.com" --interval 7200
 
 # Trigger an immediate on-demand check
-r3 cert ct check --domain example.com
+r3 cert ct check-now --domain example.com
 
 # List discovered CT log records and rogue certificates
-r3 cert ct list --rogue-only
+r3 cert ct list-entries --rogue-only
 
 # Dismiss an alert
-r3 cert ct dismiss <ENTRY_ID>
+r3 cert ct dismiss-alert <ENTRY_ID>
 ```
 
 ## Model Context Protocol (MCP)
@@ -1724,13 +1723,13 @@ Stream prioritization can be toggled on each HTTP proxy and overridden per port:
 CLI commands:
 ```sh
 # View proxy stream priority configuration
-r3 proxy priority <PROXY_ID>
+r3 proxy get-stream-priority <PROXY_ID>
 
 # Enable adaptive priority with header injection
-r3 proxy priority <PROXY_ID> --enable --inject-header --adaptive-concurrency
+r3 proxy update-stream-priority <PROXY_ID> --enable true --inject-header true --adaptive-concurrency true
 
 # View global stream priority and backpressure statistics
-r3 traffic priority
+r3 traffic get-priority-stats
 ```
 
 MCP tools: `get_proxy_stream_priority`, `update_proxy_stream_priority`, `get_traffic_priority_stats`.
@@ -1936,7 +1935,7 @@ r3 http://127.0.0.1:46492 platform status
 # Ports
 r3 <server> port list
 r3 <server> port get <id>
-r3 <server> port add <spec.json|yaml|->
+r3 <server> port create <spec.json|yaml|->
 r3 <server> port update <id> <spec.json|yaml|->
 r3 <server> port delete <id>
 r3 <server> port reset <id>
@@ -1944,9 +1943,9 @@ r3 <server> port reset <id>
 # Proxies
 r3 <server> proxy list
 r3 <server> proxy get <id>
-r3 <server> proxy add <proxy.json|yaml|->
+r3 <server> proxy create <proxy.json|yaml|->
 r3 <server> proxy update <id> <proxy.json|yaml|->
-r3 <server> proxy status <id>
+r3 <server> proxy get-status <id>
 r3 <server> proxy purge-cache <id> [--path /static]
 r3 <server> proxy delete <id>
 
@@ -1954,218 +1953,218 @@ r3 <server> proxy delete <id>
 r3 <server> cert list
 r3 <server> cert get <id>
 r3 <server> cert upload --cert server.crt --key server.key
-r3 <server> cert coverage
+r3 <server> cert check-coverage
 r3 <server> cert delete <id>
-r3 <server> cert self-sign --san app.example.com [--ca <ca-id>] [--kind client]
+r3 <server> cert create-self-signed --san app.example.com [--ca <ca-id>] [--kind client]
 r3 <server> cert download <id> [--output cert.tar.gz]
 r3 <server> cert delete-many <id> <id>
 r3 <server> cert verify-cname --domain app.example.com [--expected-target panel.example.com]
 r3 <server> acme list
 r3 <server> acme get <id>
-r3 <server> acme add <acme.json|yaml|->
+r3 <server> acme create <acme.json|yaml|->
 r3 <server> acme update <id> <acme.json|yaml|->
-r3 <server> acme order <id>
+r3 <server> acme request <id>
 r3 <server> acme delete <id>
 
 # Access Lists & DNS Providers
 r3 <server> acl list
 r3 <server> acl get <id>
-r3 <server> acl add <acl.json|yaml|->
+r3 <server> acl create <acl.json|yaml|->
 r3 <server> acl update <id> <acl.json|yaml|->
 r3 <server> acl delete <id>
 r3 <server> dns list
 r3 <server> dns get <id>
-r3 <server> dns add <dns.json|yaml|->
+r3 <server> dns create <dns.json|yaml|->
 r3 <server> dns update <id> <dns.json|yaml|->
 r3 <server> dns delete <id>
 
 # Deployed Applications
 r3 <server> app list
 r3 <server> app get <id>
-r3 <server> app add <app.json|yaml|->
+r3 <server> app create <app.json|yaml|->
 r3 <server> app update <id> <app.json|yaml|->
 r3 <server> app deploy <id>
-r3 <server> app rollback <id>
+r3 <server> app rollback-deployment <id>
 r3 <server> app start <id>
 r3 <server> app stop <id>
 r3 <server> app restart <id>
-r3 <server> app logs <id> [--tail 100]
-r3 <server> app log-size <id>
+r3 <server> app get-logs <id> [--tail 100]
+r3 <server> app get-log-size <id>
 r3 <server> app vacuum-logs <id>
-r3 <server> app env <id>
-r3 <server> app set-env <id> KEY=VAL [KEY2=VAL2...]
+r3 <server> app get-env <id>
+r3 <server> app update-env <id> KEY=VAL [KEY2=VAL2...]
 r3 <server> app delete <id>
 r3 <server> app check-update <id>
-r3 <server> app deployments <id>
-r3 <server> app deployment <deployment-id>
-r3 <server> app approve <deployment-id>
-r3 <server> app reject <deployment-id>
-r3 <server> app metrics <id> [--hours 6]
-r3 <server> app services <id>
-r3 <server> app topology <id>
+r3 <server> app list-deployments <id>
+r3 <server> app get-deployment <deployment-id>
+r3 <server> app approve-deployment <deployment-id>
+r3 <server> app reject-deployment <deployment-id>
+r3 <server> app get-metrics <id> [--hours 6]
+r3 <server> app get-services <id>
+r3 <server> app get-topology <id>
 r3 <server> app upgrade-catalog <id>
-printf '%s' "$TOKEN" | r3 <server> app set-git-token <id>
+printf '%s' "$TOKEN" | r3 <server> app update-git-token <id>
 r3 <server> app delete-git-token <id>
-r3 <server> app new-webhook-secret <id>
+r3 <server> app create-webhook-secret <id>
 r3 <server> app delete-webhook-secret <id>
 r3 <server> app install-hook <id>
 r3 <server> app files list <id> --path /data
 r3 <server> app files download <id> --path /data/app.db [--output app.db]
 r3 <server> app files upload <id> --path /data/config.yml --file ./config.yml
 r3 <server> app files delete <id> --path /data/old.log
-r3 <server> app volumes backups <id> <volume>
-r3 <server> app volumes backup <id> <volume>
-r3 <server> app volumes restore <id> <volume> <backup-id>
+r3 <server> app volumes list-backups <id> <volume>
+r3 <server> app volumes create-backup <id> <volume>
+r3 <server> app volumes restore-backup <id> <volume> <backup-id>
 r3 <server> app volumes delete-backup <id> <volume> <backup-id>
 r3 <server> app volumes download-backup <id> <volume> <backup-id> [--output data.tar.gz]
-r3 <server> app volumes export <id> <volume> [--output data-export.tar.gz]
-r3 <server> app volumes import <id> <volume> --file ./data.tar.gz
+r3 <server> app volumes export-archive <id> <volume> [--output data-export.tar.gz]
+r3 <server> app volumes import-archive <id> <volume> --file ./data.tar.gz
 
 # Managed Databases
 r3 <server> db list
-r3 <server> db get <id>
+r3 <server> db get-app <id>
 r3 <server> db create --name my-db --engine postgres [--version postgres:18-alpine]
 r3 <server> db clone <id> --name my-db-clone
-r3 <server> db replica <id> --name my-db-replica
-r3 <server> db logs <id> [--tail 100]
-r3 <server> db credentials <id>
-r3 <server> db tenants <id>
+r3 <server> db create-replica <id> --name my-db-replica
+r3 <server> db get-app-logs <id> [--tail 100]
+r3 <server> db get-credentials <id>
+r3 <server> db list-tenants <id>
 r3 <server> db reset-password <id> [--tenant <name>]
 r3 <server> db delete-tenant <id> <tenant>
 r3 <server> db delete <id>
-r3 <server> db replicas <id>
+r3 <server> db list-replicas <id>
 r3 <server> db refresh-engines
 
 # Backups, Automated Testing, Point-in-Time Recovery (PITR) & WAL
-r3 <server> backup config
+r3 <server> backup get-config
 r3 <server> backup list <database-id>
 r3 <server> backup create <database-id>
 r3 <server> backup test <database-id> <backup-id>
 r3 <server> backup restore <database-id> <backup-id>
-r3 <server> backup pitr-range <database-id>
-r3 <server> backup pitr-restore <database-id> <timestamp_ms> [--new-name <name>] [--host-port <port>]
-r3 <server> backup wal-archive <database-id>
-r3 <server> backup wal-segments <database-id>
+r3 <server> backup get-pitr-range <database-id>
+r3 <server> backup restore-pitr <database-id> <timestamp_ms> [--new-name <name>] [--host-port <port>]
+r3 <server> backup archive-wal <database-id>
+r3 <server> backup list-wal-segments <database-id>
 r3 <server> backup delete <database-id> <backup-id>
 r3 <server> backup list-all
-r3 <server> backup overview
-r3 <server> backup run <database-id>
-r3 <server> backup s3-list [--database <name>]
-r3 <server> backup s3-download --key <key> [--output db.sql.gz]
+r3 <server> backup get-overview
+r3 <server> backup run-now <database-id>
+r3 <server> backup list-s3 [--database <name>]
+r3 <server> backup download-s3 --key <key> [--output db.sql.gz]
 r3 <server> backup download <database-id> <backup-id> [--output db.sql.gz]
-r3 <server> backup s3-restore <key> [--target-db <id> | --new-name <name> [--engine <engine>]]
+r3 <server> backup restore-s3 <key> [--target-db <id> | --new-name <name> [--engine <engine>]]
 
 # Multi-Node Agent Targets
 r3 <server> target list
 r3 <server> target get <id>
-r3 <server> target add --name worker-1 --host 10.0.0.5 --port 46493
+r3 <server> target create --name worker-1 --host 10.0.0.5 --port 46493
 r3 <server> target drain <id>
 r3 <server> target undrain <id>
 r3 <server> target upgrade <id>
 r3 <server> target upgrade-all
-r3 <server> target token <id>
+r3 <server> target create-token <id>
 r3 <server> target delete <id>
 
 # Projects & Environments
 r3 <server> project list
 r3 <server> project get <id>
-r3 <server> project add --name my-project [--description "Core apps"]
-r3 <server> project sync-env <project-id> --from staging --to production
+r3 <server> project create --name my-project [--description "Core apps"]
+r3 <server> project sync-environment-env <project-id> --from staging --to production
 r3 <server> project delete <id>
 r3 <server> project update <id> --name my-project [--description "Core apps"]
-r3 <server> project env-create <project-id> --name staging
-r3 <server> project env-get <project-id> <env-id>
-r3 <server> project env-update <project-id> <env-id> --name stage
-r3 <server> project env-delete <project-id> <env-id>
-r3 <server> project env-vars <project-id> <env-id>
-r3 <server> project env-set-vars <project-id> <env-id> <vars.json|yaml|->
-r3 <server> project env-diff <project-id> <source-env-id> <target-env-id>
+r3 <server> project create-environment <project-id> --name staging
+r3 <server> project get-environment <project-id> <env-id>
+r3 <server> project update-environment <project-id> <env-id> --name stage
+r3 <server> project delete-environment <project-id> <env-id>
+r3 <server> project get-environment-env <project-id> <env-id>
+r3 <server> project update-environment-env <project-id> <env-id> <vars.json|yaml|->
+r3 <server> project diff-environments <project-id> <source-env-id> <target-env-id>
 r3 <server> env-group list
 r3 <server> env-group get <id>
-r3 <server> env-group add <group.json|yaml|->
+r3 <server> env-group create <group.json|yaml|->
 r3 <server> env-group update <id> <group.json|yaml|->
 r3 <server> env-group delete <id>
 
 # App Store & One-Click Templates
-r3 <server> store list
+r3 <server> store get
 r3 <server> store refresh
-r3 <server> store install <store-app-id> --name my-service [--domain service.example.com]
+r3 <server> store install-app <store-app-id> --name my-service [--domain service.example.com]
 
 # Traffic Telemetry & Request Inspection
 r3 <server> traffic connections list [--proxy <id>]
-r3 <server> traffic connections close <connection-id>
-r3 <server> traffic priority
-r3 <server> traffic geo
-r3 <server> traffic replay <log-entry-id>
-r3 <server> traffic list [--resource-id <proxy-id>] [--status 502] [--search /api] [--country DE] [--limit 50]
-r3 <server> traffic get <log-entry-id>
-r3 <server> traffic live [--resource-id <proxy-id>] [--status 502] [--search /api] [--country DE]
-r3 <server> app logs-live <id> [--tail 100] [--service web]
-r3 <server> app terminal <id> [--shell /bin/bash]
+r3 <server> traffic connections terminate <connection-id>
+r3 <server> traffic get-priority-stats
+r3 <server> traffic get-geo
+r3 <server> traffic replay-request --entry <log-entry-id>
+r3 <server> traffic get [--resource-id <proxy-id>] [--status 502] [--search /api] [--country DE] [--limit 50]
+r3 <server> traffic get-entry <log-entry-id>
+r3 <server> traffic stream [--resource-id <proxy-id>] [--status 502] [--search /api] [--country DE]
+r3 <server> app stream-logs <id> [--tail 100] [--service web]
+r3 <server> app open-terminal <id> [--shell /bin/bash]
 r3 <server> traffic replay-request <request.json|yaml|->
-r3 <server> security anomalies
-r3 <server> security anomaly-rules
-r3 <server> security set-anomaly-rules <rules.json|yaml|->
+r3 <server> security get-system-anomalies
+r3 <server> security get-anomaly-rules
+r3 <server> security update-anomaly-rules <rules.json|yaml|->
 r3 <server> security dismiss-anomalies
 r3 <server> security analyze-headers <rules.json|yaml|->
-r3 <server> proxy dry-run <request.json|yaml|->
-r3 <server> port status <port-id>
-r3 <server> port interfaces
-r3 <server> cdn status
-r3 <server> cdn refresh
-r3 <server> discovery list
-r3 <server> logs server [--since 1700000000] [--until 1700003600] [--limit 100]
-r3 <server> dashboard
-r3 <server> audit list [--username admin] [--action add_proxy] [--resource-id <id>] [--search text] [--limit 50]
-r3 <server> grpc health <request.json|yaml|->
+r3 <server> proxy preview <request.json|yaml|->
+r3 <server> port get-status <port-id>
+r3 <server> port list-network-interfaces
+r3 <server> cdn get-status
+r3 <server> cdn refresh-ranges
+r3 <server> discovery list-status
+r3 <server> get-logs server [--since 1700000000] [--until 1700003600] [--limit 100]
+r3 <server> get-dashboard
+r3 <server> audit list-log [--username admin] [--action add_proxy] [--resource-id <id>] [--search text] [--limit 50]
+r3 <server> grpc check-health <request.json|yaml|->
 r3 <server> grpc invoke <request.json|yaml|->
 r3 <server> grpc reflect <request.json|yaml|->
-r3 <server> proxy grpc-invoke <proxy-id> <request.json|yaml|->
-r3 <server> proxy grpc-reflect <proxy-id> [<request.json|yaml|->]
-r3 <server> backup set-config <config.json|yaml|->
-r3 <server> platform mcp-sessions
+r3 <server> proxy invoke-grpc <proxy-id> <request.json|yaml|->
+r3 <server> proxy reflect-grpc <proxy-id> [<request.json|yaml|->]
+r3 <server> backup update-config <config.json|yaml|->
+r3 <server> platform list-mcp-sessions
 r3 <server> platform revoke-mcp-session <session-id>
-r3 <server> platform grafana [--output r3v3rs3-grafana.json]
+r3 <server> platform get-grafana-dashboard [--output r3v3rs3-grafana.json]
 
 # Security, Banned & Quarantined IPs
-r3 <server> security banned-ips
-r3 <server> security unban <ip>
-r3 <server> security quarantined-ips
-r3 <server> security quarantine <ip> [--reason "Scanner probe"] [--duration-seconds 3600]
-r3 <server> security unquarantine <ip>
-r3 <server> security quarantine-config
-r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600] [--block-status-codes 404,403] [--scanner-patterns "/.env,/.git"] [--allowed-ips "198.51.100.0/24"]
+r3 <server> security list-banned-ips
+r3 <server> security unban-ip <ip>
+r3 <server> security list-quarantined-ips
+r3 <server> security quarantine-ip <ip> [--reason "Scanner probe"] [--duration-seconds 3600]
+r3 <server> security unquarantine-ip <ip>
+r3 <server> security get-quarantine-config
+r3 <server> security update-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600] [--block-status-codes 404,403] [--scanner-patterns "/.env,/.git"] [--allowed-ips "198.51.100.0/24"]
 
 # Webhooks & Scheduled Cron Jobs
 r3 <server> webhook list
 r3 <server> webhook get <id>
-r3 <server> webhook add <webhook.json|yaml|->
+r3 <server> webhook create <webhook.json|yaml|->
 r3 <server> webhook update <id> <webhook.json|yaml|->
 r3 <server> webhook test <id>
 r3 <server> webhook delete <id>
 r3 <server> cron list <app-id>
-r3 <server> cron add <app-id> --cron "0 * * * *" --command "php artisan schedule:run" [--name hourly]
+r3 <server> cron create <app-id> --cron "0 * * * *" --command "php artisan schedule:run" [--name hourly]
 r3 <server> cron update <app-id> <job-id> [--cron "*/15 * * * *"] [--command "php artisan queue:work"] [--name queue]
 r3 <server> cron run <app-id> <job-id>
 r3 <server> cron delete <app-id> <job-id>
 
 # Container Registries
 r3 <server> registry list
-r3 <server> registry add --server ghcr.io --username user --password token
+r3 <server> registry create --server ghcr.io --username user --password token
 r3 <server> registry update <id> [--server ghcr.io] [--username user] [--password token]
 r3 <server> registry delete <id>
 
 # Git Provider Connections & Repositories
 r3 <server> git list
 r3 <server> git get <id>
-r3 <server> git add --name my-gitlab --provider gitlab --client-id <id> [--client-secret <secret>]
-r3 <server> git repos <id> [--search query] [--page 1]
-r3 <server> git branches <id> --repo owner/repo
+r3 <server> git create --name my-gitlab --provider gitlab --client-id <id> [--client-secret <secret>]
+r3 <server> git list-repositories <id> [--search query] [--page 1]
+r3 <server> git list-branches <id> --repo owner/repo
 r3 <server> git delete <id>
 r3 <server> git update <id> <connection.json|yaml|->
 r3 <server> git authorize <id> --redirect-uri https://panel.example.com/oauth/git/callback
-r3 <server> git github-app --name team-github --redirect-uri https://panel.example.com/oauth/git/callback [--organization my-team] [--url https://github.example.com]
-r3 <server> git install <id>
+r3 <server> git create-github-app --name team-github --redirect-uri https://panel.example.com/oauth/git/callback [--organization my-team] [--url https://github.example.com]
+r3 <server> git install-github-app <id>
 
 # User Accounts & Auth Tokens
 r3 <server> account list
@@ -2177,12 +2176,12 @@ r3 <server> token create --name ci-deploy [--scope edit]
 r3 <server> token delete <id>
 
 # Platform Status & Maintenance
-r3 <server> platform status
-r3 <server> platform metrics
-r3 <server> platform prune
+r3 <server> platform get-app-info
+r3 <server> platform get-metrics
+r3 <server> platform run-prune
 r3 <server> platform vacuum-logs [--threshold-mb 50]
-r3 <server> platform upgrade
-r3 <server> platform upgrade-status
+r3 <server> platform upgrade-server
+r3 <server> platform get-upgrade-status
 r3 <server> platform rotate-key
 ```
 
@@ -2243,12 +2242,12 @@ enabled = true
 extra_ports = ["udp/51820"]
 ```
 
-The settings page, the MCP tool `update_firewall` and `r3 security firewall set --enabled true --extra-ports udp/51820` change the same two settings.
+The settings page, the MCP tool `update_firewall` and `r3 security firewall update --enabled true --extra-ports udp/51820` change the same two settings.
 
 r3v3rs3 replaces the table in one `nft -f` transaction each time a port, an app or the setting changes, so a half-written table never exists. Turning the setting off removes the table. The table filters only the `input` hook; the Docker NAT and forward rules stay as they are. Agent targets keep the same table on their host with the `host_ports` of their apps.
 
 - The server needs `CAP_NET_ADMIN`; the unit that `install.sh` writes gives it.
-- r3v3rs3 must be the only firewall that drops traffic. nftables runs the input chain of every table, so a drop in a firewalld, ufw or `iptables-persistent` table still blocks a port this table opens. Stop the other tool first (`systemctl disable --now firewalld`, `ufw disable`, or `systemctl disable --now netfilter-persistent`). The **Host Firewall** card of the settings page, `GET /api/firewall`, the MCP tool `get_firewall_status` and `r3 security firewall status` list each such table as a warning, and the port list shows **Firewall open, another firewall found**.
+- r3v3rs3 must be the only firewall that drops traffic. nftables runs the input chain of every table, so a drop in a firewalld, ufw or `iptables-persistent` table still blocks a port this table opens. Stop the other tool first (`systemctl disable --now firewalld`, `ufw disable`, or `systemctl disable --now netfilter-persistent`). The **Host Firewall** card of the settings page, `GET /api/firewall`, the MCP tool `get_firewall_status` and `r3 security firewall get-status` list each such table as a warning, and the port list shows **Firewall open, another firewall found**.
 - A container that publishes a port with Docker (`-p 8080:80`) is reached through the forward hook, so this table does not block it.
 
 Rollback: set `enabled = false`, or run `nft delete table inet r3v3rs3` on the host, then start the previous firewall again. Save its rules first (`nft list ruleset > /root/ruleset.nft`) and restore them with `nft -f /root/ruleset.nft`.
@@ -2500,7 +2499,7 @@ r3 traffic connections list
 r3 traffic connections list --proxy prx_01j7xyz
 
 # Terminate an active connection by ID
-r3 traffic connections close con_01j7xyz
+r3 traffic connections terminate con_01j7xyz
 ```
 
 ### Model Context Protocol (MCP)

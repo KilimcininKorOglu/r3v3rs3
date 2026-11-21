@@ -1,4 +1,4 @@
-//! `r3 app terminal`: an interactive shell in the container of an app over the terminal
+//! `r3 app open-terminal`: an interactive shell in the container of an app over the terminal
 //! WebSocket. Keys go to the server as binary messages, the output comes back as binary
 //! messages, and a size change goes as a `{"cols":..,"rows":..}` text message.
 

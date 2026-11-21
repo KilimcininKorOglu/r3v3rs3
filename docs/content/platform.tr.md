@@ -318,7 +318,7 @@ App Store kataloğundan veya harici Git repolarından Compose uygulamaları dağ
   - App Store kurulum formunda, ilk dağıtıma başlamadan önce boş secret alanlarını tek tıkla doldurmak için **Eksik Gizli Değerleri Otomatik Doldur** (`apps.store_env_generate_secrets`) butonuna tıklanabilir.
   - Uygulama detay sayfasındaki **Ortam değişkenleri** sekmesinde (`/apps/{id}/env`), eksik secret değerlerini kaydedilmeden önce form alanlarına yerleştirmek için **Eksik Gizli Değerleri Otomatik Doldur** (`apps.env_generate_secrets`) butonu kullanılır.
 - **CLI ve MCP Yönetimi**:
-  - CLI: `r3 app generate-env <APP_ID> [--save] [--overwrite]` ve `r3 app resolve-template [--template <STR>] [--file <PATH>] [--overwrite]`.
+  - CLI: `r3 app generate-env-secrets <APP_ID> [--save] [--overwrite]` ve `r3 app resolve-compose-env-template [--template <STR>] [--file <PATH>] [--overwrite]`.
   - MCP: `generate_app_env_secrets` ve `resolve_compose_env_template`.
   - REST API: `POST /api/apps/{id}/env/generate` ve `POST /api/compose/env/generate`.
 
@@ -647,7 +647,7 @@ Konteynerlerin sessizce bellek yetersizliği (OOM Killer) nedeniyle çökmesini 
 - **REST API Endpoint'i**: `GET /api/apps/{id}/diagnostics` uç noktası tam `AppResourceDiagnostics` modelini döner.
 - **%100 MCP & CLI Parity**: `get_app_resource_diagnostics` MCP aracı veya CLI komutu ile doğrudan sorgulanabilir:
   ```bash
-  r3 app diagnostics <APP_ID>
+  r3 app get-resource-diagnostics <APP_ID>
   ```
 
 ### Dağıtım Yaşam Döngüsü Kancaları & Veritabanı Geçiş Koşucusu (Lifecycle Hooks & Migration Runner)
@@ -918,7 +918,7 @@ Uygulama listesinden bir uygulamaya tıklandığında `/apps/{id}` adresindeki �
 - **Hızlı Aksiyonlar Barı**: Tek tıkla **Deploy**, **Yeniden Başlat** (Restart), önceki sürüme **Geri Al** (Rollback), **Terminal** ve **Loglar** butonları.
 - **Compose Mimarisi ve Topoloji**: Compose çok servisli uygulamalar için görsel mimari bağlantı şeması ve konteyner yönetim tablosu.
 - **Son Loglar Önizlemesi**: En son 15 log satırını gösteren terminal önizleme kutusu. Pano log için en fazla 5 saniye bekler. Container runtime zamanında yanıt vermezse önizleme nedeni gösterir (API yanıtında `logs_error`) ve panonun geri kalanı log olmadan yüklenir.
-- **API, MCP ve CLI Eşitliği**: `GET /api/apps/{id}/dashboard`, MCP aracı `get_app_dashboard` ve CLI komutu `r3 app dashboard <APP_ID>` ile tam yönetim eşitliği.
+- **API, MCP ve CLI Eşitliği**: `GET /api/apps/{id}/dashboard`, MCP aracı `get_app_dashboard` ve CLI komutu `r3 app get-dashboard <APP_ID>` ile tam yönetim eşitliği.
 
 ### App Store
 
@@ -1023,7 +1023,7 @@ Admin hesabı ayrıca şunları görür:
 - **İsteğe Bağlı Log Temizleme**: Herhangi bir uygulamanın **Log** sayfasında, ilgili uygulamanın konteynerlerinin döndürülmüş log dosyalarını silerek anında disk alanı kazanmak için bir **Günlükleri Buda** butonu (`POST /api/apps/{id}/logs/vacuum`) yer alır. Ayrıca **Hedefler** sayfasındaki **Disk Hijyeni ve Temizleme Politikası** kartında bulunan isteğe bağlı **Logları Temizle** butonu (`POST /api/platform/logs/vacuum`) tüm platformdaki döndürülmüş konteyner log dosyalarını tek hamlede siler.
 - **Şimdi Temizle**: Anında temizlik başlatmak ve geri kazanılan alan ile silinen öğe sayılarını canlı görmek için **Şimdi Temizle** butonuna tıklayın (veya `POST /api/platform/prune/run` gönderin).
 - **Çalıştırma İstatistikleri**: Son zamanlanmış temizleme, son acil durum disk basıncı temizleme zamanını ve geri kazanılan disk alanını gösterir.
-- **CLI ve MCP Yönetimi**: Disk hijyeni ve temizleme politikaları hem CLI hem MCP üzerinden yönetilebilir. Etkin politikayı görüntülemek için `r3 platform prune-policy`, saklama ve temizleme parametrelerini güncellemek için `r3 platform set-prune-policy --enable true --keep-cache-mb 5120 --kept-builds 5 --dangling-layers-only true`, temizliği derhal çalıştırmak için `r3 platform prune` komutları kullanılır. MCP tarafında ise `get_prune_policy`, `update_prune_policy` ve `run_prune` araçları kullanılır.
+- **CLI ve MCP Yönetimi**: Disk hijyeni ve temizleme politikaları hem CLI hem MCP üzerinden yönetilebilir. Etkin politikayı görüntülemek için `r3 platform get-prune-policy`, saklama ve temizleme parametrelerini güncellemek için `r3 platform update-prune-policy --enable true --keep-cache-mb 5120 --kept-builds 5 --dangling-layers-only true`, temizliği derhal çalıştırmak için `r3 platform run-prune` komutları kullanılır. MCP tarafında ise `get_prune_policy`, `update_prune_policy` ve `run_prune` araçları kullanılır.
 
 ### Düğüm Eşik Alarmları
 
@@ -1035,7 +1035,7 @@ Admin hesabı ayrıca şunları görür:
 - **Soket / TIME_WAIT Tükenme Uyarısı (`system.socket_exhaustion`)**: `/proc/net/sockstat` üzerinden soket durumunu okur ve TCP `TIME_WAIT` soket sayısı yapılandırılan üst sınırı (örn. 10.000) aştığında uyarı fırlatarak yerel port tükenmesini (ephemeral port exhaustion) erkenden haber verir.
 - **Spam Önleme Bekleme Süresi (Cooldown)**: Dahili 15 dakikalık bekleme süresi, uzun süreli yüksek trafik veya sürekli düşük disk durumlarında bildirim bombardımanını engeller.
 - **Giden Webhook'lar ve Denetim Kayıtları**: Abone olunan giden webhook'lar bildirimleri `Sistem` kategorisi altında alır ve kural değişiklikleri denetim günlüğünde kayıt altına alınır.
-- **CLI & MCP Eşitliği**: `r3 platform node-alerts` ve `r3 platform set-node-alerts` CLI alt komutları ile `get_node_alerts` ve `update_node_alerts` MCP araçları üzerinden %100 yönetilebilir.
+- **CLI & MCP Eşitliği**: `r3 platform get-node-alerts` ve `r3 platform update-node-alerts` CLI alt komutları ile `get_node_alerts` ve `update_node_alerts` MCP araçları üzerinden %100 yönetilebilir.
 
 ### Webhook'lar
 

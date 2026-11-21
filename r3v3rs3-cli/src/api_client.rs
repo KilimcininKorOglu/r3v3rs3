@@ -2566,13 +2566,6 @@ impl ApiClient {
         Ok(())
     }
 
-    pub async fn get_geoip_config(&self) -> anyhow::Result<()> {
-        let status: r3v3rs3_api::geoip::GeoIpStatus =
-            self.get_json("/api/security/geoip/status").await?;
-        print_json(&serde_json::to_value(&status)?)?;
-        Ok(())
-    }
-
     pub async fn set_geoip_config(
         &self,
         account_id: Option<String>,

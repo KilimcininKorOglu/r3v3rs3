@@ -79,19 +79,19 @@ Standart JSON yapılandırma yedeklerinden farklı olarak, **Felaket Kurtarma Pa
 
 ```bash
 # Tüm felaket kurtarma snapshot paketlerini listele
-$ r3 backup dr list
+$ r3 dr list
 
 # Şifreli snapshot paketi oluştur ve uzak S3 depolamasına eşitle
-$ r3 backup dr create --passphrase "gizli-parolam"
+$ r3 dr create --passphrase "gizli-parolam"
 
 # Bir snapshot ID'sinden platform durumunu geri yükle
-$ r3 backup dr restore <id> --passphrase "gizli-parolam"
+$ r3 dr restore <id> --passphrase "gizli-parolam"
 
 # Snapshot paketini (.r3bundle) yerel diske indir
-$ r3 backup dr download <id> -o backup.r3bundle
+$ r3 dr download <id> -o backup.r3bundle
 
 # Yerel bir paket dosyasından doğrudan geri yükle
-$ r3 backup dr restore-file -f backup.r3bundle --passphrase "gizli-parolam"
+$ r3 dr restore-upload -f backup.r3bundle --passphrase "gizli-parolam"
 ```
 
 ### CLI (Yeni Sunucuda Tek Komutla Geri Yükleme)
@@ -480,11 +480,11 @@ Proxy düzeyinde her seferinde ayrı ayrı HTML sayfaları girmek yerine r3v3rs3
 
 - **Yerleşik Temalar**: Tüm standart hata durum kodları (`400`, `401`, `403`, `404`, `405`, `408`, `429`, `500`, `502`, `503`, `504`) için hazır modern temalarla (`Minimalist Dark`, `Modern Glassmorphism`, `Developer Terminal`, `Illustration Card`, `Maintenance Notice`) birlikte gelir.
 - **Etkileşimli Görsel Editör Modal'ı**: WebUI üzerinden canlı responsive önizleme görünümleri (Masaüstü, Tablet, Mobil), HTML kod editörü ve durum kodu şablonlarıyla temaları doğrudan düzenleme ve test etme imkânı.
-- **Özel Tema Yönetimi**: WebUI üzerinden `+ Yeni Tema` modal'ı veya CLI (`r3 error-page-theme add` / `r3 error-page-theme update`) ile benzersiz kimlikli özel temalar oluşturma ve düzenleme.
+- **Özel Tema Yönetimi**: WebUI üzerinden `+ Yeni Tema` modal'ı veya CLI (`r3 error-page-theme create` / `r3 error-page-theme update`) ile benzersiz kimlikli özel temalar oluşturma ve düzenleme.
 - **Proxy Tema Ataması**: `error_page_theme = "short_id"` ile herhangi bir proxy'ye WebUI, CLI (`r3 proxy update <id> ...`) veya REST API üzerinden tek tıkla hata sayfası teması bağlanabilir.
 - **Proxy Bazlı İnce Ayar / Geçersiz Kılma**: Proxy yapılandırmasında tanımlanan özel `error_pages` girdileri, o durum kodu için atanan temayı geçersiz kılarak öncelik alır.
 - **Yazılım İmzasını Gizleme**: HTTP proxy üzerinde `hide_branding = true` ayarlanarak varsayılan hata sayfalarındaki "Powered by r3v3rs3" bağlantısı gizlenebilir.
-- **Varsayılanlara Sıfırlama**: WebUI, CLI (`r3 error-page-theme reset-defaults`) veya MCP (`reset_error_page_themes`) üzerinden yerleşik temalar her zaman varsayılan şablonlara geri döndürülebilir.
+- **Varsayılanlara Sıfırlama**: WebUI, CLI (`r3 error-page-theme reset`) veya MCP (`reset_error_page_themes`) üzerinden yerleşik temalar her zaman varsayılan şablonlara geri döndürülebilir.
 
 ### Dinamik Şablon Değişkenleri
 
@@ -607,7 +607,7 @@ Aktif sağlık kontrolü, `health_check.interval` değeri `0s`'den büyükse ça
 - UDP proxy her sunucunun host adını çözümler.
 
 Anlık gRPC sağlık kontrolü komutları:
-- **CLI**: `r3 proxy grpc-health <PROXY_ID> [--service <SERVICE>]`
+- **CLI**: `r3 proxy check-grpc-health <PROXY_ID> [--service <SERVICE>]`
 - **MCP Aracı**: `check_proxy_grpc_health` (parametreler: `proxy_id` veya `target_url`, `service`)
 - **REST API**: `POST /api/proxies/{id}/grpc/health` veya `POST /api/grpc/health`
 
@@ -772,11 +772,10 @@ r3v3rs3; MaxMind GeoLite2-Country veritabanları için SHA256 bütünlük doğru
 - **WebUI, CLI ve MCP Arasında %100 Eşitlik**:
   - **WebUI**: Güvenlik sayfasında (`/security`) "GeoIP" sekmesinde yüklü durumunu, veritabanı dosya yolunu, boyutunu, derleme tarihini, lisans durumunu gösteren canlı durum kartı ve tek tıkla "Update Database Now" butonu.
   - **CLI**:
-    - `r3 security geoip status`: Yüklü veritabanı durumunu, derleme zamanını, boyutunu ve otomatik güncelleme takvimini gösterir.
-    - `r3 security geoip update`: En güncel GeoLite2-Country MMDB dosyasını indirir ve anında hot-reload eder.
-    - `r3 security geoip config`: GeoIP yapılandırmasını görüntüler.
-    - `r3 security geoip set-config --license-key <KEY> --auto-update true --interval-days 7`: GeoIP ayarlarını günceller.
-  - **MCP Tool'ları**: `get_geoip_status`, `update_geoip_database`, `get_geoip_config`, `update_geoip_config`.
+    - `r3 security geoip get-status`: Yüklü veritabanı durumunu, derleme zamanını, boyutunu ve otomatik güncelleme takvimini gösterir.
+    - `r3 security geoip update-database`: En güncel GeoLite2-Country MMDB dosyasını indirir ve anında hot-reload eder.
+    - `r3 security geoip update-config --license-key <KEY> --auto-update true --interval-days 7`: GeoIP ayarlarını günceller.
+  - **MCP Tool'ları**: `get_geoip_status`, `update_geoip_database`, `update_geoip_config`.
   - **REST API**:
     - `GET /api/security/geoip/status`
     - `PUT /api/security/geoip/config`
@@ -1176,13 +1175,13 @@ r3v3rs3, WebUI, MCP ve CLI üzerinden tek tıkla uygulanabilen yerleşik OWASP g
 
 ```bash
 # Mevcut güvenlik profillerini listele
-r3 proxy security-headers profiles
+r3 proxy security-headers list-profiles
 
 # Proxy güvenlik üstbilgilerini denetle, skoru ve önerileri incele
-r3 proxy security-headers audit <PROXY_ID>
+r3 proxy security-headers get <PROXY_ID>
 
 # Bir proxy'ye OWASP güvenlik sertleştirme profili uygula
-r3 proxy security-headers apply <PROXY_ID> strict
+r3 proxy security-headers apply-profile <PROXY_ID> strict
 ```
 
 #### MCP Araçları
@@ -1517,7 +1516,7 @@ Harici müşteriler veya üçüncü taraf alan adları için sertifika düzenler
 
 CNAME talimatlarını ve doğrulama durumunu CLI veya MCP üzerinden inceleyin:
 ```bash
-r3 acme cname-instructions <ACME_ID>
+r3 acme get-cname-instructions <ACME_ID>
 ```
 
 ## DNS webhook
@@ -1613,22 +1612,22 @@ CT günlüklerini `r3 cert ct` komut satırı aracı ile doğrudan yönetin:
 
 ```bash
 # İzleme durumunu ve aktif alarm sayısını görüntüleme
-r3 cert ct status
+r3 cert ct get-status
 
 # Güncel konfigürasyonu görüntüleme
-r3 cert ct config
+r3 cert ct get-config
 
 # Konfigürasyonu güncelleme
-r3 cert ct set-config --enable true --domains "example.com,api.example.com" --interval 7200
+r3 cert ct update-config --enable true --domains "example.com,api.example.com" --interval 7200
 
 # İsteğe bağlı anlık tarama başlatma
-r3 cert ct check --domain example.com
+r3 cert ct check-now --domain example.com
 
 # Keşfedilen CT kayıtlarını ve sahte sertifikaları listeleme
-r3 cert ct list --rogue-only
+r3 cert ct list-entries --rogue-only
 
 # Bir alarmı kapatma
-r3 cert ct dismiss <ENTRY_ID>
+r3 cert ct dismiss-alert <ENTRY_ID>
 ```
 
 ## Model Context Protocol (MCP)
@@ -1724,13 +1723,13 @@ Akış önceliklendirmesi her HTTP proxy'sinde etkinleştirilebilir ve port baş
 CLI komutları:
 ```sh
 # Proxy akış önceliklendirme yapılandırmasını görüntüleme
-r3 proxy priority <PROXY_ID>
+r3 proxy get-stream-priority <PROXY_ID>
 
 # Header iletimiyle birlikte uyarlamalı önceliklendirmeyi etkinleştirme
-r3 proxy priority <PROXY_ID> --enable --inject-header --adaptive-concurrency
+r3 proxy update-stream-priority <PROXY_ID> --enable true --inject-header true --adaptive-concurrency true
 
 # Genel akış öncelik ve geri basınç istatistiklerini görüntüleme
-r3 traffic priority
+r3 traffic get-priority-stats
 ```
 
 MCP araçları: `get_proxy_stream_priority`, `update_proxy_stream_priority`, `get_traffic_priority_stats`.
@@ -1936,7 +1935,7 @@ r3 http://127.0.0.1:46492 platform status
 # Portlar
 r3 <server> port list
 r3 <server> port get <id>
-r3 <server> port add <spec.json|yaml|->
+r3 <server> port create <spec.json|yaml|->
 r3 <server> port update <id> <spec.json|yaml|->
 r3 <server> port delete <id>
 r3 <server> port reset <id>
@@ -1944,9 +1943,9 @@ r3 <server> port reset <id>
 # Proxy'ler
 r3 <server> proxy list
 r3 <server> proxy get <id>
-r3 <server> proxy add <proxy.json|yaml|->
+r3 <server> proxy create <proxy.json|yaml|->
 r3 <server> proxy update <id> <proxy.json|yaml|->
-r3 <server> proxy status <id>
+r3 <server> proxy get-status <id>
 r3 <server> proxy purge-cache <id> [--path /static]
 r3 <server> proxy delete <id>
 
@@ -1954,218 +1953,218 @@ r3 <server> proxy delete <id>
 r3 <server> cert list
 r3 <server> cert get <id>
 r3 <server> cert upload --cert server.crt --key server.key
-r3 <server> cert coverage
+r3 <server> cert check-coverage
 r3 <server> cert delete <id>
-r3 <server> cert self-sign --san app.example.com [--ca <ca-id>] [--kind client]
+r3 <server> cert create-self-signed --san app.example.com [--ca <ca-id>] [--kind client]
 r3 <server> cert download <id> [--output cert.tar.gz]
 r3 <server> cert delete-many <id> <id>
 r3 <server> cert verify-cname --domain app.example.com [--expected-target panel.example.com]
 r3 <server> acme list
 r3 <server> acme get <id>
-r3 <server> acme add <acme.json|yaml|->
+r3 <server> acme create <acme.json|yaml|->
 r3 <server> acme update <id> <acme.json|yaml|->
-r3 <server> acme order <id>
+r3 <server> acme request <id>
 r3 <server> acme delete <id>
 
 # Erişim Listeleri (ACL) ve DNS Sağlayıcıları
 r3 <server> acl list
 r3 <server> acl get <id>
-r3 <server> acl add <acl.json|yaml|->
+r3 <server> acl create <acl.json|yaml|->
 r3 <server> acl update <id> <acl.json|yaml|->
 r3 <server> acl delete <id>
 r3 <server> dns list
 r3 <server> dns get <id>
-r3 <server> dns add <dns.json|yaml|->
+r3 <server> dns create <dns.json|yaml|->
 r3 <server> dns update <id> <dns.json|yaml|->
 r3 <server> dns delete <id>
 
 # Dağıtılan Uygulamalar
 r3 <server> app list
 r3 <server> app get <id>
-r3 <server> app add <app.json|yaml|->
+r3 <server> app create <app.json|yaml|->
 r3 <server> app update <id> <app.json|yaml|->
 r3 <server> app deploy <id>
-r3 <server> app rollback <id>
+r3 <server> app rollback-deployment <id>
 r3 <server> app start <id>
 r3 <server> app stop <id>
 r3 <server> app restart <id>
-r3 <server> app logs <id> [--tail 100]
-r3 <server> app log-size <id>
+r3 <server> app get-logs <id> [--tail 100]
+r3 <server> app get-log-size <id>
 r3 <server> app vacuum-logs <id>
-r3 <server> app env <id>
-r3 <server> app set-env <id> KEY=VAL [KEY2=VAL2...]
+r3 <server> app get-env <id>
+r3 <server> app update-env <id> KEY=VAL [KEY2=VAL2...]
 r3 <server> app delete <id>
 r3 <server> app check-update <id>
-r3 <server> app deployments <id>
-r3 <server> app deployment <deployment-id>
-r3 <server> app approve <deployment-id>
-r3 <server> app reject <deployment-id>
-r3 <server> app metrics <id> [--hours 6]
-r3 <server> app services <id>
-r3 <server> app topology <id>
+r3 <server> app list-deployments <id>
+r3 <server> app get-deployment <deployment-id>
+r3 <server> app approve-deployment <deployment-id>
+r3 <server> app reject-deployment <deployment-id>
+r3 <server> app get-metrics <id> [--hours 6]
+r3 <server> app get-services <id>
+r3 <server> app get-topology <id>
 r3 <server> app upgrade-catalog <id>
-printf '%s' "$TOKEN" | r3 <server> app set-git-token <id>
+printf '%s' "$TOKEN" | r3 <server> app update-git-token <id>
 r3 <server> app delete-git-token <id>
-r3 <server> app new-webhook-secret <id>
+r3 <server> app create-webhook-secret <id>
 r3 <server> app delete-webhook-secret <id>
 r3 <server> app install-hook <id>
 r3 <server> app files list <id> --path /data
 r3 <server> app files download <id> --path /data/app.db [--output app.db]
 r3 <server> app files upload <id> --path /data/config.yml --file ./config.yml
 r3 <server> app files delete <id> --path /data/old.log
-r3 <server> app volumes backups <id> <volume>
-r3 <server> app volumes backup <id> <volume>
-r3 <server> app volumes restore <id> <volume> <backup-id>
+r3 <server> app volumes list-backups <id> <volume>
+r3 <server> app volumes create-backup <id> <volume>
+r3 <server> app volumes restore-backup <id> <volume> <backup-id>
 r3 <server> app volumes delete-backup <id> <volume> <backup-id>
 r3 <server> app volumes download-backup <id> <volume> <backup-id> [--output data.tar.gz]
-r3 <server> app volumes export <id> <volume> [--output data-export.tar.gz]
-r3 <server> app volumes import <id> <volume> --file ./data.tar.gz
+r3 <server> app volumes export-archive <id> <volume> [--output data-export.tar.gz]
+r3 <server> app volumes import-archive <id> <volume> --file ./data.tar.gz
 
 # Yönetilen Veritabanları
 r3 <server> db list
-r3 <server> db get <id>
+r3 <server> db get-app <id>
 r3 <server> db create --name my-db --engine postgres [--version postgres:18-alpine]
 r3 <server> db clone <id> --name my-db-clone
-r3 <server> db replica <id> --name my-db-replica
-r3 <server> db logs <id> [--tail 100]
-r3 <server> db credentials <id>
-r3 <server> db tenants <id>
+r3 <server> db create-replica <id> --name my-db-replica
+r3 <server> db get-app-logs <id> [--tail 100]
+r3 <server> db get-credentials <id>
+r3 <server> db list-tenants <id>
 r3 <server> db reset-password <id> [--tenant <name>]
 r3 <server> db delete-tenant <id> <tenant>
 r3 <server> db delete <id>
-r3 <server> db replicas <id>
+r3 <server> db list-replicas <id>
 r3 <server> db refresh-engines
 
 # Yedekler, Otomatik Doğrulama, Belirli Bir Ana Geri Yükleme (PITR) ve WAL
-r3 <server> backup config
+r3 <server> backup get-config
 r3 <server> backup list <database-id>
 r3 <server> backup create <database-id>
 r3 <server> backup test <database-id> <backup-id>
 r3 <server> backup restore <database-id> <backup-id>
-r3 <server> backup pitr-range <database-id>
-r3 <server> backup pitr-restore <database-id> <timestamp_ms> [--new-name <name>] [--host-port <port>]
-r3 <server> backup wal-archive <database-id>
-r3 <server> backup wal-segments <database-id>
+r3 <server> backup get-pitr-range <database-id>
+r3 <server> backup restore-pitr <database-id> <timestamp_ms> [--new-name <name>] [--host-port <port>]
+r3 <server> backup archive-wal <database-id>
+r3 <server> backup list-wal-segments <database-id>
 r3 <server> backup delete <database-id> <backup-id>
 r3 <server> backup list-all
-r3 <server> backup overview
-r3 <server> backup run <database-id>
-r3 <server> backup s3-list [--database <name>]
-r3 <server> backup s3-download --key <key> [--output db.sql.gz]
+r3 <server> backup get-overview
+r3 <server> backup run-now <database-id>
+r3 <server> backup list-s3 [--database <name>]
+r3 <server> backup download-s3 --key <key> [--output db.sql.gz]
 r3 <server> backup download <database-id> <backup-id> [--output db.sql.gz]
-r3 <server> backup s3-restore <key> [--target-db <id> | --new-name <name> [--engine <engine>]]
+r3 <server> backup restore-s3 <key> [--target-db <id> | --new-name <name> [--engine <engine>]]
 
 # Çoklu Düğüm Agent Hedefleri
 r3 <server> target list
 r3 <server> target get <id>
-r3 <server> target add --name worker-1 --host 10.0.0.5 --port 46493
+r3 <server> target create --name worker-1 --host 10.0.0.5 --port 46493
 r3 <server> target drain <id>
 r3 <server> target undrain <id>
 r3 <server> target upgrade <id>
 r3 <server> target upgrade-all
-r3 <server> target token <id>
+r3 <server> target create-token <id>
 r3 <server> target delete <id>
 
 # Projeler ve Ortamlar
 r3 <server> project list
 r3 <server> project get <id>
-r3 <server> project add --name my-project [--description "Ana servisler"]
-r3 <server> project sync-env <project-id> --from staging --to production
+r3 <server> project create --name my-project [--description "Ana servisler"]
+r3 <server> project sync-environment-env <project-id> --from staging --to production
 r3 <server> project delete <id>
 r3 <server> project update <id> --name my-project [--description "Core apps"]
-r3 <server> project env-create <project-id> --name staging
-r3 <server> project env-get <project-id> <env-id>
-r3 <server> project env-update <project-id> <env-id> --name stage
-r3 <server> project env-delete <project-id> <env-id>
-r3 <server> project env-vars <project-id> <env-id>
-r3 <server> project env-set-vars <project-id> <env-id> <vars.json|yaml|->
-r3 <server> project env-diff <project-id> <source-env-id> <target-env-id>
+r3 <server> project create-environment <project-id> --name staging
+r3 <server> project get-environment <project-id> <env-id>
+r3 <server> project update-environment <project-id> <env-id> --name stage
+r3 <server> project delete-environment <project-id> <env-id>
+r3 <server> project get-environment-env <project-id> <env-id>
+r3 <server> project update-environment-env <project-id> <env-id> <vars.json|yaml|->
+r3 <server> project diff-environments <project-id> <source-env-id> <target-env-id>
 r3 <server> env-group list
 r3 <server> env-group get <id>
-r3 <server> env-group add <group.json|yaml|->
+r3 <server> env-group create <group.json|yaml|->
 r3 <server> env-group update <id> <group.json|yaml|->
 r3 <server> env-group delete <id>
 
 # Uygulama Kataloğu (App Store)
-r3 <server> store list
+r3 <server> store get
 r3 <server> store refresh
-r3 <server> store install <store-app-id> --name my-service [--domain service.example.com]
+r3 <server> store install-app <store-app-id> --name my-service [--domain service.example.com]
 
 # Trafik Telemetrisi ve İstek İnceleme
 r3 <server> traffic connections list [--proxy <id>]
-r3 <server> traffic connections close <connection-id>
-r3 <server> traffic priority
-r3 <server> traffic geo
-r3 <server> traffic replay <log-entry-id>
-r3 <server> traffic list [--resource-id <proxy-id>] [--status 502] [--search /api] [--country DE] [--limit 50]
-r3 <server> traffic get <log-entry-id>
-r3 <server> traffic live [--resource-id <proxy-id>] [--status 502] [--search /api] [--country DE]
-r3 <server> app logs-live <id> [--tail 100] [--service web]
-r3 <server> app terminal <id> [--shell /bin/bash]
+r3 <server> traffic connections terminate <connection-id>
+r3 <server> traffic get-priority-stats
+r3 <server> traffic get-geo
+r3 <server> traffic replay-request --entry <log-entry-id>
+r3 <server> traffic get [--resource-id <proxy-id>] [--status 502] [--search /api] [--country DE] [--limit 50]
+r3 <server> traffic get-entry <log-entry-id>
+r3 <server> traffic stream [--resource-id <proxy-id>] [--status 502] [--search /api] [--country DE]
+r3 <server> app stream-logs <id> [--tail 100] [--service web]
+r3 <server> app open-terminal <id> [--shell /bin/bash]
 r3 <server> traffic replay-request <request.json|yaml|->
-r3 <server> security anomalies
-r3 <server> security anomaly-rules
-r3 <server> security set-anomaly-rules <rules.json|yaml|->
+r3 <server> security get-system-anomalies
+r3 <server> security get-anomaly-rules
+r3 <server> security update-anomaly-rules <rules.json|yaml|->
 r3 <server> security dismiss-anomalies
 r3 <server> security analyze-headers <rules.json|yaml|->
-r3 <server> proxy dry-run <request.json|yaml|->
-r3 <server> port status <port-id>
-r3 <server> port interfaces
-r3 <server> cdn status
-r3 <server> cdn refresh
-r3 <server> discovery list
-r3 <server> logs server [--since 1700000000] [--until 1700003600] [--limit 100]
-r3 <server> dashboard
-r3 <server> audit list [--username admin] [--action add_proxy] [--resource-id <id>] [--search text] [--limit 50]
-r3 <server> grpc health <request.json|yaml|->
+r3 <server> proxy preview <request.json|yaml|->
+r3 <server> port get-status <port-id>
+r3 <server> port list-network-interfaces
+r3 <server> cdn get-status
+r3 <server> cdn refresh-ranges
+r3 <server> discovery list-status
+r3 <server> get-logs server [--since 1700000000] [--until 1700003600] [--limit 100]
+r3 <server> get-dashboard
+r3 <server> audit list-log [--username admin] [--action add_proxy] [--resource-id <id>] [--search text] [--limit 50]
+r3 <server> grpc check-health <request.json|yaml|->
 r3 <server> grpc invoke <request.json|yaml|->
 r3 <server> grpc reflect <request.json|yaml|->
-r3 <server> proxy grpc-invoke <proxy-id> <request.json|yaml|->
-r3 <server> proxy grpc-reflect <proxy-id> [<request.json|yaml|->]
-r3 <server> backup set-config <config.json|yaml|->
-r3 <server> platform mcp-sessions
+r3 <server> proxy invoke-grpc <proxy-id> <request.json|yaml|->
+r3 <server> proxy reflect-grpc <proxy-id> [<request.json|yaml|->]
+r3 <server> backup update-config <config.json|yaml|->
+r3 <server> platform list-mcp-sessions
 r3 <server> platform revoke-mcp-session <session-id>
-r3 <server> platform grafana [--output r3v3rs3-grafana.json]
+r3 <server> platform get-grafana-dashboard [--output r3v3rs3-grafana.json]
 
 # Güvenlik, Yasaklı & Karantinalı IP'ler
-r3 <server> security banned-ips
-r3 <server> security unban <ip>
-r3 <server> security quarantined-ips
-r3 <server> security quarantine <ip> [--reason "Tarayıcı sondası"] [--duration-seconds 3600]
-r3 <server> security unquarantine <ip>
-r3 <server> security quarantine-config
-r3 <server> security set-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600] [--block-status-codes 404,403] [--scanner-patterns "/.env,/.git"] [--allowed-ips "198.51.100.0/24"]
+r3 <server> security list-banned-ips
+r3 <server> security unban-ip <ip>
+r3 <server> security list-quarantined-ips
+r3 <server> security quarantine-ip <ip> [--reason "Tarayıcı sondası"] [--duration-seconds 3600]
+r3 <server> security unquarantine-ip <ip>
+r3 <server> security get-quarantine-config
+r3 <server> security update-quarantine-config [--enabled true] [--max-violations 5] [--window-seconds 60] [--ban-duration-seconds 3600] [--block-status-codes 404,403] [--scanner-patterns "/.env,/.git"] [--allowed-ips "198.51.100.0/24"]
 
 # Webhook'lar ve Zamanlanmış Görevler (Cron)
 r3 <server> webhook list
 r3 <server> webhook get <id>
-r3 <server> webhook add <webhook.json|yaml|->
+r3 <server> webhook create <webhook.json|yaml|->
 r3 <server> webhook update <id> <webhook.json|yaml|->
 r3 <server> webhook test <id>
 r3 <server> webhook delete <id>
 r3 <server> cron list <app-id>
-r3 <server> cron add <app-id> --cron "0 * * * *" --command "php artisan schedule:run" [--name hourly]
+r3 <server> cron create <app-id> --cron "0 * * * *" --command "php artisan schedule:run" [--name hourly]
 r3 <server> cron update <app-id> <job-id> [--cron "*/15 * * * *"] [--command "php artisan queue:work"] [--name queue]
 r3 <server> cron run <app-id> <job-id>
 r3 <server> cron delete <app-id> <job-id>
 
 # Konteyner Registry'leri
 r3 <server> registry list
-r3 <server> registry add --server ghcr.io --username user --password token
+r3 <server> registry create --server ghcr.io --username user --password token
 r3 <server> registry update <id> [--server ghcr.io] [--username user] [--password token]
 r3 <server> registry delete <id>
 
 # Git Sağlayıcı Bağlantıları ve Depolar
 r3 <server> git list
 r3 <server> git get <id>
-r3 <server> git add --name my-gitlab --provider gitlab --client-id <id> [--client-secret <secret>]
-r3 <server> git repos <id> [--search query] [--page 1]
-r3 <server> git branches <id> --repo owner/repo
+r3 <server> git create --name my-gitlab --provider gitlab --client-id <id> [--client-secret <secret>]
+r3 <server> git list-repositories <id> [--search query] [--page 1]
+r3 <server> git list-branches <id> --repo owner/repo
 r3 <server> git delete <id>
 r3 <server> git update <id> <connection.json|yaml|->
 r3 <server> git authorize <id> --redirect-uri https://panel.example.com/oauth/git/callback
-r3 <server> git github-app --name team-github --redirect-uri https://panel.example.com/oauth/git/callback [--organization my-team] [--url https://github.example.com]
-r3 <server> git install <id>
+r3 <server> git create-github-app --name team-github --redirect-uri https://panel.example.com/oauth/git/callback [--organization my-team] [--url https://github.example.com]
+r3 <server> git install-github-app <id>
 
 # Kullanıcı Hesapları ve Yetki Token'ları
 r3 <server> account list
@@ -2177,12 +2176,12 @@ r3 <server> token create --name ci-deploy [--scope edit]
 r3 <server> token delete <id>
 
 # Platform Durumu ve Bakım
-r3 <server> platform status
-r3 <server> platform metrics
-r3 <server> platform prune
+r3 <server> platform get-app-info
+r3 <server> platform get-metrics
+r3 <server> platform run-prune
 r3 <server> platform vacuum-logs [--threshold-mb 50]
-r3 <server> platform upgrade
-r3 <server> platform upgrade-status
+r3 <server> platform upgrade-server
+r3 <server> platform get-upgrade-status
 r3 <server> platform rotate-key
 ```
 
@@ -2243,12 +2242,12 @@ enabled = true
 extra_ports = ["udp/51820"]
 ```
 
-Ayarlar sayfası, MCP aracı `update_firewall` ve `r3 security firewall set --enabled true --extra-ports udp/51820` komutu aynı iki ayarı değiştirir.
+Ayarlar sayfası, MCP aracı `update_firewall` ve `r3 security firewall update --enabled true --extra-ports udp/51820` komutu aynı iki ayarı değiştirir.
 
 Bir port, bir uygulama veya ayar her değiştiğinde r3v3rs3 tabloyu tek bir `nft -f` işlemiyle değiştirir. Bu yüzden yarım yazılmış bir tablo oluşmaz. Ayar kapatılınca tablo silinir. Tablo yalnız `input` hook'unu filtreler. Docker'ın NAT ve forward kuralları değişmez. Agent hedefleri de kendi host'larında aynı tabloyu, kendi uygulamalarının `host_ports` değerleriyle tutar.
 
 - Sunucunun `CAP_NET_ADMIN` yetkisine ihtiyacı vardır. `install.sh` dosyasının yazdığı unit bu yetkiyi verir.
-- Trafiği düşüren tek güvenlik duvarı r3v3rs3 olmalıdır. nftables her tablonun input zincirini çalıştırır. Bu yüzden firewalld, ufw veya `iptables-persistent` tablosundaki bir drop kuralı, bu tablonun açtığı bir portu yine engeller. Önce diğer aracı durdurun (`systemctl disable --now firewalld`, `ufw disable` veya `systemctl disable --now netfilter-persistent`). Ayarlar sayfasındaki **Sunucu Güvenlik Duvarı** kartı, `GET /api/firewall`, MCP aracı `get_firewall_status` ve `r3 security firewall status` böyle her tabloyu bir uyarı olarak listeler. Port listesi de **Güvenlik duvarı açık, başka bir güvenlik duvarı var** gösterir.
+- Trafiği düşüren tek güvenlik duvarı r3v3rs3 olmalıdır. nftables her tablonun input zincirini çalıştırır. Bu yüzden firewalld, ufw veya `iptables-persistent` tablosundaki bir drop kuralı, bu tablonun açtığı bir portu yine engeller. Önce diğer aracı durdurun (`systemctl disable --now firewalld`, `ufw disable` veya `systemctl disable --now netfilter-persistent`). Ayarlar sayfasındaki **Sunucu Güvenlik Duvarı** kartı, `GET /api/firewall`, MCP aracı `get_firewall_status` ve `r3 security firewall get-status` böyle her tabloyu bir uyarı olarak listeler. Port listesi de **Güvenlik duvarı açık, başka bir güvenlik duvarı var** gösterir.
 - Docker ile port yayınlayan bir container'a (`-p 8080:80`) forward hook'u üzerinden ulaşılır. Bu yüzden bu tablo onu engellemez.
 
 Geri dönüş: `enabled = false` yapın veya host'ta `nft delete table inet r3v3rs3` çalıştırın. Sonra önceki güvenlik duvarını yeniden başlatın. Önce onun kurallarını kaydedin (`nft list ruleset > /root/ruleset.nft`) ve `nft -f /root/ruleset.nft` ile geri yükleyin.
@@ -2500,7 +2499,7 @@ r3 traffic connections list
 r3 traffic connections list --proxy prx_01j7xyz
 
 # Bir aktif bağlantıyı ID ile sonlandır
-r3 traffic connections close con_01j7xyz
+r3 traffic connections terminate con_01j7xyz
 ```
 
 ### Model Context Protocol (MCP)
