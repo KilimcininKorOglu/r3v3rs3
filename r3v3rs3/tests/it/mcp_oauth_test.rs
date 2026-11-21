@@ -14,7 +14,7 @@ use r3v3rs3::{admin::start_admin, config::new_appinfo, log::DatabaseLayer};
 use r3v3rs3_api::app::{AppConfig, McpClientConfig, McpConfig};
 use r3v3rs3_api::auth::Role;
 use reqwest::redirect::Policy;
-use reqwest::{Client, StatusCode};
+use reqwest::{Client, Method, StatusCode};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -23,7 +23,9 @@ use std::path::{Path, PathBuf};
 use tracing_subscriber::filter::LevelFilter;
 
 use crate::common;
-use common::{TestStorage, alloc_tcp_port, login_when_allowed, session_cookie, wait_for_listener};
+use common::{
+    TestStorage, alloc_tcp_port, login_when_allowed, send, session_cookie, wait_for_listener,
+};
 
 const CLIENT_ID: &str = "r3v3rs3-cli";
 const REDIRECT_URI: &str = "http://127.0.0.1:49152/callback";
@@ -892,6 +894,105 @@ async fn access_token_for_scope(
         .json()
         .await?;
     Ok(tokens["access_token"].as_str().unwrap().to_string())
+}
+
+/// A client that can send only a fixed `Authorization` header uses an API token of the account.
+/// The token scope stays a limit: a read token changes nothing. A forged or deleted token is
+/// refused like no token at all.
+#[tokio::test]
+async fn an_api_token_signs_in_to_the_mcp_endpoint() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-api-token")?;
+    with_admin(&dir.0, |addr| async move {
+        let cookie = session_as(&addr, "admin", "password").await?;
+        let (edit_id, edit) = create_api_token(addr, &cookie, "edit").await?;
+        let (_, read) = create_api_token(addr, &cookie, "read").await?;
+        assert_eq!(initialize_status(addr, &edit).await?, StatusCode::OK);
+        assert_edit_scope(addr, &edit, true).await?;
+        assert_edit_scope(addr, &read, false).await?;
+        assert_refused_tokens(addr, &cookie, &edit_id, &edit).await
+    })
+    .await
+}
+
+/// A forged token and a deleted token get 401, like a request without a token.
+async fn assert_refused_tokens(
+    addr: SocketAddr,
+    cookie: &str,
+    id: &str,
+    token: &str,
+) -> anyhow::Result<()> {
+    let forged = format!("{token}x");
+    assert_eq!(
+        initialize_status(addr, &forged).await?,
+        StatusCode::UNAUTHORIZED
+    );
+    let path = format!("/api/auth/tokens/{id}");
+    let (status, text) = send(addr, Method::DELETE, &path, cookie, None).await?;
+    assert!(status == 200 || status == 204, "{status} {text}");
+    assert_eq!(
+        initialize_status(addr, token).await?,
+        StatusCode::UNAUTHORIZED
+    );
+    Ok(())
+}
+
+/// Creates an API token of the signed-in account and returns its id and value.
+async fn create_api_token(
+    addr: SocketAddr,
+    cookie: &str,
+    scope: &str,
+) -> anyhow::Result<(String, String)> {
+    let body = Some(json!({ "name": format!("mcp-{scope}"), "scope": scope }));
+    let (status, text) = send(addr, Method::POST, "/api/auth/tokens", cookie, body).await?;
+    assert_eq!(status, 200, "{text}");
+    let created: Value = serde_json::from_str(&text)?;
+    let id = created["id"].as_str().unwrap_or_default().to_string();
+    let token = created["token"].as_str().unwrap_or_default().to_string();
+    Ok((id, token))
+}
+
+/// The status of an MCP `initialize` request with the bearer token.
+async fn initialize_status(addr: SocketAddr, token: &str) -> anyhow::Result<StatusCode> {
+    let response = Client::new()
+        .post(format!("http://{addr}/api/mcp"))
+        .header("authorization", format!("Bearer {token}"))
+        .header("accept", "application/json, text/event-stream")
+        .json(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "r3v3rs3-test", "version": "0.0.1"},
+            }
+        }))
+        .send()
+        .await?;
+    Ok(response.status())
+}
+
+/// A change tool passes only with an edit token. The proxy does not exist, so an allowed call
+/// ends with a not-found error; a refused one ends with the scope or the role error.
+async fn assert_edit_scope(addr: SocketAddr, token: &str, allowed: bool) -> anyhow::Result<()> {
+    let client = mcp_client(addr, token).await?;
+    let mut params = rmcp::model::CallToolRequestParams::new("delete_proxy");
+    params = params.with_arguments(
+        json!({ "id": "abc-def" })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+    );
+    let result = client.call_tool(params).await;
+    client.cancel().await?;
+    let error = format!("{result:?}");
+    let refused = error.contains("edit scope") || error.contains("does not allow");
+    assert_eq!(!refused, allowed, "{error}");
+    if allowed {
+        assert!(
+            error.contains("not_found") || error.contains("not found"),
+            "{error}"
+        );
+    }
+    Ok(())
 }
 
 /// A silent MCP client for the test.

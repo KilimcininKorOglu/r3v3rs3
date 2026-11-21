@@ -1590,8 +1590,37 @@ fn escape_header_param(param: &str) -> String {
     param.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// The caller of an MCP bearer token and its scopes: an OAuth access token with a live grant, or
+/// an API token of an account, for a client that can only send a fixed header. A read API token
+/// acts as a viewer, so it gets only the `read` scope.
+async fn mcp_caller(state: &AppState, token: &str) -> Option<(Caller, String)> {
+    let grant = {
+        let data = state.data.lock().await;
+        data.mcp.verify(token).map(|grant| {
+            (
+                grant.username.clone(),
+                grant.scope.clone(),
+                grant.created_at,
+            )
+        })
+    };
+    if let Some((username, scope, created_at)) = grant {
+        let mut record = crate::sessions::SessionRecord::new(&username);
+        record.started_at = created_at;
+        let caller = state.accounts.borrow().caller(&record)?;
+        return Some((caller, scope));
+    }
+    let caller = super::auth::api_token_caller(state, token)?;
+    let scope = match caller.role {
+        r3v3rs3_api::auth::Role::Viewer => "read",
+        _ => "read edit",
+    };
+    Some((caller, scope.to_string()))
+}
+
 /// The middleware of the MCP endpoint: the request needs an access token with a live grant of a
-/// signed-in account. The token scopes travel with the caller in the request extensions.
+/// signed-in account, or an API token. The token scopes travel with the caller in the request
+/// extensions.
 pub async fn verify_bearer(
     State(state): State<AppState>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
@@ -1615,20 +1644,7 @@ pub async fn verify_bearer(
     else {
         return unauthorized(&origin);
     };
-    let (username, scope, created_at) = {
-        let data = state.data.lock().await;
-        match data.mcp.verify(token) {
-            Some(grant) => (
-                grant.username.clone(),
-                grant.scope.clone(),
-                grant.created_at,
-            ),
-            None => return unauthorized(&origin),
-        }
-    };
-    let mut record = crate::sessions::SessionRecord::new(&username);
-    record.started_at = created_at;
-    let Some(mut caller) = state.accounts.borrow().caller(&record) else {
+    let Some((mut caller, scope)) = mcp_caller(&state, token).await else {
         return unauthorized(&origin);
     };
     let proxied = request.extensions().get::<ProxiedClient>();
