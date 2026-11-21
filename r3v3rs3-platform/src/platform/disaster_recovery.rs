@@ -430,7 +430,7 @@ pub async fn create_dr_backup(
     let dir = dr_dir(config_dir);
     fs::create_dir_all(&dir)?;
     let bundle_path = dir.join(format!("{id}.r3bundle"));
-    fs::write(&bundle_path, &encrypted_bundle)?;
+    super::wal::write_atomic(&bundle_path, &encrypted_bundle).await?;
 
     let s3_replicated = if upload_s3 && let Some(p) = platform {
         replicate_to_s3(p, &id, &encrypted_bundle).await
@@ -449,8 +449,12 @@ pub async fn create_dr_backup(
     };
 
     let manifest_path = dir.join(format!("{id}.json"));
-    if let Ok(manifest_json) = serde_json::to_string_pretty(&entry) {
-        let _ = fs::write(manifest_path, manifest_json);
+    let manifest_json = serde_json::to_string_pretty(&entry)?;
+    if let Err(err) = super::wal::write_atomic(&manifest_path, manifest_json.as_bytes()).await {
+        // Without its manifest the bundle is never listed, so it must not stay behind.
+        fs::remove_file(&bundle_path)
+            .with_context(|| format!("cannot remove {}", bundle_path.display()))?;
+        return Err(err.context("cannot write the backup manifest"));
     }
 
     Ok(entry)
@@ -600,7 +604,7 @@ pub async fn run_cli_backup(
         }
     };
 
-    fs::write(&dest_path, &encrypted)?;
+    super::wal::write_atomic(&dest_path, &encrypted).await?;
 
     let entry = DisasterRecoveryBackupEntry {
         id,
