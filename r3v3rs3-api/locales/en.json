@@ -841,6 +841,8 @@
   "http_form.maintenance_body_hint": "HTML or plain text response. Leave empty to serve the default maintenance page.",
   "http_form.maintenance_body_placeholder": "Optional custom HTML or plain text message...",
   "http_form.maintenance_enabled": "Enable maintenance mode",
+  "http_form.maintenance_error_page": "Use the error page theme",
+  "http_form.maintenance_error_page_hint": "Answers with the page of this status code from the error page theme of the proxy instead of a custom body.",
   "http_form.maintenance_hint": "Returns an immediate maintenance response instead of routing to upstream servers.",
   "http_form.maintenance_retry_after": "Retry-After (Seconds, Optional)",
   "http_form.maintenance_status": "Status Code",

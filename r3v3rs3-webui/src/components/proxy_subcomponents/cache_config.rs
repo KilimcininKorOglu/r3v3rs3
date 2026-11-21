@@ -520,12 +520,14 @@ pub struct MaintenanceForm {
     pub status: String,
     pub body: String,
     pub retry_after: String,
+    pub error_page: bool,
 }
 
 impl MaintenanceForm {
     pub fn new(config: &MaintenanceConfig) -> Self {
         Self {
             enabled: config.enabled,
+            error_page: config.error_page,
             status: config.status.to_string(),
             body: config.body.clone(),
             retry_after: config
@@ -568,9 +570,13 @@ pub fn maintenance_view(
                         { error_view(errors.get("maintenance_retry_after")) }
                     </div>
                 </div>
-                <label class={classes!(LABEL_CLASS, "mt-3")}>{locale.t("http_form.maintenance_body")}</label>
-                <textarea rows="3" autocapitalize="off" spellcheck="false" placeholder={locale.t("http_form.maintenance_body_placeholder")} value={form.body.clone()} onchange={update(|form, event| form.body = text_area(event))} class={INPUT_CLASS} />
-                <p class={HINT_CLASS}>{locale.t("http_form.maintenance_body_hint")}</p>
+                { toggle(update(|form, event| form.error_page = checked(event)), form.error_page, locale.t("http_form.maintenance_error_page"), "mt-3") }
+                <p class={HINT_CLASS}>{locale.t("http_form.maintenance_error_page_hint")}</p>
+                if !form.error_page {
+                    <label class={classes!(LABEL_CLASS, "mt-3")}>{locale.t("http_form.maintenance_body")}</label>
+                    <textarea rows="3" autocapitalize="off" spellcheck="false" placeholder={locale.t("http_form.maintenance_body_placeholder")} value={form.body.clone()} onchange={update(|form, event| form.body = text_area(event))} class={INPUT_CLASS} />
+                    <p class={HINT_CLASS}>{locale.t("http_form.maintenance_body_hint")}</p>
+                }
             }
         </div>
     }
@@ -610,6 +616,7 @@ pub fn parse_maintenance(
         status,
         body: form.body.clone(),
         retry_after,
+        error_page: form.error_page,
     }
 }
 

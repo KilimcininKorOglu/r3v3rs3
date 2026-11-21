@@ -1528,8 +1528,7 @@ fn check_route_access<B>(
     request_host: Option<&str>,
 ) -> Result<Upstream, EarlyExit> {
     if route.maintenance.enabled {
-        let response = maintenance_response(&route.maintenance);
-        return Err(EarlyExit::Respond(Box::new(response)));
+        return Err(maintenance_exit(&route.maintenance));
     }
     if let Some(response) = check_dictionary_request(route, req) {
         return Err(EarlyExit::Respond(Box::new(response)));
@@ -2203,6 +2202,19 @@ const DEFAULT_MAINTENANCE_BODY: &str = "<!DOCTYPE html>\n<html lang=\"en\">\n<he
 
 fn is_html_body(body: &[u8], body_str: &str) -> bool {
     body.starts_with(b"<!DOCTYPE") || body.starts_with(b"<html") || body_str.contains("</html>")
+}
+
+/// The answer of a route in maintenance: the error page of the theme for `error_page`, else the
+/// configured or the default maintenance page.
+fn maintenance_exit(maintenance: &r3v3rs3_api::proxy::MaintenanceConfig) -> EarlyExit {
+    if maintenance.error_page {
+        return EarlyExit::Err(ProxyError::Maintenance {
+            status: StatusCode::from_u16(maintenance.status)
+                .unwrap_or(StatusCode::SERVICE_UNAVAILABLE),
+            retry_after: maintenance.retry_after,
+        });
+    }
+    EarlyExit::Respond(Box::new(maintenance_response(maintenance)))
 }
 
 fn maintenance_response(

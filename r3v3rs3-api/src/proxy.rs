@@ -446,6 +446,10 @@ pub struct MaintenanceConfig {
     /// Optional Retry-After header in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after: Option<u32>,
+    /// When true, the answer is the page of `status` from the error page theme of the proxy, and
+    /// `body` is not used. A stopped platform app answers this way.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub error_page: bool,
 }
 
 impl MaintenanceConfig {
@@ -454,6 +458,7 @@ impl MaintenanceConfig {
             && self.status == DEFAULT_MAINTENANCE_STATUS
             && self.body.is_empty()
             && self.retry_after.is_none()
+            && !self.error_page
     }
 
     pub fn validate(&self) -> Result<(), Error> {

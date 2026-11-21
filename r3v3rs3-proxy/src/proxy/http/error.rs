@@ -53,6 +53,13 @@ pub enum ProxyError {
 
     #[error("automated AI scraper or crawler blocked")]
     BotBlocked,
+
+    /// A route in maintenance that answers with the error page of the theme.
+    #[error("the route is in maintenance")]
+    Maintenance {
+        status: StatusCode,
+        retry_after: Option<u32>,
+    },
 }
 
 impl ProxyError {
@@ -74,6 +81,7 @@ impl ProxyError {
             | Self::UpstreamClientCertInvalid
             | Self::NoUpstreamServers
             | Self::UpstreamUriInvalid => StatusCode::BAD_GATEWAY,
+            Self::Maintenance { status, .. } => *status,
         }
     }
 }
@@ -92,6 +100,12 @@ pub fn error_headers(err: &anyhow::Error) -> HeaderMap {
         }
         Some(ProxyError::Unauthorized { challenge }) => {
             headers.insert(WWW_AUTHENTICATE, challenge.clone());
+        }
+        Some(ProxyError::Maintenance {
+            retry_after: Some(seconds),
+            ..
+        }) => {
+            headers.insert(RETRY_AFTER, HeaderValue::from(*seconds));
         }
         _ => {}
     }

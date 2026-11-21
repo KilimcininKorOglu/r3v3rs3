@@ -841,6 +841,8 @@
   "http_form.maintenance_body_hint": "HTML veya düz metin yanıtı. Varsayılan bakım sayfasını kullanmak için boş bırakın.",
   "http_form.maintenance_body_placeholder": "İsteğe bağlı özel HTML veya metin mesajı...",
   "http_form.maintenance_enabled": "Bakım modunu etkinleştir",
+  "http_form.maintenance_error_page": "Hata sayfası temasını kullan",
+  "http_form.maintenance_error_page_hint": "Özel gövde yerine, proxy'nin hata sayfası temasındaki bu durum koduna ait sayfayla yanıt verir.",
   "http_form.maintenance_hint": "İstekleri upstream sunuculara iletmek yerine doğrudan bakım yanıtı döner.",
   "http_form.maintenance_retry_after": "Retry-After (Saniye, İsteğe Bağlı)",
   "http_form.maintenance_status": "Durum Kodu",

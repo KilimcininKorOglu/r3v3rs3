@@ -79,6 +79,7 @@ async fn run_maintenance_steps(
         status: 503,
         body: String::new(),
         retry_after: None,
+        error_page: false,
     };
     call(
         &mut channels,
@@ -89,11 +90,14 @@ async fn run_maintenance_steps(
     .await??;
     check_upstream(&client, &url, "upstream response").await?;
 
+    check_themed_maintenance(&mut channels, &client, &url, &upstream).await?;
+
     let custom = MaintenanceConfig {
         enabled: true,
         status: 503,
         body: "Custom system maintenance in progress.".into(),
         retry_after: Some(180),
+        error_page: false,
     };
     call(
         &mut channels,
@@ -114,6 +118,43 @@ async fn run_maintenance_steps(
     Ok(())
 }
 
+/// A stopped platform app: the page of the error page theme, never the fixed maintenance page
+/// and never the custom body, with the Retry-After of the setting.
+async fn check_themed_maintenance(
+    channels: &mut ServerChannels,
+    client: &reqwest::Client,
+    url: &str,
+    upstream: &str,
+) -> anyhow::Result<()> {
+    let themed = MaintenanceConfig {
+        enabled: true,
+        status: 503,
+        body: "Custom system maintenance in progress.".into(),
+        retry_after: Some(30),
+        error_page: true,
+    };
+    call(
+        channels,
+        UpdateProxy {
+            entry: make_entry(upstream, themed),
+        },
+    )
+    .await??;
+    check_maintenance(
+        client,
+        url,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "30",
+        "text/html",
+        "Service Unavailable",
+    )
+    .await?;
+    let body = client.get(url).send().await?.text().await?;
+    assert!(!body.contains("Under Maintenance"), "{body}");
+    assert!(!body.contains("Custom system maintenance"), "{body}");
+    Ok(())
+}
+
 #[tokio::test]
 async fn maintenance_mode_serves_maintenance_page_and_toggles() -> anyhow::Result<()> {
     let upstream =
@@ -125,6 +166,7 @@ async fn maintenance_mode_serves_maintenance_page_and_toggles() -> anyhow::Resul
         status: 503,
         body: String::new(),
         retry_after: Some(60),
+        error_page: false,
     };
     let proxy = HttpProxy {
         routes: vec![http_route("/", upstream.as_str(), None)],
