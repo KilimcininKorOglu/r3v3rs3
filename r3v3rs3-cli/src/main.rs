@@ -167,7 +167,7 @@ pub enum PortCommand {
     /// Resets a port listener.
     Reset { id: String },
     /// Enables or disables TLS 1.3 0-RTT early data on a port.
-    SetEarlyData {
+    UpdateEarlyData {
         id: String,
         /// `--enable false` turns early data off; a bare bool flag could only turn it on.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
@@ -175,7 +175,7 @@ pub enum PortCommand {
     },
     /// Makes the upstream servers of a TCP or UDP port see the client address (needs
     /// CAP_NET_ADMIN on the server and an upstream that is not a loopback address).
-    SetTransparent {
+    UpdateTransparent {
         id: String,
         /// `--enable false` turns the option off; a bare bool flag could only turn it on.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
@@ -2027,8 +2027,12 @@ async fn run_port(api: &api_client::ApiClient, cmd: PortCommand) -> anyhow::Resu
         PortCommand::Update { id, payload } => api.update_port(&id, &payload).await,
         PortCommand::Delete { id } => api.delete_port(&id).await,
         PortCommand::Reset { id } => api.reset_port(&id).await,
-        PortCommand::SetEarlyData { id, enable } => api.set_port_early_data(&id, enable).await,
-        PortCommand::SetTransparent { id, enable } => api.set_port_transparent(&id, enable).await,
+        PortCommand::UpdateEarlyData { id, enable } => {
+            api.update_port_early_data(&id, enable).await
+        }
+        PortCommand::UpdateTransparent { id, enable } => {
+            api.update_port_transparent(&id, enable).await
+        }
         PortCommand::Status { id } => api.print_get(&format!("/api/ports/{id}/status")).await,
         PortCommand::Interfaces => api.print_get("/api/ports/interfaces").await,
     }
@@ -3165,12 +3169,12 @@ mod tests {
             let mut argv = vec!["r3", "http://127.0.0.1:1", "port", command, "abc"];
             argv.extend_from_slice(extra);
             match Args::try_parse_from(argv).map(|a| a.command) {
-                Ok(Command::Port(PortCommand::SetEarlyData { enable, .. }))
-                | Ok(Command::Port(PortCommand::SetTransparent { enable, .. })) => Ok(enable),
+                Ok(Command::Port(PortCommand::UpdateEarlyData { enable, .. }))
+                | Ok(Command::Port(PortCommand::UpdateTransparent { enable, .. })) => Ok(enable),
                 other => Err(format!("{other:?}")),
             }
         };
-        for command in ["set-early-data", "set-transparent"] {
+        for command in ["update-early-data", "update-transparent"] {
             assert_eq!(parse(command, &[]), Ok(true), "{command}");
             assert_eq!(parse(command, &["--enable"]), Ok(true), "{command}");
             assert_eq!(

@@ -1355,17 +1355,38 @@ async fn assert_cli_port_mutations(
     assert!(get_out.status.success());
     assert_cli_transparent(binary, addr, token, &port_id).await?;
     // Turning early data off must be possible; the port has no TLS, so off is its only value.
-    let args = ["port", "set-early-data", &port_id, "--enable", "false"];
+    let args = ["port", "update-early-data", &port_id, "--enable", "false"];
     let out = run_client(binary, addr, token, &args).await?;
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+    assert_early_data_needs_tls(binary, addr, token, &port_id).await?;
     Ok(port_id)
 }
 
-/// `port set-transparent` saves the option, and `--enable false` clears it again.
+/// OpenAPI `update_port_early_data`: TLS 1.3 early data (RFC 8446 2.3) exists only inside a TLS
+/// handshake, so the server refuses to turn it on for a port without TLS termination.
+async fn assert_early_data_needs_tls(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    port_id: &str,
+) -> anyhow::Result<()> {
+    let args = ["port", "update-early-data", port_id, "--enable", "true"];
+    let out = run_client(binary, addr, token, &args).await?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("tls_termination_config_missing"),
+        "{stderr}"
+    );
+    Ok(())
+}
+
+/// `port update-transparent` (OpenAPI `update_port_transparent`) saves the option, and
+/// `--enable false` clears it again.
 async fn assert_cli_transparent(
     binary: &Path,
     addr: &SocketAddr,
@@ -1373,7 +1394,7 @@ async fn assert_cli_transparent(
     port_id: &str,
 ) -> anyhow::Result<()> {
     for enabled in ["true", "false"] {
-        let args = ["port", "set-transparent", port_id, "--enable", enabled];
+        let args = ["port", "update-transparent", port_id, "--enable", enabled];
         let out = run_client(binary, addr, token, &args).await?;
         assert!(
             out.status.success(),
@@ -3743,14 +3764,6 @@ const MCP_ONLY_TOOLS: &[(&str, &str)] = &[
         "JSON of the process metrics that get_metrics serves as text",
     ),
     ("update_firewall", "the firewall field of update_config"),
-    (
-        "update_port_transparent",
-        "the transparent field of update_port",
-    ),
-    (
-        "update_port_early_data",
-        "the early data field of update_port",
-    ),
     (
         "install_store_app",
         "create_app and deploy_app of a catalog entry",

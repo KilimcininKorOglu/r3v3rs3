@@ -224,6 +224,13 @@ impl Port {
     }
 }
 
+/// Request to turn the transparent option of a TCP or UDP port on or off.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SetPortTransparentRequest {
+    /// Whether the upstream servers see the client address.
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
 pub struct NetworkInterface {
     pub name: String,

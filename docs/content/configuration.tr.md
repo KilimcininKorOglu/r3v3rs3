@@ -198,9 +198,10 @@ listen = "/ip4/0.0.0.0/tcp/443/https"
 tls_termination = { server_names = ["example.com"], early_data = true }
 ```
 
-CLI veya MCP üzerinden:
+API (`{"enabled": true}` gövdesiyle `PUT /api/ports/{id}/early_data`), CLI veya MCP (`update_port_early_data`) üzerinden. TLS sonlandırması olmayan bir portta sunucu early data'yı açmayı reddeder:
 ```bash
-r3 port set-early-data <PORT_ID> --enable
+r3 port update-early-data <PORT_ID> --enable true
+r3 port update-early-data <PORT_ID> --enable false
 ```
 
 ## PROXY protocol
@@ -257,10 +258,10 @@ listen = "/ip4/0.0.0.0/udp/49160-49240"
 transparent = true
 ```
 
-CLI veya MCP (`update_port_transparent`) üzerinden:
+API (`{"enabled": true}` gövdesiyle `PUT /api/ports/{id}/transparent`), CLI veya MCP (`update_port_transparent`) üzerinden:
 ```bash
-r3 port set-transparent <PORT_ID> --enable true
-r3 port set-transparent <PORT_ID> --enable false
+r3 port update-transparent <PORT_ID> --enable true
+r3 port update-transparent <PORT_ID> --enable false
 ```
 
 r3v3rs3 kaldırıldıktan sonra ağ kurallarını elle silmek için:

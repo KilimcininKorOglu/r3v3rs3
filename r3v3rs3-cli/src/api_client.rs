@@ -674,42 +674,32 @@ impl ApiClient {
         Ok(())
     }
 
-    pub async fn set_port_early_data(&self, id: &str, enable: bool) -> anyhow::Result<()> {
-        let entry: r3v3rs3_api::port::PortEntry =
-            self.get_json(&format!("/api/ports/{id}")).await?;
-        let mut port = entry.port;
-        if let Some(ref mut tls) = port.opts.tls_termination {
-            tls.early_data = enable;
-        } else if enable {
-            anyhow::bail!("port/{id} does not have TLS termination configured");
-        }
-        let res = self
-            .request(
-                Method::PUT,
-                &format!("/api/ports/{id}"),
-                Some(&serde_json::to_value(&port)?),
-            )
-            .await?;
+    /// Turns TLS 1.3 0-RTT early data of a port on or off; the server refuses to turn it on for
+    /// a port without TLS termination.
+    pub async fn update_port_early_data(&self, id: &str, enable: bool) -> anyhow::Result<()> {
+        let body = serde_json::json!({ "enabled": enable });
+        self.request(
+            Method::PUT,
+            &format!("/api/ports/{id}/early_data"),
+            Some(&body),
+        )
+        .await?;
         println!("port/{id} early_data set to {enable}");
-        print_json(&res)
+        Ok(())
     }
 
     /// Turns the transparent option of a TCP or UDP port on or off; the server refuses it on
     /// another port and with a loopback upstream server.
-    pub async fn set_port_transparent(&self, id: &str, enable: bool) -> anyhow::Result<()> {
-        let entry: r3v3rs3_api::port::PortEntry =
-            self.get_json(&format!("/api/ports/{id}")).await?;
-        let mut port = entry.port;
-        port.opts.transparent = enable;
-        let res = self
-            .request(
-                Method::PUT,
-                &format!("/api/ports/{id}"),
-                Some(&serde_json::to_value(&port)?),
-            )
-            .await?;
+    pub async fn update_port_transparent(&self, id: &str, enable: bool) -> anyhow::Result<()> {
+        let body = serde_json::json!({ "enabled": enable });
+        self.request(
+            Method::PUT,
+            &format!("/api/ports/{id}/transparent"),
+            Some(&body),
+        )
+        .await?;
         println!("port/{id} transparent set to {enable}");
-        print_json(&res)
+        Ok(())
     }
 
     // --- Proxy operations ---

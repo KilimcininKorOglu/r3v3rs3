@@ -198,9 +198,10 @@ listen = "/ip4/0.0.0.0/tcp/443/https"
 tls_termination = { server_names = ["example.com"], early_data = true }
 ```
 
-Via CLI or MCP:
+Via the API (`PUT /api/ports/{id}/early_data` with `{"enabled": true}`), the CLI or MCP (`update_port_early_data`). The server refuses to turn early data on for a port without TLS termination:
 ```bash
-r3 port set-early-data <PORT_ID> --enable
+r3 port update-early-data <PORT_ID> --enable true
+r3 port update-early-data <PORT_ID> --enable false
 ```
 
 ## PROXY Protocol
@@ -257,10 +258,10 @@ listen = "/ip4/0.0.0.0/udp/49160-49240"
 transparent = true
 ```
 
-Via CLI or MCP (`update_port_transparent`):
+Via the API (`PUT /api/ports/{id}/transparent` with `{"enabled": true}`), the CLI or MCP (`update_port_transparent`):
 ```bash
-r3 port set-transparent <PORT_ID> --enable true
-r3 port set-transparent <PORT_ID> --enable false
+r3 port update-transparent <PORT_ID> --enable true
+r3 port update-transparent <PORT_ID> --enable false
 ```
 
 To remove the network rules by hand after r3v3rs3 is uninstalled:

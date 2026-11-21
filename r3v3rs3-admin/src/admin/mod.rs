@@ -1085,6 +1085,8 @@ fn port_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(ports::get, ports::put, ports::delete))
         .routes(routes!(ports::status))
         .routes(routes!(ports::reset))
+        .routes(routes!(ports::update_early_data))
+        .routes(routes!(ports::update_transparent))
         .routes(routes!(ports::interfaces))
 }
 

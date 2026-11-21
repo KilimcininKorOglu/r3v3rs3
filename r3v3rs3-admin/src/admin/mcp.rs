@@ -2072,16 +2072,17 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let mut entry: r3v3rs3_api::port::PortEntry = *self
-            .state
-            .call(&caller, GetPort { id })
-            .await
-            .map_err(tool_error)?;
-        entry.port.opts.transparent = params.enabled;
-        self.state
-            .call(&caller, UpdatePort { entry })
-            .await
-            .map_err(tool_error)?;
+        let request = r3v3rs3_api::port::SetPortTransparentRequest {
+            enabled: params.enabled,
+        };
+        let _updated = super::ports::update_transparent(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
         json_result(json!({ "id": id.to_string(), "transparent": params.enabled }))
     }
 
@@ -2097,23 +2098,17 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let id: ShortId = parse_id(&params.id)?;
-        let mut entry: r3v3rs3_api::port::PortEntry = *self
-            .state
-            .call(&caller, GetPort { id })
-            .await
-            .map_err(tool_error)?;
-        if let Some(tls) = entry.port.opts.tls_termination.as_mut() {
-            tls.early_data = params.enabled;
-        } else if params.enabled {
-            return Err(ErrorData::invalid_params(
-                "Port does not have TLS termination configured",
-                None,
-            ));
-        }
-        self.state
-            .call(&caller, UpdatePort { entry })
-            .await
-            .map_err(tool_error)?;
+        let request = r3v3rs3_api::early_data::SetPortEarlyDataRequest {
+            enabled: params.enabled,
+        };
+        let _updated = super::ports::update_early_data(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?;
         json_result(json!({ "id": id.to_string(), "early_data": params.enabled }))
     }
 

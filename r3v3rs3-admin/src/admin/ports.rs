@@ -10,8 +10,10 @@ use axum::{
     extract::{Path, State},
 };
 use r3v3rs3_api::{
+    early_data::SetPortEarlyDataRequest,
+    error::Error,
     id::ShortId,
-    port::{NetworkInterface, Port, PortEntry, PortStatus},
+    port::{NetworkInterface, Port, PortEntry, PortStatus, SetPortTransparentRequest},
 };
 
 /// Lists the ports.
@@ -114,6 +116,53 @@ pub async fn put(
     Json(entry): Json<Port>,
 ) -> Result<Json<Box<()>>, AppError> {
     let entry = (id, entry).into();
+    Ok(Json(state.call(&caller, UpdatePort { entry }).await?))
+}
+
+/// Turns TLS 1.3 0-RTT early data on or off for one port. The other settings stay unchanged.
+#[utoipa::path(
+    put,
+    path = "/{id}/early_data",
+    tag = "ports",
+    operation_id = "update_port_early_data",
+    params(("id" = ShortId, Path, description = "Port id.")),
+    request_body = SetPortEarlyDataRequest,
+    responses((status = 200, description = "The port is updated."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn update_early_data(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<SetPortEarlyDataRequest>,
+) -> Result<Json<Box<()>>, AppError> {
+    let mut entry = *state.call(&caller, GetPort { id }).await?;
+    match entry.port.opts.tls_termination.as_mut() {
+        Some(tls) => tls.early_data = request.enabled,
+        None if request.enabled => return Err(Error::TlsTerminationConfigMissing.into()),
+        None => {}
+    }
+    Ok(Json(state.call(&caller, UpdatePort { entry }).await?))
+}
+
+/// Turns the transparent option of a TCP or UDP port on or off. The other settings stay
+/// unchanged.
+#[utoipa::path(
+    put,
+    path = "/{id}/transparent",
+    tag = "ports",
+    operation_id = "update_port_transparent",
+    params(("id" = ShortId, Path, description = "Port id.")),
+    request_body = SetPortTransparentRequest,
+    responses((status = 200, description = "The port is updated."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn update_transparent(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<SetPortTransparentRequest>,
+) -> Result<Json<Box<()>>, AppError> {
+    let mut entry = *state.call(&caller, GetPort { id }).await?;
+    entry.port.opts.transparent = request.enabled;
     Ok(Json(state.call(&caller, UpdatePort { entry }).await?))
 }
 
