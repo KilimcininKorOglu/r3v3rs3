@@ -96,6 +96,55 @@ async fn a_failing_reflection_call_is_an_error() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A `ServerReflectionResponse` whose `file_descriptor_response` (field 4) carries one
+/// `FileDescriptorProto`: package `demo` (field 2) with service `Echo` (field 6) and its method
+/// `Say` (`MethodDescriptorProto` name 1, input_type 2, output_type 3).
+fn file_descriptor_answer() -> Vec<u8> {
+    let method = [
+        length_delimited(1, b"Say"),
+        length_delimited(2, b".demo.SayRequest"),
+        length_delimited(3, b".demo.SayReply"),
+    ]
+    .concat();
+    let service = [length_delimited(1, b"Echo"), length_delimited(2, &method)].concat();
+    let file = [length_delimited(2, b"demo"), length_delimited(6, &service)].concat();
+    let response = length_delimited(1, &file);
+    // valid_host (field 1) comes first, as real servers send it.
+    let answer = [
+        length_delimited(1, b"localhost"),
+        length_delimited(4, &response),
+    ]
+    .concat();
+    grpc_frame(&answer)
+}
+
+#[tokio::test]
+async fn the_methods_of_a_listed_service_come_from_its_file_descriptor() -> anyhow::Result<()> {
+    let app = Router::new().route(
+        V1_PATH,
+        post(|body: Bytes| async move {
+            let answer = if body.get(5) == Some(&((7 << 3) | 2)) {
+                list_services_answer("demo.Echo")
+            } else {
+                file_descriptor_answer()
+            };
+            (grpc_headers("0"), answer).into_response()
+        }),
+    );
+    let upstream = serve_http_upstream(app).await?;
+    let found = discover(upstream.as_str()).await?;
+    let service = found.services.first().expect("no service");
+    assert_eq!(service.name, "demo.Echo");
+    let methods: Vec<_> = service
+        .methods
+        .iter()
+        .map(|m| m.full_name.as_str())
+        .collect();
+    assert_eq!(methods, ["/demo.Echo/Say"]);
+    assert_eq!(service.methods[0].input_type, ".demo.SayRequest");
+    Ok(())
+}
+
 #[tokio::test]
 async fn the_older_reflection_version_is_used_when_v1_is_missing() -> anyhow::Result<()> {
     let app = Router::new().route(V1_PATH, unimplemented()).route(

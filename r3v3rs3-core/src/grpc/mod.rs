@@ -74,7 +74,20 @@ async fn discover_symbols(
         .ok()??;
 
     let (_, payload) = proto::decode_framed_grpc_message(&bytes)?;
-    Some(reflection::parse_file_descriptor_proto(payload))
+    let mut merged = reflection::ParsedFileDescriptor::default();
+    for file in reflection::file_descriptors_from_reflection_response(payload) {
+        let parsed = reflection::parse_file_descriptor_proto(file);
+        merged.message_fields.extend(parsed.message_fields);
+        // A file can define several services; keep only the one asked for, so a service that
+        // shares its file with another one is not listed twice.
+        merged.services.extend(
+            parsed
+                .services
+                .into_iter()
+                .filter(|s| s.name == service_name),
+        );
+    }
+    Some(merged)
 }
 
 fn attach_sample_json(
@@ -121,16 +134,19 @@ pub async fn discover_grpc_services(target_url: &str) -> Result<GrpcReflectRespo
 
     let mut services = Vec::new();
     for svc_name in service_names {
-        if let Some(parsed) = discover_symbols(&client, target_url, ref_service, &svc_name).await {
-            for mut svc in parsed.services {
-                attach_sample_json(&mut svc.methods, &parsed.message_fields);
-                services.push(svc);
-            }
-        } else {
+        let parsed = discover_symbols(&client, target_url, ref_service, &svc_name)
+            .await
+            .unwrap_or_default();
+        if parsed.services.is_empty() {
+            // No descriptor for the service: list it without methods instead of dropping it.
             services.push(GrpcServiceInfo {
                 name: svc_name,
                 methods: Vec::new(),
             });
+        }
+        for mut svc in parsed.services {
+            attach_sample_json(&mut svc.methods, &parsed.message_fields);
+            services.push(svc);
         }
     }
 

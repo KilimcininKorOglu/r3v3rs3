@@ -393,6 +393,34 @@ fn handle_file_proto_item(
     Some(())
 }
 
+/// The length-delimited values of field `field` at the top level of a protobuf message.
+fn length_delimited_fields(data: &[u8], field: u32) -> Vec<&[u8]> {
+    let mut values = Vec::new();
+    let mut offset = 0;
+    while let Some(tag) = read_varint(data, &mut offset) {
+        let wire_type = (tag & 0x07) as u8;
+        let start = offset;
+        if skip_field(data, &mut offset, wire_type).is_none() {
+            break;
+        }
+        if (tag >> 3) as u32 == field && wire_type == 2 {
+            let mut inner = start;
+            let _len = read_varint(data, &mut inner);
+            values.push(&data[inner..offset]);
+        }
+    }
+    values
+}
+
+/// The serialized `FileDescriptorProto`s of a `ServerReflectionResponse` payload: field 4
+/// (`file_descriptor_response`) holds them as its repeated field 1 (`file_descriptor_proto`).
+pub fn file_descriptors_from_reflection_response(payload: &[u8]) -> Vec<&[u8]> {
+    length_delimited_fields(payload, 4)
+        .into_iter()
+        .flat_map(|response| length_delimited_fields(response, 1))
+        .collect()
+}
+
 /// Parses a serialized `FileDescriptorProto` into services and message field definitions.
 pub fn parse_file_descriptor_proto(data: &[u8]) -> ParsedFileDescriptor {
     let mut result = ParsedFileDescriptor::default();
