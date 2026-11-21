@@ -1452,6 +1452,7 @@ async fn assert_cli_proxy_mutations(
     let get_out = run_client(binary, addr, token, &["proxy", "get", &proxy_id]).await?;
     assert!(get_out.status.success());
     assert_cli_dictionaries(binary, addr, token, &proxy_id).await?;
+    assert_cli_stream_priority(binary, addr, token, &proxy_id).await?;
 
     let rm_proxy = run_client(binary, addr, token, &["proxy", "rm", &proxy_id]).await?;
     assert!(rm_proxy.status.success());
@@ -1466,6 +1467,37 @@ async fn assert_cli_proxy_mutations(
 /// `get_proxy_compression_dictionary`, `delete_proxy_compression_dictionary`): the server
 /// computes the RFC 9842 SHA-256 hash of the content, an unknown dictionary id is 404, and an
 /// invalid dictionary (a serving path without a leading `/`) is refused.
+/// `r3 proxy update-stream-priority` (OpenAPI `update_proxy_stream_priority`) stores the given
+/// switches, so `get-stream-priority` shows them, and an unknown proxy fails with not found.
+async fn assert_cli_stream_priority(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    proxy_id: &str,
+) -> anyhow::Result<()> {
+    // Adaptive concurrency defaults to on, so turning it off proves the flag reached the server.
+    let flags = ["--enable", "true", "--adaptive-concurrency", "false"];
+    let update = [&["proxy", "update-stream-priority", proxy_id][..], &flags].concat();
+    cli_ok(binary, addr, token, &update).await?;
+    let shown = cli_ok(
+        binary,
+        addr,
+        token,
+        &["proxy", "get-stream-priority", proxy_id],
+    )
+    .await?;
+    let config: Value = serde_json::from_str(&shown)?;
+    assert_eq!(config["enabled"], json!(true), "{shown}");
+    assert_eq!(config["adaptive_concurrency"], json!(false), "{shown}");
+    let missing = [&["proxy", "update-stream-priority", MISSING_DB][..], &flags].concat();
+    let out = run_client(binary, addr, token, &missing).await?;
+    assert_not_found(
+        "update-stream-priority",
+        &String::from_utf8_lossy(&out.stderr),
+    );
+    Ok(())
+}
+
 async fn assert_cli_dictionaries(
     binary: &Path,
     addr: &SocketAddr,

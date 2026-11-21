@@ -3436,12 +3436,9 @@ impl ApiClient {
         inject_header: Option<bool>,
         adaptive_concurrency: Option<bool>,
     ) -> anyhow::Result<()> {
-        let current: Option<r3v3rs3_api::priority::StreamPriorityConfig> = self
+        let mut config: r3v3rs3_api::priority::StreamPriorityConfig = self
             .get_json(&format!("/api/proxies/{id}/priority"))
-            .await
-            .ok();
-
-        let mut config = current.unwrap_or_default();
+            .await?;
         config.enabled = enable;
         if let Some(inject) = inject_header {
             config.inject_header = inject;
@@ -3451,7 +3448,8 @@ impl ApiClient {
         }
 
         let body = r3v3rs3_api::priority::SetStreamPriorityRequest { config };
-        let _res: r3v3rs3_api::priority::StreamPriorityConfig = self
+        // The API answers `null` on success.
+        let () = self
             .put_json(&format!("/api/proxies/{id}/priority"), &body)
             .await?;
         println!("proxy/{id} stream_priority enabled set to {enable}");
