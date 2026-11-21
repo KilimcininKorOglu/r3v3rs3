@@ -5,15 +5,21 @@ use crate::firewall::{FirewallRules, render, render_removal, run_nft, ssh_ports}
 use r3v3rs3_api::firewall::{FirewallConfig, FirewallStatus, HostPort, Transport};
 use r3v3rs3_api::multiaddr::Multiaddr;
 use std::{
-    path::PathBuf,
+    future::Future,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 use tokio::sync::watch;
+use tokio::time::MissedTickBehavior;
 use tracing::{error, info};
 
 /// The environment variable that overrides `[firewall] enabled`.
 pub const ENABLED_ENV: &str = "R3V3RS3_FIREWALL_ENABLED";
+
+/// How often the warnings about other firewalls are read again while the table is in place, so
+/// a firewall that the operator stops or starts shows up without a change of the settings.
+const WARNING_REFRESH: Duration = Duration::from_secs(60);
 
 /// What the table should hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +42,13 @@ impl FirewallControl {
     pub fn spawn(ssh_dir: PathBuf) -> Self {
         let (wanted, receiver) = watch::channel(Wanted::Nothing);
         let status = Arc::new(Mutex::new(FirewallStatus::default()));
-        tokio::spawn(run(receiver, status.clone(), ssh_dir));
+        tokio::spawn(run(
+            receiver,
+            status.clone(),
+            ssh_dir,
+            crate::firewall_conflicts::detect,
+            WARNING_REFRESH,
+        ));
         Self { wanted, status }
     }
 
@@ -124,34 +136,76 @@ pub fn wanted_ports<'a>(
     all
 }
 
-async fn run(
+/// Applies each wanted table, and reads the warnings again every `refresh_every` while the
+/// table is in place.
+async fn run<D, F>(
     mut receiver: watch::Receiver<Wanted>,
     status: Arc<Mutex<FirewallStatus>>,
     ssh_dir: PathBuf,
-) {
-    while receiver.changed().await.is_ok() {
-        let wanted = receiver.borrow_and_update().clone();
-        let (script, enabled, ports) = match &wanted {
-            Wanted::Nothing => continue,
-            Wanted::Remove => (render_removal(), false, Vec::new()),
-            Wanted::Apply(ports) => {
-                let rules = FirewallRules::new(ports.iter().copied(), &ssh_ports(&ssh_dir));
-                (render(&rules), true, rules.ports.into_iter().collect())
+    detect: D,
+    refresh_every: Duration,
+) where
+    D: Fn() -> F,
+    F: Future<Output = Vec<String>>,
+{
+    let mut refresh = tokio::time::interval(refresh_every);
+    refresh.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            changed = receiver.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                let wanted = receiver.borrow_and_update().clone();
+                apply(&wanted, &status, &ssh_dir, &detect).await;
             }
-        };
-        let result = run_nft(&script).await;
-        match &result {
-            Ok(()) => info!(enabled, ports = ports.len(), "updated the firewall table"),
-            Err(err) => error!(%err, "failed to update the firewall table"),
+            _ = refresh.tick() => refresh_warnings(&status, &detect).await,
         }
-        let warnings = match enabled {
-            true => crate::firewall_conflicts::detect().await,
-            false => Vec::new(),
-        };
-        if let Ok(mut current) = status.lock() {
-            *current = next_status(&current, enabled, ports, result);
-            current.warnings = warnings;
+    }
+}
+
+async fn apply<D, F>(wanted: &Wanted, status: &Mutex<FirewallStatus>, ssh_dir: &Path, detect: &D)
+where
+    D: Fn() -> F,
+    F: Future<Output = Vec<String>>,
+{
+    let (script, enabled, ports) = match wanted {
+        Wanted::Nothing => return,
+        Wanted::Remove => (render_removal(), false, Vec::new()),
+        Wanted::Apply(ports) => {
+            let rules = FirewallRules::new(ports.iter().copied(), &ssh_ports(ssh_dir));
+            (render(&rules), true, rules.ports.into_iter().collect())
         }
+    };
+    let result = run_nft(&script).await;
+    match &result {
+        Ok(()) => info!(enabled, ports = ports.len(), "updated the firewall table"),
+        Err(err) => error!(%err, "failed to update the firewall table"),
+    }
+    let warnings = match enabled {
+        true => detect().await,
+        false => Vec::new(),
+    };
+    if let Ok(mut current) = status.lock() {
+        *current = next_status(&current, enabled, ports, result);
+        current.warnings = warnings;
+    }
+}
+
+/// Reads the warnings again while the status says the table is in place.
+async fn refresh_warnings<D, F>(status: &Mutex<FirewallStatus>, detect: &D)
+where
+    D: Fn() -> F,
+    F: Future<Output = Vec<String>>,
+{
+    if !status.lock().is_ok_and(|current| current.enabled) {
+        return;
+    }
+    let warnings = detect().await;
+    if let Ok(mut current) = status.lock()
+        && current.enabled
+    {
+        current.warnings = warnings;
     }
 }
 
@@ -238,6 +292,59 @@ mod tests {
         for bad in ["", "on", "enabled", "2"] {
             assert_eq!(parse_bool(bad), None, "{bad:?}");
         }
+    }
+
+    /// configuration.md "Host firewall": the status lists the other firewalls of the host. An
+    /// operator who stops firewalld changes no setting, so the warning must still go away; a
+    /// status without the table must not run the detector at all.
+    #[tokio::test]
+    async fn the_warnings_follow_the_host_without_a_settings_change() -> anyhow::Result<()> {
+        let firewalld = "firewalld is active: ports opened by r3v3rs3 can still be blocked";
+        let answer = Arc::new(Mutex::new(vec![firewalld.to_string()]));
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let detect = {
+            let (answer, calls) = (answer.clone(), calls.clone());
+            move || {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let now = answer.lock().map(|a| a.clone()).unwrap_or_default();
+                async move { now }
+            }
+        };
+        let status = Arc::new(Mutex::new(FirewallStatus {
+            enabled: true,
+            warnings: vec![firewalld.to_string()],
+            ..FirewallStatus::default()
+        }));
+        let (_wanted, receiver) = watch::channel(Wanted::Nothing);
+        let every = Duration::from_millis(20);
+        let task = tokio::spawn(run(receiver, status.clone(), PathBuf::new(), detect, every));
+
+        // The operator runs `systemctl disable --now firewalld`.
+        answer.lock().map_err(|e| anyhow::anyhow!("{e}"))?.clear();
+        let cleared = wait_for(|| status.lock().is_ok_and(|s| s.warnings.is_empty())).await;
+        assert!(
+            cleared,
+            "the firewalld warning stayed after firewalld stopped"
+        );
+
+        status.lock().map_err(|e| anyhow::anyhow!("{e}"))?.enabled = false;
+        tokio::time::sleep(every * 3).await;
+        let before = calls.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(every * 5).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), before);
+        task.abort();
+        Ok(())
+    }
+
+    /// Polls `done` for at most two seconds.
+    async fn wait_for(done: impl Fn() -> bool) -> bool {
+        for _ in 0..200 {
+            if done() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        false
     }
 
     /// A failed nft run leaves the previous table, so the status must keep its ports and say
