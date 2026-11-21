@@ -61,6 +61,68 @@ impl ContainerRuntime for BoundedRuntime {
         self.inner.pull_image(image).await
     }
 
+    async fn pull_image_with_auth(
+        &self,
+        image: &ImageRef,
+        auth: Option<&r3v3rs3_api::platform::RegistryAuth>,
+    ) -> anyhow::Result<()> {
+        self.inner.pull_image_with_auth(image, auth).await
+    }
+
+    async fn container_log_info(
+        &self,
+        name: &ContainerName,
+    ) -> anyhow::Result<Option<r3v3rs3_api::container::ContainerLogInfo>> {
+        self.inner.container_log_info(name).await
+    }
+
+    async fn disk_space(&self) -> anyhow::Result<Option<r3v3rs3_api::dashboard::DiskSpace>> {
+        self.inner.disk_space().await
+    }
+
+    async fn list_project_containers(
+        &self,
+        project: &ProjectName,
+    ) -> anyhow::Result<Vec<ContainerSummary>> {
+        self.inner.list_project_containers(project).await
+    }
+
+    async fn logs_stream(
+        &self,
+        name: &ContainerName,
+        tail: u32,
+    ) -> anyhow::Result<(bool, hyper::Response<hyper::body::Incoming>)> {
+        self.inner.logs_stream(name, tail).await
+    }
+
+    async fn prune_platform(
+        &self,
+        policy: &r3v3rs3_api::platform::PrunePolicy,
+    ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
+        self.inner.prune_platform(policy).await
+    }
+
+    async fn run_prune(
+        &self,
+        policy: &r3v3rs3_api::platform::PrunePolicy,
+    ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
+        self.inner.run_prune(policy).await
+    }
+
+    async fn vacuum_all_logs(
+        &self,
+        threshold_bytes: Option<u64>,
+    ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+        self.inner.vacuum_all_logs(threshold_bytes).await
+    }
+
+    async fn vacuum_container_logs(
+        &self,
+        name: &ContainerName,
+    ) -> anyhow::Result<r3v3rs3_api::container::LogVacuumResult> {
+        self.inner.vacuum_container_logs(name).await
+    }
+
     async fn inspect_image(&self, image: &ImageRef) -> anyhow::Result<Option<ImageInfo>> {
         self.inner.inspect_image(image).await
     }
@@ -205,5 +267,31 @@ impl ContainerRuntime for BoundedRuntime {
             archive_tar.len()
         ));
         self.inner.upload_archive(name, path, archive_tar).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::fake::FakeRuntime;
+
+    /// Source: the module contract, "a test runtime that passes every call to a real runtime".
+    /// A call that reached the trait default instead would fail with "does not ...".
+    #[tokio::test]
+    async fn every_call_reaches_the_wrapped_runtime() -> anyhow::Result<()> {
+        let bounded = BoundedRuntime::new(Arc::new(FakeRuntime::default()));
+        let policy = r3v3rs3_api::platform::PrunePolicy::default();
+        assert_eq!(bounded.run_prune(&policy).await?.space_reclaimed_bytes, 100);
+        assert_eq!(
+            bounded.prune_platform(&policy).await?.space_reclaimed_bytes,
+            10
+        );
+        assert!(bounded.disk_space().await?.is_some());
+        let project: ProjectName = "r3v3rs3-abc".parse()?;
+        assert!(bounded.list_project_containers(&project).await?.is_empty());
+        let name: ContainerName = "r3v3rs3-abc-1".parse()?;
+        assert!(bounded.container_log_info(&name).await?.is_none());
+        bounded.vacuum_container_logs(&name).await?;
+        Ok(())
     }
 }
