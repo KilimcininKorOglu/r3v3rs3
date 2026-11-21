@@ -137,18 +137,16 @@ pub trait ContainerRuntime: Send + Sync {
         anyhow::bail!("the runtime does not support log streaming");
     }
 
-    /// Opens an interactive shell in the container. Only the local runtime carries one; an
-    /// agent target answers an error until the terminal travels its own link.
+    /// Opens an interactive shell in the container. Every runtime states its answer: the local
+    /// Docker runtime opens the shell, an agent target refuses until the terminal travels its
+    /// own link. A default body let the Docker runtime fall through to the refusal unnoticed.
     async fn exec(
         &self,
         name: &ContainerName,
         cols: u16,
         rows: u16,
         cmd: &[&str],
-    ) -> anyhow::Result<docker::ExecHandle> {
-        let _ = (name, cols, rows, cmd);
-        anyhow::bail!("the runtime does not support a terminal");
-    }
+    ) -> anyhow::Result<docker::ExecHandle>;
 
     /// Runs a command in the container, captures its standard output and fails on a non-zero
     /// exit code. `env` carries `KEY=value` entries. Like the files of a container, only the

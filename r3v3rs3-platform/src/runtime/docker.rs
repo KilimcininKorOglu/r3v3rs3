@@ -459,13 +459,14 @@ impl DockerRuntime {
                 b"{\"Detach\":false,\"Tty\":true}",
             )))?;
         let stream = self.client.send_upgrade(request).await?;
-        let handle = ExecHandle {
+        // Resized before the handle exists: a borrow of the handle across the await would make
+        // the future not `Send`, and the runtime trait needs a `Send` future.
+        resize_exec(&self.client, &exec.id, cols, rows).await?;
+        Ok(ExecHandle {
             stream,
             id: exec.id,
             client: self.client.clone(),
-        };
-        handle.resize(cols, rows).await?;
-        Ok(handle)
+        })
     }
 }
 
@@ -914,6 +915,16 @@ impl ContainerRuntime for DockerRuntime {
     async fn version(&self) -> anyhow::Result<String> {
         let version: VersionResponse = self.get("/version").await?;
         Ok(version.version)
+    }
+
+    async fn exec(
+        &self,
+        name: &ContainerName,
+        cols: u16,
+        rows: u16,
+        cmd: &[&str],
+    ) -> anyhow::Result<ExecHandle> {
+        DockerRuntime::exec(self, name, cols, rows, cmd).await
     }
 
     async fn pull_image(&self, image: &ImageRef) -> anyhow::Result<()> {

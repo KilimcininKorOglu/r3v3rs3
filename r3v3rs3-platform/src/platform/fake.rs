@@ -333,6 +333,17 @@ impl ContainerRuntime for FakeRuntime {
         Ok("fake".into())
     }
 
+    /// The fake runtime has no container to open a shell in.
+    async fn exec(
+        &self,
+        _name: &ContainerName,
+        _cols: u16,
+        _rows: u16,
+        _cmd: &[&str],
+    ) -> anyhow::Result<crate::runtime::docker::ExecHandle> {
+        Err(r3v3rs3_api::error::Error::TerminalUnsupported.into())
+    }
+
     async fn pull_image(&self, image: &ImageRef) -> anyhow::Result<()> {
         let mut state = self.check()?;
         if let Some(missing) = &state.missing_image

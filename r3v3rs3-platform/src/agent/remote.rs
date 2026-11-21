@@ -135,6 +135,17 @@ impl ContainerRuntime for RemoteRuntime {
         }
     }
 
+    /// The agent link carries no terminal yet.
+    async fn exec(
+        &self,
+        _name: &ContainerName,
+        _cols: u16,
+        _rows: u16,
+        _cmd: &[&str],
+    ) -> anyhow::Result<crate::runtime::docker::ExecHandle> {
+        Err(Error::TerminalUnsupported.into())
+    }
+
     async fn pull_image(&self, image: &ImageRef) -> anyhow::Result<()> {
         self.pull_image_with_auth(image, None).await
     }
