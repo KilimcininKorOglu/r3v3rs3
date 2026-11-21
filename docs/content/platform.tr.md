@@ -1071,7 +1071,7 @@ Yönetim altındaki **Webhook'lar** sayfası, giden olay bildirim hedeflerini y�
 - **Şifreli Platform Yedekleri**: `r3v3rs3.db` veritabanı, ana şifreleme anahtarları (`r3v3rs3.key`), küme mühür anahtarları, TLS sertifikaları, hesaplar ve uygulama tanımlarını içeren tek paketli, AES-256-GCM ile şifrelenmiş `.r3bundle` snapshot'ları oluşturma.
 - **Uzak S3 Replikasyonu**: Yedek ayarlarında yapılandırılan uzak S3 bulut depolamasına felaket kurtarma paketlerini otomatik olarak yükleme.
 - **Snapshot Yönetim Tablosu**: Snapshot ID'si, zaman damgası, boyutu, arşivlenen dosya sayısı ve S3 yükleme rozetini inceleme; standart eylem simgeleriyle indirme, geri yükleme veya silme işlemlerini yürütme.
-- **Yükle ve Geri Yükle**: Bir `.r3bundle` paket dosyasını yükleyip isteğe bağlı parola ile tüm platform durumunu tek adımda geri yükleme.
+- **Yükle ve Geri Yükle**: Bir `.r3bundle` paket dosyasını yükleyip zorunlu parolasıyla tüm platform durumunu tek adımda geri yükleme.
 
 #### 3. Yapılandırma Yedeği
 - **JSON Yapılandırma İndirme**: Bütün ters proxy ve yönlendirme yapılandırmasını hassas anahtarlar maskelenmiş ve hesaplar hariç tutulmuş biçimde tek bir JSON dosyası olarak dışa aktarma.

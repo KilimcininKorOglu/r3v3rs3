@@ -1071,7 +1071,7 @@ The **Backups** page (`/backups`) provides a centralized management console for 
 - **Encrypted Platform Snapshots**: Create single-bundle encrypted snapshots (`.r3bundle`) containing `r3v3rs3.db`, master encryption keys (`r3v3rs3.key`), cluster sealing keys, TLS certificates, accounts, and application manifests with AES-256-GCM.
 - **Remote S3 Replication**: Automatically upload disaster recovery snapshots to remote S3 cloud storage configured in backup settings.
 - **Snapshot Management Table**: View snapshot ID, timestamp, size, included file count, S3 replication status badge, and execute download, in-place restore, or deletion using standard action icons.
-- **Upload & Restore**: Restore a complete platform state by uploading an `.r3bundle` archive with optional decryption passphrase.
+- **Upload & Restore**: Restore a complete platform state by uploading an `.r3bundle` archive with its required decryption passphrase.
 
 #### 3. Configuration Backup
 - **JSON Configuration Export**: Export entire reverse proxy and platform routing configuration to a sanitized JSON backup file (secrets masked, accounts excluded).

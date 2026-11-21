@@ -3303,6 +3303,47 @@ async fn the_live_streams_are_reachable_from_the_cli() -> anyhow::Result<()> {
     .await
 }
 
+/// A DR backup or restore without a passphrase is a client error (RFC 9110 15.5.1, 400 Bad
+/// Request) that names the missing passphrase, not a 500 from the server.
+#[tokio::test]
+async fn a_dr_request_without_a_passphrase_is_refused_as_bad_request() -> anyhow::Result<()> {
+    let dir = TempDir::new("mcp-dr-passphrase")?;
+    with_admin(&dir.0, |addr| async move {
+        let token = access_token(&addr).await?;
+        let base = format!("http://{addr}/api/disaster-recovery");
+        let cases = [
+            (format!("{base}/backups"), json!({})),
+            (format!("{base}/backups"), json!({ "passphrase": "   " })),
+            (format!("{base}/backups/{MISSING_DB}/restore"), json!({})),
+        ];
+        for (url, body) in cases {
+            let res = Client::new()
+                .post(&url)
+                .bearer_auth(&token)
+                .json(&body)
+                .send()
+                .await?;
+            let status = res.status().as_u16();
+            let text = res.text().await?;
+            assert_eq!(status, 400, "{url} {body}: {text}");
+            assert!(text.contains("passphrase"), "{url} {body}: {text}");
+        }
+        let upload = Client::new()
+            .post(format!("{base}/restore-upload"))
+            .bearer_auth(&token)
+            .body(b"not a bundle".to_vec())
+            .send()
+            .await?;
+        assert_eq!(
+            upload.status().as_u16(),
+            400,
+            "restore-upload without x-passphrase"
+        );
+        Ok(())
+    })
+    .await
+}
+
 /// Downloads the first DR bundle to `path` with the CLI, compares it with the bytes the API
 /// serves, and removes the file.
 async fn assert_dr_download_matches(

@@ -414,10 +414,7 @@ pub async fn create_dr_backup(
     upload_s3: bool,
     platform: Option<&crate::platform::Platform>,
 ) -> anyhow::Result<DisasterRecoveryBackupEntry> {
-    let pass = passphrase
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .ok_or_else(|| anyhow!("passphrase must not be empty"))?;
+    let pass = required_passphrase(passphrase)?;
     let files = collect_bundle_files(config_dir).await?;
     let files_count = files.len();
     let tar_gz = pack_tar_gz(&files)?;
@@ -546,9 +543,18 @@ pub async fn restore_dr_backup(
     id: &str,
     passphrase: Option<&str>,
 ) -> anyhow::Result<usize> {
+    required_passphrase(passphrase)?;
     validate_dr_backup_id(id)?;
     let bundle = download_dr_backup(config_dir, id).await?;
     restore_dr_bytes(config_dir, &bundle, passphrase).await
+}
+
+/// The trimmed passphrase of a request; a missing or blank one is the client's error.
+fn required_passphrase(passphrase: Option<&str>) -> anyhow::Result<&str> {
+    passphrase
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| r3v3rs3_api::error::Error::DisasterRecoveryPassphraseRequired.into())
 }
 
 /// Restores platform state from raw `.r3bundle` bytes.
@@ -557,10 +563,7 @@ pub async fn restore_dr_bytes(
     bytes: &[u8],
     passphrase: Option<&str>,
 ) -> anyhow::Result<usize> {
-    let pass = passphrase
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .ok_or_else(|| anyhow!("passphrase must not be empty"))?;
+    let pass = required_passphrase(passphrase)?;
     let tar_gz = decrypt_dr_bundle(bytes, pass)?;
     unpack_tar_gz(&tar_gz, config_dir)
 }

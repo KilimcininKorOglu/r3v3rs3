@@ -79,6 +79,9 @@ pub enum Error {
     #[error("missing TLS termination config")]
     TlsTerminationConfigMissing,
 
+    #[error("a disaster recovery backup needs a passphrase")]
+    DisasterRecoveryPassphraseRequired,
+
     #[error("PROXY protocol works only on TCP, TLS, HTTP and HTTPS ports")]
     ProxyProtocolNotSupported,
 

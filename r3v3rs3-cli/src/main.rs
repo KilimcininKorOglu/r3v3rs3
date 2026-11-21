@@ -840,9 +840,9 @@ pub enum DrCommand {
     List,
     /// Creates an encrypted full platform disaster recovery snapshot (.r3bundle).
     Create {
-        /// Optional passphrase to encrypt the disaster recovery bundle.
+        /// Passphrase that encrypts the disaster recovery bundle.
         #[arg(long)]
-        passphrase: Option<String>,
+        passphrase: String,
         /// Do not replicate the snapshot to remote S3 storage.
         #[arg(long)]
         no_s3: bool,
@@ -850,9 +850,9 @@ pub enum DrCommand {
     /// Restores a full disaster recovery snapshot by backup ID.
     Restore {
         backup_id: String,
-        /// Optional passphrase to decrypt the disaster recovery bundle.
+        /// Passphrase that decrypts the disaster recovery bundle.
         #[arg(long)]
-        passphrase: Option<String>,
+        passphrase: String,
     },
     /// Deletes a disaster recovery backup snapshot by ID.
     #[command(alias = "rm")]
@@ -869,9 +869,9 @@ pub enum DrCommand {
         /// Path to the .r3bundle file to restore.
         #[arg(short, long)]
         file: String,
-        /// Optional passphrase to decrypt the disaster recovery bundle.
+        /// Passphrase that decrypts the disaster recovery bundle.
         #[arg(long)]
-        passphrase: Option<String>,
+        passphrase: String,
     },
 }
 
@@ -2514,21 +2514,18 @@ async fn run_dr(api: &api_client::ApiClient, cmd: DrCommand) -> anyhow::Result<(
     match cmd {
         DrCommand::List => api.list_dr_backups().await,
         DrCommand::Create { passphrase, no_s3 } => {
-            api.create_dr_backup(passphrase.as_deref(), !no_s3).await
+            api.create_dr_backup(Some(&passphrase), !no_s3).await
         }
         DrCommand::Restore {
             backup_id,
             passphrase,
-        } => {
-            api.restore_dr_backup(&backup_id, passphrase.as_deref())
-                .await
-        }
+        } => api.restore_dr_backup(&backup_id, Some(&passphrase)).await,
         DrCommand::Delete { backup_id } => api.delete_dr_backup(&backup_id).await,
         DrCommand::Download { backup_id, output } => {
             api.download_dr_backup(&backup_id, output.as_deref()).await
         }
         DrCommand::RestoreUpload { file, passphrase } => {
-            api.restore_dr_file(&file, passphrase.as_deref()).await
+            api.restore_dr_file(&file, Some(&passphrase)).await
         }
     }
 }
@@ -3311,6 +3308,29 @@ mod tests {
         assert_eq!(parse(&["--save", "false"]), Ok(false));
         assert_eq!(parse(&["--save", "true"]), Ok(true));
         assert_eq!(parse(&["--save"]), Ok(true));
+    }
+
+    /// A DR backup or restore cannot run without a passphrase, so the command refuses to start
+    /// instead of sending a request the server must reject.
+    #[test]
+    fn dr_commands_require_a_passphrase() {
+        let commands: [&[&str]; 3] = [
+            &["dr", "create"],
+            &["dr", "restore", "abc"],
+            &["dr", "restore-upload", "--file", "b.r3bundle"],
+        ];
+        for command in commands {
+            let argv = [&["r3", "http://127.0.0.1:1"][..], command].concat();
+            assert!(
+                Args::try_parse_from(&argv).is_err(),
+                "{command:?} ran without a passphrase"
+            );
+            let with = [&argv[..], &["--passphrase", "p"]].concat();
+            assert!(
+                Args::try_parse_from(&with).is_ok(),
+                "{command:?} refused a passphrase"
+            );
+        }
     }
 
     /// The port switches take `--enable false`, and a bare `--enable` (as the docs and older

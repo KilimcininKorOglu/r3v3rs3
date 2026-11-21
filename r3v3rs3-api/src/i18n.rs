@@ -230,6 +230,7 @@ mod tests {
             Error::UpstreamRangeMismatch { addr: text() },
             Error::TransparentLoopbackUpstream { addr: text() },
             Error::TlsTerminationConfigMissing,
+            Error::DisasterRecoveryPassphraseRequired,
             Error::ProxyProtocolNotSupported,
             Error::ProxyProtocolTrustedMissing,
             Error::CertificateInUse {

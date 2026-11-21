@@ -61,14 +61,14 @@ The tools `backup_config` and `restore_config` do the same; pass the answer of `
 Unlike standard JSON configuration backups, **Disaster Recovery Snapshots** (`.r3bundle`) capture the full operational state of r3v3rs3 and its Coolify-like deployment platform in a single, AES-256-GCM encrypted bundle:
 
 - **Complete State Included**: Contains `r3v3rs3.db` (unified SQLite database with all settings, ports, proxies, access lists, ACME certificates, user accounts, apps, deployments, databases, and environment variables), `r3v3rs3.key`, cluster sealing keys (`keys/`), TLS certificates and private keys (`certs/`), and legacy backup files if present.
-- **AES-256-GCM Encryption**: Encrypted with an optional user-defined passphrase using 10,000 rounds of salted SHA-256 key derivation. Unencrypted data never leaves the server memory.
+- **AES-256-GCM Encryption**: Encrypted with a required user-defined passphrase, from which Argon2id derives the key with a random salt. Bundles made by older releases with SHA-256 key derivation still restore. A backup or restore request without a passphrase is refused with `400 disaster_recovery_passphrase_required`. Unencrypted data never leaves the server memory.
 - **Automatic S3 Replication**: When remote S3 storage is configured in database backup settings, disaster recovery backups are automatically uploaded to `{prefix}/disaster-recovery/` in the remote bucket.
 - **Single-Command Disaster Recovery**: Allows restoring the entire system onto a completely fresh server with a single CLI command.
 
 ### WebUI
 
 Open the **Backups** page (`/backups`) and select the **Platform Disaster Recovery** tab:
-- Enter an optional encryption **Passphrase** and check **Upload to remote S3 storage**.
+- Enter the encryption **Passphrase** and check **Upload to remote S3 storage**.
 - Click **Create Encrypted Snapshot** to create a point-in-time `.r3bundle`.
 - Download, restore, or delete existing snapshots from the table using action icon buttons.
 - Click **Upload & Restore .r3bundle** to upload an existing bundle file and restore the entire server state with confirmation.
@@ -116,7 +116,7 @@ $ r3v3rs3 disaster-recovery backup --output /var/backups/r3v3rs3.r3bundle --pass
 ### REST API
 
 - `GET /api/disaster-recovery/backups`: Lists all disaster recovery snapshots with sizes, timestamps, and S3 status.
-- `POST /api/disaster-recovery/backups`: Creates a new encrypted snapshot with optional passphrase and S3 replication.
+- `POST /api/disaster-recovery/backups`: Creates a new encrypted snapshot with the required passphrase and optional S3 replication.
 - `GET /api/disaster-recovery/backups/{id}/download`: Downloads the `.r3bundle` file.
 - `DELETE /api/disaster-recovery/backups/{id}`: Deletes a disaster recovery backup.
 - `POST /api/disaster-recovery/backups/{id}/restore`: Restores from a stored snapshot ID.
