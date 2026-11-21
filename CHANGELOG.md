@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-11-21
+
+### Added
+- Apps can be stopped, started and restarted without a new deployment: `POST /api/apps/{id}/stop`, `/start` and `/restart`, the MCP tools `stop_app`, `start_app` and `restart_app`, `r3 app stop|start|restart`, and the **Stop**, **Start** and **Restart** buttons on the app page. Start runs the existing containers again without a build or a pull; Compose apps use `docker compose stop` and `start`.
+- The domains of a stopped app answer 503 with the error page theme, and the app list and the app page mark the app as stopped. A manual deployment runs the app again.
+- While an app is stopped, webhook and preview deployments, image auto-updates, window deployments, scheduled commands and scheduled database backups are skipped; each skip is audited once per stop as `skip_stopped_app`, and a webhook answers 202 with `skipped_stopped`.
+- Maintenance mode can answer with the page of its status code from the error page theme of the proxy (`error_page`, **Use the error page theme**).
+
+### Changed
+- The status badge in the app page header is translated.
+- The host firewall docs describe how to keep the rules of a previous firewall that are not input rules.
+
+### Fixed
+- A platform prune keeps the containers of stopped apps, so Start can run them again.
+- The server stops at start when a platform database column cannot be added, instead of running without it.
+- The webhook audit summary names a destroyed preview instead of calling it queued.
+- The host firewall reads the warnings about other firewalls again every minute while its table is in place.
+- ufw counts as another firewall only when `/etc/ufw/ufw.conf` enables it.
+
 ## [3.7.0] - 2026-11-21
 
 ### Added
