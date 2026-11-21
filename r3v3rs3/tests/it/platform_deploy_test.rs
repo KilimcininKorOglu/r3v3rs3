@@ -94,6 +94,83 @@ async fn an_app_deploys_blue_green_and_rolls_back() -> anyhow::Result<()> {
     .await
 }
 
+/// Stop keeps the container and makes the domain answer 503; Start runs the same container
+/// again, without a new deployment, and the domain answers from it.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn a_stopped_app_answers_503_and_starts_the_same_container() -> anyhow::Result<()> {
+    let source = json!({"type": "image", "image": IMAGE});
+    with_app(source, |ctx, id| async move {
+        deploy(&ctx, &id, "blue").await?;
+        wait_for_answer(&ctx, "Name: blue").await?;
+        wait_for_containers(&id, 1).await?;
+        let before = only_container(&id).await?;
+        stop_and_check(&ctx, &id, &before.id).await?;
+        start_and_check(&ctx, &id, &before.id).await?;
+        delete_app(&ctx, &id).await
+    })
+    .await
+}
+
+async fn only_container(id: &str) -> anyhow::Result<r3v3rs3_api::container::ContainerSummary> {
+    let mut containers = runtime()?.list_containers(&id.parse()?).await?;
+    ensure!(containers.len() == 1, "{containers:?}");
+    containers.pop().context("no container")
+}
+
+/// Stops the app: the container exits but stays, and the domain answers 503.
+async fn stop_and_check(ctx: &Context, id: &str, container: &str) -> anyhow::Result<()> {
+    // The app stays busy until the job of its deployment removes the old container.
+    let app = call_when_free(ctx, Method::POST, &format!("/api/apps/{id}/stop")).await?;
+    ensure!(app["stopped"] == true, "{app}");
+    let stopped = only_container(id).await?;
+    ensure!(
+        stopped.id == container && stopped.state == "exited",
+        "{stopped:?}"
+    );
+    wait_for_status(ctx, 503).await
+}
+
+/// Starts the app: the same container runs and answers, and no deployment is added.
+async fn start_and_check(ctx: &Context, id: &str, container: &str) -> anyhow::Result<()> {
+    let app = call(ctx, Method::POST, &format!("/api/apps/{id}/start"), None).await?;
+    ensure!(app["stopped"] == false, "{app}");
+    wait_for_answer(ctx, "Name: blue").await?;
+    let started = only_container(id).await?;
+    ensure!(
+        started.id == container && started.state == "running",
+        "{started:?}"
+    );
+    let deployments = call(
+        ctx,
+        Method::GET,
+        &format!("/api/apps/{id}/deployments"),
+        None,
+    )
+    .await?;
+    ensure!(
+        deployments.as_array().map(Vec::len) == Some(1),
+        "{deployments}"
+    );
+    Ok(())
+}
+
+/// Waits until the proxy answers the domain with `expected`.
+async fn wait_for_status(ctx: &Context, expected: u16) -> anyhow::Result<()> {
+    let url = format!("http://{}/", ctx.proxy.socket_addr());
+    let client = reqwest::Client::new();
+    let mut last = None;
+    for _ in 0..60 {
+        let reply = client.get(&url).header(HOST, DOMAIN).send().await;
+        last = reply.ok().map(|reply| reply.status().as_u16());
+        if last == Some(expected) {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    bail!("the proxy answered {last:?}, not {expected}")
+}
+
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn a_git_app_builds_its_image_and_deploys() -> anyhow::Result<()> {
