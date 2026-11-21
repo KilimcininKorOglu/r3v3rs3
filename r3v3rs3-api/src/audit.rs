@@ -240,7 +240,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 137] = [
+    pub const ALL: [AuditAction; 141] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -378,6 +378,10 @@ impl AuditAction {
         Self::DeleteManyCerts,
         Self::ResetErrorPageThemes,
         Self::UpdateProxyStreamPriority,
+        Self::CreateDnsCredential,
+        Self::UpdateDnsCredential,
+        Self::DeleteDnsCredential,
+        Self::RequestAcme,
     ];
 }
 
@@ -474,6 +478,21 @@ mod tests {
                 "{old} moves to {new}, which is not an action"
             );
         }
+    }
+
+    /// The action filter of the audit page lists `ALL`, so an action missing from it cannot be
+    /// selected. Every action has a label key in the locale file, so the keys name every action.
+    #[test]
+    fn all_lists_every_action() {
+        let locale: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(include_str!("../locales/en.json")).unwrap_or_default();
+        let listed: Vec<String> = AuditAction::ALL.iter().map(|&a| name(a)).collect();
+        let missing: Vec<&str> = locale
+            .keys()
+            .filter_map(|key| key.strip_prefix("audit.action_"))
+            .filter(|action| !listed.iter().any(|l| l == action))
+            .collect();
+        assert!(missing.is_empty(), "actions missing from ALL: {missing:?}");
     }
 }
 
