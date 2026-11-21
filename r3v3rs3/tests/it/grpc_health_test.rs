@@ -7,6 +7,7 @@ use r3v3rs3::admin::start_admin;
 use r3v3rs3::config::new_appinfo;
 use r3v3rs3::grpc::health::check_grpc_health;
 use r3v3rs3::log::DatabaseLayer;
+use r3v3rs3_api::auth::Role;
 use r3v3rs3_api::grpc::{GrpcHealthCheckRequest, GrpcHealthCheckResponse, GrpcServingStatus};
 use r3v3rs3_api::proxy::{HttpProxy, Server};
 use r3v3rs3_api::upstream::HealthCheck;
@@ -17,7 +18,7 @@ use tracing_subscriber::filter::LevelFilter;
 use crate::common;
 use common::{
     TestStorage, admin_session_cookie, alloc_tcp_port, http_port_entry, http_proxy_entry,
-    http_route, serve_http_upstream, wait_for_listener, with_server,
+    http_route, serve_http_upstream, session_cookie, wait_for_listener, with_server,
 };
 
 fn init_crypto_provider() {
@@ -151,6 +152,7 @@ async fn test_admin_api_grpc_health_endpoints() -> anyhow::Result<()> {
 
     let storage = TestStorage::builder()
         .accounts(HashMap::from([("admin".to_string(), "secret".to_string())]))
+        .account("editor", "editor-secret", Role::Editor, None)
         .ports(vec![http_port_entry("http", &proxy_port)])
         .proxies(vec![http_proxy_entry("grpcprox", "http", proxy)])
         .build();
@@ -166,18 +168,27 @@ async fn test_admin_api_grpc_health_endpoints() -> anyhow::Result<()> {
             channels.accounts.clone(),
         ));
         wait_for_listener(admin_addr).await?;
-
-        let cookie = admin_session_cookie(admin_addr).await?;
-        let client = reqwest::Client::new();
-        let base_url = format!("http://{admin_addr}");
-
-        check_standalone_grpc_health(&client, &base_url, &cookie, &upstream).await?;
-        check_proxy_grpc_health(&client, &base_url, &cookie).await
+        check_grpc_endpoints_by_role(admin_addr, &upstream).await
     })
     .await?;
 
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())
+}
+
+/// The admin reaches the standalone and the proxy endpoints; the editor only the proxy ones.
+async fn check_grpc_endpoints_by_role(
+    admin_addr: std::net::SocketAddr,
+    upstream: &url::Url,
+) -> anyhow::Result<()> {
+    let cookie = admin_session_cookie(admin_addr).await?;
+    let client = reqwest::Client::new();
+    let base_url = format!("http://{admin_addr}");
+    check_standalone_grpc_health(&client, &base_url, &cookie, upstream).await?;
+    check_proxy_grpc_health(&client, &base_url, &cookie).await?;
+    let editor = session_cookie(admin_addr, "editor", "editor-secret").await?;
+    refuse_standalone_grpc_to_editor(&client, &base_url, &editor, upstream).await?;
+    check_proxy_grpc_health(&client, &base_url, &editor).await
 }
 
 /// Checks that POST /api/grpc/health reports the upstream as serving.
@@ -202,6 +213,41 @@ async fn check_standalone_grpc_health(
     let check_res: GrpcHealthCheckResponse = res.json().await?;
     assert!(check_res.healthy);
     assert_eq!(check_res.status, GrpcServingStatus::Serving);
+    Ok(())
+}
+
+/// The standalone gRPC endpoints send a request to any address the caller names, so only an
+/// admin may use them; an editor reaches gRPC only through a proxy, whose upstreams bound the
+/// target (server-side request forgery, OWASP A10:2021).
+async fn refuse_standalone_grpc_to_editor(
+    client: &reqwest::Client,
+    base_url: &str,
+    cookie: &str,
+    upstream: &url::Url,
+) -> anyhow::Result<()> {
+    let target = upstream.to_string();
+    let bodies = [
+        ("health", serde_json::json!({ "target_url": target })),
+        ("reflect", serde_json::json!({ "target_url": target })),
+        (
+            "invoke",
+            serde_json::json!({ "target_url": target, "service": "demo.Echo", "method": "Say",
+                "payload": {}, "metadata": {} }),
+        ),
+    ];
+    for (endpoint, body) in bodies {
+        let res = client
+            .post(format!("{base_url}/api/grpc/{endpoint}"))
+            .header("Cookie", cookie)
+            .json(&body)
+            .send()
+            .await?;
+        assert_eq!(
+            res.status(),
+            StatusCode::FORBIDDEN,
+            "editor reached /api/grpc/{endpoint}"
+        );
+    }
     Ok(())
 }
 

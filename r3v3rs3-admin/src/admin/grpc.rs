@@ -197,7 +197,9 @@ pub async fn reflect_standalone(
     Extension(caller): Extension<Caller>,
     Json(req): Json<GrpcReflectRequest>,
 ) -> Result<Json<GrpcReflectResponse>, AppError> {
-    caller.authorize(Permission::Edit)?;
+    // Any address can be named here, so only an admin may send to it (OWASP A10:2021); an
+    // editor uses the proxy endpoints, whose target is bound to the proxy's upstreams.
+    caller.authorize(Permission::Admin)?;
     let target = req.target_url.ok_or_else(|| Error::GrpcError {
         reason: "target_url is required".to_string(),
     })?;
@@ -227,7 +229,9 @@ pub async fn invoke_standalone(
     Extension(caller): Extension<Caller>,
     Json(req): Json<GrpcInvokeRequest>,
 ) -> Result<Json<GrpcInvokeResponse>, AppError> {
-    caller.authorize(Permission::Edit)?;
+    // Any address can be named here, so only an admin may send to it (OWASP A10:2021); an
+    // editor uses the proxy endpoints, whose target is bound to the proxy's upstreams.
+    caller.authorize(Permission::Admin)?;
     let target = req.target_url.as_deref().ok_or_else(|| Error::GrpcError {
         reason: "target_url is required".to_string(),
     })?;
@@ -257,7 +261,9 @@ pub async fn health_standalone(
     Extension(caller): Extension<Caller>,
     Json(req): Json<GrpcHealthCheckRequest>,
 ) -> Result<Json<GrpcHealthCheckResponse>, AppError> {
-    caller.authorize(Permission::Edit)?;
+    // Any address can be named here, so only an admin may send to it (OWASP A10:2021); an
+    // editor uses the proxy endpoints, whose target is bound to the proxy's upstreams.
+    caller.authorize(Permission::Admin)?;
     let target = req.target_url.as_deref().ok_or_else(|| Error::GrpcError {
         reason: "target_url is required".to_string(),
     })?;

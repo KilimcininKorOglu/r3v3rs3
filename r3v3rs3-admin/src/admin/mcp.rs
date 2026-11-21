@@ -4705,7 +4705,7 @@ impl McpServer {
 
     /// Check the health of any gRPC server.
     #[tool(
-        description = "Run grpc.health.v1.Health/Check against `request.target_url`, optionally for `request.service`. Needs a token with the edit scope and an account that may edit."
+        description = "Run grpc.health.v1.Health/Check against `request.target_url`, optionally for `request.service`. Any address can be named, so it needs a token with the edit scope and an admin account; editors use `check_proxy_grpc_health`."
     )]
     async fn check_grpc_health(
         &self,
@@ -4727,7 +4727,7 @@ impl McpServer {
 
     /// Call a method of any gRPC server.
     #[tool(
-        description = "Call the unary gRPC method `request.service`/`request.method` on `request.target_url` with the JSON `request.payload` and `request.metadata` headers; the server must offer reflection. Needs a token with the edit scope and an account that may edit."
+        description = "Call the unary gRPC method `request.service`/`request.method` on `request.target_url` with the JSON `request.payload` and `request.metadata` headers; the server must offer reflection. Any address can be named, so it needs a token with the edit scope and an admin account; editors use `invoke_proxy_grpc`."
     )]
     async fn invoke_grpc(
         &self,
@@ -4749,7 +4749,7 @@ impl McpServer {
 
     /// List the services of any gRPC server.
     #[tool(
-        description = "List the services and methods of the gRPC server `request.target_url` through server reflection, optionally only `request.service_name`. Needs a token with the edit scope and an account that may edit."
+        description = "List the services and methods of the gRPC server `request.target_url` through server reflection, optionally only `request.service_name`. Any address can be named, so it needs a token with the edit scope and an admin account; editors use `reflect_proxy_grpc`."
     )]
     async fn reflect_grpc(
         &self,
