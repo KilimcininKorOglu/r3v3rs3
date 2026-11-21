@@ -102,7 +102,7 @@ impl RpcMethod for AddAccount {
         let account = &self.account;
         let summary = scope_summary(account.role, account.proxies.as_ref());
         Some(account_record(
-            AuditAction::AddAccount,
+            AuditAction::CreateAccount,
             &account.username,
             summary,
         ))
@@ -353,7 +353,7 @@ impl RpcMethod for CreateApiToken {
 
     fn audit(&self) -> Option<AuditRecord> {
         Some(account_record(
-            AuditAction::CreateApiToken,
+            AuditAction::CreateToken,
             &self.username,
             self.name.clone(),
         ))
@@ -394,7 +394,7 @@ impl RpcMethod for DeleteApiToken {
 
     fn audit(&self) -> Option<AuditRecord> {
         Some(account_record(
-            AuditAction::DeleteApiToken,
+            AuditAction::DeleteToken,
             &self.username,
             self.token_id.clone(),
         ))

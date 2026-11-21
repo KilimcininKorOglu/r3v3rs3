@@ -86,7 +86,7 @@ impl RpcMethod for AddDnsCredential {
     }
 
     fn audit(&self) -> Option<AuditRecord> {
-        Some(AuditRecord::new(AuditAction::AddDnsCredential).summary(self.request.name.clone()))
+        Some(AuditRecord::new(AuditAction::CreateDnsCredential).summary(self.request.name.clone()))
     }
 }
 

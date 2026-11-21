@@ -2116,7 +2116,7 @@ r3 <server> cdn refresh-ranges
 r3 <server> discovery list-status
 r3 <server> get-logs server [--since 1700000000] [--until 1700003600] [--limit 100]
 r3 <server> get-dashboard
-r3 <server> audit list-log [--username admin] [--action add_proxy] [--resource-id <id>] [--search text] [--limit 50]
+r3 <server> audit list-log [--username admin] [--action create_proxy] [--resource-id <id>] [--search text] [--limit 50]
 r3 <server> grpc check-health <request.json|yaml|->
 r3 <server> grpc invoke <request.json|yaml|->
 r3 <server> grpc reflect <request.json|yaml|->
@@ -2408,6 +2408,8 @@ $ curl -b cookies.txt -c cookies.txt -H 'Content-Type: application/json' \
 r3v3rs3, bir hesabın WebUI veya yönetim API'si ile yaptığı değişiklikleri kaydeder: portlar (sıfırlamalar dahil), proxy'ler (cache temizlemeleri dahil), erişim listeleri, sertifikalar, ACME kayıtları, ayarlar, CDN IP aralığı yenilemeleri ve hesaplar. [Deploy platformu](@/platform.tr.md) için uygulamaları, ortam değişkenlerini, deployment'ları ve geri almaları, Git token'larını ve webhook secret'larını, hedefleri ve agent kayıtlarını, Git sağlayıcı bağlantılarını, yeniden kurulan webhook'ları ve platform ayarlarını kaydeder. İmzalı bir Git sağlayıcı webhook'unun başlattığı deployment da kaydedilir. Yönetim paneline her giriş, her başarısız giriş denemesi ve her çıkış da kaydedilir. r3v3rs3'ün kendi yaptığı değişiklikler kaydedilmez. Sertifika yenileme ve keşfedilen proxy'ler buna örnektir.
 
 Her kayıtta zaman, hesap, istemci IP adresi, işlem, değişen kaynağın id'si ve kısa bir özet bulunur. Özet isimleri, adresleri ve rolleri içerir. Parola, token veya key içermez.
+
+Bir kaydın işlem adı, değişikliği yapan API işleminin operation id'sidir. Bu ad, işlemin MCP aracının adıyla aynıdır: `create_proxy`, `upload_app_file`, `run_prune`. İki işlemin kendine ait bir API işlemi yoktur: `login_failed` (reddedilen bir oturum açma denemesi) ve `enroll_agent` (kendini kaydeden bir agent). Eski sürümlerin `add_proxy` veya `backup_database` gibi önceki adlarla yazdığı kayıtlar, sunucu `log.db` dosyasını açtığında güncel adlara taşınır. Birden fazla işlemi kapsayan eski bir ad, bu işlemlerin ilkine taşınır.
 
 Tek sunucu denetim kaydını log dizinindeki `log.db` dosyasının `audit_log` tablosunda tutar.
 

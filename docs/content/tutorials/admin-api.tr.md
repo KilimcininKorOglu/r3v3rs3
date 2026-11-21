@@ -195,8 +195,8 @@ WebUI veya API üzerinden yapılan her değişiklik kaydedilir. Kaydı yalnız a
 ```bash
 $ curl -s -b cookies.txt 'http://localhost:46492/api/audit?limit=5' | jq -c '.[]'
 {"time":1789647517635,"username":"admin","client":"127.0.0.1","action":"purge_proxy_cache","resource_id":"jzr-pgf"}
-{"time":1789647512463,"username":"admin","client":"127.0.0.1","action":"add_proxy","resource_id":"jzr-pgf","summary":"api-demo-app"}
-{"time":1789647508125,"username":"admin","client":"127.0.0.1","action":"add_port","resource_id":"smc-gzh","summary":"api-demo /ip4/127.0.0.1/tcp/8475/http"}
+{"time":1789647512463,"username":"admin","client":"127.0.0.1","action":"create_proxy","resource_id":"jzr-pgf","summary":"api-demo-app"}
+{"time":1789647508125,"username":"admin","client":"127.0.0.1","action":"create_port","resource_id":"smc-gzh","summary":"api-demo /ip4/127.0.0.1/tcp/8475/http"}
 {"time":1789647489459,"username":"admin","client":"127.0.0.1","action":"login"}
 ```
 

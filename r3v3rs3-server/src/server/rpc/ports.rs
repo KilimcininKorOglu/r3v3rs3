@@ -121,7 +121,7 @@ impl RpcMethod for AddPort {
 
     /// The server adds the generated id to the entry.
     fn audit(&self) -> Option<AuditRecord> {
-        Some(AuditRecord::new(AuditAction::AddPort).summary(port_summary(&self.entry)))
+        Some(AuditRecord::new(AuditAction::CreatePort).summary(port_summary(&self.entry)))
     }
 }
 

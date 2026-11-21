@@ -34,7 +34,7 @@ impl RpcMethod for AddAccessList {
 
     /// The server adds the generated id to the entry.
     fn audit(&self) -> Option<AuditRecord> {
-        Some(AuditRecord::new(AuditAction::AddAccessList).summary(self.list.name.clone()))
+        Some(AuditRecord::new(AuditAction::CreateAccessList).summary(self.list.name.clone()))
     }
 }
 

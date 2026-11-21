@@ -2116,7 +2116,7 @@ r3 <server> cdn refresh-ranges
 r3 <server> discovery list-status
 r3 <server> get-logs server [--since 1700000000] [--until 1700003600] [--limit 100]
 r3 <server> get-dashboard
-r3 <server> audit list-log [--username admin] [--action add_proxy] [--resource-id <id>] [--search text] [--limit 50]
+r3 <server> audit list-log [--username admin] [--action create_proxy] [--resource-id <id>] [--search text] [--limit 50]
 r3 <server> grpc check-health <request.json|yaml|->
 r3 <server> grpc invoke <request.json|yaml|->
 r3 <server> grpc reflect <request.json|yaml|->
@@ -2408,6 +2408,8 @@ $ curl -b cookies.txt -c cookies.txt -H 'Content-Type: application/json' \
 r3v3rs3 records the changes that an account makes through the WebUI or the admin API: ports (including resets), proxies (including cache purges), access lists, certificates, ACME entries, settings, CDN IP range refreshes and accounts. For the [deployment platform](@/platform.md) it records the apps, their environment variables, deployments and rollbacks, Git tokens and webhook secrets, the targets and agent enrollments, the Git provider connections, the reinstalled webhooks and the platform settings. A deployment that a signed Git provider webhook starts is also recorded. It also records each sign-in, failed sign-in and sign-out of the admin panel. The changes that r3v3rs3 makes by itself, for example a certificate renewal or a discovered proxy, are not recorded.
 
 Each entry holds the time, the account, the client IP address, the action, the id of the changed resource and a short summary. The summary holds names, addresses and roles. It never holds a password, a token or a key.
+
+The action of an entry is the operation id of the API operation that made the change, the same name as its MCP tool: `create_proxy`, `upload_app_file`, `run_prune`. Two actions have no API operation of their own: `login_failed` (a refused sign-in) and `enroll_agent` (an agent that enrolls itself). Entries that older releases wrote under earlier names, such as `add_proxy` or `backup_database`, move to the current names when the server opens `log.db`; an old name that covered several operations moves to the first of them.
 
 A single server keeps the audit log in the `audit_log` table of `log.db` in the log directory.
 

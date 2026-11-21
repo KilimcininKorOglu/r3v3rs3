@@ -1211,7 +1211,7 @@ pub async fn consent(
         .record_audit(
             &caller.username,
             caller.client,
-            AuditRecord::new(AuditAction::AuthorizeMcpClient)
+            AuditRecord::new(AuditAction::ApproveMcpClient)
                 .id(client.id.clone())
                 .summary(format!("{} ({scope})", client.name)),
         )

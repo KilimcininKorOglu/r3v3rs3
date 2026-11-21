@@ -61,7 +61,7 @@ impl RpcMethod for AddErrorPageTheme {
     }
 
     fn audit(&self) -> Option<AuditRecord> {
-        Some(AuditRecord::new(AuditAction::AddErrorPageTheme).summary(self.theme.name.clone()))
+        Some(AuditRecord::new(AuditAction::CreateErrorPageTheme).summary(self.theme.name.clone()))
     }
 }
 
@@ -143,7 +143,7 @@ impl RpcMethod for ResetErrorPageThemes {
 
     fn audit(&self) -> Option<AuditRecord> {
         Some(
-            AuditRecord::new(AuditAction::UpdateConfig)
+            AuditRecord::new(AuditAction::ResetErrorPageThemes)
                 .summary("Reset error page themes to defaults".to_string()),
         )
     }

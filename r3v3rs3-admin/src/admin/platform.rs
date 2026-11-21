@@ -132,7 +132,7 @@ pub async fn add_target(
         .await
         .map_err(platform_error)?;
     // The summary names the target, never the token.
-    let record = AuditRecord::new(AuditAction::AddTarget)
+    let record = AuditRecord::new(AuditAction::CreateTarget)
         .id(created.target.id)
         .summary(created.target.name.clone());
     state
@@ -161,7 +161,7 @@ pub async fn new_target_token(
         .new_target_token(id)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::NewTargetToken)
+    let record = AuditRecord::new(AuditAction::CreateTargetToken)
         .id(id)
         .summary(created.target.name.clone());
     state
@@ -298,7 +298,7 @@ pub async fn set_target_region(
         .set_target_region(id, request.region)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::SetTargetRegion)
+    let record = AuditRecord::new(AuditAction::UpdateTargetRegion)
         .id(id)
         .summary(updated.name.clone());
     state
@@ -326,7 +326,7 @@ pub async fn upgrade_all_targets(
         .map_err(platform_error)?;
     let version = crate::release::version().map_err(platform_error)?;
     for target in &upgraded {
-        let record = AuditRecord::new(AuditAction::UpgradeTarget)
+        let record = AuditRecord::new(AuditAction::UpgradeAllTargets)
             .id(target.id)
             .summary(format!("{} -> {version}", target.name));
         state
@@ -385,7 +385,7 @@ pub async fn add_app(
         .add_app(request, unix_ms())
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::AddApp)
+    let record = AuditRecord::new(AuditAction::CreateApp)
         .id(app.id)
         .summary(app.name.to_string());
     state
@@ -720,7 +720,7 @@ pub async fn put_git_token(
         .await
         .map_err(platform_error)?;
     // The summary names the app, never the token.
-    let record = AuditRecord::new(AuditAction::SetAppGitToken)
+    let record = AuditRecord::new(AuditAction::UpdateAppGitToken)
         .id(id)
         .summary(app.name.to_string());
     state
@@ -779,7 +779,7 @@ pub async fn new_webhook_secret(
         .await
         .map_err(platform_error)?;
     // The summary names the app, never the secret.
-    let record = AuditRecord::new(AuditAction::NewAppWebhookSecret)
+    let record = AuditRecord::new(AuditAction::CreateAppWebhookSecret)
         .id(id)
         .summary(app.name.to_string());
     state
@@ -926,7 +926,7 @@ pub async fn vacuum_app_logs(
 ) -> Result<Json<LogVacuumResult>, AppError> {
     let platform = state.platform(&caller, Permission::Edit).await?;
     let result = platform.vacuum_app_logs(id).await.map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::VacuumLogs)
+    let record = AuditRecord::new(AuditAction::VacuumAppLogs)
         .id(id)
         .summary(format!(
             "Vacuumed container logs, freed {} bytes",
@@ -1342,7 +1342,7 @@ pub async fn terminal(
         Some(shell) if !shell.trim().is_empty() => format!("{container} ({shell})"),
         _ => container,
     };
-    let record = AuditRecord::new(AuditAction::ExecApp)
+    let record = AuditRecord::new(AuditAction::OpenAppTerminal)
         .id(id)
         .summary(summary);
     state
@@ -1472,7 +1472,7 @@ pub async fn rollback_deployment(
         .rollback(id, &caller.username)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::RollbackApp)
+    let record = AuditRecord::new(AuditAction::RollbackDeployment)
         .id(deployment.app)
         .summary(format!("{id} -> {}", deployment.id));
     state
@@ -1608,7 +1608,7 @@ pub async fn create_app_scheduled_command(
         .add_scheduled_command(id, request)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::AddScheduledCommand)
+    let record = AuditRecord::new(AuditAction::CreateAppScheduledCommand)
         .id(id)
         .summary(&cmd.name);
     state
@@ -1641,7 +1641,7 @@ pub async fn update_app_scheduled_command(
         .update_scheduled_command(id, cmd_id, request)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::UpdateScheduledCommand)
+    let record = AuditRecord::new(AuditAction::UpdateAppScheduledCommand)
         .id(id)
         .summary(&cmd.name);
     state
@@ -1672,7 +1672,7 @@ pub async fn delete_app_scheduled_command(
         .delete_scheduled_command(id, cmd_id)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::DeleteScheduledCommand)
+    let record = AuditRecord::new(AuditAction::DeleteAppScheduledCommand)
         .id(id)
         .summary(cmd_id.to_string());
     state
@@ -1703,7 +1703,7 @@ pub async fn run_app_scheduled_command(
         .execute_scheduled_command(id, cmd_id)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::RunScheduledCommand)
+    let record = AuditRecord::new(AuditAction::RunAppScheduledCommand)
         .id(id)
         .summary(cmd_id.to_string());
     state
@@ -1747,7 +1747,7 @@ pub async fn upgrade_app_catalog(
     let _ = platform
         .deploy(id, &caller.username, DeploymentTrigger::Manual)
         .await;
-    let record = AuditRecord::new(AuditAction::UpgradeAppFromCatalog)
+    let record = AuditRecord::new(AuditAction::UpgradeAppCatalog)
         .id(id)
         .summary(format!("{} -> {}", app.name, store_app.id));
     state
@@ -1955,7 +1955,7 @@ pub async fn add_registry(
         .add_registry(request)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::AddRegistry)
+    let record = AuditRecord::new(AuditAction::CreateRegistry)
         .id(entry.id)
         .summary(entry.server.clone());
     state
@@ -2059,7 +2059,7 @@ pub async fn update_prune_policy(
         .update_prune_policy(policy.clone())
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(format!(
+    let record = AuditRecord::new(AuditAction::UpdatePrunePolicy).summary(format!(
         "Updated prune policy (enabled: {})",
         policy.enabled
     ));
@@ -2086,7 +2086,7 @@ pub async fn run_prune(
 ) -> Result<Json<PruneResult>, AppError> {
     let platform = state.platform(&caller, Permission::Admin).await?;
     let result = platform.run_prune().await.map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(format!(
+    let record = AuditRecord::new(AuditAction::RunPrune).summary(format!(
         "Ran disk prune, reclaimed {} bytes",
         result.space_reclaimed_bytes
     ));
@@ -2122,7 +2122,7 @@ pub async fn vacuum_platform_logs(
         .vacuum_all_logs(query.threshold_mb)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::VacuumLogs).summary(format!(
+    let record = AuditRecord::new(AuditAction::VacuumPlatformLogs).summary(format!(
         "Platform vacuumed container logs, freed {} bytes across {} files",
         result.freed_bytes, result.truncated_files
     ));
@@ -2175,7 +2175,7 @@ pub async fn update_node_alerts(
         .update_node_alert_rules(rules)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::UpdateNodeAlertRules).summary(format!(
+    let record = AuditRecord::new(AuditAction::UpdateNodeAlerts).summary(format!(
         "Updated node alert rules (enabled: {})",
         rules.enabled
     ));
@@ -2221,7 +2221,7 @@ pub async fn create_env_group(
         .create_env_group(request, unix_ms())
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::AddEnvGroup)
+    let record = AuditRecord::new(AuditAction::CreateEnvGroup)
         .id(group.id)
         .summary(group.name.clone());
     state
@@ -2343,7 +2343,7 @@ pub async fn create_project(
         .create_project(request, unix_ms())
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::AddProject)
+    let record = AuditRecord::new(AuditAction::CreateProject)
         .id(project.id)
         .summary(project.name.clone());
     state
@@ -2447,7 +2447,7 @@ pub async fn create_environment(
         .create_environment(id, request, unix_ms())
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::AddEnvironment)
+    let record = AuditRecord::new(AuditAction::CreateEnvironment)
         .id(env.id)
         .summary(env.name.clone());
     state

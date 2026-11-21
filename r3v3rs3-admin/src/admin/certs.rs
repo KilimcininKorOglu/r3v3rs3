@@ -353,7 +353,7 @@ pub async fn put_ct_config(
     let config_dir = state.data.lock().await.app_info.config_path.clone();
     let monitor = super::ct::get_or_init_state(&config_dir);
     monitor.save_config(body.config.clone())?;
-    let record = crate::audit::AuditRecord::new(AuditAction::UpdateCtMonitorConfig)
+    let record = crate::audit::AuditRecord::new(AuditAction::UpdateCtConfig)
         .summary("Updated Certificate Transparency monitor configuration");
     state
         .record_audit(&caller.username, caller.client, record)
@@ -417,7 +417,7 @@ pub async fn check_ct_now(
     let config_dir = state.data.lock().await.app_info.config_path.clone();
     let monitor = super::ct::get_or_init_state(&config_dir);
     let count = monitor.run_check(&state, query.domain.as_deref()).await?;
-    let record = crate::audit::AuditRecord::new(AuditAction::CheckCtLogs).summary(format!(
+    let record = crate::audit::AuditRecord::new(AuditAction::CheckCtNow).summary(format!(
         "Triggered Certificate Transparency check, {} new rogue certs found",
         count
     ));

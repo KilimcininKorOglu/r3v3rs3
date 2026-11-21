@@ -407,7 +407,7 @@ impl Platform {
             .await;
 
         if let Some(audit) = &self.audit {
-            let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(format!(
+            let record = AuditRecord::new(AuditAction::RunPrune).summary(format!(
                 "Emergency disk pressure prune at {used_percent}% (threshold {threshold}%): reclaimed {} bytes",
                 result.space_reclaimed_bytes
             ));

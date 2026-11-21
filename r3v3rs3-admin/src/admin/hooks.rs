@@ -92,7 +92,7 @@ pub async fn app_hook(
             .deployment
             .as_ref()
             .map_or_else(|| "queued".to_string(), |d| d.id.to_string());
-        let record = AuditRecord::new(AuditAction::AppWebhook)
+        let record = AuditRecord::new(AuditAction::ReceiveAppWebhook)
             .id(id)
             .summary(format!("{} ({}): {started}", app.name, provider.as_str()));
         // A webhook request has no account.

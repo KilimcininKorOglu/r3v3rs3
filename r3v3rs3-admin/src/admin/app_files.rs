@@ -107,6 +107,7 @@ pub async fn upload(
     audit(
         &state,
         &caller,
+        AuditAction::UploadAppFile,
         id,
         format!("upload {} ({} bytes)", query.path, body.len()),
     )
@@ -136,7 +137,8 @@ pub async fn delete(
         .delete_path(id, &query.path)
         .await
         .map_err(platform_error)?;
-    audit(&state, &caller, id, format!("delete {}", query.path)).await;
+    let summary = format!("delete {}", query.path);
+    audit(&state, &caller, AuditAction::DeleteAppFile, id, summary).await;
     Ok(Json(()))
 }
 
@@ -192,6 +194,7 @@ pub async fn create_volume_backup(
     audit(
         &state,
         &caller,
+        AuditAction::CreateVolumeBackup,
         id,
         format!("backup volume {volume} ({})", entry.id),
     )
@@ -255,6 +258,7 @@ pub async fn restore_volume_backup(
     audit(
         &state,
         &caller,
+        AuditAction::RestoreVolumeBackup,
         id,
         format!("restore volume {volume} from {backup_id}"),
     )
@@ -289,6 +293,7 @@ pub async fn delete_volume_backup(
     audit(
         &state,
         &caller,
+        AuditAction::DeleteVolumeBackup,
         id,
         format!("delete volume backup {volume}/{backup_id}"),
     )
@@ -353,6 +358,7 @@ pub async fn import_volume_archive(
     audit(
         &state,
         &caller,
+        AuditAction::ImportVolumeArchive,
         id,
         format!("import archive into volume {volume} ({size} bytes)"),
     )
@@ -402,10 +408,15 @@ fn check_path(app: &AppEntry, path: &str, write: bool) -> Result<VolumeMount, Ap
     Ok(mount.clone())
 }
 
-async fn audit(state: &AppState, caller: &Caller, id: ShortId, summary: String) {
-    let record = AuditRecord::new(AuditAction::AppFile)
-        .id(id)
-        .summary(summary);
+/// Records a file or volume change of an app under the action of its operation.
+async fn audit(
+    state: &AppState,
+    caller: &Caller,
+    action: AuditAction,
+    id: ShortId,
+    summary: String,
+) {
+    let record = AuditRecord::new(action).id(id).summary(summary);
     state
         .record_audit(&caller.username, caller.client, record)
         .await;

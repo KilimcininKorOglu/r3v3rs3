@@ -59,7 +59,7 @@ pub async fn create(
     let platform = state.platform(&caller, Permission::Edit).await?;
     let entry = platform.run_backup(id).await.map_err(platform_error)?;
     let app = platform.app(id).await.map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::BackupDatabase)
+    let record = AuditRecord::new(AuditAction::CreateDatabaseBackup)
         .id(id)
         .summary(app.name.to_string());
     state
@@ -161,7 +161,7 @@ pub async fn restore(
         .await
         .map_err(platform_error)?;
     let app = platform.app(id).await.map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::RestoreDatabase)
+    let record = AuditRecord::new(AuditAction::RestoreDatabaseBackup)
         .id(id)
         .summary(app.name.to_string());
     state
@@ -190,7 +190,7 @@ pub async fn test_backup(
         .await
         .map_err(platform_error)?;
     let app = platform.app(id).await.map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::BackupDatabase)
+    let record = AuditRecord::new(AuditAction::TestDatabaseBackup)
         .id(id)
         .summary(format!("{}: test backup {backup_id}", app.name));
     state
@@ -292,7 +292,7 @@ pub async fn restore_pitr(
         .restore_pitr(id, request)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::PitrRestoreDatabase)
+    let record = AuditRecord::new(AuditAction::RestoreDatabasePitr)
         .id(id)
         .summary(format!(
             "{}: PITR target {} (branched: {})",
@@ -416,7 +416,7 @@ pub async fn restore_s3(
         .restore_s3_backup(request, &caller.username)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::RestoreDatabaseFromS3)
+    let record = AuditRecord::new(AuditAction::RestoreS3DatabaseBackup)
         .summary(format!("restored from S3 key {key}"));
     state
         .record_audit(&caller.username, caller.client, record)
@@ -483,7 +483,7 @@ pub async fn run_backup_now(
         .app(req.database_id)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::BackupDatabase)
+    let record = AuditRecord::new(AuditAction::RunDatabaseBackupNow)
         .id(req.database_id)
         .summary(app.name.to_string());
     state

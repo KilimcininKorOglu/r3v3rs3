@@ -1551,7 +1551,7 @@ impl McpServer {
 
     /// List recent audit log entries.
     #[tool(
-        description = "List the newest entries of the audit log: who changed what, when, from which client address, and the action name (for example `add_proxy` or `deploy_app`). `limit` caps the number of entries (default 50). Read-only; admin accounts only."
+        description = "List the newest entries of the audit log: who changed what, when, from which client address, and the action name (for example `create_proxy` or `deploy_app`). `limit` caps the number of entries (default 50). Read-only; admin accounts only."
     )]
     async fn list_audit_log(
         &self,
@@ -3420,7 +3420,7 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         let res = platform.vacuum_app_logs(id).await.map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::VacuumLogs)
+        let record = AuditRecord::new(AuditAction::VacuumAppLogs)
             .id(id)
             .summary(format!(
                 "Vacuumed container logs, freed {} bytes",
@@ -3680,7 +3680,7 @@ impl McpServer {
             .add_scheduled_command(id, request)
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::AddScheduledCommand)
+        let record = AuditRecord::new(AuditAction::CreateAppScheduledCommand)
             .id(id)
             .summary(&cmd.name);
         self.state
@@ -3717,7 +3717,7 @@ impl McpServer {
             .update_scheduled_command(id, cmd_id, request)
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::UpdateScheduledCommand)
+        let record = AuditRecord::new(AuditAction::UpdateAppScheduledCommand)
             .id(id)
             .summary(&cmd.name);
         self.state
@@ -3748,7 +3748,7 @@ impl McpServer {
             .delete_scheduled_command(id, cmd_id)
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::DeleteScheduledCommand)
+        let record = AuditRecord::new(AuditAction::DeleteAppScheduledCommand)
             .id(id)
             .summary(cmd_id.to_string());
         self.state
@@ -3779,7 +3779,7 @@ impl McpServer {
             .execute_scheduled_command(id, cmd_id)
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::RunScheduledCommand)
+        let record = AuditRecord::new(AuditAction::RunAppScheduledCommand)
             .id(id)
             .summary(cmd_id.to_string());
         self.state
@@ -5792,7 +5792,7 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         let app = platform.app(id).await.map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::BackupDatabase)
+        let record = AuditRecord::new(AuditAction::TestDatabaseBackup)
             .id(id)
             .summary(format!("{}: test backup {}", app.name, params.backup_id));
         self.state
@@ -5852,7 +5852,7 @@ impl McpServer {
             .restore_pitr(id, request)
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::PitrRestoreDatabase)
+        let record = AuditRecord::new(AuditAction::RestoreDatabasePitr)
             .id(id)
             .summary(format!(
                 "{}: PITR target {} (branched: {})",
@@ -6064,7 +6064,7 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         let created = platform.new_target_token(id).await.map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::NewTargetToken)
+        let record = AuditRecord::new(AuditAction::CreateTargetToken)
             .id(id)
             .summary(created.target.name.clone());
         self.state
@@ -6292,7 +6292,7 @@ impl McpServer {
             .create_environment(project_id, spec, crate::clock::unix_ms())
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::AddEnvironment)
+        let record = AuditRecord::new(AuditAction::CreateEnvironment)
             .id(env.id)
             .summary(env.name.clone());
         self.state
@@ -6490,7 +6490,7 @@ impl McpServer {
             .vacuum_all_logs(params.threshold_mb)
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::VacuumLogs).summary(format!(
+        let record = AuditRecord::new(AuditAction::VacuumPlatformLogs).summary(format!(
             "Platform vacuumed container logs, freed {} bytes",
             res.freed_bytes
         ));
@@ -6516,7 +6516,7 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         let res = platform.run_prune().await.map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(format!(
+        let record = AuditRecord::new(AuditAction::RunPrune).summary(format!(
             "Ran disk prune, reclaimed {} bytes",
             res.space_reclaimed_bytes
         ));
@@ -6566,7 +6566,7 @@ impl McpServer {
             .update_prune_policy(policy.clone())
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::UpdatePlatformSettings).summary(format!(
+        let record = AuditRecord::new(AuditAction::UpdatePrunePolicy).summary(format!(
             "Updated prune policy via MCP (enabled: {})",
             policy.enabled
         ));
@@ -6622,7 +6622,7 @@ impl McpServer {
             .update_node_alert_rules(rules)
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::UpdateNodeAlertRules).summary(format!(
+        let record = AuditRecord::new(AuditAction::UpdateNodeAlerts).summary(format!(
             "Updated node alert rules via MCP (enabled: {})",
             rules.enabled
         ));
@@ -6678,7 +6678,7 @@ impl McpServer {
         crate::proxy::connection_tracker::terminate(conn_id).map_err(|e| {
             ErrorData::internal_error(format!("failed to terminate connection: {e}"), None)
         })?;
-        let record = AuditRecord::new(AuditAction::TerminateConnection)
+        let record = AuditRecord::new(AuditAction::TerminateTrafficConnection)
             .summary(format!("Terminated active connection {} via MCP", conn_id));
         self.state
             .record_audit(&caller.username, caller.client, record)
@@ -6725,7 +6725,7 @@ impl McpServer {
             .save_config(config.clone())
             .map_err(|e| ErrorData::internal_error(format!("failed to save config: {e}"), None))?;
 
-        let record = AuditRecord::new(AuditAction::UpdateCtMonitorConfig)
+        let record = AuditRecord::new(AuditAction::UpdateCtConfig)
             .summary("Updated Certificate Transparency monitor configuration via MCP");
         self.state
             .record_audit(&caller.username, caller.client, record)
@@ -6788,7 +6788,7 @@ impl McpServer {
             .await
             .map_err(|e| ErrorData::internal_error(format!("CT log check failed: {e}"), None))?;
 
-        let record = AuditRecord::new(AuditAction::CheckCtLogs).summary(format!(
+        let record = AuditRecord::new(AuditAction::CheckCtNow).summary(format!(
             "Triggered Certificate Transparency check via MCP, {count} new rogue certs found"
         ));
         self.state
@@ -6907,7 +6907,7 @@ impl McpServer {
             .create_outbound_webhook(request)
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::AddOutboundWebhook)
+        let record = AuditRecord::new(AuditAction::CreateOutboundWebhook)
             .id(entry.id)
             .summary(format!("{} ({})", entry.name, entry.url));
         self.state
@@ -7084,7 +7084,7 @@ impl McpServer {
             .await
             .map_err(any_error)?;
         let entry = platform.add_registry(request).await.map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::AddRegistry)
+        let record = AuditRecord::new(AuditAction::CreateRegistry)
             .id(entry.id)
             .summary(entry.server.clone());
         self.state
@@ -7232,7 +7232,7 @@ impl McpServer {
             .add_git_connection(request, crate::clock::unix_ms())
             .await
             .map_err(any_error)?;
-        let record = AuditRecord::new(AuditAction::AddGitConnection)
+        let record = AuditRecord::new(AuditAction::CreateGitConnection)
             .id(entry.id)
             .summary(format!("{} ({})", entry.name, entry.provider.as_str()));
         self.state

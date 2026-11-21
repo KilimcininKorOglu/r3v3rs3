@@ -346,7 +346,7 @@ When an app leaves a shared server, or its project is deleted, its database and 
 
 ### Database Credentials and Passwords
 
-An account with the Admin permission reads the passwords of a database at any time: `GET /api/databases/{id}/credentials` returns the root account and every tenant with its user, password, database and connection string on `127.0.0.1` of the r3v3rs3 server. Every read writes a `view_database_credentials` entry into the audit log, without the passwords.
+An account with the Admin permission reads the passwords of a database at any time: `GET /api/databases/{id}/credentials` returns the root account and every tenant with its user, password, database and connection string on `127.0.0.1` of the r3v3rs3 server. Every read writes a `get_database_credentials` entry into the audit log, without the passwords.
 
 `POST /api/databases/{id}/password` gives an account a new password: the body `{"tenant": null}` changes the root password, `{"tenant": "<name>"}` the password of a tenant. The command runs inside the database container, the new password is sealed with the platform key, and every app that connects with the account starts a new deployment with it. The response returns the account with its new password and lists the apps whose deployment started (`redeployed`) or did not start (`failed`). The apps of a shared server connect as their tenants, so a new root password redeploys no app there. On Redis the new root password takes effect at once and the ACL file keeps it across a restart and a deployment; a Redis created without a password gets its first one this way. When the database refuses the new root password, the stored password stays the old one.
 
@@ -962,11 +962,11 @@ An admin account sees a **Terminal** link on the page of an app, as well as a de
 - **Database CLI Shortcuts**: When opening the terminal of a managed database (PostgreSQL, MySQL, MariaDB, Redis, MongoDB), the page automatically starts with the appropriate CLI tool (`psql`, `mysql`, `mariadb`, `redis-cli`, `mongosh`). Authentication credentials and environment variables are automatically applied. Operators can also open additional shell tabs side-by-side to inspect files while keeping the database console active.
 - **Session Actions**: The **Copy Output** button extracts the active terminal buffer directly to the clipboard, and **Clear** clears the current screen output.
 
-The terminal works while the app runs on the local Docker Engine of the r3v3rs3 server; an app on an agent target has no terminal yet. Every terminal that an account opens goes into the audit log as `exec_app`, including the chosen shell or CLI tool.
+The terminal works while the app runs on the local Docker Engine of the r3v3rs3 server; an app on an agent target has no terminal yet. Every terminal that an account opens goes into the audit log as `open_app_terminal`, including the chosen shell or CLI tool.
 
 ### Files
 
-An admin account also sees a **Files** link on the page of an app. It opens the files of the volumes of the running container. The page selects a volume, lists its directories, and opens a directory on **View**. A file row offers **Download**, **Edit** and **Delete**; **Edit** opens a file up to 1 MB as text, and **Save** writes it back. The toolbar of the page uploads a file into the current directory and steps one directory up. A write stays inside a volume that is not read-only, and the page hides the upload, the edit and the delete of a read-only volume. Like the terminal, the files work only while the app runs on the local Docker Engine of the r3v3rs3 server. Every write and delete goes into the audit log as `app_file`.
+An admin account also sees a **Files** link on the page of an app. It opens the files of the volumes of the running container. The page selects a volume, lists its directories, and opens a directory on **View**. A file row offers **Download**, **Edit** and **Delete**; **Edit** opens a file up to 1 MB as text, and **Save** writes it back. The toolbar of the page uploads a file into the current directory and steps one directory up. A write stays inside a volume that is not read-only, and the page hides the upload, the edit and the delete of a read-only volume. Like the terminal, the files work only while the app runs on the local Docker Engine of the r3v3rs3 server. Every upload goes into the audit log as `upload_app_file`, and every delete as `delete_app_file`.
 
 #### Volume Backups, Snapshots and Direct Archive Export/Import
 

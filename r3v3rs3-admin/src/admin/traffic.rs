@@ -376,7 +376,7 @@ pub async fn terminate_connection(
     caller.authorize(Permission::Edit)?;
     crate::proxy::connection_tracker::terminate(id)?;
     let record =
-        crate::audit::AuditRecord::new(r3v3rs3_api::audit::AuditAction::TerminateConnection);
+        crate::audit::AuditRecord::new(r3v3rs3_api::audit::AuditAction::TerminateTrafficConnection);
     state
         .record_audit(&caller.username, caller.client, record)
         .await;

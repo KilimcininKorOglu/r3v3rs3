@@ -20,46 +20,46 @@ pub enum AuditAction {
     Login,
     LoginFailed,
     Logout,
-    AddAccount,
+    CreateAccount,
     UpdateAccount,
     DeleteAccount,
     UpdateConfig,
     RefreshCdnRanges,
     /// An account refreshed the app store catalog.
-    RefreshAppStore,
+    RefreshStore,
     /// An account refreshed the engine catalog.
-    RefreshEngines,
-    AddPort,
+    RefreshDatabaseEngines,
+    CreatePort,
     UpdatePort,
     DeletePort,
     ResetPort,
-    AddProxy,
+    CreateProxy,
     UpdateProxy,
     DeleteProxy,
     PurgeProxyCache,
-    AddAccessList,
+    CreateAccessList,
     UpdateAccessList,
     DeleteAccessList,
-    AddCert,
+    UploadCert,
     DeleteCert,
-    AddAcme,
+    CreateAcme,
     UpdateAcme,
     DeleteAcme,
     /// An account ordered the certificates of an ACME entry again at once.
     RequestAcme,
-    AddDnsCredential,
+    CreateDnsCredential,
     UpdateDnsCredential,
     DeleteDnsCredential,
-    AddApp,
+    CreateApp,
     UpdateApp,
     DeleteApp,
     UpdateAppEnv,
     DeployApp,
-    RollbackApp,
+    RollbackDeployment,
     /// An account opened a terminal into the container of an app.
-    ExecApp,
+    OpenAppTerminal,
     /// An account uploaded or deleted a file of an app.
-    AppFile,
+    DeleteAppFile,
     /// An account created a database app.
     CreateDatabase,
     /// An account cloned a database app.
@@ -69,56 +69,56 @@ pub enum AuditAction {
     /// An account deleted a database app.
     DeleteDatabase,
     /// An account read the passwords of the accounts of a database.
-    ViewDatabaseCredentials,
+    GetDatabaseCredentials,
     /// An account gave the root account or a tenant of a database a new password.
     ResetDatabasePassword,
     /// An account removed a tenant of a shared database server with its data.
     DeleteDatabaseTenant,
     /// An account took the backup of a database.
-    BackupDatabase,
+    CreateDatabaseBackup,
     /// An account deleted a backup of a database.
     DeleteDatabaseBackup,
     /// An account restored the backup of a database.
-    RestoreDatabase,
+    RestoreDatabaseBackup,
     /// An account restored a database from an S3 remote backup snapshot.
-    RestoreDatabaseFromS3,
+    RestoreS3DatabaseBackup,
     /// An account performed point-in-time recovery on a database.
-    PitrRestoreDatabase,
+    RestoreDatabasePitr,
     /// An account archived a WAL or binary log segment of a database.
     ArchiveDatabaseWal,
     /// An account changed the backup settings.
     UpdateBackupConfig,
-    SetAppGitToken,
+    UpdateAppGitToken,
     DeleteAppGitToken,
-    AddTarget,
+    CreateTarget,
     DeleteTarget,
-    NewTargetToken,
+    CreateTargetToken,
     EnrollAgent,
     UpgradeServer,
-    NewAppWebhookSecret,
+    CreateAppWebhookSecret,
     DeleteAppWebhookSecret,
     /// A signed webhook request of a Git provider started or queued a deployment.
-    AppWebhook,
-    AddGitConnection,
+    ReceiveAppWebhook,
+    CreateGitConnection,
     UpdateGitConnection,
     DeleteGitConnection,
-    UpdatePlatformSettings,
+    UpdatePrunePolicy,
     /// An account of the Git provider authorized a connection.
-    ConnectGitConnection,
+    InstallGithubApp,
     /// An account installed the webhook of an app at its Git provider again.
     InstallAppHook,
     /// An account approved an MCP client in the OAuth authorization flow.
-    AuthorizeMcpClient,
+    ApproveMcpClient,
     /// An account checked for image updates of an app.
     CheckAppUpdate,
     /// An account added a scheduled command to an app.
-    AddScheduledCommand,
+    CreateAppScheduledCommand,
     /// An account updated a scheduled command of an app.
-    UpdateScheduledCommand,
+    UpdateAppScheduledCommand,
     /// An account deleted a scheduled command of an app.
-    DeleteScheduledCommand,
+    DeleteAppScheduledCommand,
     /// An account executed a scheduled command of an app.
-    RunScheduledCommand,
+    RunAppScheduledCommand,
     /// An account approved a pending deployment of an app.
     ApproveDeployment,
     /// An account rejected a pending deployment of an app.
@@ -128,7 +128,7 @@ pub enum AuditAction {
     /// An account removed a login ban for an IP address.
     UnbanIp,
     /// An account upgraded an app to the latest version in the app store catalog.
-    UpgradeAppFromCatalog,
+    UpgradeAppCatalog,
     /// An account rotated the platform encryption key and re-sealed stored secrets.
     RotatePlatformKey,
     /// An account registered a WebAuthn passkey.
@@ -136,11 +136,11 @@ pub enum AuditAction {
     /// An account deleted a WebAuthn passkey.
     DeletePasskey,
     /// An account created an API token.
-    CreateApiToken,
+    CreateToken,
     /// An account deleted an API token.
-    DeleteApiToken,
+    DeleteToken,
     /// An account added container registry credentials.
-    AddRegistry,
+    CreateRegistry,
     /// An account updated container registry credentials.
     UpdateRegistry,
     /// An account deleted container registry credentials.
@@ -154,19 +154,19 @@ pub enum AuditAction {
     /// An account restored platform state from a disaster recovery backup.
     RestoreDisasterRecoveryBackup,
     /// An account added an environment variable group.
-    AddEnvGroup,
+    CreateEnvGroup,
     /// An account updated an environment variable group.
     UpdateEnvGroup,
     /// An account deleted an environment variable group.
     DeleteEnvGroup,
     /// An account added a project.
-    AddProject,
+    CreateProject,
     /// An account updated a project.
     UpdateProject,
     /// An account deleted a project.
     DeleteProject,
     /// An account added an environment to a project.
-    AddEnvironment,
+    CreateEnvironment,
     /// An account updated an environment in a project.
     UpdateEnvironment,
     /// An account deleted an environment from a project.
@@ -176,7 +176,7 @@ pub enum AuditAction {
     /// An account synchronized or cloned environment variables across project environments.
     SyncEnvironmentEnv,
     /// An account added an outbound webhook.
-    AddOutboundWebhook,
+    CreateOutboundWebhook,
     /// An account updated an outbound webhook.
     UpdateOutboundWebhook,
     /// An account deleted an outbound webhook.
@@ -188,11 +188,11 @@ pub enum AuditAction {
     /// An account undrained a target, restoring it to traffic.
     UndrainTarget,
     /// An account set the geographical region of a target.
-    SetTargetRegion,
+    UpdateTargetRegion,
     /// An account updated the node-level threshold alert rules.
-    UpdateNodeAlertRules,
+    UpdateNodeAlerts,
     /// An account truncated or vacuumed container log files.
-    VacuumLogs,
+    VacuumAppLogs,
     /// An account or system quarantined an IP address.
     QuarantineIp,
     /// An account unquarantined / unbanned an IP address.
@@ -200,153 +200,281 @@ pub enum AuditAction {
     /// An account updated the auto-quarantine configuration.
     UpdateQuarantineConfig,
     /// An account updated the GeoIP database configuration.
-    UpdateGeoIpConfig,
+    UpdateGeoipConfig,
     /// An account or scheduled task triggered a GeoIP database update.
-    RefreshGeoIpDatabase,
+    UpdateGeoipDatabase,
     /// An account added an error page theme.
-    AddErrorPageTheme,
+    CreateErrorPageTheme,
     /// An account updated an error page theme.
     UpdateErrorPageTheme,
     /// An account deleted an error page theme.
     DeleteErrorPageTheme,
     /// An account applied a predefined security header profile to a proxy.
-    ApplySecurityProfile,
+    ApplyProxySecurityHeaderProfile,
     /// An operator terminated an active long-lived connection or stream.
-    TerminateConnection,
+    TerminateTrafficConnection,
     /// An account generated secrets for an app's environment variables.
     GenerateAppEnvSecrets,
     /// An account updated the Certificate Transparency monitor configuration.
-    UpdateCtMonitorConfig,
+    UpdateCtConfig,
     /// An account triggered an on-demand Certificate Transparency log check.
-    CheckCtLogs,
+    CheckCtNow,
     /// An account dismissed or updated a Certificate Transparency rogue certificate alert.
     DismissCtAlert,
+    UploadAppFile,
+    CreateVolumeBackup,
+    RestoreVolumeBackup,
+    DeleteVolumeBackup,
+    ImportVolumeArchive,
+    TestDatabaseBackup,
+    RunDatabaseBackupNow,
+    UpgradeAllTargets,
+    RunPrune,
+    VacuumPlatformLogs,
+    UpdateAnomalyRules,
+    RestoreDisasterRecoveryUpload,
+    CompleteGitOauth,
+    DeleteManyCerts,
+    ResetErrorPageThemes,
+    UpdateProxyStreamPriority,
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 121] = [
+    pub const ALL: [AuditAction; 137] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
-        Self::AddAccount,
+        Self::CreateAccount,
         Self::UpdateAccount,
         Self::DeleteAccount,
         Self::UpdateConfig,
         Self::RefreshCdnRanges,
-        Self::RefreshAppStore,
-        Self::RefreshEngines,
-        Self::AddPort,
+        Self::RefreshStore,
+        Self::RefreshDatabaseEngines,
+        Self::CreatePort,
         Self::UpdatePort,
         Self::DeletePort,
         Self::ResetPort,
-        Self::AddProxy,
+        Self::CreateProxy,
         Self::UpdateProxy,
         Self::DeleteProxy,
         Self::PurgeProxyCache,
-        Self::AddAccessList,
+        Self::CreateAccessList,
         Self::UpdateAccessList,
         Self::DeleteAccessList,
-        Self::AddCert,
+        Self::UploadCert,
         Self::DeleteCert,
-        Self::AddAcme,
+        Self::CreateAcme,
         Self::UpdateAcme,
         Self::DeleteAcme,
-        Self::AddApp,
+        Self::CreateApp,
         Self::UpdateApp,
         Self::DeleteApp,
         Self::UpdateAppEnv,
         Self::DeployApp,
-        Self::RollbackApp,
-        Self::ExecApp,
-        Self::AppFile,
+        Self::RollbackDeployment,
+        Self::OpenAppTerminal,
+        Self::DeleteAppFile,
         Self::CreateDatabase,
         Self::CloneDatabase,
         Self::CreateDatabaseReplica,
         Self::DeleteDatabase,
-        Self::ViewDatabaseCredentials,
+        Self::GetDatabaseCredentials,
         Self::ResetDatabasePassword,
         Self::DeleteDatabaseTenant,
-        Self::BackupDatabase,
+        Self::CreateDatabaseBackup,
         Self::DeleteDatabaseBackup,
-        Self::RestoreDatabase,
-        Self::RestoreDatabaseFromS3,
-        Self::PitrRestoreDatabase,
+        Self::RestoreDatabaseBackup,
+        Self::RestoreS3DatabaseBackup,
+        Self::RestoreDatabasePitr,
         Self::ArchiveDatabaseWal,
         Self::UpdateBackupConfig,
-        Self::SetAppGitToken,
+        Self::UpdateAppGitToken,
         Self::DeleteAppGitToken,
-        Self::AddTarget,
+        Self::CreateTarget,
         Self::DeleteTarget,
-        Self::NewTargetToken,
+        Self::CreateTargetToken,
         Self::EnrollAgent,
         Self::UpgradeServer,
-        Self::NewAppWebhookSecret,
+        Self::CreateAppWebhookSecret,
         Self::DeleteAppWebhookSecret,
-        Self::AppWebhook,
-        Self::AddGitConnection,
+        Self::ReceiveAppWebhook,
+        Self::CreateGitConnection,
         Self::UpdateGitConnection,
         Self::DeleteGitConnection,
-        Self::UpdatePlatformSettings,
-        Self::ConnectGitConnection,
+        Self::UpdatePrunePolicy,
+        Self::InstallGithubApp,
         Self::InstallAppHook,
-        Self::AuthorizeMcpClient,
+        Self::ApproveMcpClient,
         Self::CheckAppUpdate,
-        Self::AddScheduledCommand,
-        Self::UpdateScheduledCommand,
-        Self::DeleteScheduledCommand,
-        Self::RunScheduledCommand,
+        Self::CreateAppScheduledCommand,
+        Self::UpdateAppScheduledCommand,
+        Self::DeleteAppScheduledCommand,
+        Self::RunAppScheduledCommand,
         Self::ApproveDeployment,
         Self::RejectDeployment,
         Self::CancelDeployment,
         Self::UnbanIp,
-        Self::UpgradeAppFromCatalog,
+        Self::UpgradeAppCatalog,
         Self::RotatePlatformKey,
         Self::RegisterPasskey,
         Self::DeletePasskey,
-        Self::CreateApiToken,
-        Self::DeleteApiToken,
-        Self::AddRegistry,
+        Self::CreateToken,
+        Self::DeleteToken,
+        Self::CreateRegistry,
         Self::UpdateRegistry,
         Self::DeleteRegistry,
         Self::UpgradeTarget,
         Self::RestoreConfig,
         Self::CreateDisasterRecoveryBackup,
         Self::RestoreDisasterRecoveryBackup,
-        Self::AddEnvGroup,
+        Self::CreateEnvGroup,
         Self::UpdateEnvGroup,
         Self::DeleteEnvGroup,
-        Self::AddProject,
+        Self::CreateProject,
         Self::UpdateProject,
         Self::DeleteProject,
-        Self::AddEnvironment,
+        Self::CreateEnvironment,
         Self::UpdateEnvironment,
         Self::DeleteEnvironment,
         Self::UpdateEnvironmentEnv,
         Self::SyncEnvironmentEnv,
-        Self::AddOutboundWebhook,
+        Self::CreateOutboundWebhook,
         Self::UpdateOutboundWebhook,
         Self::DeleteOutboundWebhook,
         Self::TestOutboundWebhook,
         Self::DrainTarget,
         Self::UndrainTarget,
-        Self::SetTargetRegion,
-        Self::UpdateNodeAlertRules,
-        Self::VacuumLogs,
+        Self::UpdateTargetRegion,
+        Self::UpdateNodeAlerts,
+        Self::VacuumAppLogs,
         Self::QuarantineIp,
         Self::UnquarantineIp,
         Self::UpdateQuarantineConfig,
-        Self::UpdateGeoIpConfig,
-        Self::RefreshGeoIpDatabase,
-        Self::AddErrorPageTheme,
+        Self::UpdateGeoipConfig,
+        Self::UpdateGeoipDatabase,
+        Self::CreateErrorPageTheme,
         Self::UpdateErrorPageTheme,
         Self::DeleteErrorPageTheme,
-        Self::ApplySecurityProfile,
-        Self::TerminateConnection,
+        Self::ApplyProxySecurityHeaderProfile,
+        Self::TerminateTrafficConnection,
         Self::GenerateAppEnvSecrets,
-        Self::UpdateCtMonitorConfig,
-        Self::CheckCtLogs,
+        Self::UpdateCtConfig,
+        Self::CheckCtNow,
         Self::DismissCtAlert,
+        Self::UploadAppFile,
+        Self::CreateVolumeBackup,
+        Self::RestoreVolumeBackup,
+        Self::DeleteVolumeBackup,
+        Self::ImportVolumeArchive,
+        Self::TestDatabaseBackup,
+        Self::RunDatabaseBackupNow,
+        Self::UpgradeAllTargets,
+        Self::RunPrune,
+        Self::VacuumPlatformLogs,
+        Self::UpdateAnomalyRules,
+        Self::RestoreDisasterRecoveryUpload,
+        Self::CompleteGitOauth,
+        Self::DeleteManyCerts,
+        Self::ResetErrorPageThemes,
+        Self::UpdateProxyStreamPriority,
     ];
+}
+
+/// The action names that older releases wrote into the audit log, each with the name that
+/// replaced it. An action is named after the API operation that records it; where an old name
+/// covered several operations, its old entries move to the first one. The log database rewrites
+/// these names when it opens.
+pub const RENAMED_ACTIONS: &[(&str, &str)] = &[
+    ("add_account", "create_account"),
+    ("add_port", "create_port"),
+    ("add_proxy", "create_proxy"),
+    ("add_access_list", "create_access_list"),
+    ("add_cert", "upload_cert"),
+    ("add_acme", "create_acme"),
+    ("add_dns_credential", "create_dns_credential"),
+    ("add_app", "create_app"),
+    ("rollback_app", "rollback_deployment"),
+    ("exec_app", "open_app_terminal"),
+    ("app_file", "delete_app_file"),
+    ("view_database_credentials", "get_database_credentials"),
+    ("backup_database", "create_database_backup"),
+    ("restore_database", "restore_database_backup"),
+    ("restore_database_from_s3", "restore_s3_database_backup"),
+    ("pitr_restore_database", "restore_database_pitr"),
+    ("set_app_git_token", "update_app_git_token"),
+    ("add_target", "create_target"),
+    ("new_target_token", "create_target_token"),
+    ("new_app_webhook_secret", "create_app_webhook_secret"),
+    ("app_webhook", "receive_app_webhook"),
+    ("add_git_connection", "create_git_connection"),
+    ("update_platform_settings", "update_prune_policy"),
+    ("connect_git_connection", "install_github_app"),
+    ("authorize_mcp_client", "approve_mcp_client"),
+    ("add_scheduled_command", "create_app_scheduled_command"),
+    ("update_scheduled_command", "update_app_scheduled_command"),
+    ("delete_scheduled_command", "delete_app_scheduled_command"),
+    ("run_scheduled_command", "run_app_scheduled_command"),
+    ("upgrade_app_from_catalog", "upgrade_app_catalog"),
+    ("create_api_token", "create_token"),
+    ("delete_api_token", "delete_token"),
+    ("add_registry", "create_registry"),
+    ("add_env_group", "create_env_group"),
+    ("add_project", "create_project"),
+    ("add_environment", "create_environment"),
+    ("add_outbound_webhook", "create_outbound_webhook"),
+    ("set_target_region", "update_target_region"),
+    ("update_node_alert_rules", "update_node_alerts"),
+    ("vacuum_logs", "vacuum_app_logs"),
+    ("refresh_app_store", "refresh_store"),
+    ("refresh_engines", "refresh_database_engines"),
+    ("check_ct_logs", "check_ct_now"),
+    ("update_ct_monitor_config", "update_ct_config"),
+    ("terminate_connection", "terminate_traffic_connection"),
+    ("refresh_geo_ip_database", "update_geoip_database"),
+    ("update_geo_ip_config", "update_geoip_config"),
+    (
+        "apply_security_profile",
+        "apply_proxy_security_header_profile",
+    ),
+    ("add_error_page_theme", "create_error_page_theme"),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn name(action: AuditAction) -> String {
+        serde_json::to_value(action)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_string))
+            .unwrap_or_default()
+    }
+
+    /// An old name that is also a current name would rewrite fresh entries on every start, and a
+    /// chain (a -> b, b -> c) would leave entries on a name that no longer exists.
+    #[test]
+    fn no_old_action_name_is_still_in_use() {
+        let current: Vec<String> = AuditAction::ALL.iter().map(|&a| name(a)).collect();
+        for (old, _) in RENAMED_ACTIONS {
+            assert!(
+                !current.iter().any(|c| c == old),
+                "{old} is still an action name"
+            );
+        }
+    }
+
+    /// Every old entry must land on an action that the log can still read.
+    #[test]
+    fn every_new_action_name_is_readable() {
+        for (old, new) in RENAMED_ACTIONS {
+            let parsed = serde_json::from_value::<AuditAction>(serde_json::Value::from(*new));
+            assert!(
+                parsed.is_ok(),
+                "{old} moves to {new}, which is not an action"
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

@@ -67,7 +67,7 @@ pub async fn refresh_engines(
         .send(crate::command::ServerCommand::SetEngines { catalog })
         .await
         .map_err(|_| Error::FailedToInvokeRpc)?;
-    let record = AuditRecord::new(AuditAction::RefreshEngines);
+    let record = AuditRecord::new(AuditAction::RefreshDatabaseEngines);
     state
         .record_audit(&caller.username, caller.client, record)
         .await;
@@ -501,7 +501,7 @@ pub async fn credentials(
         .database_accounts(id)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::ViewDatabaseCredentials).id(id);
+    let record = AuditRecord::new(AuditAction::GetDatabaseCredentials).id(id);
     state
         .record_audit(&caller.username, caller.client, record)
         .await;

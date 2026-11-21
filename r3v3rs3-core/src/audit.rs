@@ -3,6 +3,7 @@
 
 use crate::clock::unix_ms;
 use crate::log::open_database;
+use anyhow::Context;
 use r3v3rs3_api::audit::{
     AuditAction, AuditEntry, AuditQuery, DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT, MAX_SUMMARY_LENGTH,
 };
@@ -257,7 +258,28 @@ async fn connect(path: &Path) -> anyhow::Result<SqlitePool> {
     sqlx::query("CREATE INDEX IF NOT EXISTS audit_log_time ON audit_log (time)")
         .execute(&pool)
         .await?;
+    rename_old_actions(&pool).await?;
     Ok(pool)
+}
+
+/// Moves the entries that older releases wrote under a renamed action to its current name, so
+/// the log reads them and the action filter finds them. An entry with a current name is not
+/// touched, so a second run changes nothing.
+async fn rename_old_actions(pool: &SqlitePool) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    for (old, new) in r3v3rs3_api::audit::RENAMED_ACTIONS {
+        sqlx::query(
+            "UPDATE audit_log SET entry = json_set(entry, '$.action', ?1)
+            WHERE json_extract(entry, '$.action') = ?2",
+        )
+        .bind(new)
+        .bind(old)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("cannot rename the audit action {old} to {new}"))?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// SQLite stores signed 64-bit integers. A larger value is the largest integer.
@@ -340,7 +362,7 @@ mod tests {
             time,
             username: username.to_string(),
             client: None,
-            action: AuditAction::AddProxy,
+            action: AuditAction::CreateProxy,
             resource_id: None,
             summary: String::new(),
             node: String::new(),
@@ -456,6 +478,74 @@ mod tests {
         };
         assert_eq!(times(store.query(&by_search).await?), [8_000]);
 
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    /// Writes rows the way a release before the rename did: raw JSON with the old action names.
+    async fn seed_old_rows(path: &Path) -> anyhow::Result<()> {
+        let pool = open_database(path).await?;
+        sqlx::query("CREATE TABLE audit_log (time INTEGER NOT NULL, username TEXT NOT NULL, entry TEXT NOT NULL)")
+            .execute(&pool)
+            .await?;
+        let rows = [
+            (
+                1_000,
+                r#"{"time":1000,"username":"admin","action":"add_proxy","summary":"web"}"#,
+            ),
+            (
+                2_000,
+                r#"{"time":2000,"username":"admin","action":"backup_database","summary":"nightly"}"#,
+            ),
+            (
+                3_000,
+                r#"{"time":3000,"username":"admin","action":"deploy_app","summary":"kept"}"#,
+            ),
+        ];
+        for (time, json) in rows {
+            sqlx::query("INSERT INTO audit_log (time, username, entry) VALUES (?, 'admin', ?)")
+                .bind(time)
+                .bind(json)
+                .execute(&pool)
+                .await?;
+        }
+        pool.close().await;
+        Ok(())
+    }
+
+    fn summaries(entries: &[AuditEntry]) -> Vec<(u64, AuditAction, &str)> {
+        entries
+            .iter()
+            .map(|e| (e.time, e.action, e.summary.as_str()))
+            .collect()
+    }
+
+    /// Source: the decision to name audit actions after their API operations and to move the
+    /// entries of older releases. No entry may be lost, and the filter must find old entries
+    /// under the new name.
+    #[tokio::test]
+    async fn entries_of_older_releases_move_to_the_new_action_names() -> anyhow::Result<()> {
+        let path = std::env::temp_dir().join(format!(
+            "r3v3rs3-audit-old-{}.db",
+            hex::encode(rand::random::<[u8; 8]>())
+        ));
+        seed_old_rows(&path).await?;
+        let expected = [
+            (3_000, AuditAction::DeployApp, "kept"),
+            (2_000, AuditAction::CreateDatabaseBackup, "nightly"),
+            (1_000, AuditAction::CreateProxy, "web"),
+        ];
+        for _ in 0..2 {
+            let store = SqliteAuditStore::new(path.clone());
+            let entries = store.query(&all_entries()).await?;
+            assert_eq!(summaries(&entries), expected);
+            let by_new_name = AuditFilter {
+                action: Some(AuditAction::CreateDatabaseBackup),
+                ..all_entries()
+            };
+            assert_eq!(times(store.query(&by_new_name).await?), [2_000]);
+            store.pool().await?.close().await;
+        }
         std::fs::remove_file(path)?;
         Ok(())
     }

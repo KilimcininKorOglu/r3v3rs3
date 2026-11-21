@@ -130,6 +130,60 @@ async fn the_audit_log_records_the_changes_and_the_sign_ins_of_an_account() -> a
     panel.stop().await
 }
 
+/// Source: the project naming rule that an audit action carries the operation id of the API
+/// operation that records it. The anomaly rules and the node alert rules are two operations,
+/// so the log must tell them apart.
+#[tokio::test]
+async fn each_operation_records_its_own_action_name() -> anyhow::Result<()> {
+    let dir = prepare_dir("audit-names").await?;
+    let started = unix_ms();
+    let mut config = AppConfig::default();
+    config.platform.enabled = true;
+    let storage = TestStorage::builder()
+        .config(config)
+        .account("admin", "secret", Role::Admin, None)
+        .build();
+    let panel = Panel::start(&dir, storage).await?;
+    let client = Client::new();
+    let cookie = session_cookie(panel.addr, "admin", "secret").await?;
+    for path in ["/api/system/anomalies/rules", "/api/platform/node_alerts"] {
+        resave(&client, panel.addr, &cookie, path).await?;
+    }
+    let entries = wait_for_entries(&dir, started, 3, "the audit log misses an update").await?;
+    let mut actions = entries.iter().map(|e| e.action).collect::<Vec<_>>();
+    actions.retain(|a| *a != AuditAction::Login);
+    actions.sort_by_key(|a| format!("{a:?}"));
+    assert_eq!(
+        actions,
+        [
+            AuditAction::UpdateAnomalyRules,
+            AuditAction::UpdateNodeAlerts
+        ]
+    );
+    panel.stop().await
+}
+
+/// Reads the settings of `path` and writes them back unchanged.
+async fn resave(client: &Client, addr: SocketAddr, cookie: &str, path: &str) -> anyhow::Result<()> {
+    let url = format!("http://{addr}{path}");
+    let current: serde_json::Value = client
+        .get(&url)
+        .header(COOKIE, cookie)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    client
+        .put(&url)
+        .header(COOKIE, cookie)
+        .json(&current)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(())
+}
+
 /// Adds an account, fails a sign-in and signs out, so the audit log records each step.
 async fn change_and_sign_in(client: &Client, addr: SocketAddr) -> anyhow::Result<()> {
     let cookie = session_cookie(addr, "admin", "secret").await?;
@@ -170,7 +224,7 @@ fn check_stored_entries(entries: &[AuditEntry]) -> anyhow::Result<()> {
     let expected = [
         (AuditAction::Login, "admin", None, ""),
         (
-            AuditAction::AddAccount,
+            AuditAction::CreateAccount,
             "admin",
             Some("viewer"),
             "role=viewer",
@@ -218,7 +272,7 @@ async fn check_audit_api(client: &Client, addr: SocketAddr) -> anyhow::Result<()
     assert_eq!(
         rows(&added),
         [(
-            AuditAction::AddAccount,
+            AuditAction::CreateAccount,
             "admin",
             Some("viewer"),
             "role=viewer"
@@ -258,7 +312,7 @@ async fn the_audit_log_records_the_forwarded_client_of_a_trusted_proxy() -> anyh
     .await?;
     // A session request and the sign-out record the address that the proxy forwarded.
     assert_eq!(
-        client_of(&entries, AuditAction::AddAccount).as_deref(),
+        client_of(&entries, AuditAction::CreateAccount).as_deref(),
         Some("203.0.113.8")
     );
     assert_eq!(

@@ -173,7 +173,7 @@ Every change and every sign-in is recorded. Only an admin can read it:
 
 ```bash
 $ curl -s -b cookies.txt 'http://localhost:46492/api/audit?limit=3' | jq -c '.[]'
-{"time":1789647512463,"username":"admin","client":"127.0.0.1","action":"add_proxy","resource_id":"jzr-pgf","summary":"api-demo-app"}
+{"time":1789647512463,"username":"admin","client":"127.0.0.1","action":"create_proxy","resource_id":"jzr-pgf","summary":"api-demo-app"}
 {"time":1789647489459,"username":"admin","client":"127.0.0.1","action":"login"}
 ```
 

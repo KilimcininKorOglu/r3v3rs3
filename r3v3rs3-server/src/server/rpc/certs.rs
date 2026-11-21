@@ -61,7 +61,7 @@ impl RpcMethod for AddCert {
 
     fn audit(&self) -> Option<AuditRecord> {
         let names = self.cert.san.iter().map(ToString::to_string);
-        let record = AuditRecord::new(AuditAction::AddCert).id(self.cert.id);
+        let record = AuditRecord::new(AuditAction::UploadCert).id(self.cert.id);
         Some(record.summary(names.collect::<Vec<_>>().join(", ")))
     }
 }
@@ -120,7 +120,7 @@ impl RpcMethod for DeleteCerts {
 
     fn audit(&self) -> Option<AuditRecord> {
         let ids = self.ids.iter().map(ToString::to_string);
-        let record = AuditRecord::new(AuditAction::DeleteCert);
+        let record = AuditRecord::new(AuditAction::DeleteManyCerts);
         Some(record.summary(ids.collect::<Vec<_>>().join(", ")))
     }
 }

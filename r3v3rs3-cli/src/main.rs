@@ -1108,7 +1108,7 @@ pub enum AuditCommand {
         username: Option<String>,
         #[arg(long)]
         resource_id: Option<String>,
-        /// Only records of this action, for example `add_proxy`.
+        /// Only records of this action, for example `create_proxy`.
         #[arg(long)]
         action: Option<String>,
         #[arg(long)]

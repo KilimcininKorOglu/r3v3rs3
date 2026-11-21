@@ -46,7 +46,7 @@ pub async fn create_webhook(
 ) -> Result<Json<OutboundWebhook>, AppError> {
     let platform = state.platform(&caller, Permission::Admin).await?;
     let entry = platform.create_outbound_webhook(request).await?;
-    let record = AuditRecord::new(AuditAction::AddOutboundWebhook)
+    let record = AuditRecord::new(AuditAction::CreateOutboundWebhook)
         .id(entry.id)
         .summary(format!("{} ({})", entry.name, entry.url));
     state

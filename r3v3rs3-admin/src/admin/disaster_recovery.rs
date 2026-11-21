@@ -246,7 +246,7 @@ pub async fn restore_upload(
     })
     .await?;
 
-    let record = AuditRecord::new(AuditAction::RestoreDisasterRecoveryBackup)
+    let record = AuditRecord::new(AuditAction::RestoreDisasterRecoveryUpload)
         .summary(format!("{restored} files restored from upload"));
     state
         .record_audit(&caller.username, caller.client, record)

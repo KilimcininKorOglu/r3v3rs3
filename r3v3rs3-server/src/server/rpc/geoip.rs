@@ -63,7 +63,7 @@ impl RpcMethod for UpdateGeoIpConfig {
     }
 
     fn audit(&self) -> Option<AuditRecord> {
-        Some(AuditRecord::new(AuditAction::UpdateGeoIpConfig))
+        Some(AuditRecord::new(AuditAction::UpdateGeoipConfig))
     }
 }
 
@@ -114,7 +114,7 @@ impl RpcMethod for RefreshGeoIpDatabase {
     }
 
     fn audit(&self) -> Option<AuditRecord> {
-        Some(AuditRecord::new(AuditAction::RefreshGeoIpDatabase))
+        Some(AuditRecord::new(AuditAction::UpdateGeoipDatabase))
     }
 }
 

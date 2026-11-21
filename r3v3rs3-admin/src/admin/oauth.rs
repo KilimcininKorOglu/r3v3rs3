@@ -139,10 +139,10 @@ async fn record(state: &AppState, authorized: &Authorized) {
     let entry = &authorized.entry;
     let (action, summary) = if authorized.install_url.is_some() {
         let summary = format!("{} ({})", entry.name, entry.provider.as_str());
-        (AuditAction::AddGitConnection, summary)
+        (AuditAction::CompleteGitOauth, summary)
     } else {
         (
-            AuditAction::ConnectGitConnection,
+            AuditAction::CompleteGitOauth,
             super::git::connected_summary(entry),
         )
     };

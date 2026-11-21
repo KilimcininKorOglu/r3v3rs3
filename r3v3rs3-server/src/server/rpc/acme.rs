@@ -96,7 +96,7 @@ impl RpcMethod for AddAcme {
             .iter()
             .map(ToString::to_string);
         let summary = names.collect::<Vec<_>>().join(", ");
-        Some(AuditRecord::new(AuditAction::AddAcme).summary(summary))
+        Some(AuditRecord::new(AuditAction::CreateAcme).summary(summary))
     }
 }
 

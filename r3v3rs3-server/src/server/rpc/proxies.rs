@@ -201,7 +201,7 @@ impl RpcMethod for AddProxy {
 
     /// The server adds the generated id to the entry.
     fn audit(&self) -> Option<AuditRecord> {
-        Some(AuditRecord::new(AuditAction::AddProxy).summary(self.entry.name.clone()))
+        Some(AuditRecord::new(AuditAction::CreateProxy).summary(self.entry.name.clone()))
     }
 }
 
@@ -317,7 +317,7 @@ impl RpcMethod for UpdateProxyStreamPriority {
     }
 
     fn audit(&self) -> Option<AuditRecord> {
-        let record = AuditRecord::new(AuditAction::UpdateProxy).id(self.id);
+        let record = AuditRecord::new(AuditAction::UpdateProxyStreamPriority).id(self.id);
         Some(record.summary("update_proxy_stream_priority"))
     }
 }
@@ -365,7 +365,7 @@ impl RpcMethod for ApplyProxySecurityHeadersProfile {
     }
 
     fn audit(&self) -> Option<AuditRecord> {
-        let record = AuditRecord::new(AuditAction::UpdateProxy).id(self.id);
+        let record = AuditRecord::new(AuditAction::ApplyProxySecurityHeaderProfile).id(self.id);
         Some(record.summary("apply_proxy_security_headers_profile"))
     }
 }

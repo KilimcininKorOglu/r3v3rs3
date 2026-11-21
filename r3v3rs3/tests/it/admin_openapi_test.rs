@@ -484,6 +484,7 @@ fn check_document(document: &Value) {
         "operation ids repeat"
     );
     check_operation_verbs(&operation_ids);
+    check_audit_action_names(&operation_ids);
 
     assert_eq!(document["info"]["version"], env!("CARGO_PKG_VERSION"));
     let session = &document["components"]["securitySchemes"]["session"];
@@ -580,6 +581,41 @@ fn check_operation_verbs(operation_ids: &BTreeSet<String>) {
     assert!(
         wrong.is_empty(),
         "operation ids without an allowed verb: {wrong:?}"
+    );
+}
+
+/// Audit actions that no API operation records, each with its reason.
+const AUDIT_EVENTS: &[(&str, &str)] = &[
+    (
+        "login_failed",
+        "a refused sign-in, recorded by the login operation",
+    ),
+    (
+        "enroll_agent",
+        "an agent enrolling itself over its mTLS link",
+    ),
+];
+
+/// Project naming rule: an audit action carries the operation id of the API operation that
+/// records it, the same name its MCP tool and CLI command derive from.
+fn check_audit_action_names(operation_ids: &BTreeSet<String>) {
+    let events = AUDIT_EVENTS
+        .iter()
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>();
+    let wrong = r3v3rs3_api::audit::AuditAction::ALL
+        .iter()
+        .filter_map(|action| {
+            serde_json::to_value(action)
+                .ok()?
+                .as_str()
+                .map(str::to_string)
+        })
+        .filter(|name| !operation_ids.contains(name) && !events.contains(&name.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        wrong.is_empty(),
+        "audit actions without an operation: {wrong:?}"
     );
 }
 

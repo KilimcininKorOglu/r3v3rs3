@@ -137,7 +137,7 @@ pub async fn install_github_app(
         .install_github_app(id)
         .await
         .map_err(platform_error)?;
-    let record = AuditRecord::new(AuditAction::ConnectGitConnection)
+    let record = AuditRecord::new(AuditAction::InstallGithubApp)
         .id(entry.id)
         .summary(connected_summary(&entry));
     state
@@ -183,7 +183,7 @@ pub async fn add_connection(
         .add_git_connection(request, unix_ms())
         .await
         .map_err(platform_error)?;
-    record(&state, &caller, AuditAction::AddGitConnection, &entry).await;
+    record(&state, &caller, AuditAction::CreateGitConnection, &entry).await;
     Ok(Json(entry))
 }
 

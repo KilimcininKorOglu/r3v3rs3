@@ -439,7 +439,7 @@ pub async fn update_rules(
     let monitor = get_or_init_state(&config_dir);
     monitor.save_rules(rules)?;
 
-    let record = AuditRecord::new(AuditAction::UpdateNodeAlertRules).summary(format!(
+    let record = AuditRecord::new(AuditAction::UpdateAnomalyRules).summary(format!(
         "Updated anomaly alert rules (enabled: {})",
         rules.enabled
     ));

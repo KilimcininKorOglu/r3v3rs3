@@ -49,7 +49,7 @@ pub async fn refresh(
         .send(ServerCommand::SetAppStore { catalog })
         .await
         .map_err(|_| Error::FailedToInvokeRpc)?;
-    let record = AuditRecord::new(AuditAction::RefreshAppStore);
+    let record = AuditRecord::new(AuditAction::RefreshStore);
     state
         .record_audit(&caller.username, caller.client, record)
         .await;

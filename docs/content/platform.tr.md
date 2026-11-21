@@ -346,7 +346,7 @@ Bir uygulama ortak sunucudan ayrıldığında veya projesi silindiğinde, verita
 
 ### Veritabanı Bağlantı Bilgileri ve Parolalar
 
-Admin yetkisi olan bir hesap bir veritabanının parolalarını her zaman okuyabilir: `GET /api/databases/{id}/credentials` root hesabını ve her tenant'ı kullanıcısı, parolası, veritabanı ve r3v3rs3 sunucusunun `127.0.0.1` adresindeki bağlantı dizesiyle döndürür. Her okuma audit log'a parolasız bir `view_database_credentials` kaydı yazar.
+Admin yetkisi olan bir hesap bir veritabanının parolalarını her zaman okuyabilir: `GET /api/databases/{id}/credentials` root hesabını ve her tenant'ı kullanıcısı, parolası, veritabanı ve r3v3rs3 sunucusunun `127.0.0.1` adresindeki bağlantı dizesiyle döndürür. Her okuma audit log'a parolasız bir `get_database_credentials` kaydı yazar.
 
 `POST /api/databases/{id}/password` bir hesaba yeni parola verir: `{"tenant": null}` gövdesi root parolasını, `{"tenant": "<ad>"}` gövdesi bir tenant'ın parolasını değiştirir. Komut veritabanı container'ının içinde çalışır, yeni parola platform anahtarıyla mühürlenir ve hesapla bağlanan her uygulama yeni parolayla yeni bir deployment başlatır. Yanıt hesabı yeni parolasıyla döndürür ve deployment'ı başlayan (`redeployed`) ile başlamayan (`failed`) uygulamaları listeler. Ortak bir sunucunun uygulamaları kendi tenant'larıyla bağlanır, bu yüzden orada yeni bir root parolası hiçbir uygulamayı yeniden deploy etmez. Redis'te yeni root parolası hemen geçerli olur. ACL dosyası parolayı yeniden başlatmalarda ve deployment'larda korur. Parolasız oluşturulmuş bir Redis ilk parolasını bu yolla alır. Veritabanı yeni root parolasını reddederse saklanan parola eskisi olarak kalır.
 
@@ -962,11 +962,11 @@ Admin hesap, uygulama sayfasında bir **Terminal** linki, ayrıca Veritabanları
 - **Veritabanı CLI Kısayolları**: Yönetilen bir veritabanının terminaline girildiğinde ilk sekme otomatik olarak ilgili veritabanı motorunun CLI aracıyla (`psql`, `mysql`, `mariadb`, `redis-cli`, `mongosh`) başlar. Kimlik ve parola bilgileri otomatik uygulanır. Operatörler veritabanı konsolunu kapatmadan yan sekmede `sh` veya `bash` açarak dosya sistemini aynı anda inceleyebilir.
 - **Oturum Aksiyonları**: **Çıktıyı Kopyala** butonu aktif terminal ekranındaki tüm metni panoya kopyalar; **Temizle** butonu ise ekran çıktısını sıfırlar.
 
-Terminal, uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir; agent hedefindeki bir uygulamanın henüz terminali yoktur. Bir hesabın açtığı her terminal audit log'una, seçilen kabuk veya CLI aracı bilgisiyle birlikte `exec_app` olarak geçer.
+Terminal, uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir; agent hedefindeki bir uygulamanın henüz terminali yoktur. Bir hesabın açtığı her terminal audit log'una, seçilen kabuk veya CLI aracı bilgisiyle birlikte `open_app_terminal` olarak geçer.
 
 ### Dosyalar
 
-Admin hesap, uygulama sayfasında bir **Dosyalar** linki de görür. Link, çalışan container'ın volume'lerindeki dosyaları açar. Sayfa bir volume seçer, dizinlerini listeler ve **Görüntüle** ile bir dizini açar. Bir dosya satırı **İndir**, **Düzenle** ve **Sil** sunar; **Düzenle** 1 MB'a kadar bir dosyayı metin olarak açar ve **Kaydet** geri yazar. Sayfanın üst barı geçerli dizine bir dosya yükler ve bir üst dizine çıkar. Yazma işlemleri read-only olmayan bir volume içinde kalır; sayfa read-only bir volume için yükleme, düzenleme ve silme butonlarını göstermez. Terminal gibi dosyalar da yalnız uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir. Her yazma ve silme işlemi audit log'una `app_file` olarak geçer.
+Admin hesap, uygulama sayfasında bir **Dosyalar** linki de görür. Link, çalışan container'ın volume'lerindeki dosyaları açar. Sayfa bir volume seçer, dizinlerini listeler ve **Görüntüle** ile bir dizini açar. Bir dosya satırı **İndir**, **Düzenle** ve **Sil** sunar; **Düzenle** 1 MB'a kadar bir dosyayı metin olarak açar ve **Kaydet** geri yazar. Sayfanın üst barı geçerli dizine bir dosya yükler ve bir üst dizine çıkar. Yazma işlemleri read-only olmayan bir volume içinde kalır; sayfa read-only bir volume için yükleme, düzenleme ve silme butonlarını göstermez. Terminal gibi dosyalar da yalnız uygulama r3v3rs3 sunucusunun kendi Docker Engine'inde çalışırken kullanılabilir. Her yükleme audit log'una `upload_app_file`, her silme işlemi de `delete_app_file` olarak geçer.
 
 #### Volume Yedekleri, Snapshot'lar ve Doğrudan Arşiv Dışa/İçe Aktarma
 
