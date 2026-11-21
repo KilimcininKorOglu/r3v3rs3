@@ -1152,12 +1152,7 @@ impl ApiClient {
     }
 
     pub async fn get_acl(&self, id: &str) -> anyhow::Result<()> {
-        // The API has no single-list read, so the list is taken from the full listing.
-        let entries: Vec<serde_json::Value> = self.get_json("/api/access_lists").await?;
-        let entry = entries
-            .into_iter()
-            .find(|entry| entry["id"] == id)
-            .ok_or_else(|| anyhow::anyhow!("access list {id} not found"))?;
+        let entry: serde_json::Value = self.get_json(&format!("/api/access_lists/{id}")).await?;
         print_json(&entry)
     }
 
@@ -2209,12 +2204,7 @@ impl ApiClient {
     }
 
     pub async fn get_target(&self, id: &str) -> anyhow::Result<()> {
-        // The API has no single-target read, so the target is taken from the full listing.
-        let targets: Vec<serde_json::Value> = self.get_json("/api/targets").await?;
-        let target = targets
-            .into_iter()
-            .find(|target| target["id"] == id)
-            .ok_or_else(|| anyhow::anyhow!("target {id} not found"))?;
+        let target: serde_json::Value = self.get_json(&format!("/api/targets/{id}")).await?;
         print_json(&target)
     }
 

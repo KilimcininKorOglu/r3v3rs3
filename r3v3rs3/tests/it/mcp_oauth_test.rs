@@ -1488,6 +1488,12 @@ async fn assert_cli_access_lists(
     cli_ok(binary, addr, token, &["acl", "delete", &id]).await?;
     let listing = cli_ok(binary, addr, token, &["acl", "list"]).await?;
     assert!(!listing.contains("cli-acl"), "{listing}");
+    // OpenAPI `get_access_list`: the server answers the deleted id with 404 itself.
+    let out = run_client(binary, addr, token, &["acl", "get", &id]).await?;
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("404"),
+        "{out:?}"
+    );
     Ok(())
 }
 
@@ -1539,8 +1545,8 @@ fn client_binary() -> anyhow::Result<std::path::PathBuf> {
     Ok(binary)
 }
 
-/// `r3 target get` and `r3 target token` reach the target API (OpenAPI: `list_targets` and
-/// `new_target_token` at `/api/targets/{id}/token`), and `r3 platform status` shows the release
+/// `r3 target get` and `r3 target token` reach the target API (OpenAPI: `get_target` and
+/// `create_target_token` at `/api/targets/{id}/token`), and `r3 platform status` shows the release
 /// version and the worker mode, the same data as the MCP tool `server_status`.
 #[tokio::test]
 async fn the_client_binary_reads_targets_and_the_server_status() -> anyhow::Result<()> {
@@ -1564,8 +1570,7 @@ async fn the_client_binary_reads_targets_and_the_server_status() -> anyhow::Resu
             .and_then(|rest| rest.split(',').next())
             .context("no target id in the add output")?
             .to_string();
-        let shown = cli_ok(&binary, &addr, &token, &["target", "get", &id]).await?;
-        assert!(shown.contains("cli-edge"), "{shown}");
+        assert_cli_target_get(&binary, &addr, &token, &id).await?;
         let renewed = cli_ok(&binary, &addr, &token, &["target", "token", &id]).await?;
         assert!(renewed.contains("\"token\""), "{renewed}");
         let status = cli_ok(&binary, &addr, &token, &["platform", "status"]).await?;
@@ -1574,6 +1579,24 @@ async fn the_client_binary_reads_targets_and_the_server_status() -> anyhow::Resu
         Ok(())
     })
     .await
+}
+
+/// `r3 target get` (OpenAPI `get_target`) shows the target it names, and the server itself
+/// answers an unknown id with 404.
+async fn assert_cli_target_get(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let shown = cli_ok(binary, addr, token, &["target", "get", id]).await?;
+    assert!(shown.contains("cli-edge"), "{shown}");
+    let out = run_client(binary, addr, token, &["target", "get", MISSING_DB]).await?;
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("404"),
+        "{out:?}"
+    );
+    Ok(())
 }
 
 /// An id that names no database, so every call that takes it must answer "not found".
