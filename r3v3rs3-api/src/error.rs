@@ -151,6 +151,9 @@ pub enum Error {
     #[error("a deployment of the app is in progress: {name}")]
     AppBusy { name: String },
 
+    #[error("the app has no running deployment to stop or start: {name}")]
+    AppNotDeployed { name: String },
+
     #[error("the deployment has no image to roll back to: {id}")]
     RollbackUnavailable { id: ShortId },
 

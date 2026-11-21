@@ -369,6 +369,8 @@ pub struct RunningDeployment {
     pub target: ShortId,
     pub app_name: AppName,
     pub spec: AppSpec,
+    /// Whether an account stopped the app, whose containers then do not run.
+    pub stopped: bool,
 }
 
 /// The outcome of a write that a unique app name or host port can refuse.
@@ -1015,9 +1017,14 @@ impl PlatformStore {
     }
 
     /// Marks a deployment `running` and the running deployment of the same app `superseded`, in
-    /// one transaction. Its job goes on until `end_deployment`.
+    /// one transaction. Its job goes on until `end_deployment`. A deployment that serves runs
+    /// its containers, so a stopped app runs again.
     pub async fn serve_deployment(&self, app: ShortId, id: ShortId) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
+        sqlx::query("UPDATE apps SET stopped = 0 WHERE id = ?")
+            .bind(app.to_string())
+            .execute(&mut *tx)
+            .await?;
         sqlx::query(
             "UPDATE deployments SET status = 'superseded'
             WHERE app_id = ? AND status = 'running' AND id <> ?",
@@ -1109,7 +1116,7 @@ impl PlatformStore {
     /// The running deployment of every app, with the app name.
     pub async fn running_deployments(&self) -> anyhow::Result<Vec<RunningDeployment>> {
         let rows = sqlx::query(
-            "SELECT d.id, d.app_id, a.target_id, a.name, d.spec FROM deployments d
+            "SELECT d.id, d.app_id, a.target_id, a.name, a.stopped, d.spec FROM deployments d
             JOIN apps a ON a.id = d.app_id
             WHERE d.status = 'running' ORDER BY a.name",
         )
@@ -1123,6 +1130,7 @@ impl PlatformStore {
                     target: id_of(row, "target_id")?,
                     app_name: row.try_get::<&str, _>("name")?.parse()?,
                     spec: serde_json::from_str(row.try_get("spec")?)?,
+                    stopped: row.try_get("stopped")?,
                 })
             })
             .collect()

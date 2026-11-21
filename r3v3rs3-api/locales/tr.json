@@ -560,6 +560,7 @@
   "error.acme_wildcard_needs_dns_challenge": "Wildcard alan adı DNS-01 challenge'ı gerektirir: {identifier}",
   "error.all_servers_drained": "En az bir upstream sunucunun ağırlığı 0'dan büyük olmalıdır.",
   "error.app_busy": "{name} uygulamasının bir deployment'ı sürüyor. Bitmesini bekleyin.",
+  "error.app_not_deployed": "{name} uygulamasının çalışan bir deployment'ı yok. Önce deploy edin.",
   "error.app_name_exists": "{name} adında bir uygulama zaten var.",
   "error.cannot_change_own_account": "Kendi hesabınızı silemez, rolünü de değiştiremezsiniz.",
   "error.certificate_in_use": "Sertifika kullanımda: {id}",

@@ -162,10 +162,19 @@ impl Platform {
         }
     }
 
-    async fn read_proxies(&self) -> anyhow::Result<Published> {
+    pub(super) async fn read_proxies(&self) -> anyhow::Result<Published> {
         let mut proxies = Vec::new();
         let mut issues = Vec::new();
         for deployment in self.store.running_deployments().await? {
+            if deployment.stopped {
+                proxies.extend(proxy::stopped_app_proxy(
+                    deployment.app,
+                    deployment.app_name.as_str(),
+                    &deployment.spec,
+                    &self.config,
+                ));
+                continue;
+            }
             let (host_ports, app_issues) = self.deployment_ports(&deployment).await?;
             issues.extend(app_issues);
             if !host_ports.is_empty() {
@@ -270,6 +279,9 @@ pub async fn refresh(platform: Weak<Platform>) {
         let Some(platform) = platform.upgrade() else {
             return;
         };
+        if let Err(err) = platform.keep_stopped_apps_down().await {
+            tracing::error!(error = %format!("{err:#}"), "cannot read the stopped apps");
+        }
         if !platform.publish().await {
             return;
         }
@@ -456,6 +468,7 @@ mod tests {
             target,
             app_name: "turn".parse().unwrap(),
             spec: spec.clone(),
+            stopped: false,
         };
         let ports = host_ports_by_target(&[running(agent)]);
         assert_eq!(ports.keys().collect::<Vec<_>>(), [&agent]);

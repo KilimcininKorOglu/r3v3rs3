@@ -8,7 +8,7 @@ use r3v3rs3_api::discovery::{DiscoveryIssue, DiscoveryProvider, DiscoverySource,
 use r3v3rs3_api::header_rules::HeaderRules;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppSpec, PlatformConfig};
-use r3v3rs3_api::proxy::{HttpProxy, ProxyKind, Route, Server, ServerUrl};
+use r3v3rs3_api::proxy::{HttpProxy, MaintenanceConfig, ProxyKind, Route, Server, ServerUrl};
 use r3v3rs3_api::upstream::{CircuitBreaker, HealthCheck};
 use r3v3rs3_api::vhost::VirtualHost;
 use std::time::Duration;
@@ -85,11 +85,40 @@ pub fn app_proxy(
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let health_check = app_health_check(app.spec, app.host_ports.len());
-    let circuit_breaker = app_circuit_breaker(app.host_ports.len());
     let http = HttpProxy {
-        vhosts: app
-            .spec
+        health_check: app_health_check(app.spec, app.host_ports.len()),
+        circuit_breaker: app_circuit_breaker(app.host_ports.len()),
+        ..app_http(app.spec, servers)
+    };
+    Ok(Some(discovered(app.id, app.name, app.spec, config, http)))
+}
+
+/// The proxy of a stopped app: the same proxy without servers, which answers every request with
+/// the 503 page of the error page theme. The key, the ports and the certificate stay, so the
+/// domains keep their certificates and the proxy comes back unchanged at the start.
+pub fn stopped_app_proxy(
+    id: ShortId,
+    name: &str,
+    spec: &AppSpec,
+    config: &PlatformConfig,
+) -> Option<DiscoveredProxy> {
+    if spec.domains.is_empty() {
+        return None;
+    }
+    let http = HttpProxy {
+        maintenance: MaintenanceConfig {
+            enabled: true,
+            error_page: true,
+            ..Default::default()
+        },
+        ..app_http(spec, Vec::new())
+    };
+    Some(discovered(id, name, spec, config, http))
+}
+
+fn app_http(spec: &AppSpec, servers: Vec<Server>) -> HttpProxy {
+    HttpProxy {
+        vhosts: spec
             .domains
             .iter()
             .cloned()
@@ -99,41 +128,48 @@ pub fn app_proxy(
             servers,
             ..Default::default()
         }],
-        load_balancing: app.spec.load_balancing.unwrap_or_default(),
-        health_check,
-        circuit_breaker,
-        sticky: app.spec.sticky.clone().unwrap_or_default(),
-        bot_blocker: app.spec.bot_blocker,
-        grpc_web: app.spec.grpc_web,
+        load_balancing: spec.load_balancing.unwrap_or_default(),
+        sticky: spec.sticky.clone().unwrap_or_default(),
+        bot_blocker: spec.bot_blocker,
+        grpc_web: spec.grpc_web,
         // An app sees the domain that the browser opened, not the loopback port of its container.
         preserve_host: true,
-        headers: if app.spec.frame_protection {
+        headers: if spec.frame_protection {
             HeaderRules::default_frame_protection()
         } else {
             HeaderRules::default()
         },
         ..Default::default()
-    };
-    let key = app.id.to_string();
-    Ok(Some(DiscoveredProxy {
+    }
+}
+
+fn discovered(
+    id: ShortId,
+    name: &str,
+    spec: &AppSpec,
+    config: &PlatformConfig,
+    http: HttpProxy,
+) -> DiscoveredProxy {
+    let key = id.to_string();
+    DiscoveredProxy {
         key: key.clone(),
         source: DiscoverySource {
             provider: DiscoveryProvider::Platform,
-            resource: app.name.to_string(),
+            resource: name.to_string(),
         },
         definition: ProxyDefinition {
             key,
-            name: app.name.to_string(),
-            ports: if app.spec.ports.is_empty() {
+            name: name.to_string(),
+            ports: if spec.ports.is_empty() {
                 config.proxy_ports.clone()
             } else {
-                app.spec.ports.clone()
+                spec.ports.clone()
             },
             active: true,
             acme: config.acme,
             kind: ProxyKind::Http(Box::new(http)),
         },
-    }))
+    }
 }
 
 fn app_health_check(spec: &AppSpec, host_count: usize) -> HealthCheck {

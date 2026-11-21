@@ -25,6 +25,7 @@ mod github_app;
 mod history;
 pub mod hooks;
 pub mod image_check;
+mod lifecycle;
 mod metrics;
 mod mongo;
 #[cfg(test)]

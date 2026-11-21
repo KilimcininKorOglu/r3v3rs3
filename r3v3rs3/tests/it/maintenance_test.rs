@@ -155,6 +155,35 @@ async fn check_themed_maintenance(
     Ok(())
 }
 
+/// The proxy of a stopped platform app has a route without servers. It must answer the 503 page
+/// of the error page theme, never the 502 of a route without an upstream server.
+#[tokio::test]
+async fn a_route_without_servers_in_themed_maintenance_answers_503() -> anyhow::Result<()> {
+    let port = alloc_tcp_port().await?;
+    let proxy = HttpProxy {
+        routes: vec![r3v3rs3_api::proxy::Route::default()],
+        maintenance: MaintenanceConfig {
+            enabled: true,
+            error_page: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let config = TestStorage::builder()
+        .ports(vec![http_port_entry("p1", &port)])
+        .proxies(vec![http_proxy_entry("px1", "p1", proxy)])
+        .build();
+    let url = port.http_url("/");
+    with_server(config, |_channels| async move {
+        let resp = reqwest::get(url.as_str()).await?;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = resp.text().await?;
+        assert!(body.contains("Service Unavailable"), "{body}");
+        Ok(())
+    })
+    .await
+}
+
 #[tokio::test]
 async fn maintenance_mode_serves_maintenance_page_and_toggles() -> anyhow::Result<()> {
     let upstream =

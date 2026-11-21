@@ -268,6 +268,7 @@ mod tests {
             Error::PlatformFailed,
             Error::AppNameExists { name: text() },
             Error::AppBusy { name: text() },
+            Error::AppNotDeployed { name: text() },
             Error::RollbackUnavailable {
                 id: "abc".parse().unwrap(),
             },

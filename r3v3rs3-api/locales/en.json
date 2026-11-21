@@ -560,6 +560,7 @@
   "error.acme_wildcard_needs_dns_challenge": "A wildcard domain name needs the DNS-01 challenge: {identifier}",
   "error.all_servers_drained": "At least one upstream server must have a weight above 0.",
   "error.app_busy": "A deployment of {name} is in progress. Wait until it ends.",
+  "error.app_not_deployed": "{name} has no running deployment. Deploy it first.",
   "error.app_name_exists": "An app named {name} already exists.",
   "error.cannot_change_own_account": "You cannot delete your own account or change its role.",
   "error.certificate_in_use": "Certificate is in use: {id}",
