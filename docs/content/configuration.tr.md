@@ -1928,7 +1928,7 @@ Sonra:
 
 ```sh
 r3 http://127.0.0.1:46492 login
-r3 http://127.0.0.1:46492 platform status
+r3 http://127.0.0.1:46492 platform get-app-info
 ```
 
 `login`, onay sayfasını tarayıcıda açar ve token'ları yapılandırma dizinine kaydeder. Bir script, access token'ı doğrudan `--token` ile veya `R3V3RS3_TOKEN` ortam değişkeniyle verebilir. `update` komutu, çalışan binary'nin yerine daha yeni bir release kurar ve sha256 özetini release'in checksum'larıyla doğrular.

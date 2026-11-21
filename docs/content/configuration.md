@@ -1928,7 +1928,7 @@ Then:
 
 ```sh
 r3 http://127.0.0.1:46492 login
-r3 http://127.0.0.1:46492 platform status
+r3 http://127.0.0.1:46492 platform get-app-info
 ```
 
 `login` opens the consent page in the browser and stores the tokens in the config directory. A script can pass an access token directly with `--token` or the `R3V3RS3_TOKEN` environment variable. The `update` command installs a newer release over the running binary and verifies its sha256 digest against the checksums of the release.
