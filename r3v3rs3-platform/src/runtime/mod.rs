@@ -10,7 +10,33 @@ use r3v3rs3_api::container::{
 };
 use r3v3rs3_api::git::RelPath;
 use r3v3rs3_api::platform::BuildKitConfig;
+use serde_derive::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::time::Duration;
+
+/// The stopped containers that a prune keeps: those of stopped apps, which start them again.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PruneKeep {
+    #[serde(default)]
+    pub containers: Vec<ContainerName>,
+    /// Every container of these Compose projects.
+    #[serde(default)]
+    pub projects: Vec<ProjectName>,
+}
+
+impl PruneKeep {
+    pub fn is_empty(&self) -> bool {
+        self.containers.is_empty() && self.projects.is_empty()
+    }
+
+    /// Whether the container with `name` and `labels` must stay.
+    pub fn keeps(&self, name: &str, labels: &BTreeMap<String, String>) -> bool {
+        let project = labels.get(r3v3rs3_api::container::COMPOSE_PROJECT_LABEL);
+        self.containers.iter().any(|kept| kept.as_str() == name)
+            || project
+                .is_some_and(|project| self.projects.iter().any(|kept| kept.as_str() == project))
+    }
+}
 
 #[async_trait::async_trait]
 pub trait ContainerRuntime: Send + Sync {
@@ -53,20 +79,23 @@ pub trait ContainerRuntime: Send + Sync {
     /// every one that no container uses.
     async fn prune_project_images(&self, project: &ProjectName, all: bool) -> anyhow::Result<()>;
 
-    /// Executes disk hygiene prune according to the policy and returns the results.
+    /// Executes disk hygiene prune according to the policy and returns the results. The
+    /// containers of `keep` stay.
     async fn run_prune(
         &self,
         _policy: &r3v3rs3_api::platform::PrunePolicy,
+        _keep: &PruneKeep,
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
         anyhow::bail!("the runtime does not prune its host");
     }
 
-    /// The prune of an agent host: the stopped containers of the platform, the dangling image
-    /// layers and the build cache. The other containers, the tagged images and the volumes of
-    /// the host can belong to software outside the platform, so they stay.
+    /// The prune of an agent host: the stopped containers of the platform except `keep`, the
+    /// dangling image layers and the build cache. The other containers, the tagged images and
+    /// the volumes of the host can belong to software outside the platform, so they stay.
     async fn prune_platform(
         &self,
         _policy: &r3v3rs3_api::platform::PrunePolicy,
+        _keep: &PruneKeep,
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
         anyhow::bail!("the runtime does not prune its host");
     }

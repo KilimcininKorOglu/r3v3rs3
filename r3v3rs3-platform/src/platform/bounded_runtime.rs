@@ -98,15 +98,17 @@ impl ContainerRuntime for BoundedRuntime {
     async fn prune_platform(
         &self,
         policy: &r3v3rs3_api::platform::PrunePolicy,
+        keep: &crate::runtime::PruneKeep,
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
-        self.inner.prune_platform(policy).await
+        self.inner.prune_platform(policy, keep).await
     }
 
     async fn run_prune(
         &self,
         policy: &r3v3rs3_api::platform::PrunePolicy,
+        keep: &crate::runtime::PruneKeep,
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
-        self.inner.run_prune(policy).await
+        self.inner.run_prune(policy, keep).await
     }
 
     async fn vacuum_all_logs(
@@ -281,11 +283,11 @@ mod tests {
     async fn every_call_reaches_the_wrapped_runtime() -> anyhow::Result<()> {
         let bounded = BoundedRuntime::new(Arc::new(FakeRuntime::default()));
         let policy = r3v3rs3_api::platform::PrunePolicy::default();
-        assert_eq!(bounded.run_prune(&policy).await?.space_reclaimed_bytes, 100);
-        assert_eq!(
-            bounded.prune_platform(&policy).await?.space_reclaimed_bytes,
-            10
-        );
+        let keep = crate::runtime::PruneKeep::default();
+        let pruned = bounded.run_prune(&policy, &keep).await?;
+        assert_eq!(pruned.space_reclaimed_bytes, 100);
+        let pruned = bounded.prune_platform(&policy, &keep).await?;
+        assert_eq!(pruned.space_reclaimed_bytes, 10);
         assert!(bounded.disk_space().await?.is_some());
         let project: ProjectName = "r3v3rs3-abc".parse()?;
         assert!(bounded.list_project_containers(&project).await?.is_empty());

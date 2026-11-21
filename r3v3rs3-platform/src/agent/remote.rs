@@ -315,9 +315,11 @@ impl ContainerRuntime for RemoteRuntime {
     async fn run_prune(
         &self,
         policy: &r3v3rs3_api::platform::PrunePolicy,
+        keep: &crate::runtime::PruneKeep,
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
         let policy = policy.clone();
-        match self.call(AgentRequest::RunPrune { policy }).await? {
+        let keep = keep.clone();
+        match self.call(AgentRequest::RunPrune { policy, keep }).await? {
             AgentOutput::Prune { result } => Ok(result),
             other => Err(unexpected(&other)),
         }

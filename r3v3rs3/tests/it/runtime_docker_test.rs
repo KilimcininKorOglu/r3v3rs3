@@ -720,42 +720,51 @@ async fn a_fixed_host_port_publishes_the_same_port() -> anyhow::Result<()> {
 }
 
 /// The prune of an agent host removes the stopped containers of the platform and keeps a
-/// stopped container without the app label, which belongs to software outside the platform.
-/// Only the container switch is on, so the test deletes no image or build cache of the host.
+/// stopped container without the app label, which belongs to software outside the platform,
+/// and the stopped container of a stopped app, which a start runs again. Only the container
+/// switch is on, so the test deletes no image or build cache of the host.
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
 async fn the_agent_prune_keeps_the_containers_outside_the_platform() -> anyhow::Result<()> {
     let runtime = runtime()?;
     let image = pull(&runtime).await?;
-    let (platform, outside) = (Names::new()?, Names::new()?);
-    let result = prune_a_stopped_pair(&runtime, &platform, &outside, image).await;
-    let _ = runtime.remove_container(&platform.container).await;
-    runtime.remove_container(&outside.container).await?;
+    let names = [Names::new()?, Names::new()?, Names::new()?];
+    let result = prune_stopped_containers(&runtime, &names, image).await;
+    let _ = runtime.remove_container(&names[0].container).await;
+    let _ = runtime.remove_container(&names[2].container).await;
+    runtime.remove_container(&names[1].container).await?;
     result
 }
 
-/// Creates a stopped platform container and a stopped container without the app label, runs
-/// the agent prune with only the container switch on, and checks what stays.
-async fn prune_a_stopped_pair(
+/// Creates a stopped platform container, a stopped container without the app label and a
+/// stopped platform container of a stopped app, runs the agent prune with only the container
+/// switch on, and checks what stays.
+async fn prune_stopped_containers(
     runtime: &DockerRuntime,
-    platform: &Names,
-    outside: &Names,
+    [platform, outside, stopped_app]: &[Names; 3],
     image: ImageRef,
 ) -> anyhow::Result<()> {
     let mut owned = spec(platform, image.clone())?;
     owned.network = None;
-    let mut foreign = spec(outside, image)?;
+    let mut foreign = spec(outside, image.clone())?;
     foreign.network = None;
     foreign.labels.clear();
-    runtime.create_container(&owned).await?;
-    runtime.create_container(&foreign).await?;
+    let mut kept = spec(stopped_app, image)?;
+    kept.network = None;
+    for spec in [&owned, &foreign, &kept] {
+        runtime.create_container(spec).await?;
+    }
     let policy = r3v3rs3_api::platform::PrunePolicy {
         prune_containers: true,
         prune_images: false,
         prune_build_cache: false,
         ..Default::default()
     };
-    let result = runtime.prune_platform(&policy).await?;
+    let keep = r3v3rs3::runtime::PruneKeep {
+        containers: vec![stopped_app.container.clone()],
+        projects: Vec::new(),
+    };
+    let result = runtime.prune_platform(&policy, &keep).await?;
     ensure!(result.containers_deleted >= 1, "{result:?}");
     let owned_left = runtime.inspect_container(&platform.container).await?;
     ensure!(
@@ -766,6 +775,11 @@ async fn prune_a_stopped_pair(
     ensure!(
         foreign_left.is_some(),
         "the container outside the platform was deleted"
+    );
+    let kept_left = runtime.inspect_container(&stopped_app.container).await?;
+    ensure!(
+        kept_left.is_some(),
+        "the container of a stopped app was deleted"
     );
     Ok(())
 }

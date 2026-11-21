@@ -9,6 +9,7 @@ use super::compose::project_name;
 use super::deploy::AppLock;
 use super::store::RunningDeployment;
 use super::{Platform, not_found, proxy};
+use crate::runtime::PruneKeep;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, AppSource};
@@ -144,6 +145,25 @@ impl Platform {
             return Ok(());
         };
         self.stop_running_containers(deployment).await
+    }
+
+    /// The containers on `target` that a prune keeps: those of the stopped apps, so that a
+    /// start finds them again.
+    pub(super) async fn prune_keep(&self, target: ShortId) -> anyhow::Result<PruneKeep> {
+        let mut keep = PruneKeep::default();
+        for deployment in self.store.running_deployments().await? {
+            let targets = deployment.spec.targets_or_default(deployment.target);
+            if !deployment.stopped || !targets.contains(&target) {
+                continue;
+            }
+            if matches!(deployment.spec.source, AppSource::Compose { .. }) {
+                keep.projects.push(project_name(deployment.app)?);
+            } else {
+                let name = proxy::container_name(deployment.app, deployment.id)?;
+                keep.containers.push(name);
+            }
+        }
+        Ok(keep)
     }
 
     async fn stop_running_containers(&self, deployment: &RunningDeployment) -> anyhow::Result<()> {
@@ -349,6 +369,26 @@ mod tests {
             .finish_deployment(id, next.id, 4)
             .await?;
         assert!(!setup.platform.app(id).await?.stopped);
+        Ok(())
+    }
+
+    /// A prune keeps the stopped container of a stopped app, so a start finds it; once the app
+    /// runs, nothing is kept.
+    #[tokio::test]
+    async fn a_prune_keeps_the_container_of_a_stopped_app() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let (id, name) = deployed(&setup.platform, None).await?;
+        setup.runtime.set(&name, true, &[(80, 40001)]);
+        setup.platform.stop_app(id).await?;
+        setup.platform.run_prune().await?;
+        setup.platform.start_app(id).await?;
+        setup.platform.run_prune().await?;
+        let keeps = setup.runtime.state().prune_keeps.clone();
+        let expected = PruneKeep {
+            containers: vec![name],
+            projects: Vec::new(),
+        };
+        assert_eq!(keeps, [expected, PruneKeep::default()]);
         Ok(())
     }
 }

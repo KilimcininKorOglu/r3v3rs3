@@ -190,8 +190,8 @@ impl Executor {
                 let result = self.runtime.vacuum_container_logs(&name).await?;
                 Ok(AgentOutput::LogVacuum { result })
             }
-            AgentRequest::RunPrune { policy } => {
-                let result = self.runtime.prune_platform(&policy).await?;
+            AgentRequest::RunPrune { policy, keep } => {
+                let result = self.runtime.prune_platform(&policy, &keep).await?;
                 Ok(AgentOutput::Prune { result })
             }
             AgentRequest::DiskSpace => {

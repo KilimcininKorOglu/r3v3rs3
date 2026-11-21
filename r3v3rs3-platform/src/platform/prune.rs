@@ -202,7 +202,10 @@ impl Platform {
     /// an offline agent does not make the scheduler repeat the prune of the server host.
     pub async fn run_prune(&self) -> anyhow::Result<PruneResult> {
         let mut policy = self.prune_policy().await?;
-        let mut result = self.local.run_prune(&policy).await?;
+        let keep = self
+            .prune_keep(r3v3rs3_api::platform::LOCAL_TARGET.parse()?)
+            .await?;
+        let mut result = self.local.run_prune(&policy, &keep).await?;
         policy.last_pruned_at = Some(unix_secs());
         policy.last_reclaimed_bytes = Some(result.space_reclaimed_bytes);
         self.store.save_prune_policy(&policy).await?;
@@ -272,7 +275,8 @@ impl Platform {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(target.id, now);
-        let result = runtime.run_prune(policy).await?;
+        let keep = self.prune_keep(target.id).await?;
+        let result = runtime.run_prune(policy, &keep).await?;
         let payload = serde_json::json!({
             "target": target.name,
             "used_percent": disk.used_percent,
@@ -300,7 +304,8 @@ impl Platform {
             if super::is_local(target.id) {
                 continue;
             }
-            match self.runtime(target.id).run_prune(policy).await {
+            let keep = self.prune_keep(target.id).await?;
+            match self.runtime(target.id).run_prune(policy, &keep).await {
                 Ok(part) => add_prune(result, &part),
                 Err(err) => failures.push(format!("{}: {err:#}", target.name)),
             }
@@ -383,7 +388,10 @@ impl Platform {
         threshold: u8,
     ) -> anyhow::Result<PruneResult> {
         let mut policy = self.prune_policy().await?;
-        let result = self.local.run_prune(&policy).await?;
+        let keep = self
+            .prune_keep(r3v3rs3_api::platform::LOCAL_TARGET.parse()?)
+            .await?;
+        let result = self.local.run_prune(&policy, &keep).await?;
         let now = unix_secs();
         policy.last_pruned_at = Some(now);
         policy.last_pressure_pruned_at = Some(now);

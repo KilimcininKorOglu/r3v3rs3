@@ -55,6 +55,8 @@ pub struct FakeState {
     /// The prunes of the host in their order: `true` for a full prune, `false` for the prune of
     /// an agent host.
     pub host_prunes: Vec<bool>,
+    /// The containers that each prune had to keep, in the order of `host_prunes`.
+    pub prune_keeps: Vec<crate::runtime::PruneKeep>,
     /// The used share of the disk of the host, in percent.
     pub disk_used_percent: u8,
 }
@@ -571,8 +573,11 @@ impl ContainerRuntime for FakeRuntime {
     async fn run_prune(
         &self,
         _: &r3v3rs3_api::platform::PrunePolicy,
+        keep: &crate::runtime::PruneKeep,
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
-        self.check()?.host_prunes.push(true);
+        let mut state = self.check()?;
+        state.host_prunes.push(true);
+        state.prune_keeps.push(keep.clone());
         Ok(r3v3rs3_api::platform::PruneResult {
             space_reclaimed_bytes: 100,
             ..Default::default()
@@ -582,8 +587,11 @@ impl ContainerRuntime for FakeRuntime {
     async fn prune_platform(
         &self,
         _: &r3v3rs3_api::platform::PrunePolicy,
+        keep: &crate::runtime::PruneKeep,
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
-        self.check()?.host_prunes.push(false);
+        let mut state = self.check()?;
+        state.host_prunes.push(false);
+        state.prune_keeps.push(keep.clone());
         Ok(r3v3rs3_api::platform::PruneResult {
             space_reclaimed_bytes: 10,
             ..Default::default()

@@ -136,6 +136,9 @@ pub enum AgentRequest {
     /// platform owns or can make again. An older agent refuses the variant.
     RunPrune {
         policy: r3v3rs3_api::platform::PrunePolicy,
+        /// The stopped containers of stopped apps, which the prune keeps.
+        #[serde(default)]
+        keep: crate::runtime::PruneKeep,
     },
     /// The usage of the disk that holds the Docker data of the agent host. An older agent
     /// refuses the variant.

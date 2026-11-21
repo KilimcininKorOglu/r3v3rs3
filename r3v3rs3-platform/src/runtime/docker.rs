@@ -5,7 +5,7 @@
 //! characters. Every call that changes an object first inspects it by name, checks that the name
 //! matches, and then uses the returned id.
 
-use super::ContainerRuntime;
+use super::{ContainerRuntime, PruneKeep};
 use crate::kv::http::{
     ApiClient, Lines, RESPONSE_TIMEOUT, read_body, read_body_limited, read_json,
 };
@@ -288,8 +288,17 @@ impl DockerRuntime {
         Ok(())
     }
 
-    /// Removes the stopped containers; with `label`, only the stopped containers that carry it.
-    async fn prune_docker_containers(&self, label: Option<&str>) -> anyhow::Result<(u64, u64)> {
+    /// Removes the stopped containers except `keep`; with `label`, only the stopped containers
+    /// that carry it. Docker's prune cannot leave a container out, so with `keep` each
+    /// container goes on its own, and the freed space of these removals is not counted.
+    async fn prune_docker_containers(
+        &self,
+        label: Option<&str>,
+        keep: &PruneKeep,
+    ) -> anyhow::Result<(u64, u64)> {
+        if !keep.is_empty() {
+            return Ok((self.remove_stopped_containers(label, keep).await?, 0));
+        }
         let allowed = [StatusCode::CONFLICT];
         let path = match label {
             Some(label) => {
@@ -311,6 +320,33 @@ impl DockerRuntime {
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
         Ok((count, space))
+    }
+
+    async fn remove_stopped_containers(
+        &self,
+        label: Option<&str>,
+        keep: &PruneKeep,
+    ) -> anyhow::Result<u64> {
+        let mut filters = json!({ "status": ["created", "exited", "dead"] });
+        if let Some(label) = label {
+            filters["label"] = json!([label]);
+        }
+        let path = format!(
+            "/containers/json?all=true&filters={}",
+            encode(&filters.to_string())
+        );
+        let list: Vec<ListContainer> = self.get(&path).await?;
+        let mut removed = 0;
+        // 404: the container went away since the listing; 409: it started again.
+        let allowed = [StatusCode::NOT_FOUND, StatusCode::CONFLICT];
+        for id in removable(list, keep) {
+            let path = format!("/containers/{id}");
+            let res = self
+                .send(Method::DELETE, &path, None, &allowed, RESPONSE_TIMEOUT)
+                .await?;
+            removed += u64::from(res.status().is_success());
+        }
+        Ok(removed)
     }
 
     /// Removes the dangling layers and, unless `dangling_only`, every unused image except the
@@ -999,10 +1035,11 @@ impl ContainerRuntime for DockerRuntime {
     async fn run_prune(
         &self,
         policy: &r3v3rs3_api::platform::PrunePolicy,
+        keep: &PruneKeep,
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
         let mut result = r3v3rs3_api::platform::PruneResult::default();
         if policy.prune_containers {
-            let (count, space) = self.prune_docker_containers(None).await?;
+            let (count, space) = self.prune_docker_containers(None, keep).await?;
             result.containers_deleted += count;
             result.space_reclaimed_bytes += space;
         }
@@ -1024,10 +1061,11 @@ impl ContainerRuntime for DockerRuntime {
     async fn prune_platform(
         &self,
         policy: &r3v3rs3_api::platform::PrunePolicy,
+        keep: &PruneKeep,
     ) -> anyhow::Result<r3v3rs3_api::platform::PruneResult> {
         let mut result = r3v3rs3_api::platform::PruneResult::default();
         if policy.prune_containers {
-            let (count, space) = self.prune_docker_containers(Some(APP_LABEL)).await?;
+            let (count, space) = self.prune_docker_containers(Some(APP_LABEL), keep).await?;
             result.containers_deleted += count;
             result.space_reclaimed_bytes += space;
         }
@@ -2018,6 +2056,15 @@ impl ListContainer {
     }
 }
 
+/// The ids of the listed stopped containers that a prune removes: all but `keep`.
+fn removable(list: Vec<ListContainer>, keep: &PruneKeep) -> Vec<String> {
+    list.into_iter()
+        .map(ListContainer::into_summary)
+        .filter(|summary| !keep.keeps(&summary.name, &summary.labels))
+        .map(|summary| summary.id)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2028,6 +2075,34 @@ mod tests {
         frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
         frame.extend_from_slice(payload.as_bytes());
         frame
+    }
+
+    /// A stopped app starts its own container again, so the prune removes every stopped
+    /// container except the named ones and every container of a kept Compose project.
+    #[test]
+    fn the_prune_leaves_the_containers_of_stopped_apps() {
+        let listed = |id: &str, name: &str, project: Option<&str>| ListContainer {
+            id: id.into(),
+            names: Some(vec![format!("/{name}")]),
+            state: "exited".into(),
+            labels: Some(
+                project
+                    .map(|p| (COMPOSE_PROJECT_LABEL.to_string(), p.to_string()))
+                    .into_iter()
+                    .collect(),
+            ),
+        };
+        let list = vec![
+            listed("1", "r3v3rs3-abc-def-ghj-klm", None),
+            listed("2", "r3v3rs3-old-old-old-old", None),
+            listed("3", "shop-web-1", Some("r3v3rs3-abc-def")),
+            listed("4", "blog-web-1", Some("r3v3rs3-xyz-xyz")),
+        ];
+        let keep = PruneKeep {
+            containers: vec!["r3v3rs3-abc-def-ghj-klm".parse().unwrap()],
+            projects: vec!["r3v3rs3-abc-def".parse().unwrap()],
+        };
+        assert_eq!(removable(list, &keep), ["2", "4"]);
     }
 
     /// A rollback starts the build image of an older deployment, which no container uses, so
