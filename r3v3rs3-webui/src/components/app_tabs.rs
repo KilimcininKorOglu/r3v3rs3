@@ -40,7 +40,19 @@ fn status_badge_class(status: &str) -> &'static str {
             "bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300"
         }
         "failed" | "dead" => "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300",
+        "stopped" => "bg-orange-100 text-orange-800 dark:bg-orange-900/50 dark:text-orange-300",
         _ => "bg-neutral-100 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-300",
+    }
+}
+
+/// The translation key of a status label; an unknown status keeps its own text.
+fn status_label_key(status: &str) -> Option<&'static str> {
+    match status {
+        "running" => Some("apps.status_running"),
+        "deploying" => Some("apps.status_deploying"),
+        "failed" => Some("apps.status_failed"),
+        "stopped" => Some("apps.status_stopped"),
+        _ => None,
     }
 }
 
@@ -104,7 +116,7 @@ pub fn app_tabs(props: &Props) -> Html {
                                 "inline-flex", "items-center", "px-2", "py-0.5", "rounded", "text-xs", "font-medium",
                                 status_badge_class(status.as_str())
                             )}>
-                                {status}
+                                { status_label_key(status).map_or_else(|| status.clone(), |key| locale.t(key).to_string()) }
                             </span>
                         }
                     </h1>

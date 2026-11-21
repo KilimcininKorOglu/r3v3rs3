@@ -159,17 +159,24 @@ struct DashboardParams {
     navigator: Navigator,
 }
 
-fn render_dashboard_content(p: DashboardParams) -> Html {
-    let status_str = p
-        .summary
+/// The status in the page header: a stopped app is stopped whatever its deployment says.
+fn header_status(summary: &AppDashboardSummary) -> Option<&'static str> {
+    if summary.app.stopped {
+        return Some("stopped");
+    }
+    summary
         .running_deployment
         .as_ref()
-        .map(|d| match d.status {
-            DeploymentStatus::Running => "running",
-            DeploymentStatus::Deploying | DeploymentStatus::Building => "deploying",
-            DeploymentStatus::Failed => "failed",
-            _ => "stopped",
-        });
+        .and_then(|d| match d.status {
+            DeploymentStatus::Running => Some("running"),
+            DeploymentStatus::Deploying | DeploymentStatus::Building => Some("deploying"),
+            DeploymentStatus::Failed => Some("failed"),
+            _ => None,
+        })
+}
+
+fn render_dashboard_content(p: DashboardParams) -> Html {
+    let status_str = header_status(&p.summary);
 
     html! {
         <>
@@ -210,7 +217,7 @@ fn render_dashboard_content(p: DashboardParams) -> Html {
 
 fn render_quick_actions(p: &DashboardParams) -> Html {
     let on_deploy = deploy_click_callback(p);
-    let on_restart = restart_click_callback(p);
+    let lifecycle = lifecycle_buttons(p);
     let on_rollback = rollback_click_callback(p);
 
     let (nav_term, nav_logs, id) = (p.navigator.clone(), p.navigator.clone(), p.id);
@@ -226,12 +233,7 @@ fn render_quick_actions(p: &DashboardParams) -> Html {
                         { play_icon() }
                         {p.locale.t("apps.deploy")}
                     </Button>
-                    <Button kind={ButtonKind::Secondary} onclick={on_restart}>
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        {p.locale.t("apps.restart")}
-                    </Button>
+                    { lifecycle }
                 }
                 if p.can_edit
                     && p.summary.running_deployment.is_some()
@@ -282,7 +284,40 @@ fn deploy_click_callback(p: &DashboardParams) -> Callback<MouseEvent> {
     })
 }
 
-fn restart_click_callback(p: &DashboardParams) -> Callback<MouseEvent> {
+/// Start for a stopped app; Stop and Restart for a running one. An app without a running
+/// deployment has no container to stop or start, so it gets none of them.
+fn lifecycle_buttons(p: &DashboardParams) -> Html {
+    if p.summary.running_deployment.is_none() {
+        return Html::default();
+    }
+    if p.summary.app.stopped {
+        return html! {
+            <Button kind={ButtonKind::Success} onclick={lifecycle_click_callback(p, "start")}>
+                { play_icon() }
+                {p.locale.t("apps.start")}
+            </Button>
+        };
+    }
+    html! {
+        <>
+            <Button kind={ButtonKind::Warning} onclick={lifecycle_click_callback(p, "stop")}>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {p.locale.t("apps.stop")}
+            </Button>
+            <Button kind={ButtonKind::Secondary} onclick={lifecycle_click_callback(p, "restart")}>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {p.locale.t("apps.restart")}
+            </Button>
+        </>
+    }
+}
+
+/// Asks for a confirmation, then sends `POST /api/apps/{id}/{action}` and reloads the page.
+fn lifecycle_click_callback(p: &DashboardParams, action: &'static str) -> Callback<MouseEvent> {
     let (locale, id, name, failure, reload) = (
         p.locale,
         p.id,
@@ -292,10 +327,11 @@ fn restart_click_callback(p: &DashboardParams) -> Callback<MouseEvent> {
     );
     Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        let question = locale.tf("apps.confirm_restart", &[("name", name.as_str())]);
+        let key = format!("apps.confirm_{action}");
+        let question = locale.tf(&key, &[("name", name.as_str())]);
         let (failure, reload) = (failure.clone(), reload.clone());
         dialog::confirm_then(locale, question, async move {
-            let path = format!("{API_ENDPOINT}/apps/{id}/restart");
+            let path = format!("{API_ENDPOINT}/apps/{id}/{action}");
             match super::settings::post_empty(locale, &path).await {
                 Ok(()) => failure.set(None),
                 Err(err) => failure.set(Some(err)),
@@ -602,5 +638,46 @@ fn render_logs_preview(
                 }
             </pre>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn summary(stopped: bool, status: Option<&str>) -> AppDashboardSummary {
+        let running = status.map(|status| {
+            json!({
+                "id": "dep", "app": "app", "status": status, "trigger": "manual",
+                "username": "admin", "started_at": 0
+            })
+        });
+        serde_json::from_value(json!({
+            "app": {
+                "id": "app", "name": "shop", "target": "local", "stopped": stopped,
+                "spec": {"source": {"type": "image", "image": "nginx:1.27"}, "port": 80},
+                "created_at": 0, "updated_at": 0
+            },
+            "running_deployment": running,
+            "logs_preview": ""
+        }))
+        .unwrap()
+    }
+
+    /// A stopped app reads as stopped although its last deployment still runs, and a running
+    /// app is never called stopped.
+    #[test]
+    fn the_header_shows_a_stopped_app_as_stopped() {
+        assert_eq!(
+            header_status(&summary(true, Some("running"))),
+            Some("stopped")
+        );
+        assert_eq!(
+            header_status(&summary(false, Some("running"))),
+            Some("running")
+        );
+        assert_eq!(header_status(&summary(false, Some("superseded"))), None);
+        assert_eq!(header_status(&summary(false, None)), None);
     }
 }

@@ -378,7 +378,11 @@ fn app_row(
             name_cell(locale, &row.app),
             source_cell(locale, &row.app),
             html! { <>{domains_cell}</> },
-            deployment_cell(locale, row.latest.as_ref()),
+            if row.app.stopped {
+                status_badge(locale.t("apps.status_stopped"), "bg-orange-500")
+            } else {
+                deployment_cell(locale, row.latest.as_ref())
+            },
         ],
         actions,
     }
