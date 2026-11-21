@@ -6,16 +6,21 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use tokio::process::Command;
 
-/// The warnings about other firewalls: an active firewalld or ufw service, and every input
-/// chain of another table that drops or rejects packets.
+/// The configuration file whose `ENABLED` line turns ufw on.
+const UFW_CONF: &str = "/etc/ufw/ufw.conf";
+
+/// The warnings about other firewalls: an active firewalld service, an enabled ufw, and every
+/// input chain of another table that drops or rejects packets.
 pub async fn detect() -> Vec<String> {
     let mut warnings = Vec::new();
-    for service in ["firewalld", "ufw"] {
-        if service_active(service).await {
-            warnings.push(format!(
-                "{service} is active: ports opened by r3v3rs3 can still be blocked"
-            ));
-        }
+    if service_active("firewalld").await {
+        warnings.push(blocked_by("firewalld"));
+    }
+    let ufw_conf = tokio::fs::read_to_string(UFW_CONF)
+        .await
+        .unwrap_or_default();
+    if ufw_enabled(&ufw_conf) {
+        warnings.push(blocked_by("ufw"));
     }
     match ruleset().await {
         Ok(json) => warnings.extend(blocking_chains(&json).into_iter().map(|chain| {
@@ -24,6 +29,20 @@ pub async fn detect() -> Vec<String> {
         Err(err) => warnings.push(format!("cannot read the nftables ruleset: {err:#}")),
     }
     warnings
+}
+
+fn blocked_by(firewall: &str) -> String {
+    format!("{firewall} is active: ports opened by r3v3rs3 can still be blocked")
+}
+
+/// Whether a `ufw.conf` turns ufw on. The ufw service of Ubuntu is a oneshot unit that stays
+/// `active` with `ENABLED=no` and loads no rules then, so the service state says nothing.
+fn ufw_enabled(conf: &str) -> bool {
+    conf.lines().any(|line| {
+        line.trim()
+            .strip_prefix("ENABLED=")
+            .is_some_and(|value| value.trim().trim_matches('"').eq_ignore_ascii_case("yes"))
+    })
 }
 
 async fn service_active(name: &str) -> bool {
@@ -119,6 +138,21 @@ mod tests {
         // The own table drops by design; the forward hook is Docker's path; a chain without a
         // hook runs only when an input chain jumps to it.
         assert_eq!(chains, ["inet other inp", "ip filter INPUT"]);
+    }
+
+    /// ufw(8): `ENABLED=yes` in /etc/ufw/ufw.conf starts the firewall at boot; `ENABLED=no`
+    /// (the Ubuntu default) loads no rules although `systemctl is-active ufw` says active.
+    #[test]
+    fn only_an_enabled_ufw_counts_as_a_firewall() {
+        let ubuntu_default = "# /etc/ufw/ufw.conf\n#\n\n# Set to yes to start on boot.\nENABLED=no\n\nLOGLEVEL=low\n";
+        assert!(!ufw_enabled(ubuntu_default));
+        assert!(!ufw_enabled(""), "a host without ufw");
+        assert!(
+            !ufw_enabled("# ENABLED=yes\n"),
+            "a comment turns nothing on"
+        );
+        assert!(ufw_enabled("ENABLED=yes\nLOGLEVEL=low\n"));
+        assert!(ufw_enabled("ENABLED=\"yes\"\n"));
     }
 
     #[test]
