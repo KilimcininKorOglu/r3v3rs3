@@ -383,6 +383,21 @@ async fn compose_up(compose: &DockerCompose, name: &ProjectName, dir: &Path) -> 
     ensure_eq!(ports.len(), 1);
     ensure_eq!(ports[0].host_ip.as_deref(), Some("127.0.0.1"));
     compose.up(&project).await?;
+    check_answer(name).await?;
+    stop_and_start(compose, name).await
+}
+
+/// Stop keeps the container of the project but stops it; Start runs the same container again.
+async fn stop_and_start(compose: &DockerCompose, name: &ProjectName) -> anyhow::Result<()> {
+    let before = project_containers(name).await?;
+    compose.stop(name).await?;
+    let container = runtime()?
+        .inspect_container(&before[0].parse()?)
+        .await?
+        .context("the stopped container is gone")?;
+    ensure!(!container.running, "the container still runs");
+    compose.start(name).await?;
+    ensure_eq!(project_containers(name).await?, before);
     check_answer(name).await
 }
 
