@@ -1869,13 +1869,24 @@ fn git_app(name: &str) -> Value {
 /// `delete_app_git_token`, `create_app_webhook_secret`, `delete_app_webhook_secret`,
 /// `get_deployment`, `approve_deployment`, `reject_deployment`, `get_app_metrics`,
 /// `get_app_services`, `get_app_topology`, `upgrade_app_catalog`, `install_app_hook`).
-async fn assert_mcp_apps(
+/// OpenAPI `update_app_hooks` replaces the hooks of an app; `get_app_hooks` reads them back.
+async fn assert_mcp_hooks(
     client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+    id: &str,
 ) -> anyhow::Result<()> {
-    let added: Value = serde_json::from_str(
-        &mcp_call(client, "create_app", json!({ "app": git_app("mcp-app") })).await?,
-    )?;
-    let id = added["id"].as_str().context("no app id")?.to_string();
+    let hooks = json!({ "pre_deploy": "migrate-now" });
+    let args = json!({ "id": id, "hooks": hooks });
+    mcp_call(client, "update_app_hooks", args).await?;
+    let shown = mcp_call(client, "get_app_hooks", json!({ "id": id })).await?;
+    assert_eq!(serde_json::from_str::<Value>(&shown)?, hooks);
+    Ok(())
+}
+
+/// The Git token and webhook secret tools of an app; the stored token never comes back.
+async fn assert_mcp_app_secrets(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+    id: &str,
+) -> anyhow::Result<()> {
     let with_token = mcp_call(
         client,
         "update_app_git_token",
@@ -1887,6 +1898,18 @@ async fn assert_mcp_apps(
     let secret = mcp_call(client, "create_app_webhook_secret", json!({ "id": id })).await?;
     assert!(secret.contains("secret"), "{secret}");
     mcp_call(client, "delete_app_webhook_secret", json!({ "id": id })).await?;
+    Ok(())
+}
+
+async fn assert_mcp_apps(
+    client: &rmcp::service::RunningService<rmcp::service::RoleClient, TestClient>,
+) -> anyhow::Result<()> {
+    let added: Value = serde_json::from_str(
+        &mcp_call(client, "create_app", json!({ "app": git_app("mcp-app") })).await?,
+    )?;
+    let id = added["id"].as_str().context("no app id")?.to_string();
+    assert_mcp_hooks(client, &id).await?;
+    assert_mcp_app_secrets(client, &id).await?;
     for name in ["get_deployment", "approve_deployment", "reject_deployment"] {
         let err = mcp_call(client, name, json!({ "id": MISSING_DB }))
             .await
@@ -1942,6 +1965,48 @@ async fn run_client_stdin(
     .map_err(|err| anyhow::anyhow!("the client task failed: {err}"))?
 }
 
+/// Runs `r3 app update-hooks <id> <flags>`, then returns what `r3 app get-hooks <id>` shows.
+async fn cli_hooks_after(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    id: &str,
+    flags: &[&str],
+) -> anyhow::Result<Value> {
+    let update = [&["app", "update-hooks", id][..], flags].concat();
+    cli_ok(binary, addr, token, &update).await?;
+    let shown = cli_ok(binary, addr, token, &["app", "get-hooks", id]).await?;
+    Ok(serde_json::from_str(&shown)?)
+}
+
+/// `r3 app update-hooks` and `get-hooks` (OpenAPI `update_app_hooks`, `get_app_hooks`): an
+/// update replaces both hooks with the given ones, so a hook left out is removed, and an
+/// unknown app is not found.
+async fn assert_cli_hooks(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let both = ["--pre-deploy", "migrate-now", "--post-deploy", "warm-up"];
+    assert_eq!(
+        cli_hooks_after(binary, addr, token, id, &both).await?,
+        json!({ "pre_deploy": "migrate-now", "post_deploy": "warm-up" })
+    );
+    let pre = ["--pre-deploy", "migrate-again"];
+    assert_eq!(
+        cli_hooks_after(binary, addr, token, id, &pre).await?,
+        json!({ "pre_deploy": "migrate-again" })
+    );
+    assert_eq!(
+        cli_hooks_after(binary, addr, token, id, &[]).await?,
+        json!({})
+    );
+    let out = run_client(binary, addr, token, &["app", "get-hooks", MISSING_DB]).await?;
+    assert_not_found("app get-hooks", &String::from_utf8_lossy(&out.stderr));
+    Ok(())
+}
+
 /// The CLI reaches the same app and deployment endpoints; the Git token is read from
 /// standard input, so it never appears in the process list.
 async fn assert_cli_apps(binary: &Path, addr: &SocketAddr, token: &str) -> anyhow::Result<()> {
@@ -1956,6 +2021,7 @@ async fn assert_cli_apps(binary: &Path, addr: &SocketAddr, token: &str) -> anyho
         &cli_ok(binary, addr, token, &["app", "list"]).await?,
         "cli-app",
     )?;
+    assert_cli_hooks(binary, addr, token, &id).await?;
     let out = run_client_stdin(
         binary,
         addr,

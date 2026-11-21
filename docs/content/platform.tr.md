@@ -661,16 +661,16 @@ r3v3rs3, dağıtım aşamalarında veritabanı geçişlerini (migration), şema 
 - **Dağıtım Sonrası Kancası (Post-Deploy Hook)** (`lifecycle_hooks.post_deploy`): Yeni servis sağlık kontrollerini geçip trafiğe açıldıktan sonra çalışan container içinde yürütülür.
   - Önbellek temizleme/ısıtma, arama indeksi güncelleme veya harici bildirim gönderme senaryoları için idealdir.
   - Örnek komutlar: `curl -s http://localhost/warmup`, `php artisan config:cache`.
-- **%100 MCP & CLI Paritesi**: Yaşam döngüsü kancaları WebUI üzerinden (uygulama formundaki "Dağıtım Yaşam Döngüsü Kancaları" kartı), `PUT /api/apps/{id}` uç noktasıyla, MCP araçlarıyla veya CLI üzerinden yönetilebilir:
+- **%100 MCP & CLI Paritesi**: Yaşam döngüsü kancaları WebUI üzerinden (uygulama formundaki "Dağıtım Yaşam Döngüsü Kancaları" kartı), `GET /api/apps/{id}/hooks` (MCP `get_app_hooks`) ile okunur ve `PUT /api/apps/{id}/hooks` (MCP `update_app_hooks`) ile değiştirilir. Güncelleme iki kancayı birlikte değiştirir. İstekte olmayan kanca silinir. Boş istek iki kancayı da siler. CLI aynı işlemleri kullanır:
   ```bash
-  # Mevcut yaşam döngüsü kancalarını görüntüleme
-  r3 app hooks <APP_ID>
+  # Mevcut yaşam döngüsü kancalarını görüntüleme (kanca yoksa {})
+  r3 app get-hooks <APP_ID>
 
   # Pre-deploy ve post-deploy kancalarını yapılandırma
-  r3 app hooks <APP_ID> --pre-deploy "npx prisma migrate deploy" --post-deploy "curl -s http://localhost/warmup"
+  r3 app update-hooks <APP_ID> --pre-deploy "npx prisma migrate deploy" --post-deploy "curl -s http://localhost/warmup"
 
-  # Yaşam döngüsü kancalarını temizleme
-  r3 app hooks <APP_ID> --clear
+  # İki kancayı da silme
+  r3 app update-hooks <APP_ID>
   ```
 
 ## Giden Webhook'lar & Olay Bildirimleri

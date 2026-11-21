@@ -637,8 +637,10 @@ pub enum AppCommand {
     VacuumLogs { id: String },
     /// Shows live container resource throttling, CFS quota, and OOM diagnostic status.
     GetResourceDiagnostics { id: String },
-    /// Shows or updates lifecycle hooks (pre-deploy, post-deploy) of an application.
-    Hooks {
+    /// Shows the deploy hooks (pre-deploy, post-deploy) of an app.
+    GetHooks { id: String },
+    /// Replaces the deploy hooks of an app; a hook left out is removed, no flag removes both.
+    UpdateHooks {
         id: String,
         /// Command to execute before routing traffic (e.g. migrations).
         #[arg(long)]
@@ -646,9 +648,6 @@ pub enum AppCommand {
         /// Command to execute after new version is healthy (e.g. cache warmup).
         #[arg(long)]
         post_deploy: Option<String>,
-        /// Clear all lifecycle hooks.
-        #[arg(long)]
-        clear: bool,
     },
     /// Checks the registry for a newer image tag or digest of an app.
     CheckUpdate { id: String },
@@ -2304,12 +2303,12 @@ async fn run_app(api: &api_client::ApiClient, cmd: AppCommand) -> anyhow::Result
         AppCommand::GetLogSize { id } => api.app_log_size(&id).await,
         AppCommand::VacuumLogs { id } => api.vacuum_app_logs(&id).await,
         AppCommand::GetResourceDiagnostics { id } => api.app_diagnostics(&id).await,
-        AppCommand::Hooks {
+        AppCommand::GetHooks { id } => api.print_get(&format!("/api/apps/{id}/hooks")).await,
+        AppCommand::UpdateHooks {
             id,
             pre_deploy,
             post_deploy,
-            clear,
-        } => api.app_hooks(&id, pre_deploy, post_deploy, clear).await,
+        } => api.update_app_hooks(&id, pre_deploy, post_deploy).await,
         other => run_app_more(api, other).await,
     }
 }
@@ -3207,7 +3206,6 @@ mod tests {
         ("app start", "the API has no app start operation yet"),
         ("app stop", "the API has no app stop operation yet"),
         ("app restart", "the API has no app restart operation yet"),
-        ("app hooks", "the API has no app hook operations yet"),
     ];
 
     /// Collects the path of every command that has no subcommand of its own.

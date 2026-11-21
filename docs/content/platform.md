@@ -661,16 +661,16 @@ r3v3rs3 supports automated lifecycle hooks to execute database migrations, schem
 - **Post-Deploy Hook** (`lifecycle_hooks.post_deploy`): Executes inside the running container after it passes its readiness and health checks and begins serving traffic.
   - Ideal for clearing or warming application caches, generating search indexes, or pinging external observability endpoints.
   - Example commands: `curl -s http://localhost/warmup`, `php artisan config:cache`.
-- **100% MCP & CLI Parity**: Lifecycle hooks can be configured via WebUI ("Deployment Lifecycle Hooks" card in the app form), updated via `PUT /api/apps/{id}`, managed via MCP, or managed via the CLI:
+- **100% MCP & CLI Parity**: Lifecycle hooks can be configured via WebUI ("Deployment Lifecycle Hooks" card in the app form), read with `GET /api/apps/{id}/hooks` (MCP `get_app_hooks`) and replaced with `PUT /api/apps/{id}/hooks` (MCP `update_app_hooks`). An update replaces both hooks: a hook left out of the request is removed, and an empty request removes both. The CLI uses the same operations:
   ```bash
-  # View current lifecycle hooks
-  r3 app hooks <APP_ID>
+  # View current lifecycle hooks ({} when none are set)
+  r3 app get-hooks <APP_ID>
 
   # Configure pre-deploy migration and post-deploy warmup
-  r3 app hooks <APP_ID> --pre-deploy "npx prisma migrate deploy" --post-deploy "curl -s http://localhost/warmup"
+  r3 app update-hooks <APP_ID> --pre-deploy "npx prisma migrate deploy" --post-deploy "curl -s http://localhost/warmup"
 
-  # Clear lifecycle hooks
-  r3 app hooks <APP_ID> --clear
+  # Remove both hooks
+  r3 app update-hooks <APP_ID>
   ```
 
 ## Outbound Webhooks & Event Notifications

@@ -28,13 +28,13 @@ use r3v3rs3_api::{
     platform::{
         AppDashboardSummary, AppEntry, AppLog, AppLogQuery, AppMetricsPoint, AppRequest,
         AppScheduledCommand, ComposeServiceStatus, ComposeTopology, DeploymentEntry,
-        DeploymentTrigger, EnvEntry, EnvGroup, EnvGroupSpec, EnvGroupSummary,
-        EnvironmentDiffReport, EnvironmentEnvSpec, EnvironmentSpec, EnvironmentSyncReport,
-        EnvironmentSyncRequest, GitTokenRequest, ImageUpdateStatus, KeyRotationReport,
-        MetricsQuery, NodeAlertRules, Project, ProjectEnvironment, ProjectSpec, ProjectSummary,
-        PrunePolicy, PruneResult, RegistryEntry, RegistryRequest, ScheduledCommandRequest,
-        ScheduledCommandRunResult, SetTargetRegionRequest, TargetEntry, TargetRequest, TargetToken,
-        WebhookSecret,
+        DeploymentLifecycleHooks, DeploymentTrigger, EnvEntry, EnvGroup, EnvGroupSpec,
+        EnvGroupSummary, EnvironmentDiffReport, EnvironmentEnvSpec, EnvironmentSpec,
+        EnvironmentSyncReport, EnvironmentSyncRequest, GitTokenRequest, ImageUpdateStatus,
+        KeyRotationReport, MetricsQuery, NodeAlertRules, Project, ProjectEnvironment, ProjectSpec,
+        ProjectSummary, PrunePolicy, PruneResult, RegistryEntry, RegistryRequest,
+        ScheduledCommandRequest, ScheduledCommandRunResult, SetTargetRegionRequest, TargetEntry,
+        TargetRequest, TargetToken, WebhookSecret,
     },
 };
 use serde_derive::Deserialize;
@@ -413,6 +413,54 @@ pub async fn get_app(
     let catalog = crate::appstore::state().catalog.clone();
     app.catalog_update = check_catalog_update(&app, &catalog);
     Ok(Json(app))
+}
+
+/// Returns the pre-deploy and post-deploy hooks of an app; an app without hooks answers `{}`.
+#[utoipa::path(
+    get,
+    path = "/{id}/hooks",
+    tag = "platform",
+    operation_id = "get_app_hooks",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The hooks.", body = DeploymentLifecycleHooks), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_app_hooks(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<DeploymentLifecycleHooks>, AppError> {
+    let platform = state.platform(&caller, Permission::Read).await?;
+    let app = platform.app(id).await.map_err(platform_error)?;
+    Ok(Json(app.spec.lifecycle_hooks.unwrap_or_default()))
+}
+
+/// Replaces the hooks of an app: a hook left out of the body is removed. The next deployment
+/// runs the new hooks.
+#[utoipa::path(
+    put,
+    path = "/{id}/hooks",
+    tag = "platform",
+    operation_id = "update_app_hooks",
+    params(("id" = ShortId, Path, description = "App id.")),
+    request_body = DeploymentLifecycleHooks,
+    responses((status = 200, description = "The updated app.", body = AppEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn update_app_hooks(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(hooks): Json<DeploymentLifecycleHooks>,
+) -> Result<Json<AppEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let mut current = platform.app(id).await.map_err(platform_error)?;
+    let empty = hooks == DeploymentLifecycleHooks::default();
+    current.spec.lifecycle_hooks = (!empty).then_some(hooks);
+    let request = AppRequest {
+        name: current.name,
+        target: current.target,
+        spec: current.spec,
+    };
+    update_app(State(state), Extension(caller), Path(id), Json(request)).await
 }
 
 /// Replaces the name, the target and the spec of an app. The running containers change at the

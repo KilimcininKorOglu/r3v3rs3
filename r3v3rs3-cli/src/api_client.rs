@@ -1593,71 +1593,22 @@ fn build_store_spec(
 }
 
 impl ApiClient {
-    async fn clear_app_hooks(
-        &self,
-        id: &str,
-        mut entry: r3v3rs3_api::platform::AppEntry,
-    ) -> anyhow::Result<()> {
-        entry.spec.lifecycle_hooks = None;
-        let req = r3v3rs3_api::platform::AppRequest {
-            name: entry.name,
-            target: entry.target,
-            spec: entry.spec,
-        };
-        let _res: r3v3rs3_api::platform::AppEntry =
-            self.put_json(&format!("/api/apps/{id}"), &req).await?;
-        println!("app/{id} lifecycle hooks cleared");
-        Ok(())
-    }
-
-    async fn update_app_hooks(
-        &self,
-        id: &str,
-        mut entry: r3v3rs3_api::platform::AppEntry,
-        pre_deploy: Option<String>,
-        post_deploy: Option<String>,
-    ) -> anyhow::Result<()> {
-        let mut hooks = entry.spec.lifecycle_hooks.take().unwrap_or_default();
-        if let Some(cmd) = pre_deploy {
-            hooks.pre_deploy = Some(cmd);
-        }
-        if let Some(cmd) = post_deploy {
-            hooks.post_deploy = Some(cmd);
-        }
-        entry.spec.lifecycle_hooks = Some(hooks);
-        let req = r3v3rs3_api::platform::AppRequest {
-            name: entry.name,
-            target: entry.target,
-            spec: entry.spec,
-        };
-        let _res: r3v3rs3_api::platform::AppEntry =
-            self.put_json(&format!("/api/apps/{id}"), &req).await?;
-        println!("app/{id} lifecycle hooks updated");
-        Ok(())
-    }
-
-    pub async fn app_hooks(
+    /// Replaces the deploy hooks of an app (`PUT /api/apps/{id}/hooks`); a hook left out is
+    /// removed.
+    pub async fn update_app_hooks(
         &self,
         id: &str,
         pre_deploy: Option<String>,
         post_deploy: Option<String>,
-        clear: bool,
     ) -> anyhow::Result<()> {
-        let entry: r3v3rs3_api::platform::AppEntry =
-            self.get_json(&format!("/api/apps/{id}")).await?;
-        if clear {
-            return self.clear_app_hooks(id, entry).await;
-        }
-        if pre_deploy.is_some() || post_deploy.is_some() {
-            return self
-                .update_app_hooks(id, entry, pre_deploy, post_deploy)
-                .await;
-        }
-        if let Some(ref hooks) = entry.spec.lifecycle_hooks {
-            print_json(&serde_json::to_value(hooks)?)?;
-        } else {
-            println!("No lifecycle hooks configured for app/{id}");
-        }
+        let hooks = r3v3rs3_api::platform::DeploymentLifecycleHooks {
+            pre_deploy,
+            post_deploy,
+        };
+        let _app: r3v3rs3_api::platform::AppEntry = self
+            .put_json(&format!("/api/apps/{id}/hooks"), &hooks)
+            .await?;
+        println!("app/{id} deploy hooks updated");
         Ok(())
     }
 

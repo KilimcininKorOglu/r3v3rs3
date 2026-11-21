@@ -11,7 +11,7 @@ use crate::common;
 use common::{TestStorage, admin_session_cookie, alloc_tcp_port, wait_for_listener, with_server};
 
 /// Every route of the admin API. The OpenAPI document must list exactly these operations.
-pub(crate) const OPERATIONS: [(&str, &str); 281] = [
+pub(crate) const OPERATIONS: [(&str, &str); 283] = [
     ("get", "/.well-known/oauth-authorization-server"),
     ("get", "/.well-known/oauth-protected-resource"),
     ("get", "/healthz"),
@@ -191,6 +191,8 @@ pub(crate) const OPERATIONS: [(&str, &str); 281] = [
     ("get", "/api/apps/{id}"),
     ("put", "/api/apps/{id}"),
     ("delete", "/api/apps/{id}"),
+    ("get", "/api/apps/{id}/hooks"),
+    ("put", "/api/apps/{id}/hooks"),
     ("get", "/api/apps/{id}/env"),
     ("put", "/api/apps/{id}/env"),
     ("post", "/api/apps/{id}/env/generate"),

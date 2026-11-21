@@ -131,6 +131,8 @@ pub const COMMAND_OPERATIONS: &[(&str, &str)] = &[
     ("app delete", "delete_app"),
     ("app get-logs", "get_app_logs"),
     ("app get-env", "get_app_env"),
+    ("app get-hooks", "get_app_hooks"),
+    ("app update-hooks", "update_app_hooks"),
     ("app update-env", "update_app_env"),
     ("app generate-env-secrets", "generate_app_env_secrets"),
     (

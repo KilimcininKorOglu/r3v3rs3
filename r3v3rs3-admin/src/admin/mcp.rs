@@ -98,6 +98,15 @@ pub struct UpdatePortParams {
     pub entry: r3v3rs3_api::port::PortEntry,
 }
 
+/// The arguments of `update_app_hooks`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AppHooksParams {
+    /// The id of the app.
+    pub id: String,
+    /// The new hooks; a hook left out is removed.
+    pub hooks: r3v3rs3_api::platform::DeploymentLifecycleHooks,
+}
+
 /// The argument of `update_port_early_data`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SetPortEarlyDataParams {
@@ -3173,6 +3182,48 @@ impl McpServer {
         let catalog = crate::appstore::state().catalog.clone();
         app.catalog_update = super::platform::check_catalog_update(&app, &catalog);
         json_result(app)
+    }
+
+    /// Get the deploy hooks of an application.
+    #[tool(
+        description = "Show the deploy hooks of one app by `id`: `pre_deploy` (a command run in a one-off container of the new image before traffic moves; a non-zero exit stops the deployment) and `post_deploy` (a command run in the new container after its health check). An app without hooks answers {}. Read-only; any account without a proxy list."
+    )]
+    async fn get_app_hooks(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        let hooks = super::platform::get_app_hooks(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(parse_id(&params.id)?),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(hooks.0)
+    }
+
+    /// Replace the deploy hooks of an application.
+    #[tool(
+        description = "Replace the deploy hooks of one app (`id`, `hooks`: {\"pre_deploy\": \"...\", \"post_deploy\": \"...\"}). A hook left out is removed, and {} removes both. The next deployment runs the new hooks. Returns the updated app. Needs a token with the edit scope and an editor or admin account without a proxy list."
+    )]
+    async fn update_app_hooks(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<AppHooksParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let app = super::platform::update_app_hooks(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(parse_id(&params.id)?),
+            axum::Json(params.hooks),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
     }
 
     /// Create a new PaaS application.

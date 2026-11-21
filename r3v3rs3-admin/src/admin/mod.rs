@@ -866,6 +866,7 @@ fn platform_routes() -> OpenApiRouter<AppState> {
                     platform::update_app,
                     platform::delete_app
                 ))
+                .routes(routes!(platform::get_app_hooks, platform::update_app_hooks))
                 .routes(routes!(
                     platform::get_env,
                     platform::put_env,
