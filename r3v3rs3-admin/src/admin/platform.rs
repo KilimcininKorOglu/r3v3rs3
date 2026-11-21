@@ -1373,48 +1373,59 @@ impl TerminalQuery {
     }
 }
 
-/// Bridges a WebSocket and the exec stream of a terminal until either side closes.
+/// Bridges a WebSocket and the exec stream of a terminal until either side closes. When the
+/// shell exits, the socket gets a close frame (RFC 6455 section 7.1.2), so the client reads the
+/// end of the session instead of a reset connection.
 async fn terminal_bridge(socket: WebSocket, exec: ExecHandle) {
     let ExecHandle { stream, client, id } = exec;
-    let (mut sink, mut ws_stream) = socket.split();
-    let (mut reader, mut writer) = tokio::io::split(stream);
-    let read = async {
-        let mut chunk = [0u8; 8192];
-        loop {
-            let size = reader.read(&mut chunk).await?;
-            if size == 0 {
-                break;
-            }
-            if sink
-                .send(Message::Binary(Bytes::copy_from_slice(&chunk[..size])))
-                .await
-                .is_err()
-            {
-                break;
-            }
-        }
-        anyhow::Ok(())
+    let (sink, ws_stream) = socket.split();
+    let (reader, writer) = tokio::io::split(stream);
+    let ended = tokio::select! {
+        result = terminal_output(reader, sink) => result,
+        result = terminal_input(ws_stream, writer, &client, &id) => result,
     };
-    let write = async {
-        while let Some(message) = ws_stream.next().await {
-            match message? {
-                Message::Binary(data) => writer.write_all(&data).await?,
-                Message::Text(text) => {
-                    if let Ok(size) = serde_json::from_str::<TerminalSize>(&text) {
-                        crate::runtime::docker::resize_exec(&client, &id, size.cols(), size.rows())
-                            .await?;
-                    }
-                }
-                Message::Close(_) => break,
-                _ => {}
-            }
-        }
-        anyhow::Ok::<()>(())
-    };
-    tokio::select! {
-        _ = read => {}
-        _ = write => {}
+    if let Err(err) = ended {
+        error!("the terminal session {id} ended with an error: {err:#}");
     }
+}
+
+/// Sends the shell output to the socket, and a close frame when the shell exits.
+async fn terminal_output(
+    mut reader: tokio::io::ReadHalf<crate::kv::http::UpgradedStream>,
+    mut sink: futures::stream::SplitSink<WebSocket, Message>,
+) -> anyhow::Result<()> {
+    let mut chunk = [0u8; 8192];
+    loop {
+        let size = reader.read(&mut chunk).await?;
+        if size == 0 {
+            return Ok(sink.close().await?);
+        }
+        let output = Message::Binary(Bytes::copy_from_slice(&chunk[..size]));
+        sink.send(output).await?;
+    }
+}
+
+/// Sends the keys of the socket to the shell, and applies its size messages.
+async fn terminal_input(
+    mut ws_stream: futures::stream::SplitStream<WebSocket>,
+    mut writer: tokio::io::WriteHalf<crate::kv::http::UpgradedStream>,
+    client: &crate::kv::http::ApiClient,
+    id: &str,
+) -> anyhow::Result<()> {
+    while let Some(message) = ws_stream.next().await {
+        match message? {
+            Message::Binary(data) => writer.write_all(&data).await?,
+            Message::Text(text) => {
+                if let Ok(size) = serde_json::from_str::<TerminalSize>(&text) {
+                    crate::runtime::docker::resize_exec(client, id, size.cols(), size.rows())
+                        .await?;
+                }
+            }
+            Message::Close(_) => break,
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// The resize message of the terminal page.
