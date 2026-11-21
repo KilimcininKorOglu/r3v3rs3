@@ -36,13 +36,76 @@ Claude Code veya Cursor gibi bir AI istemcisi için burada bir satır gerekmez. 
 
 ## Adım 2: Bir AI istemcisini bağlama
 
-Sunucuyu Claude Code'a bir HTTP MCP sunucusu olarak ekleyin:
+Claude Code, Codex ve OpenCode OAuth ile giriş yapar: her biri r3v3rs3'ün onay sayfasını tarayıcıda açar. Panel isterse giriş yapın, verdiğiniz kapsamları işaretleyin (durumu görmek için `read`, değiştirmek için `edit`) ve **Onayla** düğmesine basın. Sunucunun tool'ları bundan sonra kullanılabilir. Örnekler: `server_status`, `list_proxies` veya `deploy_app`.
+
+### Claude Code
 
 ```bash
 claude mcp add --transport http --scope user r3v3rs3 https://panel.example.com/api/mcp
 ```
 
-Ardından Claude Code'da `/mcp` komutunu çalıştırın, `r3v3rs3` sunucusunu seçin ve **Authenticate** seçeneğini seçin. Tarayıcı, r3v3rs3'ün onay sayfasını açar. Panel isterse giriş yapın, verdiğiniz kapsamları işaretleyin (durumu görmek için `read`, değiştirmek için `edit`) ve **Onayla** düğmesine basın. Sunucunun tool'ları bundan sonra oturumda kullanılabilir. Örnekler: `server_status`, `list_proxies` veya `deploy_app`.
+Aynı sunucu, bir projenin `.mcp.json` dosyasında:
+
+```json
+{
+  "mcpServers": {
+    "r3v3rs3": {
+      "type": "http",
+      "url": "https://panel.example.com/api/mcp"
+    }
+  }
+}
+```
+
+Ardından Claude Code'da `/mcp` komutunu çalıştırın, `r3v3rs3` sunucusunu seçin ve **Authenticate** seçeneğini seçin.
+
+### Codex
+
+```bash
+codex mcp add r3v3rs3 --url https://panel.example.com/api/mcp
+codex mcp login r3v3rs3
+```
+
+Komut `~/.codex/config.toml` dosyasına şu tabloyu yazar:
+
+```toml
+[mcp_servers.r3v3rs3]
+url = "https://panel.example.com/api/mcp"
+```
+
+### OpenCode
+
+```bash
+opencode mcp add r3v3rs3 --url https://panel.example.com/api/mcp
+opencode mcp auth r3v3rs3
+```
+
+Komut `opencode.json` dosyasına şu kaydı yazar (`--global` ise genel yapılandırmaya yazar):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "r3v3rs3": {
+        "type": "remote",
+        "url": "https://panel.example.com/api/mcp"
+      }
+    }
+  }
+}
+```
+
+### Antigravity (agy)
+
+agy OAuth akışını çalıştırmaz, sabit bir header gönderir. Ona hesabınızın bir API token'ını verin ([Adım 5](#adim-5-bir-script-icin-token) bir token oluşturur; `read` token'ı yalnız okur):
+
+```bash
+agy mcp add --header "Authorization: Bearer TOKEN" r3v3rs3 https://panel.example.com/api/mcp
+```
+
+Erişimi kesmek için token'ı `r3 <sunucu> token delete <id>` ile silin.
+
+### Erişim
 
 Hesabın rolü istemciyi yine sınırlar: viewer rolündeki bir hesap, `edit` kapsamıyla bile hiçbir şeyi değiştiremez. **Ayarlar** sayfasındaki **Aktif MCP Oturumları** listesi, giriş yapmış her istemciyi gösterir. Bir istemcinin oturumunu oradan kapatabilirsiniz.
 

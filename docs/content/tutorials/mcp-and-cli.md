@@ -36,13 +36,76 @@ An AI client such as Claude Code or Cursor does not need a line here: it registe
 
 ## Step 2: Connect an AI Client
 
-Add the server to Claude Code as an HTTP MCP server:
+Claude Code, Codex and OpenCode sign in with OAuth: each opens the consent page of r3v3rs3 in the browser. Sign in if the panel asks, check the scopes you grant (`read` to see the state, `edit` to change it) and choose **Approve**. The tools of the server are then available, for example `server_status`, `list_proxies` or `deploy_app`.
+
+### Claude Code
 
 ```bash
 claude mcp add --transport http --scope user r3v3rs3 https://panel.example.com/api/mcp
 ```
 
-Then run `/mcp` in Claude Code, select `r3v3rs3` and choose **Authenticate**. The browser opens the consent page of r3v3rs3. Sign in if the panel asks, check the scopes you grant (`read` to see the state, `edit` to change it) and choose **Approve**. The tools of the server are then available in the session, for example `server_status`, `list_proxies` or `deploy_app`.
+The same server in the `.mcp.json` file of a project:
+
+```json
+{
+  "mcpServers": {
+    "r3v3rs3": {
+      "type": "http",
+      "url": "https://panel.example.com/api/mcp"
+    }
+  }
+}
+```
+
+Then run `/mcp` in Claude Code, select `r3v3rs3` and choose **Authenticate**.
+
+### Codex
+
+```bash
+codex mcp add r3v3rs3 --url https://panel.example.com/api/mcp
+codex mcp login r3v3rs3
+```
+
+The command writes this table into `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.r3v3rs3]
+url = "https://panel.example.com/api/mcp"
+```
+
+### OpenCode
+
+```bash
+opencode mcp add r3v3rs3 --url https://panel.example.com/api/mcp
+opencode mcp auth r3v3rs3
+```
+
+The command writes this entry into `opencode.json` (`--global` writes the global config instead):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "r3v3rs3": {
+        "type": "remote",
+        "url": "https://panel.example.com/api/mcp"
+      }
+    }
+  }
+}
+```
+
+### Antigravity (agy)
+
+agy does not run the OAuth flow; it sends a fixed header. Give it an API token of your account ([Step 5](#step-5-a-token-for-a-script) creates one; a `read` token only reads):
+
+```bash
+agy mcp add --header "Authorization: Bearer TOKEN" r3v3rs3 https://panel.example.com/api/mcp
+```
+
+Delete the token with `r3 <server> token delete <id>` to cut the access.
+
+### Access
 
 The role of the account still limits the client: a viewer account cannot change anything, even with the `edit` scope. **Settings** → **Active MCP Sessions** lists every signed-in client and revokes it with **Revoke Session**.
 
