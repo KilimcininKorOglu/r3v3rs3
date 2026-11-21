@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-11-21
+
+### Added
+- Every Admin API operation is now reachable from both MCP and the `r3` CLI: named DNS credentials, configuration backup and restore, test notifications, databases and their backups, deployments, app secrets and app state, projects, environments and env groups, Git connections, certificates, traffic and anomaly rules, CDN, discovery, logs, the dashboard, gRPC, key rotation, MCP sessions, app files, app volumes, database and S3 backup downloads.
+- MCP tool `set_firewall` sets the host firewall table.
+- `r3 app open-terminal` opens an app terminal; piped commands print their output until the shell exits.
+- The CLI follows live traffic and app logs.
+- One access list or target can be read through its own API route, MCP tool and CLI command.
+- Early data and transparent mode of a port, proxy compression dictionaries and app deploy hooks have their own API operations.
+- `r3 config update`, `r3 platform get-workers` and `r3 db list-engines`.
+
+### Changed
+- Every API operation is named with one verb from a fixed list, every MCP tool carries the operation id of its API operation, and every CLI command is `r3 <group> <operation id without the group's nouns>`. Old names have no aliases.
+- Audit log actions carry the name of the API operation that records them; entries of older releases move to the new names on start.
+- Standalone gRPC calls are limited to admin accounts.
+
+### Fixed
+- The terminal of a local app answered 500, because the Docker runtime did not pass the terminal call through.
+- The terminal socket now closes with a close frame when the shell exits.
+- `r3 acl`, `r3 dns`, `r3 platform status` and `r3 target get/token` called API paths that do not exist.
+- `r3 proxy` updated the stream priority with a decode error.
+- The MCP `get_config` answer shows which secrets are stored.
+- An unreachable gRPC server is reported as an error instead of an empty service list, and gRPC methods are read from the reflection file descriptor answer.
+- Disaster recovery: a backup without a passphrase is refused as a bad request, bundles are written atomically, a lost manifest fails the restore, unknown backup ids answer 404, delete errors are kept, the live database is snapshotted into the bundle, and an unread file fails the backup. The CLI writes downloaded bundles atomically.
+- The audit filter lists the DNS credential and ACME request actions.
+
 ## [3.6.0] - 2026-11-20
 
 ### Added
