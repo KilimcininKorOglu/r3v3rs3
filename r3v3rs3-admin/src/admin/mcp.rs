@@ -1545,7 +1545,8 @@ impl McpServer {
             .call(&caller, GetConfig)
             .await
             .map_err(tool_error)?;
-        json_result(config.masked())
+        // `GetConfig` already masks the secrets; masking again clears the `*_set` flags.
+        json_result(config)
     }
 
     /// List recent audit log entries.

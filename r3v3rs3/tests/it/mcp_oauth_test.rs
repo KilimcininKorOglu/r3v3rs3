@@ -4137,6 +4137,8 @@ async fn save_a_secret_then_round_trip(
         !config.to_string().contains("license-secret"),
         "get_config shows the secret"
     );
+    // A masked secret still tells the caller that one is stored, like `GET /api/config`.
+    assert_eq!(config["geoip"]["license_key_set"], json!(true), "{config}");
     config["upgrade"]["check_interval"] = json!("2h");
     mcp_call(client, "update_config", json!({ "request": config })).await?;
     Ok(())
