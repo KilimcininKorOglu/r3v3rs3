@@ -421,12 +421,12 @@ async fn check_audit(addr: SocketAddr, admin: &str, id: &str) -> anyhow::Result<
         [
             "delete_app",
             "delete_app_webhook_secret",
-            "new_app_webhook_secret",
+            "create_app_webhook_secret",
             "delete_app_git_token",
-            "set_app_git_token",
+            "update_app_git_token",
             "update_app_env",
             "update_app",
-            "add_app"
+            "create_app"
         ]
     );
     assert_eq!(entries[1]["summary"], "shop");
@@ -584,8 +584,8 @@ async fn check_target_audit(
             "delete_target",
             "undrain_target",
             "drain_target",
-            "new_target_token",
-            "add_target"
+            "create_target_token",
+            "create_target"
         ]
     );
     assert!(entries.iter().all(|entry| entry["summary"] == "edge"));
@@ -885,7 +885,7 @@ async fn check_connection_audit(addr: SocketAddr, admin: &str, id: &str) -> anyh
         [
             "delete_git_connection",
             "update_git_connection",
-            "add_git_connection"
+            "create_git_connection"
         ]
     );
     assert_eq!(entries[0]["summary"], "renamed (gitea)");

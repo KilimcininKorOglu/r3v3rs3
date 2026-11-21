@@ -4543,9 +4543,9 @@ async fn mcp_platform_changes_are_audited() -> anyhow::Result<()> {
         change_platform_through_mcp(&client).await?;
         // The audit log writes its entries in the background, so the test waits for them.
         let expected = [
-            "add_project",
+            "create_project",
             "delete_project",
-            "add_env_group",
+            "create_env_group",
             "delete_env_group",
         ];
         let client_ref = &client;

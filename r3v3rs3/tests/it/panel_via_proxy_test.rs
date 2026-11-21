@@ -371,7 +371,7 @@ async fn the_session_works_through_the_proxy(panel: Panel, username: &str) -> an
         .await?;
     assert_eq!(added.status(), StatusCode::OK, "{}", added.text().await?);
 
-    for action in ["login", "add_account"] {
+    for action in ["login", "create_account"] {
         assert_eq!(
             audit_client(&panel, &browser, &cookie, username, action)
                 .await?
@@ -540,7 +540,7 @@ async fn an_mcp_client_signs_in_through_the_proxy(
     check_mcp_initialize(&panel, &browser, &tokens).await?;
 
     assert_eq!(
-        audit_client(&panel, &browser, &cookie, username, "authorize_mcp_client")
+        audit_client(&panel, &browser, &cookie, username, "approve_mcp_client")
             .await?
             .as_deref(),
         Some(client)
