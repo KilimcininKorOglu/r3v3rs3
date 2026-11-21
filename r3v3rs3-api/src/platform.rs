@@ -2171,6 +2171,8 @@ pub enum HookOutcome {
     PreviewDestroyed,
     /// The request was a ping, or an event or a branch that does not deploy the app.
     Ignored,
+    /// The app is stopped, so the request deploys nothing until the app starts.
+    SkippedStopped,
 }
 
 /// The response of a webhook request.

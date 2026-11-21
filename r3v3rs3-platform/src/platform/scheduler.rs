@@ -67,7 +67,9 @@ impl Platform {
             let Ok(app) = self.app(dep.app).await else {
                 continue;
             };
-            if app.spec.require_approval {
+            if app.spec.require_approval
+                || self.skips_stopped(&app, &format!("window deployment {}", dep.id))
+            {
                 continue;
             }
             let Some(window) = app.spec.deploy_window.as_deref() else {
@@ -91,7 +93,9 @@ impl Platform {
         };
         let now = unix_ms() as i64;
         for cmd in commands {
-            if is_schedule_due(&cmd.schedule, cmd.last_run_at, now) {
+            if is_schedule_due(&cmd.schedule, cmd.last_run_at, now)
+                && !self.command_app_stopped(cmd.app_id, cmd.id).await
+            {
                 let Some(lock) = self.lock_scheduled_command(cmd.id) else {
                     continue;
                 };
@@ -105,6 +109,15 @@ impl Platform {
                 });
             }
         }
+    }
+
+    /// Whether the app of a due scheduled command is stopped, so the command waits. An app that
+    /// cannot be read lets the command run, which reports the failure.
+    async fn command_app_stopped(&self, app_id: ShortId, cmd_id: ShortId) -> bool {
+        let Ok(app) = self.app(app_id).await else {
+            return false;
+        };
+        self.skips_stopped(&app, &format!("scheduled command {cmd_id}"))
     }
 
     /// Executes a single scheduled command inside the container of its app.

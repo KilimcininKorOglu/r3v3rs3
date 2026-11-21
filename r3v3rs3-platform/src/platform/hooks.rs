@@ -201,6 +201,14 @@ fn same_mac(secret: &[u8], body: &[u8], mac: &str) -> bool {
     hmac.verify_slice(&expected).is_ok()
 }
 
+/// The answer to a push or a pull request for a stopped app, which deploys nothing.
+fn skipped_stopped() -> HookResponse {
+    HookResponse {
+        outcome: HookOutcome::SkippedStopped,
+        deployment: None,
+    }
+}
+
 /// Compares the hashes of the values, so the check takes the same time for every length.
 fn same_token(value: &[u8], secret: &[u8]) -> bool {
     Sha256::digest(value)
@@ -1082,6 +1090,9 @@ impl Platform {
         parent: &AppEntry,
         pr: PrPayload,
     ) -> anyhow::Result<HookResponse> {
+        if self.skips_stopped(parent, "preview deployment") {
+            return Ok(skipped_stopped());
+        }
         let target_app = match self.find_preview_app(parent.id, pr.number).await? {
             Some(existing) => self.update_preview_app(&existing, &pr).await?,
             None => self.create_preview_app(parent, &pr).await?,
@@ -1137,6 +1148,9 @@ impl Platform {
         target_ref: Option<GitRef>,
     ) -> anyhow::Result<HookResponse> {
         let app = self.app(id).await?;
+        if self.skips_stopped(&app, "webhook deployment") {
+            return Ok(skipped_stopped());
+        }
         let lock = match self.lock_or_queue_hook(app.id, target_ref.clone()) {
             super::deploy::LockOrQueued::Queued => {
                 return Ok(HookResponse {
@@ -1370,6 +1384,27 @@ mod tests {
         let deployment = result.2.deployment.unwrap();
         assert_eq!(deployment.trigger, DeploymentTrigger::Webhook);
         assert_eq!(deployment.username, HOOK_USERNAME);
+        Ok(())
+    }
+
+    /// A push to a stopped app deploys nothing, so the app stays stopped; the same push deploys
+    /// once the app runs again.
+    #[tokio::test]
+    async fn a_push_to_a_stopped_app_deploys_nothing() -> anyhow::Result<()> {
+        let (platform, _dir) = platform().await?;
+        let shop = platform.add_app(git_request("shop"), 1).await?;
+        let (_, secret) = platform.new_webhook_secret(shop.id).await?;
+        let body = push("refs/heads/main");
+        let headers = github(&secret.secret, "push", &body);
+        platform.store.set_app_stopped(shop.id, true).await?;
+        let result = platform.hook(shop.id, &headers, &body).await?;
+        assert_eq!(result.2.outcome, HookOutcome::SkippedStopped);
+        assert!(result.2.deployment.is_none());
+        assert!(platform.store.deployments(shop.id, 10).await?.is_empty());
+
+        platform.store.set_app_stopped(shop.id, false).await?;
+        let result = platform.hook(shop.id, &headers, &body).await?;
+        assert_eq!(result.2.outcome, HookOutcome::Deployed);
         Ok(())
     }
 

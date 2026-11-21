@@ -9,7 +9,9 @@ use super::compose::project_name;
 use super::deploy::AppLock;
 use super::store::RunningDeployment;
 use super::{Platform, not_found, proxy};
+use crate::audit::AuditRecord;
 use crate::runtime::PruneKeep;
+use r3v3rs3_api::audit::AuditAction;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::platform::{AppEntry, AppSource};
@@ -57,8 +59,34 @@ impl Platform {
         self.start_locked(app).await
     }
 
+    /// Whether an automatic job of `app` must not run because the app is stopped. The first
+    /// skip of each `job` during a stop goes to the audit log; a job that its schedule keeps
+    /// due is not audited again in every round.
+    pub(super) fn skips_stopped(&self, app: &AppEntry, job: &str) -> bool {
+        if !app.stopped {
+            return false;
+        }
+        let first = self
+            .stopped_skips
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert((app.id, job.to_string()));
+        if first && let Some(audit) = &self.audit {
+            let record = AuditRecord::new(AuditAction::SkipStoppedApp)
+                .id(app.id)
+                .summary(format!("{}: skipped {job}: app stopped", app.name));
+            audit.record("system", None, record);
+        }
+        tracing::info!(app = %app.name, job, "skipped: app stopped");
+        true
+    }
+
     async fn stop_locked(&self, app: &AppEntry) -> anyhow::Result<()> {
         let deployment = self.serving(app).await?;
+        self.stopped_skips
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(id, _)| *id != app.id);
         self.store.set_app_stopped(app.id, true).await?;
         self.set_running(&deployment, false).await
     }
@@ -196,6 +224,7 @@ mod tests {
         platform: Arc<Platform>,
         runtime: Arc<FakeRuntime>,
         compose: Arc<FakeCompose>,
+        audit: Arc<crate::audit::MemoryAuditStore>,
         _dir: TempDir,
     }
 
@@ -207,12 +236,43 @@ mod tests {
             platform_with(&PlatformConfig::default(), command).await?;
         let compose = Arc::new(FakeCompose::new(runtime.clone()));
         platform.compose = compose.clone();
+        let audit = Arc::new(crate::audit::MemoryAuditStore::new());
+        platform.audit = Some(Arc::new(crate::audit::AuditLog::new(
+            audit.clone(),
+            String::new(),
+        )));
         Ok(Setup {
             platform: Arc::new(platform),
             runtime,
             compose,
+            audit,
             _dir: dir,
         })
+    }
+
+    /// The summaries of the skip records, once the background writes landed.
+    async fn skip_records(
+        audit: &crate::audit::MemoryAuditStore,
+        count: usize,
+    ) -> anyhow::Result<Vec<String>> {
+        use crate::audit::{AuditFilter, AuditStore};
+        let filter = AuditFilter {
+            since: 0,
+            until: u64::MAX,
+            username: None,
+            resource_id: None,
+            action: Some(AuditAction::SkipStoppedApp),
+            search: None,
+            limit: 100,
+        };
+        for _ in 0..200 {
+            let entries = audit.query(&filter).await?;
+            if entries.len() >= count {
+                return Ok(entries.into_iter().map(|e| e.summary).collect());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        anyhow::bail!("fewer than {count} skip records")
     }
 
     /// An app with a domain whose deployment runs in the container that this returns.
@@ -389,6 +449,116 @@ mod tests {
             projects: Vec::new(),
         };
         assert_eq!(keeps, [expected, PruneKeep::default()]);
+        Ok(())
+    }
+
+    /// A new image of a stopped app with auto-deploy deploys nothing; the skip is audited once
+    /// while the schedule stays due, and once more after the next stop.
+    #[tokio::test]
+    async fn a_stopped_app_skips_an_image_auto_update() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let id = stopped_auto_deploy_app(&setup).await?;
+        auto_update(&setup.platform, id).await?;
+        auto_update(&setup.platform, id).await?;
+        assert_eq!(setup.platform.store.deployments(id, 10).await?.len(), 1);
+
+        start_and_stop_again(&setup.platform, id).await?;
+        auto_update(&setup.platform, id).await?;
+        skip_records(&setup.audit, 2).await?;
+        // The writes run in the background; a repeated record would land in this time.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let records = skip_records(&setup.audit, 2).await?;
+        let expected = "shop: skipped image auto-update: app stopped";
+        assert_eq!(records, [expected, expected]);
+        Ok(())
+    }
+
+    /// A running app with auto-deploy, stopped.
+    async fn stopped_auto_deploy_app(setup: &Setup) -> anyhow::Result<ShortId> {
+        let (id, name) = deployed(&setup.platform, None).await?;
+        setup.runtime.set(&name, true, &[(80, 40001)]);
+        let mut app = setup.platform.app(id).await?;
+        app.spec.auto_deploy = true;
+        setup.platform.store.update_app(&app).await?;
+        setup.platform.stop_app(id).await?;
+        Ok(id)
+    }
+
+    /// Starts a stopped app and stops it again: a new stop.
+    async fn start_and_stop_again(platform: &Arc<Platform>, id: ShortId) -> anyhow::Result<()> {
+        platform.start_app(id).await?;
+        platform.stop_app(id).await?;
+        Ok(())
+    }
+
+    /// The image check found a newer image of the app.
+    async fn auto_update(platform: &Arc<Platform>, id: ShortId) -> anyhow::Result<()> {
+        let status: r3v3rs3_api::platform::ImageUpdateStatus = serde_json::from_value(
+            serde_json::json!({ "update_available": true, "checked_at": 1 }),
+        )?;
+        let app = platform.app(id).await?;
+        super::super::image_check::auto_deploy_if_needed(platform, &app, &status).await
+    }
+
+    /// A due scheduled command of a stopped app waits: it is audited as skipped and does not
+    /// run, so its last run stays empty.
+    #[tokio::test]
+    async fn a_stopped_app_skips_its_scheduled_commands() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let (id, name) = deployed(&setup.platform, None).await?;
+        setup.runtime.set(&name, true, &[(80, 40001)]);
+        let request = r3v3rs3_api::platform::ScheduledCommandRequest {
+            name: "cleanup".into(),
+            schedule: "@every 5m".into(),
+            command: "true".into(),
+            enabled: true,
+        };
+        let cmd = setup.platform.add_scheduled_command(id, request).await?;
+        setup.platform.stop_app(id).await?;
+        setup.platform.run_due_commands().await;
+        let records = skip_records(&setup.audit, 1).await?;
+        assert_eq!(
+            records,
+            [format!(
+                "shop: skipped scheduled command {}: app stopped",
+                cmd.id
+            )]
+        );
+        let stored = setup.platform.store.scheduled_command(cmd.id).await?;
+        assert!(stored.context("the command is gone")?.last_run_at.is_none());
+        assert!(setup.runtime.state().execs.is_empty());
+        Ok(())
+    }
+
+    /// A stopped app whose deploy window is open, with a pending deployment; returns its id.
+    async fn stopped_app_with_pending_deployment(setup: &Setup) -> anyhow::Result<ShortId> {
+        let (id, _) = deployed(&setup.platform, None).await?;
+        let mut app = setup.platform.app(id).await?;
+        // A window without a range is always open.
+        app.spec.deploy_window = Some("always".into());
+        setup.platform.store.update_app(&app).await?;
+        setup.platform.store.set_app_stopped(id, true).await?;
+        let pending = NewDeployment::new(&app, DeploymentTrigger::Manual, "alice", &app.spec, &[])?
+            .pending("window");
+        setup.platform.store.insert_deployment(&pending).await?;
+        Ok(pending.id)
+    }
+
+    /// A pending deployment of a stopped app is not approved when its window opens.
+    #[tokio::test]
+    async fn a_stopped_app_keeps_its_window_deployment_pending() -> anyhow::Result<()> {
+        let setup = setup().await?;
+        let pending = stopped_app_with_pending_deployment(&setup).await?;
+        setup.platform.check_window_deployments().await;
+        let records = skip_records(&setup.audit, 1).await?;
+        let expected = format!("shop: skipped window deployment {pending}: app stopped");
+        assert_eq!(records, [expected]);
+        let entry = setup.platform.store.deployment(pending).await?;
+        let status = entry.context("the deployment is gone")?.status;
+        assert_eq!(
+            status,
+            r3v3rs3_api::platform::DeploymentStatus::PendingApproval
+        );
         Ok(())
     }
 }

@@ -230,6 +230,9 @@ pub enum AuditAction {
     RunDatabaseBackupNow,
     UpgradeAllTargets,
     RunPrune,
+    /// The platform skipped an automatic job, such as a webhook deployment or a scheduled
+    /// backup, of a stopped app.
+    SkipStoppedApp,
     VacuumPlatformLogs,
     UpdateAnomalyRules,
     RestoreDisasterRecoveryUpload,
@@ -240,7 +243,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 141] = [
+    pub const ALL: [AuditAction; 142] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -371,6 +374,7 @@ impl AuditAction {
         Self::RunDatabaseBackupNow,
         Self::UpgradeAllTargets,
         Self::RunPrune,
+        Self::SkipStoppedApp,
         Self::VacuumPlatformLogs,
         Self::UpdateAnomalyRules,
         Self::RestoreDisasterRecoveryUpload,

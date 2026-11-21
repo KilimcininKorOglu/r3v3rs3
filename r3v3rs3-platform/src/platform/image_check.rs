@@ -352,6 +352,9 @@ pub async fn auto_deploy_if_needed(
     if !app.spec.auto_deploy || !status.update_available {
         return Ok(());
     }
+    if platform.skips_stopped(app, "image auto-update") {
+        return Ok(());
+    }
     let AppSource::Image { image } = &app.spec.source else {
         return Ok(());
     };

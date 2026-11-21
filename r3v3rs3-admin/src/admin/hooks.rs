@@ -81,17 +81,14 @@ pub async fn app_hook(
         .await
         .map_err(platform_error)?;
     let status = match response.outcome {
-        HookOutcome::Queued => StatusCode::ACCEPTED,
+        HookOutcome::Queued | HookOutcome::SkippedStopped => StatusCode::ACCEPTED,
         HookOutcome::Deployed
         | HookOutcome::PreviewDeployed
         | HookOutcome::PreviewDestroyed
         | HookOutcome::Ignored => StatusCode::OK,
     };
     if response.outcome != HookOutcome::Ignored {
-        let started = response
-            .deployment
-            .as_ref()
-            .map_or_else(|| "queued".to_string(), |d| d.id.to_string());
+        let started = hook_result(&response);
         let record = AuditRecord::new(AuditAction::ReceiveAppWebhook)
             .id(id)
             .summary(format!("{} ({}): {started}", app.name, provider.as_str()));
@@ -101,4 +98,44 @@ pub async fn app_hook(
         state.record_audit("", Some(client_ip), record).await;
     }
     Ok((status, Json(response)).into_response())
+}
+
+/// What a webhook request did, for the audit log: the started deployment, or why none started.
+fn hook_result(response: &HookResponse) -> String {
+    if let Some(deployment) = &response.deployment {
+        return deployment.id.to_string();
+    }
+    match response.outcome {
+        HookOutcome::SkippedStopped => "skipped: app stopped",
+        HookOutcome::PreviewDestroyed => "preview destroyed",
+        _ => "queued",
+    }
+    .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn without_deployment(outcome: HookOutcome) -> String {
+        hook_result(&HookResponse {
+            outcome,
+            deployment: None,
+        })
+    }
+
+    /// The audit log says why a request started no deployment, instead of calling every such
+    /// request queued.
+    #[test]
+    fn the_audit_names_why_a_webhook_started_nothing() {
+        assert_eq!(
+            without_deployment(HookOutcome::SkippedStopped),
+            "skipped: app stopped"
+        );
+        assert_eq!(
+            without_deployment(HookOutcome::PreviewDestroyed),
+            "preview destroyed"
+        );
+        assert_eq!(without_deployment(HookOutcome::Queued), "queued");
+    }
 }

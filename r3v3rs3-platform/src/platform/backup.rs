@@ -2279,7 +2279,10 @@ impl Platform {
             .first()
             .map(|entry| entry.created_at);
         if now >= slot && last.is_none_or(|created_at| created_at < slot) {
-            if self.is_backup_due(app.id, slot, now) {
+            // A stopped database changes nothing, and its container cannot run the dump.
+            if self.is_backup_due(app.id, slot, now)
+                && !self.skips_stopped(app, &format!("scheduled backup {slot}"))
+            {
                 self.execute_scheduled_backup(app, slot, now, config).await;
             }
         } else if config.restore_test_enabled {
@@ -3548,6 +3551,40 @@ mod tests {
         assert_ne!(source_wal, target_wal);
         assert!(source_wal.ends_with("shop-db/wal"));
         assert!(target_wal.ends_with("shop-clone/wal"));
+    }
+
+    /// A stopped database changes nothing and its container cannot run a dump, so its due
+    /// backup is not tried: no failure starts a retry wait. A running one is tried.
+    #[tokio::test]
+    async fn a_stopped_database_skips_its_scheduled_backup() -> anyhow::Result<()> {
+        let (platform, _dir) = crate::platform::tests::platform().await?;
+        let request = crate::platform::tests::request("shop-db");
+        let mut db = platform.add_app(request, 1).await?;
+        // The engine catalog is not installed in the test, so the spec goes in directly.
+        db.spec.database = Some("postgres".into());
+        platform.store.update_app(&db).await?;
+        let slot = 1_000_000_000i64;
+        platform.store.set_app_stopped(db.id, true).await?;
+        check_due_backup(&platform, db.id, slot).await?;
+        assert!(
+            platform.is_backup_due(db.id, slot, slot),
+            "the backup was tried"
+        );
+
+        platform.store.set_app_stopped(db.id, false).await?;
+        check_due_backup(&platform, db.id, slot).await?;
+        assert!(
+            !platform.is_backup_due(db.id, slot, slot),
+            "the backup was not tried"
+        );
+        Ok(())
+    }
+
+    /// Runs the scheduled backup check of the database at the start of its due slot.
+    async fn check_due_backup(platform: &Platform, id: ShortId, slot: i64) -> anyhow::Result<()> {
+        let config = platform.backup_config().await?;
+        let app = platform.app(id).await?;
+        platform.check_app_backup(&app, slot, slot, &config).await
     }
 
     #[tokio::test]

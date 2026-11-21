@@ -280,6 +280,9 @@ pub struct Platform {
     running_commands: std::sync::Mutex<HashSet<ShortId>>,
     /// Scheduled backup retry tracking per app: (slot, attempts, next_attempt_at).
     pub(super) backup_attempts: std::sync::Mutex<HashMap<ShortId, (i64, u32, i64)>>,
+    /// The automatic jobs of stopped apps that were skipped and audited, keyed by the app and
+    /// the job, so a schedule that stays due is audited once per stop.
+    stopped_skips: std::sync::Mutex<HashSet<(ShortId, String)>>,
     /// The apps that a webhook request deploys again after their running pipeline, with optional git ref.
     queued: std::sync::Mutex<HashMap<ShortId, Option<GitRef>>>,
     /// Processed webhook delivery IDs with expiration epoch seconds.
@@ -396,6 +399,7 @@ impl Platform {
             cancellations: std::sync::Mutex::new(HashMap::new()),
             running_commands: std::sync::Mutex::new(HashSet::new()),
             backup_attempts: std::sync::Mutex::new(HashMap::new()),
+            stopped_skips: std::sync::Mutex::new(HashSet::new()),
             queued: std::sync::Mutex::new(HashMap::new()),
             webhook_deliveries: std::sync::Mutex::new(HashMap::new()),
             timing: deploy::Timing::default(),

@@ -235,6 +235,7 @@
   "audit.action_run_database_backup_now": "Zamanlanmış veritabanı yedeğini hemen çalıştır",
   "audit.action_upgrade_all_targets": "Tüm agent hedeflerini güncelle",
   "audit.action_run_prune": "Kullanılmayan Docker verisini temizle",
+  "audit.action_skip_stopped_app": "Durdurulmuş uygulamanın işini atla",
   "audit.action_vacuum_platform_logs": "Tüm uygulamaların container loglarını küçült",
   "audit.action_update_anomaly_rules": "Anomali kurallarını güncelle",
   "audit.action_restore_disaster_recovery_upload": "Yüklenen felaket kurtarma yedeğini geri yükle",

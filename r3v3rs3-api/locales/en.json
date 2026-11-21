@@ -235,6 +235,7 @@
   "audit.action_run_database_backup_now": "Run the scheduled database backup now",
   "audit.action_upgrade_all_targets": "Upgrade all agent targets",
   "audit.action_run_prune": "Prune unused Docker data",
+  "audit.action_skip_stopped_app": "Skip a job of a stopped app",
   "audit.action_vacuum_platform_logs": "Vacuum the container logs of all apps",
   "audit.action_update_anomaly_rules": "Update anomaly rules",
   "audit.action_restore_disaster_recovery_upload": "Restore an uploaded disaster recovery backup",
