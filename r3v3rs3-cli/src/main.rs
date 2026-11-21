@@ -585,11 +585,11 @@ pub enum AppCommand {
     CancelDeployment { id: String },
     /// Rolls back an application to the previous deployment.
     RollbackDeployment { id: String },
-    /// Starts an application container.
+    /// Starts the stopped containers of an application again, without a build or a pull.
     Start { id: String },
-    /// Stops an application container.
+    /// Stops the containers of an application; its domains answer 503 until it starts.
     Stop { id: String },
-    /// Restarts an application container.
+    /// Stops and starts the containers of an application.
     Restart { id: String },
     /// Deletes an application.
     #[command(alias = "rm")]
@@ -3209,9 +3209,6 @@ mod tests {
             "applies a manifest with several create and update operations",
         ),
         ("update", "replaces the r3 binary with the latest release"),
-        ("app start", "the API has no app start operation yet"),
-        ("app stop", "the API has no app stop operation yet"),
-        ("app restart", "the API has no app restart operation yet"),
     ];
 
     /// Collects the path of every command that has no subcommand of its own.

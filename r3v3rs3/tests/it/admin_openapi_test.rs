@@ -11,7 +11,7 @@ use crate::common;
 use common::{TestStorage, admin_session_cookie, alloc_tcp_port, wait_for_listener, with_server};
 
 /// Every route of the admin API. The OpenAPI document must list exactly these operations.
-pub(crate) const OPERATIONS: [(&str, &str); 283] = [
+pub(crate) const OPERATIONS: [(&str, &str); 286] = [
     ("get", "/.well-known/oauth-authorization-server"),
     ("get", "/.well-known/oauth-protected-resource"),
     ("get", "/healthz"),
@@ -213,6 +213,9 @@ pub(crate) const OPERATIONS: [(&str, &str); 283] = [
     ("get", "/api/apps/{id}/metrics"),
     ("get", "/api/apps/{id}/diagnostics"),
     ("post", "/api/apps/{id}/deploy"),
+    ("post", "/api/apps/{id}/stop"),
+    ("post", "/api/apps/{id}/start"),
+    ("post", "/api/apps/{id}/restart"),
     ("post", "/api/apps/{id}/check_update"),
     ("post", "/api/apps/{id}/upgrade-catalog"),
     ("get", "/api/apps/{id}/commands"),
@@ -549,11 +552,14 @@ const OPERATION_VERBS: &[&str] = &[
     "request",
     "reset",
     "resolve",
+    "restart",
     "restore",
     "revoke",
     "rollback",
     "rotate",
     "run",
+    "start",
+    "stop",
     "stream",
     "subscribe",
     "sync",
@@ -593,6 +599,10 @@ const AUDIT_EVENTS: &[(&str, &str)] = &[
     (
         "enroll_agent",
         "an agent enrolling itself over its mTLS link",
+    ),
+    (
+        "skip_stopped_app",
+        "the platform skipping an automatic job of a stopped app",
     ),
 ];
 

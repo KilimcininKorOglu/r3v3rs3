@@ -55,6 +55,12 @@ pub enum AuditAction {
     DeleteApp,
     UpdateAppEnv,
     DeployApp,
+    /// An account stopped the containers of an app.
+    StopApp,
+    /// An account started the stopped containers of an app.
+    StartApp,
+    /// An account restarted the containers of an app.
+    RestartApp,
     RollbackDeployment,
     /// An account opened a terminal into the container of an app.
     OpenAppTerminal,
@@ -243,7 +249,7 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
-    pub const ALL: [AuditAction; 142] = [
+    pub const ALL: [AuditAction; 145] = [
         Self::Login,
         Self::LoginFailed,
         Self::Logout,
@@ -275,6 +281,9 @@ impl AuditAction {
         Self::DeleteApp,
         Self::UpdateAppEnv,
         Self::DeployApp,
+        Self::StopApp,
+        Self::StartApp,
+        Self::RestartApp,
         Self::RollbackDeployment,
         Self::OpenAppTerminal,
         Self::DeleteAppFile,

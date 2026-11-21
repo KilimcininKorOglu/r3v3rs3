@@ -3315,6 +3315,72 @@ impl McpServer {
         json_result(deployment.0)
     }
 
+    /// Stop the containers of an app.
+    #[tool(
+        description = "Stop the containers of the running deployment of an app (`id`) without deleting them. The domains of the app answer 503 with the error page theme, and webhook deployments, image auto-updates, window deployments, scheduled commands and scheduled backups are skipped until `start_app`. A manual deployment runs the app again. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn stop_app(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let app = super::platform::stop_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
+    }
+
+    /// Start the stopped containers of an app.
+    #[tool(
+        description = "Start the stopped containers of an app (`id`) again, without a build, a pull or a new container, and route its domains to them. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn start_app(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let app = super::platform::start_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
+    }
+
+    /// Restart the containers of an app.
+    #[tool(
+        description = "Stop and start the containers of the running deployment of an app (`id`); a stopped app only starts. No build, no pull and no new container. Needs a token with the edit scope and an admin account or an editor without a proxy list."
+    )]
+    async fn restart_app(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(params): Parameters<IdParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let caller = caller_of(&parts)?;
+        require_edit(&parts)?;
+        let id: ShortId = parse_id(&params.id)?;
+        let app = super::platform::restart_app(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(id),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(app.0)
+    }
+
     /// Retrieve container execution logs.
     #[tool(
         description = "Return the last lines of the container log of an app (`id`). `tail` sets the number of lines (1 to 1000, default 200); `service` selects one service of a Compose app. Use it to find why a deployment or a container fails. Read-only; any account without a proxy list."

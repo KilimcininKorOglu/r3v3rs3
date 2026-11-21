@@ -1266,6 +1266,76 @@ pub async fn deploy_app(
     Ok(Json(deployment))
 }
 
+/// Stops the containers of the running deployment of an app. The containers stay, the domains
+/// answer 503 with the error page theme, and automatic deployments and scheduled jobs wait.
+#[utoipa::path(
+    post,
+    path = "/{id}/stop",
+    tag = "platform",
+    operation_id = "stop_app",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The stopped app.", body = AppEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn stop_app(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AppEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let app = platform.stop_app(id).await.map_err(platform_error)?;
+    record_lifecycle(&state, &caller, AuditAction::StopApp, &app).await;
+    Ok(Json(app))
+}
+
+/// Starts the stopped containers of an app again, without a build or a pull.
+#[utoipa::path(
+    post,
+    path = "/{id}/start",
+    tag = "platform",
+    operation_id = "start_app",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The running app.", body = AppEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn start_app(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AppEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let app = platform.start_app(id).await.map_err(platform_error)?;
+    record_lifecycle(&state, &caller, AuditAction::StartApp, &app).await;
+    Ok(Json(app))
+}
+
+/// Stops and starts the containers of an app; a stopped app only starts.
+#[utoipa::path(
+    post,
+    path = "/{id}/restart",
+    tag = "platform",
+    operation_id = "restart_app",
+    params(("id" = ShortId, Path, description = "App id.")),
+    responses((status = 200, description = "The running app.", body = AppEntry), NotFoundResponse, ErrorResponses)
+)]
+pub async fn restart_app(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<AppEntry>, AppError> {
+    let platform = state.platform(&caller, Permission::Edit).await?;
+    let app = platform.restart_app(id).await.map_err(platform_error)?;
+    record_lifecycle(&state, &caller, AuditAction::RestartApp, &app).await;
+    Ok(Json(app))
+}
+
+async fn record_lifecycle(state: &AppState, caller: &Caller, action: AuditAction, app: &AppEntry) {
+    let record = AuditRecord::new(action)
+        .id(app.id)
+        .summary(app.name.to_string());
+    state
+        .record_audit(&caller.username, caller.client, record)
+        .await;
+}
+
 /// Checks Docker/OCI registry for updates to the image of an app. If auto-deploy is enabled and an update is found, triggers deployment.
 #[utoipa::path(
     post,

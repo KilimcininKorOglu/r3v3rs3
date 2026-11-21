@@ -124,7 +124,7 @@ async fn manage_apps(addr: SocketAddr) -> anyhow::Result<()> {
     let item = format!("{APPS}/{id}");
     check_env(addr, &admin, &viewer, &item).await?;
     check_secrets(addr, &admin, &viewer, &id).await?;
-    check_deploy_access(addr, &viewer, &scoped, &item).await?;
+    check_app_actions(addr, &[&admin, &viewer, &scoped], &item).await?;
     check_delete(addr, &admin, &viewer, &item).await?;
     check_audit(addr, &admin, &id).await
 }
@@ -372,6 +372,37 @@ async fn check_deploy_access(
     let deployments = get(addr, &format!("{item}/deployments"), viewer).await?;
     assert_eq!(deployments, json!([]));
     check_logs(addr, viewer, scoped, item).await
+}
+
+/// Deployments, stops, starts and restarts of the app.
+async fn check_app_actions(
+    addr: SocketAddr,
+    accounts: &[&str; 3],
+    item: &str,
+) -> anyhow::Result<()> {
+    check_deploy_access(addr, accounts[1], accounts[2], item).await?;
+    check_lifecycle_access(addr, accounts, item).await
+}
+
+/// Stop, start and restart need the Edit permission without a proxy list. An app without a
+/// running deployment has no container to stop or start, and the editor learns why.
+async fn check_lifecycle_access(
+    addr: SocketAddr,
+    [admin, viewer, scoped]: &[&str; 3],
+    item: &str,
+) -> anyhow::Result<()> {
+    for action in ["stop", "start", "restart"] {
+        let path = format!("{item}/{action}");
+        for cookie in [viewer, scoped] {
+            let (status, _) = send(addr, Method::POST, &path, cookie, None).await?;
+            assert_eq!(status, 403, "{action}");
+        }
+        let (status, text) = send(addr, Method::POST, &path, admin, None).await?;
+        assert_eq!(status, 400, "{action}: {text}");
+        assert!(text.contains("app_not_deployed"), "{action}: {text}");
+    }
+    assert_eq!(get(addr, item, admin).await?["stopped"], false);
+    Ok(())
 }
 
 /// A viewer reads the log of an app without a running deployment, and an account with a proxy
