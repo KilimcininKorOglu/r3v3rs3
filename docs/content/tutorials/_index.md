@@ -18,6 +18,7 @@ Each page here is a walkthrough. Follow it from the top and you get a working se
 - [TCP and UDP Proxies](@/tutorials/tcp-and-udp.md): a database, a DNS server and mutual TLS.
 - [Load Balancing and Health Checks](@/tutorials/load-balancing.md): weights, health checks, retries, sticky sessions, WebSocket and gRPC.
 - [Driving r3v3rs3 from a Script](@/tutorials/admin-api.md): the admin API, a deploy job and an account for it.
+- [MCP and the Command Line Client](@/tutorials/mcp-and-cli.md): MCP for an AI client, the `r3` client and a token for scripts.
 - [Proxies from etcd](@/tutorials/etcd-discovery.md): proxies built from the keys of an etcd cluster.
 - [Accounts for a Team](@/tutorials/team-accounts.md): roles, proxy lists, TOTP and the audit log.
 - [Single Sign-On with Forward Auth](@/tutorials/forward-auth.md): oauth2-proxy in front, the user in the upstream request.

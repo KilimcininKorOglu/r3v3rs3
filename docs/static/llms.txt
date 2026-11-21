@@ -29,6 +29,7 @@ The documentation is published in English at the root and in Turkish under `/tr/
 - [TCP and UDP Proxies](https://r3v3rs3.keremgok.tr/tutorials/tcp-and-udp/): publish a database over TCP and a DNS server over UDP, with mutual TLS
 - [Load Balancing and Health Checks](https://r3v3rs3.keremgok.tr/tutorials/load-balancing/): weights, health checks, sticky sessions, WebSocket and gRPC
 - [Driving r3v3rs3 from a Script](https://r3v3rs3.keremgok.tr/tutorials/admin-api/): sign in to the admin API and drive it from CI
+- [MCP and the Command Line Client](https://r3v3rs3.keremgok.tr/tutorials/mcp-and-cli/): turn on MCP, connect an AI client, install r3 and sign in
 - [Proxies from etcd](https://r3v3rs3.keremgok.tr/tutorials/etcd-discovery/): let etcd keys define their own proxies
 - [Accounts for a Team](https://r3v3rs3.keremgok.tr/tutorials/team-accounts/): per-person proxies, TOTP and the audit log
 - [Single Sign-On with Forward Auth](https://r3v3rs3.keremgok.tr/tutorials/forward-auth/): oauth2-proxy in front of an application

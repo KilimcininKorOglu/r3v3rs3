@@ -1872,6 +1872,8 @@ allowed_ips = ["198.51.100.0/24"]
 
 The admin API exposes its complete tool suite over the Model Context Protocol at `/api/mcp` (Streamable HTTP, spec 2025-03-26). With **100% MCP Management Parity**, every single administrative feature, proxy route, port listener, ACME certificate, PaaS application, Docker Compose stack, one-click App Store catalog app, managed database, automated backup, agent target node, and disaster recovery snapshot is fully manageable autonomously via MCP without needing a human operator to open the WebUI.
 
+The guide [MCP and the Command Line Client](@/tutorials/mcp-and-cli.md) sets up MCP, an AI client and `r3` step by step.
+
 ### Autonomous MCP Tool Suite
 
 | Category | Tools & Operations | Description |

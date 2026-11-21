@@ -1872,6 +1872,8 @@ allowed_ips = ["198.51.100.0/24"]
 
 Admin API, araç setini `/api/mcp` üzerinde Model Context Protocol (Streamable HTTP, 2025-03-26 spesifikasyonu) ile yayınlar. **%100 MCP Yönetim Eşitliği (MCP Parity)** ile ters proxy rotaları, dinleyici portlar, ACME sertifikaları, PaaS uygulamaları, Docker Compose yığınları, tek tıkla kurulan App Store katalog uygulamaları, yönetilen veritabanları, otomatik yedeklemeler, uzak agent düğümleri ve felaket kurtarma anlık görüntüleri dahil sistemdeki her bir özellik, bir insanın WebUI'yi açmasına gerek kalmadan bir yapay zeka ajanı tarafından otonom olarak %100 yönetilebilir.
 
+[MCP ve komut satırı istemcisi](@/tutorials/mcp-and-cli.tr.md) rehberi MCP'yi, bir AI istemcisini ve `r3`'ü adım adım kurar.
+
 ### Otonom MCP Araç Seti
 
 | Kategori | Araçlar ve İşlemler | Açıklama |
