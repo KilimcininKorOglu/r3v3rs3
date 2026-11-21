@@ -60,7 +60,7 @@ $ curl -s -b cookies.txt http://localhost:46492/api/proxies | jq -c '.[] | {id, 
 {"id":"cfr-kpm","name":"etcdapp","source":{"provider":"etcd","resource":"http/etcdapp"}}
 ```
 
-Key set'i `ports`, `vhosts` ve bir sunucu URL'i ayarlar. Key adları, yönetim API'sinin proxy modelinin alanlarıdır; tam liste için [Etiketler](@/discovery.tr.md#etiketler) bölümüne bakın.
+Key set'i `ports`, `vhosts` ve bir sunucu URL'i ayarlar. Key adları, yönetim API'sinin proxy modelinin alanlarıdır; tam liste için [Etiketler](@/reference/discovery.tr.md#etiketler) bölümüne bakın.
 
 r3v3rs3 önekin altındaki her proxy'yi okur. Bu yüzden key set'i `r3v3rs3.enable` gerektirmez. Key'in adresi yoktur; bu yüzden `port` ve `scheme` kullanılamaz, sunucu URL'ini yazın. Bir key'in parçası `.` içeremez; böyle bir key sorun sayılır.
 
@@ -112,9 +112,9 @@ WebUI, proxy'yi kaynağıyla ve düzenleme eylemleri olmadan gösterir. Değişt
 
 ## Referans
 
-- [Etiketler](@/discovery.tr.md#etiketler): her key, her değer türü ve numaralı listeler.
-- [etcd](@/discovery.tr.md#etcd): ayarlar ve varsayılan değerleri.
-- [ACME sertifikaları](@/discovery.tr.md#acme-sertifikalari): keşfedilen bir proxy için sertifika.
+- [Etiketler](@/reference/discovery.tr.md#etiketler): her key, her değer türü ve numaralı listeler.
+- [etcd](@/reference/discovery.tr.md#etcd): ayarlar ve varsayılan değerleri.
+- [ACME sertifikaları](@/reference/discovery.tr.md#acme-sertifikalari): keşfedilen bir proxy için sertifika.
 
 ## Sonraki adımlar
 

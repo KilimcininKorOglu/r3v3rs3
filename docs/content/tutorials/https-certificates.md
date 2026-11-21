@@ -12,7 +12,7 @@ DNS-01 is the only challenge that gets a wildcard certificate. It also needs no 
 
 ## Before You Start
 
-- A domain whose DNS zone you host at one of the providers of the [DNS-01 table](@/configuration.md#dns-01), for example Cloudflare or Route 53.
+- A domain whose DNS zone you host at one of the providers of the [DNS-01 table](@/reference/certificates.md#dns-01), for example Cloudflare or Route 53.
 - An API credential of that provider that can read the zone and write records.
 - A running r3v3rs3 with an admin account. [Getting Started](@/tutorials/getting-started.md) covers the install.
 - The `A` record of `example.com` and of each subdomain points to the IP address of the server. DNS-01 does not check this, but your clients need it.
@@ -26,7 +26,7 @@ Create a credential that can write the `_acme-challenge` TXT records of the zone
 | Cloudflare | API Token                        | `Zone:Read` and `DNS:Edit` for the zone                          |
 | Route 53   | Access Key ID, Secret Access Key | `route53:ListHostedZones` and `route53:ChangeResourceRecordSets` |
 
-The [DNS-01 table](@/configuration.md#dns-01) lists the other 13 providers with their credentials. Two of them need no hosting provider: the webhook provider calls a service of your own, and the exec provider runs a program on the r3v3rs3 host.
+The [DNS-01 table](@/reference/certificates.md#dns-01) lists the other 13 providers with their credentials. Two of them need no hosting provider: the webhook provider calls a service of your own, and the exec provider runs a program on the r3v3rs3 host.
 
 ## Step 2: Bind the HTTP and HTTPS Ports
 
@@ -161,10 +161,10 @@ HTTP/3 is available for incoming connections only. The upstream connection uses 
 
 r3v3rs3 orders a new certificate `renewal_days` after the last order, 60 days with a preset provider. A Let's Encrypt certificate is valid for 90 days, so the renewal has 30 days of margin. The order repeats the DNS-01 challenge, so the credential must stay valid.
 
-The **Settings** page has a notification webhook. It sends a `certificate_expiring` event before an expiry and an `acme_order_failed` event after a failed order, so a broken credential does not stay silent. [Notifications](@/configuration.md#notifications) describes the events.
+The **Settings** page has a notification webhook. It sends a `certificate_expiring` event before an expiry and an `acme_order_failed` event after a failed order, so a broken credential does not stay silent. [Notifications](@/reference/certificates.md#notifications) describes the events.
 
 ## Next Steps
 
-- [Certificates and ACME](@/configuration.md#acme): every challenge, every provider and the stored data.
-- [Header Rules](@/configuration.md#header-rules): the other rules and their variables.
+- [Certificates and ACME](@/reference/certificates.md#acme): every challenge, every provider and the stored data.
+- [Header Rules](@/reference/proxies.md#header-rules): the other rules and their variables.
 - [Proxies from Docker](@/tutorials/docker-discovery.md): a container label can name this ACME entry, so a discovered proxy gets its own certificate.

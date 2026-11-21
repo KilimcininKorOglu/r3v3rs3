@@ -1,7 +1,7 @@
----
-title: "Release doğrulama"
-weight: 160
----
++++
+title = "Release doğrulama"
+weight = 12
++++
 
 Her release bir `SHA256SUMS` dosyası ve onun minisign imzası olan
 `SHA256SUMS.minisig` ile çıkar. Public key, repoda `dist/minisign.pub`

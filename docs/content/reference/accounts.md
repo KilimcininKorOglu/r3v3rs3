@@ -1,12 +1,12 @@
 +++
 title = "Accounts"
 description = "Roles and proxy lists of the panel accounts"
-weight = 0
+weight = 7
 +++
 
 # Accounts
 
-Each panel account has a role. An editor or a viewer can also have a proxy list. The admin panel, the admin API and the [Admin Session](@/configuration.md#admin-session) authentication of the proxies use the same accounts.
+Each panel account has a role. An editor or a viewer can also have a proxy list. The admin panel, the admin API and the [Admin Session](@/reference/proxies.md#admin-session) authentication of the proxies use the same accounts.
 
 ## Roles
 
@@ -35,7 +35,7 @@ Each panel account has a role. An editor or a viewer can also have a proxy list.
 - When an account deletes a proxy, r3v3rs3 removes the proxy from the proxy list of each account.
 - An account with a proxy list gets `403 forbidden` for every request to the deployment platform.
 - The admin API never returns the value of a secret environment variable.
-- An account that can change an app can take over the host through the Compose file of a [Compose app](@/platform.md#compose-source), because r3v3rs3 does not restrict the settings of a Compose file. On an [agent target](@/platform.md#agent-targets) this is the host of the agent.
+- An account that can change an app can take over the host through the Compose file of a [Compose app](@/reference/platform.md#compose-source), because r3v3rs3 does not restrict the settings of a Compose file. On an [agent target](@/reference/platform.md#agent-targets) this is the host of the agent.
 
 ## Rules
 
@@ -154,4 +154,4 @@ $ curl -H "Authorization: Bearer r3v_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" \
 | `/api/auth/tokens`      | `POST`   | Creates a new API token (`name`, `scope`). Returns the raw secret once. |
 | `/api/auth/tokens/{id}` | `DELETE` | Revokes and deletes an API token by ID.                                 |
 
-The [audit log](@/configuration.md#audit-log) records each change of an account and each sign-in.
+The [audit log](@/reference/administration.md#audit-log) records each change of an account and each sign-in.

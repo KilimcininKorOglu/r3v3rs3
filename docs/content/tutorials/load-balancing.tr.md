@@ -205,9 +205,9 @@ Bir portta, aynı istemci sertifikasını ve aynı bağlantı timeout'unu kullan
 
 ## Referans
 
-- [Yük dengeleme ve sağlık kontrolü](@/configuration.tr.md#yuk-dengeleme-ve-saglik-kontrolu): her alan ve varsayılanı.
-- [Circuit breaker](@/configuration.tr.md#circuit-breaker) ve [Sticky session'lar](@/configuration.tr.md#sticky-session-lar).
-- [HTTP/2](@/configuration.tr.md#http-2), [WebSocket](@/configuration.tr.md#websocket) ve [İstek yansıtma](@/configuration.tr.md#istek-yansitma).
+- [Yük dengeleme ve sağlık kontrolü](@/reference/proxies.tr.md#yuk-dengeleme-ve-saglik-kontrolu): her alan ve varsayılanı.
+- [Circuit breaker](@/reference/proxies.tr.md#circuit-breaker) ve [Sticky session'lar](@/reference/proxies.tr.md#sticky-session-lar).
+- [HTTP/2](@/reference/proxies.tr.md#http-2), [WebSocket](@/reference/proxies.tr.md#websocket) ve [İstek yansıtma](@/reference/proxies.tr.md#istek-yansitma).
 
 ## Sonraki adımlar
 

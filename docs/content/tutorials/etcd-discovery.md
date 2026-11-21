@@ -60,7 +60,7 @@ $ curl -s -b cookies.txt http://localhost:46492/api/proxies | jq -c '.[] | {id, 
 {"id":"cfr-kpm","name":"etcdapp","source":{"provider":"etcd","resource":"http/etcdapp"}}
 ```
 
-The key set sets `ports`, `vhosts` and one server URL. The key names are the fields of the proxy model of the admin API; see [Labels](@/discovery.md#labels) for the complete list.
+The key set sets `ports`, `vhosts` and one server URL. The key names are the fields of the proxy model of the admin API; see [Labels](@/reference/discovery.md#labels) for the complete list.
 
 r3v3rs3 reads every proxy under the prefix, so a key set does not need `r3v3rs3.enable`. A key has no address, so `port` and `scheme` are not available; write the server URL. A part of a key cannot contain a `.`. Such a key is an issue.
 
@@ -112,9 +112,9 @@ The WebUI shows the proxy with its source and without the edit actions. To chang
 
 ## Reference
 
-- [Labels](@/discovery.md#labels): every key, every value type and the numbered lists.
-- [etcd](@/discovery.md#etcd): the settings and their defaults.
-- [ACME Certificates](@/discovery.md#acme-certificates): a certificate for a discovered proxy.
+- [Labels](@/reference/discovery.md#labels): every key, every value type and the numbered lists.
+- [etcd](@/reference/discovery.md#etcd): the settings and their defaults.
+- [ACME Certificates](@/reference/discovery.md#acme-certificates): a certificate for a discovered proxy.
 
 ## Next Steps
 

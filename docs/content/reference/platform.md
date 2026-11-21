@@ -1,7 +1,7 @@
 +++
 title = "Deployment Platform"
 description = "Deploy container images and route their domains through r3v3rs3"
-weight = 0
+weight = 6
 +++
 
 # Deployment Platform
@@ -540,7 +540,7 @@ Which request deploys:
 - A Git or a Compose app deploys for a push whose `ref` is `refs/heads/<branch>` or `refs/tags/<branch>`, where `<branch>` is the branch field of the app. A push that deletes the branch does not deploy.
 - When `tag_trigger` is configured (for example `v*` or `release-*`), pushing a tag that matches the pattern automatically deploys that tag.
 - When `watch_paths` lists repository files or directories (for example `["turn/", "Dockerfile"]`, at most 50), a branch push of a Git or Compose app deploys only when one of its commits adds, changes or removes a listed file or a file below a listed directory. Several apps can share one repository this way. A push whose payload does not list all of its changed files (a sender without a commit list, or a push of 20 or more commits) still deploys. Tag pushes and manual deployments ignore `watch_paths`. The field is called **Watch Paths** in the app form.
-- `host_ports` lists ports that the host firewall opens while the app runs, such as `["udp/3478", "udp/49160-49240"]` (at most 32, ports 1-65535). A service on the host network, such as a TURN server, needs them, because r3v3rs3 does not route its ports. They take effect only when the [host firewall](@/configuration.md#host-firewall) is on; an app on an agent target opens them on the agent host, and an older agent that cannot do it is refused with the release to upgrade to. The field is called **Host Ports** in the app form.
+- `host_ports` lists ports that the host firewall opens while the app runs, such as `["udp/3478", "udp/49160-49240"]` (at most 32, ports 1-65535). A service on the host network, such as a TURN server, needs them, because r3v3rs3 does not route its ports. They take effect only when the [host firewall](@/reference/firewall.md) is on; an app on an agent target opens them on the agent host, and an older agent that cannot do it is refused with the release to upgrade to. The field is called **Host Ports** in the app form.
 - When ephemeral preview deployments are enabled (`preview`), Pull Request / Merge Request events automatically manage an isolated preview app (`<app>-pr-<number>`): `opened` or `reopened` provisions and deploys the preview app on a dedicated domain (`preview_deployed`), `synchronize` deploys new commits, and `closed` destroys the preview app and frees all resources (`preview_destroyed`).
 - An image app automatically updates and deploys blue-green when a container registry (Docker Hub, GHCR, Harbor, Quay) or generic webhook delivers a push event for the app's repository. If the pushed tag matches the currently configured tag (such as `:latest`), the new digest is pulled and deployed with zero downtime. If `tag_trigger` is configured (for example `v*` or `release-*`) and the pushed tag matches the pattern, the app's image reference is updated to the new tag and deployed. A push for a mismatched repository or an unrelated tag is safely ignored.
 - A request of another sender always deploys, with any body.
@@ -628,7 +628,7 @@ A connection that an app uses cannot be deleted and answers `409 git_connection_
 
 ## Notifications
 
-The notification webhook of the "Settings" page also gets the events of the platform: `deployment_started`, `deployment_running` and `deployment_failed` for each deployment, `agent_online` and `agent_offline` for each agent target, and `app_alert` when an app exceeds its configured CPU or memory alert threshold. See [Notifications](@/configuration.md#notifications) for the JSON body.
+The notification webhook of the "Settings" page also gets the events of the platform: `deployment_started`, `deployment_running` and `deployment_failed` for each deployment, `agent_online` and `agent_offline` for each agent target, and `app_alert` when an app exceeds its configured CPU or memory alert threshold. See [Notifications](@/reference/certificates.md#notifications) for the JSON body.
 
 ### Resource Alert Rules
 
@@ -751,13 +751,13 @@ Outbound webhooks are dispatched concurrently across endpoints to eliminate head
 
 ## Routing
 
-The platform adds one proxy for each running app that has at least one domain. The proxies come from the `Platform` provider, so they are read-only like the proxies of [service discovery](@/discovery.md), and the proxy list shows the provider status. Each proxy:
+The platform adds one proxy for each running app that has at least one domain. The proxies come from the `Platform` provider, so they are read-only like the proxies of [service discovery](@/reference/discovery.md), and the proxy list shows the provider status. Each proxy:
 
 - listens on the ports that the app selects in its **Ports** fields, or the ports of `proxy_ports` when it selects none, or every HTTP and HTTPS port when that setting is also empty,
 - answers the domains of the app,
 - sends the requests to the published port of the container on `127.0.0.1`,
-- keeps the `Host` header of the client, so the app sees its own domain and not the loopback address ([Host Header](@/configuration.md#host-header)),
-- gets its certificate from the ACME entry of `acme`, with the account, the challenge and the DNS provider of the entry. The rules of [ACME Certificates](@/discovery.md#acme-certificates) apply.
+- keeps the `Host` header of the client, so the app sees its own domain and not the loopback address ([Host Header](@/reference/proxies.md#host-header)),
+- gets its certificate from the ACME entry of `acme`, with the account, the challenge and the DNS provider of the entry. The rules of [ACME Certificates](@/reference/discovery.md#acme-certificates) apply.
 
 An app without a domain gets no proxy. A running deployment whose container is missing or stopped appears as an issue in the provider status. r3v3rs3 reads the containers every 15 seconds, so a container that Docker restarts on a new port gets its route back.
 
@@ -1185,4 +1185,4 @@ The **Backups** page (`/backups`) provides a centralized management console for 
 | `POST /api/webhooks/test`                                      | Admin         | Sends an immediate test ping payload to a target URL.                                                                                                                                                                                     |
 | `GET /oauth/git/callback`                                      | The state     | The callback of the provider and of a new GitHub App. See [Connect](#connect) and [Create a GitHub App](#create-a-github-app).                                                                                                            |
 
-An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/accounts.md). Every platform route answers `503 platform_disabled` when `[platform] enabled` is off, and `503 platform_failed` when the platform failed to open its database or its key. A name that another app, target or connection uses answers `409 app_name_exists`, `409 target_name_exists` or `409 git_connection_name_exists`. A connection that is not connected answers `409 git_connection_not_connected`. `POST /api/git/connections/{id}/installation` before the GitHub App is installed answers `409 github_app_not_installed`, and a failed request to the provider answers `502 git_provider_failed`. The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target, every agent enrollment, every change and authorization of a Git provider connection, and every webhook installation that an account starts. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, an enrollment names the target and the version of the agent, a connection names itself and its provider, never its client secret or a token, an authorization also names the account, and a webhook installation names the app.
+An account with a proxy list gets `403 forbidden` for every platform route. See [Accounts](@/reference/accounts.md). Every platform route answers `503 platform_disabled` when `[platform] enabled` is off, and `503 platform_failed` when the platform failed to open its database or its key. A name that another app, target or connection uses answers `409 app_name_exists`, `409 target_name_exists` or `409 git_connection_name_exists`. A connection that is not connected answers `409 git_connection_not_connected`. `POST /api/git/connections/{id}/installation` before the GitHub App is installed answers `409 github_app_not_installed`, and a failed request to the provider answers `502 git_provider_failed`. The audit log records every change of an app, every deployment, every rollback, every webhook request that deploys, every change of a target, every agent enrollment, every change and authorization of a Git provider connection, and every webhook installation that an account starts. The summary of an environment change names the keys, never a value, a token or secret change names only the app or the target, a webhook request names the app, the provider and the deployment, an enrollment names the target and the version of the agent, a connection names itself and its provider, never its client secret or a token, an authorization also names the account, and a webhook installation names the app.

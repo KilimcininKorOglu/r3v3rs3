@@ -187,9 +187,9 @@ User accounts, password hashes, passkeys, and API tokens are stored in the unifi
 
 ## Reference
 
-- [Accounts](@/accounts.md): every rule, every error code and the API.
-- [Admin Session](@/configuration.md#admin-session): the endpoints and the cookie.
-- [Audit Log](@/configuration.md#audit-log): the fields and the query parameters.
+- [Accounts](@/reference/accounts.md): every rule, every error code and the API.
+- [Admin Session](@/reference/proxies.md#admin-session): the endpoints and the cookie.
+- [Audit Log](@/reference/administration.md#audit-log): the fields and the query parameters.
 
 ## Next Steps
 

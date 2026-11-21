@@ -43,7 +43,7 @@ Everything in the tables below has an r3v3rs3 equivalent. Anything that is not t
 | `proxy_cache_path` and `proxy_cache`        | **Cache** with a memory limit and a default TTL                                                                                                    |
 | `gzip on;`                                  | **Compression** with the algorithms and a minimum size                                                                                             |
 | `return 404;`                               | A route with the fixed response **Fixed status**                                                                                                   |
-| `proxy_set_header X-Real-IP $remote_addr;`  | Set only for a trusted proxy or CDN. Otherwise the request header rule `set X-Real-IP: {client_ip}`. See [Client IP](@/configuration.md#client-ip) |
+| `proxy_set_header X-Real-IP $remote_addr;`  | Set only for a trusted proxy or CDN. Otherwise the request header rule `set X-Real-IP: {client_ip}`. See [Client IP](@/reference/proxies.md#client-ip) |
 | `client_max_body_size 10m;`                 | **Request Body Limit**                                                                                                                             |
 | `proxy_read_timeout 60s;`                   | **Request Timeout (Seconds)** of the proxy or the route                                                                                            |
 | `stream { server { proxy_pass db:5432; } }` | A TCP proxy                                                                                                                                        |
@@ -133,7 +133,7 @@ Look at the cache headers, the `Set-Cookie` attributes, the CORS headers and the
 
 r3v3rs3 sets `X-Real-IP` only when the peer is a trusted proxy or CDN. For an application that reads `X-Real-IP` from direct clients, add the request header rule `set X-Real-IP: {client_ip}`.
 
-If you sit behind a CDN, set the CDN in [Client IP](@/configuration.md#client-ip) before you compare. Otherwise every log line holds the address of the CDN.
+If you sit behind a CDN, set the CDN in [Client IP](@/reference/proxies.md#client-ip) before you compare. Otherwise every log line holds the address of the CDN.
 
 ## Step 6: Cut Over
 
@@ -175,9 +175,9 @@ After a few days of quiet:
 
 ## Reference
 
-- [Routing](@/configuration.md#routing) and [Path Rewrite](@/configuration.md#path-rewrite).
-- [Redirect Rules](@/configuration.md#redirect-rules) and [Fixed Responses](@/configuration.md#fixed-responses).
-- [Client IP](@/configuration.md#client-ip): the headers and the trusted proxies.
+- [Routing](@/reference/proxies.md#routing) and [Path Rewrite](@/reference/proxies.md#path-rewrite).
+- [Redirect Rules](@/reference/proxies.md#redirect-rules) and [Fixed Responses](@/reference/proxies.md#fixed-responses).
+- [Client IP](@/reference/proxies.md#client-ip): the headers and the trusted proxies.
 
 ## Next Steps
 

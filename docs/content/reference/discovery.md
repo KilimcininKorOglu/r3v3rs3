@@ -1,7 +1,7 @@
 +++
 title = "Service Discovery"
 description = "Service Discovery"
-weight = 0
+weight = 5
 +++
 
 # Service Discovery
@@ -29,7 +29,7 @@ The proxy list shows the state of each provider, the number of proxies that it a
 | `running`    | The provider has read its resources and watches them for changes.                 |
 | `error`      | The provider cannot read its resources. The proxies of its last read stay active. |
 
-When the [deployment platform](@/platform.md) runs, the list also holds the provider `platform`, which publishes the proxies of the deployed apps.
+When the [deployment platform](@/reference/platform.md) runs, the list also holds the provider `platform`, which publishes the proxies of the deployed apps.
 
 An issue names the resource and the reason, for example `web-1: http.app: port not found: https`.
 
@@ -56,7 +56,7 @@ r3v3rs3.<protocol>.<name>.<field>=<value>
 | `active`         | `false` adds the proxy as inactive. The default is `true`.                                                                                                                   |
 | `port`           | The port of the upstream server on the address of the resource.                                                                                                              |
 | `scheme`         | `http` or `https` for `port` of an HTTP proxy. The default is `http`.                                                                                                        |
-| `acme`           | The id of an ACME entry that orders a certificate for the `vhosts` of an HTTP proxy. See [ACME Certificates](@/discovery.md#acme-certificates).                              |
+| `acme`           | The id of an ACME entry that orders a certificate for the `vhosts` of an HTTP proxy. See [ACME Certificates](@/reference/discovery.md#acme-certificates).                              |
 
 ## Values
 

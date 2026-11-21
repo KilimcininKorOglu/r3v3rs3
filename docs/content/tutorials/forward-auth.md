@@ -87,7 +87,7 @@ x-forwarded-uri: /
 x-forwarded-for: 203.0.113.7
 ```
 
-`X-Forwarded-For` holds the client IP address that the [Client IP](@/configuration.md#client-ip) settings resolve, so a CDN in front does not hide the real client from your policy.
+`X-Forwarded-For` holds the client IP address that the [Client IP](@/reference/proxies.md#client-ip) settings resolve, so a CDN in front does not hide the real client from your policy.
 
 The auth request trusts the same root certificates as the upstream requests, and sends the client certificate of the proxy. So an auth service over HTTPS with mutual TLS works without a second certificate setting.
 
@@ -167,13 +167,13 @@ A route replaces the authentication of the proxy, so this also works the other w
 | Every request answers 502                                    | The auth service does not answer, or the URL is wrong.                                             |
 | The browser loops between the application and the login page | The `/oauth2` route is missing or it is not set to **None**.                                       |
 | The upstream server receives no user header                  | The header is not in **Copy Response Headers**, or oauth2-proxy runs without `--set-xauthrequest`. |
-| The auth service sees `127.0.0.1` as the client              | The [Client IP](@/configuration.md#client-ip) settings do not name your CDN or trusted proxy.      |
+| The auth service sees `127.0.0.1` as the client              | The [Client IP](@/reference/proxies.md#client-ip) settings do not name your CDN or trusted proxy.      |
 
 ## Reference
 
-- [Forward Auth](@/configuration.md#forward-auth): the headers, the response rules and the timeout.
-- [Client IP](@/configuration.md#client-ip): how `X-Forwarded-For` is resolved.
-- [Routing](@/configuration.md#routing): why the longest path wins.
+- [Forward Auth](@/reference/proxies.md#forward-auth): the headers, the response rules and the timeout.
+- [Client IP](@/reference/proxies.md#client-ip): how `X-Forwarded-For` is resolved.
+- [Routing](@/reference/proxies.md#routing): why the longest path wins.
 
 ## Next Steps
 

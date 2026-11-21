@@ -97,7 +97,7 @@ Basic Auth başka bir servis istemez, ama tarayıcı kutusu gösterir ve çıkı
 <form method="post" action="/.r3v3rs3/auth/logout"><button>Çıkış Yap</button></form>
 ```
 
-Her yöntemi alanlarıyla ve yanıtlarıyla [Kimlik doğrulama](@/configuration.tr.md#kimlik-dogrulama) bölümü anlatır.
+Her yöntemi alanlarıyla ve yanıtlarıyla [Kimlik doğrulama](@/reference/proxies.tr.md#kimlik-dogrulama) bölümü anlatır.
 
 ## Adım 5: Bir yolu herkese açın
 
@@ -117,7 +117,7 @@ CDN veya yük dengeleyici arkasında TCP bağlantısının karşı ucu edge sunu
 - Kendi yük dengeleyiciniz için adresini proxy'nin **Güvenilen Proxy'ler** alanına yazın.
 - Güvenilmeyen bir karşı uç için r3v3rs3 `X-Forwarded-For`, `X-Real-IP` ve diğer istemci IP header'larını siler, çünkü istemci onları uydurabilir.
 
-Çözümlenen adresi uygulamanızın erişim log'unda kontrol edin. r3v3rs3 adresi `X-Forwarded-For` header'ında, karşı uç güvenilen bir proxy veya CDN ise `X-Real-IP` header'ında da gönderir. Header sırasını [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümü anlatır.
+Çözümlenen adresi uygulamanızın erişim log'unda kontrol edin. r3v3rs3 adresi `X-Forwarded-For` header'ında, karşı uç güvenilen bir proxy veya CDN ise `X-Real-IP` header'ında da gönderir. Header sırasını [İstemci IP adresi](@/reference/proxies.tr.md#istemci-ip-adresi) bölümü anlatır.
 
 ## Adım 7: Denetim kaydını okuyun
 
@@ -141,6 +141,6 @@ Her kayıt zamanı, hesabı, istemci IP adresini, işlemi, kaynağın id'sini ve
 
 ## Sonraki adımlar
 
-- [Erişim listeleri](@/configuration.tr.md#erisim-listeleri): liste modeli ve hataları.
-- [IP filtresi](@/configuration.tr.md#ip-filtresi) ve [Rate limit](@/configuration.tr.md#rate-limit): bütün alanlar.
-- [Hesaplar](@/accounts.tr.md): roller, proxy listeleri ve TOTP hesapları.
+- [Erişim listeleri](@/reference/proxies.tr.md#erisim-listeleri): liste modeli ve hataları.
+- [IP filtresi](@/reference/proxies.tr.md#ip-filtresi) ve [Rate limit](@/reference/proxies.tr.md#rate-limit): bütün alanlar.
+- [Hesaplar](@/reference/accounts.tr.md): roller, proxy listeleri ve TOTP hesapları.

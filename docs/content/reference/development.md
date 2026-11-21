@@ -1,7 +1,7 @@
 +++
 title = "Development"
 description = "Development"
-weight = 0
+weight = 13
 +++
 
 The source code of r3v3rs3 is on [GitHub](https://github.com/KilimcininKorOglu/r3v3rs3).

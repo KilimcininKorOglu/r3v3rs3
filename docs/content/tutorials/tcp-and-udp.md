@@ -100,7 +100,7 @@ A TCP proxy with several upstream servers balances the connections. A UDP proxy 
 - The health check removes a server that does not answer, and brings it back when it answers again. **Max Fails** and **Check Interval (Seconds)** set it.
 - **Circuit Breaker** stops new connections to a server that keeps failing. When every server has an open circuit, the client connection closes.
 
-[Load Balancing and Health Checks](@/configuration.md#load-balancing-and-health-checks) describes the fields.
+[Load Balancing and Health Checks](@/reference/proxies.md#load-balancing-and-health-checks) describes the fields.
 
 ## The Client Address
 
@@ -117,6 +117,6 @@ A TCP proxy hides the client address from the upstream server, because the conne
 
 ## Next Steps
 
-- [Ports](@/configuration.md#ports): every port type, the server names and the PROXY protocol.
-- [UDP Sessions](@/configuration.md#udp-sessions): the session model and its limits.
-- [Upstream Client Certificates](@/configuration.md#upstream-client-certificates): mutual TLS towards the upstream server.
+- [Ports](@/reference/ports.md): every port type, the server names and the PROXY protocol.
+- [UDP Sessions](@/reference/proxies.md#udp-sessions): the session model and its limits.
+- [Upstream Client Certificates](@/reference/proxies.md#upstream-client-certificates): mutual TLS towards the upstream server.

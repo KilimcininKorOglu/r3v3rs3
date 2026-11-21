@@ -29,7 +29,7 @@ Use this code to setup your TOTP client:
 EXAMPLECODEEXAMPLECODE
 ```
 
-`add-user` bir admin hesabı oluşturur. [Hesaplar](@/accounts.tr.md) sayfası `editor` ve `viewer` rollerini ve hesap başına proxy listelerini anlatır.
+`add-user` bir admin hesabı oluşturur. [Hesaplar](@/reference/accounts.tr.md) sayfası `editor` ve `viewer` rollerini ve hesap başına proxy listelerini anlatır.
 
 ## Adım 2: Sunucuyu başlatın
 
@@ -45,7 +45,7 @@ Yönetim paneli [http://localhost:46492/](http://localhost:46492/) adresinde din
 > $ ssh -L 46492:127.0.0.1:46492 kullanici@sunucunuz
 > ```
 >
-> Paneli HTTPS ile sunmak için Adım 5'ten sonra bir HTTPS portunda **Hedef** değeri `http://127.0.0.1:46492` olan bir proxy ekleyin. Proxy bu istekleri panele process içinde verir. Bu yüzden audit log başka bir ayar gerekmeden gerçek istemci adresini gösterir. Bundan sonra `R3V3RS3_WEBUI_LISTEN=false` yönetim port'unun kendisini kapatabilir (bkz. [WebUI](@/configuration.tr.md#webui)).
+> Paneli HTTPS ile sunmak için Adım 5'ten sonra bir HTTPS portunda **Hedef** değeri `http://127.0.0.1:46492` olan bir proxy ekleyin. Proxy bu istekleri panele process içinde verir. Bu yüzden audit log başka bir ayar gerekmeden gerçek istemci adresini gösterir. Bundan sonra `R3V3RS3_WEBUI_LISTEN=false` yönetim port'unun kendisini kapatabilir (bkz. [WebUI](@/reference/storage.tr.md#webui)).
 
 ## Adım 3: Port bağlayın
 
@@ -91,10 +91,10 @@ Herkese açık bir site HTTPS ister. r3v3rs3 sertifikaları bir ACME sunucusunda
 5. **Sertifika Al** butonuna tıklayın. Order hemen çalışır, sonra her sertifikadan 60 gün sonra tekrar çalışır.
 6. HTTPS portunu proxy'nize ekleyin ve alan adını **Virtual Host'lar** alanına yazın.
 
-[Sertifikalar](@/configuration.tr.md#sertifikalar) ve [ACME](@/configuration.tr.md#acme) bölümleri her alanı anlatır.
+[Sertifikalar](@/reference/certificates.tr.md) ve [ACME](@/reference/certificates.tr.md#acme) bölümleri her alanı anlatır.
 
 ## Sonraki adımlar
 
-- [Yapılandırma](@/configuration.tr.md): route seçimi, yük dengeleme, cache, kimlik doğrulama, rate limit ve diğer bütün proxy ayarları.
-- [Hesaplar](@/accounts.tr.md): roller, proxy listeleri ve denetim kaydı.
-- [Servis keşfi](@/discovery.tr.md): Docker etiketleri ve etcd'den gelen proxy'ler.
+- [Yapılandırma](@/reference/_index.tr.md): route seçimi, yük dengeleme, cache, kimlik doğrulama, rate limit ve diğer bütün proxy ayarları.
+- [Hesaplar](@/reference/accounts.tr.md): roller, proxy listeleri ve denetim kaydı.
+- [Servis keşfi](@/reference/discovery.tr.md): Docker etiketleri ve etcd'den gelen proxy'ler.

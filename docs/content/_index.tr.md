@@ -53,15 +53,15 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 
 - WebUI'ı içinde taşıyan tek bir binary. WebUI İngilizce ve Türkçedir ve açık, koyu ve sistem temaları vardır. Ayar değişiklikleri yeniden başlatmadan uygulanır.
 - Birleşik SQLite veritabanı mimarisi (`r3v3rs3.db`): tüm yapılandırma ve operasyonel durumu ACID uyumlu SQLite veritabanında saklama ve eski dosyalardan sıfır kayıpla otomatik migrasyon.
-- OpenAPI dokümanı ve Swagger UI sunan yönetim API'si ([Yönetim API'si](@/configuration.tr.md#yonetim-api-si)).
-- İstek, cache ve bağlantı sayaçlarıyla Prometheus metrics endpoint'i: `GET /api/metrics` ([Metrics](@/configuration.tr.md#metrics)).
-- OAuth 2.1 ve PKCE ile `read` ve `edit` scope'lu `/api/mcp` üzerindeki MCP sunucusu; adresi doğrudan bağlanan Claude Code gibi AI host'ları için, ayrıca script'ler ve terminal için `r3` komut satırı istemcisi ([MCP sunucusu](@/configuration.tr.md#mcp-sunucusu)).
+- OpenAPI dokümanı ve Swagger UI sunan yönetim API'si ([Yönetim API'si](@/reference/administration.tr.md#yonetim-api-si)).
+- İstek, cache ve bağlantı sayaçlarıyla Prometheus metrics endpoint'i: `GET /api/metrics` ([Metrics](@/reference/server.tr.md#metrics)).
+- OAuth 2.1 ve PKCE ile `read` ve `edit` scope'lu `/api/mcp` üzerindeki MCP sunucusu; adresi doğrudan bağlanan Claude Code gibi AI host'ları için, ayrıca script'ler ve terminal için `r3` komut satırı istemcisi ([MCP sunucusu](@/reference/mcp-and-cli.tr.md)).
 - Düğüm eşik alarmları ve sistem anomali algılama: düşük disk alanı, bant genişliği sıçraması, dosya tanımlayıcı (fd) tükenmesi ve TCP TIME_WAIT soket tükenmesi için sürekli izleme ve webhook bildirimleri.
-- `admin`, `editor` ve `viewer` rolleri olan hesaplar, hesap başına proxy listesi, TOTP ve saklama süreli denetim kaydı ([Hesaplar](@/accounts.tr.md)).
-- Saatlik dosya döndürmesi, text veya JSON biçimi olan erişim ve sunucu log'ları. Log ve denetim sayfalarının arkasındaki `log.db` veritabanı ([Loglama](@/configuration.tr.md#log)).
-- Portları sunan, master admin API'sini tutan isteğe bağlı worker süreci. Worker çökmesi paneli düşürmez ([Worker süreçleri](@/configuration.tr.md#worker-surecleri)).
-- SIGUSR2 ile kesintisiz yükseltme (`systemctl reload r3-server`), sha256 özetini doğrulayan panel içi yükseltme butonu ve panelin her sayfasında banner'la saat başı daha yeni bir release kontrolü ([Kesintisiz yükseltme](@/configuration.tr.md#kesintisiz-yukseltme), [Panelden yükseltme](@/configuration.tr.md#panelden-yukseltme)).
-- Docker etiketleri ve etcd ile servis keşfi. Keşfedilen proxy'ler salt okunurdur ve proxy olamayan bir tanım, proxy listesinde sorun olarak raporlanır ([Servis keşfi](@/discovery.tr.md)).
+- `admin`, `editor` ve `viewer` rolleri olan hesaplar, hesap başına proxy listesi, TOTP ve saklama süreli denetim kaydı ([Hesaplar](@/reference/accounts.tr.md)).
+- Saatlik dosya döndürmesi, text veya JSON biçimi olan erişim ve sunucu log'ları. Log ve denetim sayfalarının arkasındaki `log.db` veritabanı ([Loglama](@/reference/administration.tr.md#log)).
+- Portları sunan, master admin API'sini tutan isteğe bağlı worker süreci. Worker çökmesi paneli düşürmez ([Worker süreçleri](@/reference/server.tr.md)).
+- SIGUSR2 ile kesintisiz yükseltme (`systemctl reload r3-server`), sha256 özetini doğrulayan panel içi yükseltme butonu ve panelin her sayfasında banner'la saat başı daha yeni bir release kontrolü ([Kesintisiz yükseltme](@/reference/server.tr.md#kesintisiz-yukseltme), [Panelden yükseltme](@/reference/server.tr.md#panelden-yukseltme)).
+- Docker etiketleri ve etcd ile servis keşfi. Keşfedilen proxy'ler salt okunurdur ve proxy olamayan bir tanım, proxy listesinde sorun olarak raporlanır ([Servis keşfi](@/reference/discovery.tr.md)).
 
 ## Deploy platformu
 
@@ -79,7 +79,7 @@ Ayarları tarayıcıdan yaparsınız. Tek bir binary hem proxy'yi hem de İngili
 - Şifreli ortam değişkenleri. Her uygulamanın deployment'ları ve container log'u WebUI'da ve yönetim API'sinde görünür.
 - Git sağlayıcı bağlantıları: r3v3rs3'ün bir manifest'ten oluşturduğu GitHub App (GitHub Enterprise Server'da da) ve GitLab ile Gitea için OAuth uygulamaları. Bağlantı repository'leri ve branch'leri listeler. Private repository'leri clone eder ve push webhook'unu kurar.
 - GitHub, GitLab, Gitea, Forgejo veya genel bir HMAC göndericisinden gelen push webhook'ları deployment başlatır.
-- Agent hedefleri uygulamaları başka sunucularda çalıştırır. Agent, tek seferlik kayıttan sonra master'a mTLS ile bağlanır ([Deploy platformu](@/platform.tr.md)).
+- Agent hedefleri uygulamaları başka sunucularda çalıştırır. Agent, tek seferlik kayıttan sonra master'a mTLS ile bağlanır ([Deploy platformu](@/reference/platform.tr.md)).
 
 # Kurulum
 
@@ -91,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/inst
 
 # Geliştirme
 
-Ayrıntılar için [Geliştirme](@/development.tr.md) bölümüne bakın.
+Ayrıntılar için [Geliştirme](@/reference/development.tr.md) bölümüne bakın.
 
 # İlk kurulum
 

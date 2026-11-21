@@ -552,7 +552,7 @@ write_agent_unit() {
 	cat >"$AGENT_UNIT" <<EOF
 [Unit]
 Description=r3-agent of a deployment platform target
-Documentation=https://r3v3rs3.keremgok.tr/platform/
+Documentation=https://r3v3rs3.keremgok.tr/reference/platform/
 Wants=network-online.target
 After=network-online.target docker.service
 

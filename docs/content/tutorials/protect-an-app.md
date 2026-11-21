@@ -97,7 +97,7 @@ Basic Auth needs no other service, but it shows a browser dialog and has no sign
 <form method="post" action="/.r3v3rs3/auth/logout"><button>Sign Out</button></form>
 ```
 
-[Authentication](@/configuration.md#authentication) describes each method with its fields and its responses.
+[Authentication](@/reference/proxies.md#authentication) describes each method with its fields and its responses.
 
 ## Step 5: Open One Path to Everybody
 
@@ -117,7 +117,7 @@ Behind a CDN or a load balancer, the TCP peer is the edge server. Without the ri
 - For your own load balancer, write its address in **Trusted Proxies** of the proxy.
 - For an untrusted peer, r3v3rs3 removes `X-Forwarded-For`, `X-Real-IP` and the other client IP headers, because a client can forge them.
 
-Check the resolved address in the access log of your application. r3v3rs3 sends it in `X-Forwarded-For`, and in `X-Real-IP` when the peer is a trusted proxy or CDN. [Client IP](@/configuration.md#client-ip) describes the order of the headers.
+Check the resolved address in the access log of your application. r3v3rs3 sends it in `X-Forwarded-For`, and in `X-Real-IP` when the peer is a trusted proxy or CDN. [Client IP](@/reference/proxies.md#client-ip) describes the order of the headers.
 
 ## Step 7: Read the Audit Log
 
@@ -141,6 +141,6 @@ Each entry holds the time, the account, the client IP address, the action, the i
 
 ## Next Steps
 
-- [Access Lists](@/configuration.md#access-lists): the list model and its errors.
-- [IP Filter](@/configuration.md#ip-filter) and [Rate Limit](@/configuration.md#rate-limit): every field.
-- [Accounts](@/accounts.md): the roles, the proxy lists and the TOTP accounts.
+- [Access Lists](@/reference/proxies.md#access-lists): the list model and its errors.
+- [IP Filter](@/reference/proxies.md#ip-filter) and [Rate Limit](@/reference/proxies.md#rate-limit): every field.
+- [Accounts](@/reference/accounts.md): the roles, the proxy lists and the TOTP accounts.

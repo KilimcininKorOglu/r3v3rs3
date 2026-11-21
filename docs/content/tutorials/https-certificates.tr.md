@@ -12,7 +12,7 @@ Wildcard sertifika veren tek challenge DNS-01'dir. DNS-01 doğrulama için açı
 
 ## Başlamadan önce
 
-- DNS zone'unu [DNS-01 tablosundaki](@/configuration.tr.md#dns-01) sağlayıcılardan birinde tuttuğunuz bir alan adı, örneğin Cloudflare veya Route 53.
+- DNS zone'unu [DNS-01 tablosundaki](@/reference/certificates.tr.md#dns-01) sağlayıcılardan birinde tuttuğunuz bir alan adı, örneğin Cloudflare veya Route 53.
 - O sağlayıcının zone'u okuyabilen ve kayıt yazabilen bir API kimlik bilgisi.
 - Admin hesabı olan, çalışan bir r3v3rs3. Kurulumu [Başlangıç](@/tutorials/getting-started.tr.md) anlatır.
 - `example.com` ve her alt alan adının `A` kaydı sunucunun IP adresini gösterir. DNS-01 bunu kontrol etmez, ama istemcilerinizin buna ihtiyacı vardır.
@@ -26,7 +26,7 @@ Zone'daki `_acme-challenge` TXT kayıtlarını yazabilen bir kimlik bilgisi olu�
 | Cloudflare | API Token                        | Zone için `Zone:Read` ve `DNS:Edit`                             |
 | Route 53   | Access Key ID, Secret Access Key | `route53:ListHostedZones` ve `route53:ChangeResourceRecordSets` |
 
-Diğer 13 sağlayıcıyı kimlik bilgileriyle [DNS-01 tablosu](@/configuration.tr.md#dns-01) listeler. İkisi bir DNS barındırma sağlayıcısı istemez: webhook sağlayıcısı kendi servisinizi çağırır, exec sağlayıcısı r3v3rs3 host'unda bir program çalıştırır.
+Diğer 13 sağlayıcıyı kimlik bilgileriyle [DNS-01 tablosu](@/reference/certificates.tr.md#dns-01) listeler. İkisi bir DNS barındırma sağlayıcısı istemez: webhook sağlayıcısı kendi servisinizi çağırır, exec sağlayıcısı r3v3rs3 host'unda bir program çalıştırır.
 
 ## Adım 2: HTTP ve HTTPS portlarını bağlayın
 
@@ -161,10 +161,10 @@ HTTP/3 yalnız gelen bağlantılar için vardır. Upstream bağlantısı HTTP/2 
 
 r3v3rs3 son siparişten `renewal_days` sonra yeni bir sertifika ister, hazır sağlayıcılarda 60 gün. Let's Encrypt sertifikası 90 gün geçerlidir, yani yenilemenin 30 gün payı olur. Sipariş DNS-01 challenge'ını tekrarlar, bu yüzden kimlik bilgisi geçerli kalmalıdır.
 
-**Ayarlar** sayfasında bir bildirim webhook'u vardır. Bitişten önce `certificate_expiring`, başarısız bir siparişten sonra `acme_order_failed` olayını gönderir, böylece bozulan bir kimlik bilgisi fark edilmeden kalmaz. Olayları [Bildirimler](@/configuration.tr.md#bildirimler) bölümü anlatır.
+**Ayarlar** sayfasında bir bildirim webhook'u vardır. Bitişten önce `certificate_expiring`, başarısız bir siparişten sonra `acme_order_failed` olayını gönderir, böylece bozulan bir kimlik bilgisi fark edilmeden kalmaz. Olayları [Bildirimler](@/reference/certificates.tr.md#bildirimler) bölümü anlatır.
 
 ## Sonraki adımlar
 
-- [Sertifikalar ve ACME](@/configuration.tr.md#acme): bütün challenge'lar, bütün sağlayıcılar ve saklanan veriler.
-- [Header kuralları](@/configuration.tr.md#header-kurallari): diğer kurallar ve değişkenleri.
+- [Sertifikalar ve ACME](@/reference/certificates.tr.md#acme): bütün challenge'lar, bütün sağlayıcılar ve saklanan veriler.
+- [Header kuralları](@/reference/proxies.tr.md#header-kurallari): diğer kurallar ve değişkenleri.
 - [Docker'dan proxy'ler](@/tutorials/docker-discovery.tr.md): bir container etiketi bu ACME kaydını gösterebilir, böylece keşfedilen proxy kendi sertifikasını alır.

@@ -53,15 +53,15 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 
 - A single binary with a built-in WebUI in English and Turkish, with light, dark and system themes. Configuration changes apply without a restart
 - Unified SQLite database architecture (`r3v3rs3.db`) persisting all configuration and operational state with ACID transactions and automatic migration from legacy flat files
-- An admin API with an OpenAPI document and a Swagger UI ([Admin API](@/configuration.md#admin-api))
-- A Prometheus metrics endpoint at `GET /api/metrics` with request, cache and connection counters ([Metrics](@/configuration.md#metrics))
-- An MCP server at `/api/mcp` over OAuth 2.1 with PKCE and `read` and `edit` scopes, for AI hosts such as Claude Code that connect to the address directly, plus the `r3` command line client for scripts and terminals ([MCP Server](@/configuration.md#mcp-server))
+- An admin API with an OpenAPI document and a Swagger UI ([Admin API](@/reference/server.md#admin-api))
+- A Prometheus metrics endpoint at `GET /api/metrics` with request, cache and connection counters ([Metrics](@/reference/server.md#metrics))
+- An MCP server at `/api/mcp` over OAuth 2.1 with PKCE and `read` and `edit` scopes, for AI hosts such as Claude Code that connect to the address directly, plus the `r3` command line client for scripts and terminals ([MCP Server](@/reference/mcp-and-cli.md))
 - Host node threshold alerts and anomaly detection: continuous monitoring of free disk space, bandwidth spikes, file descriptor exhaustion, and TCP TIME_WAIT socket exhaustion with webhook notifications
-- Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists, TOTP and an audit log with retention ([Accounts](@/accounts.md))
-- Access and server logs with hourly file rotation, a text or JSON format, and the `log.db` database behind the log and audit pages ([Logging](@/configuration.md#logging))
-- An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down ([Worker Processes](@/configuration.md#worker-processes))
-- A zero-downtime upgrade over SIGUSR2 (`systemctl reload r3-server`), an in-panel upgrade button that verifies the sha256 digest, and an hourly check for a newer release with a banner on every page of the panel ([Zero-Downtime Upgrade](@/configuration.md#zero-downtime-upgrade), [In-Panel Upgrade](@/configuration.md#in-panel-upgrade))
-- Service discovery from Docker labels and etcd. Discovered proxies are read-only, and a definition that fails to become a proxy is reported as an issue in the proxy list ([Service Discovery](@/discovery.md))
+- Accounts with the `admin`, `editor` and `viewer` roles, per-account proxy lists, TOTP and an audit log with retention ([Accounts](@/reference/accounts.md))
+- Access and server logs with hourly file rotation, a text or JSON format, and the `log.db` database behind the log and audit pages ([Logging](@/reference/administration.md#logging))
+- An optional worker process that serves the ports while the master keeps the admin API, so a worker crash does not take the panel down ([Worker Processes](@/reference/server.md))
+- A zero-downtime upgrade over SIGUSR2 (`systemctl reload r3-server`), an in-panel upgrade button that verifies the sha256 digest, and an hourly check for a newer release with a banner on every page of the panel ([Zero-Downtime Upgrade](@/reference/server.md#zero-downtime-upgrade), [In-Panel Upgrade](@/reference/server.md#in-panel-upgrade))
+- Service discovery from Docker labels and etcd. Discovered proxies are read-only, and a definition that fails to become a proxy is reported as an issue in the proxy list ([Service Discovery](@/reference/discovery.md))
 
 ## Deployment platform
 
@@ -79,7 +79,7 @@ You configure it in a browser. One binary carries the proxy and a WebUI in Engli
 - Encrypted environment variables, the deployments and the container log of every app in the WebUI and the admin API
 - Git provider connections: a GitHub App that r3v3rs3 creates from a manifest, also on GitHub Enterprise Server, and OAuth apps for GitLab and Gitea. A connection lists the repositories and branches, clones private repositories and installs the push webhook
 - Push webhooks from GitHub, GitLab, Gitea, Forgejo or a generic HMAC sender start a deployment
-- Agent targets run apps on other servers. The agent connects to the master over mTLS after a one-time enrollment ([Deployment Platform](@/platform.md))
+- Agent targets run apps on other servers. The agent connects to the master over mTLS after a one-time enrollment ([Deployment Platform](@/reference/platform.md))
 
 # Installation
 
@@ -91,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/inst
 
 # Development
 
-See [Development](@/development.md).
+See [Development](@/reference/development.md).
 
 # First Setup
 

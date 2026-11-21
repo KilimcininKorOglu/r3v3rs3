@@ -87,12 +87,8 @@ A reverse proxy server with a built-in WebUI for TCP, UDP, TLS, HTTP, WebSocket 
 
 The documentation is available in [English](https://r3v3rs3.keremgok.tr/) and [Turkish](https://r3v3rs3.keremgok.tr/tr/):
 
-- [Configuration](https://r3v3rs3.keremgok.tr/configuration/): ports, proxies, certificates, ACME, settings, the admin API and logging
-- [Accounts](https://r3v3rs3.keremgok.tr/accounts/): roles and permissions
-- [Service Discovery](https://r3v3rs3.keremgok.tr/discovery/): Docker and etcd
-- [Deployment Platform](https://r3v3rs3.keremgok.tr/platform/): apps, deployments, webhooks, Git providers and agent targets
 - [Tutorials](https://r3v3rs3.keremgok.tr/tutorials/): step by step guides, starting with [Getting Started](https://r3v3rs3.keremgok.tr/tutorials/getting-started/)
-- [Development](https://r3v3rs3.keremgok.tr/development/)
+- [Reference](https://r3v3rs3.keremgok.tr/reference/): every setting, one topic per page: [ports](https://r3v3rs3.keremgok.tr/reference/ports/), [proxies](https://r3v3rs3.keremgok.tr/reference/proxies/), [certificates and ACME](https://r3v3rs3.keremgok.tr/reference/certificates/), [service discovery](https://r3v3rs3.keremgok.tr/reference/discovery/), the [deployment platform](https://r3v3rs3.keremgok.tr/reference/platform/), [accounts](https://r3v3rs3.keremgok.tr/reference/accounts/), [MCP and CLI](https://r3v3rs3.keremgok.tr/reference/mcp-and-cli/) and [development](https://r3v3rs3.keremgok.tr/reference/development/)
 
 ## Screenshot
 
@@ -138,7 +134,7 @@ r3-server start
 
 Open the admin panel at [http://localhost:46492/](http://localhost:46492/). `r3-server start --help` lists the options. Each option also reads an environment variable, for example `R3V3RS3_WEBUI`, `R3V3RS3_CONFIG_DIR` and `R3V3RS3_LOG_DIR`. The default config directory is `~/.config/r3v3rs3`, and the default log directory is `~/.local/share/r3v3rs3/logs`.
 
-The admin API has an OpenAPI document at `/api/openapi.json` and a Swagger UI at `/api/docs/`. Both require a signed-in session. See [Admin API](https://r3v3rs3.keremgok.tr/configuration/#admin-api) in the documentation.
+The admin API has an OpenAPI document at `/api/openapi.json` and a Swagger UI at `/api/docs/`. Both require a signed-in session. See [Admin API](https://r3v3rs3.keremgok.tr/reference/administration/#admin-api) in the documentation.
 
 ## Development
 

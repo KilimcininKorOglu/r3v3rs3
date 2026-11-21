@@ -87,7 +87,7 @@ x-forwarded-uri: /
 x-forwarded-for: 203.0.113.7
 ```
 
-`X-Forwarded-For`, [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) ayarlarının çözdüğü istemci IP adresini taşır. Yani öndeki bir CDN, gerçek istemciyi erişim kurallarınızdan gizlemez.
+`X-Forwarded-For`, [İstemci IP adresi](@/reference/proxies.tr.md#istemci-ip-adresi) ayarlarının çözdüğü istemci IP adresini taşır. Yani öndeki bir CDN, gerçek istemciyi erişim kurallarınızdan gizlemez.
 
 Doğrulama isteği, upstream isteklerle aynı kök sertifikalara güvenir ve proxy'nin istemci sertifikasını gönderir. Mutual TLS ile HTTPS üzerinden çalışan bir doğrulama servisi için ikinci bir sertifika ayarı gerekmez.
 
@@ -167,13 +167,13 @@ Route, proxy'nin kimlik doğrulamasının yerine geçer. Bu kural tersine de ça
 | Her istek 502 dönüyor                                      | Doğrulama servisi yanıt vermiyor veya URL yanlış.                                                                         |
 | Tarayıcı uygulama ile giriş sayfası arasında dönüp duruyor | `/oauth2` route'u yok veya kimlik doğrulaması **Yok** değil.                                                              |
 | Upstream sunucu kullanıcı header'ını almıyor               | Header, **Kopyalanacak Yanıt Header'ları** listesinde yok veya oauth2-proxy `--set-xauthrequest` olmadan çalışıyor.       |
-| Doğrulama servisi istemci olarak `127.0.0.1` görüyor       | [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) ayarlarında CDN'iniz veya güvenilen proxy'niz tanımlı değil. |
+| Doğrulama servisi istemci olarak `127.0.0.1` görüyor       | [İstemci IP adresi](@/reference/proxies.tr.md#istemci-ip-adresi) ayarlarında CDN'iniz veya güvenilen proxy'niz tanımlı değil. |
 
 ## Referans
 
-- [Forward Auth](@/configuration.tr.md#forward-auth): header'lar, yanıt kuralları ve timeout.
-- [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi): `X-Forwarded-For` nasıl çözülür.
-- [Route seçimi](@/configuration.tr.md#route-secimi): en uzun yol neden kazanır.
+- [Forward Auth](@/reference/proxies.tr.md#forward-auth): header'lar, yanıt kuralları ve timeout.
+- [İstemci IP adresi](@/reference/proxies.tr.md#istemci-ip-adresi): `X-Forwarded-For` nasıl çözülür.
+- [Route seçimi](@/reference/proxies.tr.md#route-secimi): en uzun yol neden kazanır.
 
 ## Sonraki adımlar
 

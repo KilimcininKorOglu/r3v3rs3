@@ -1,7 +1,7 @@
 +++
 title = "Servis keşfi"
 description = "Servis keşfi"
-weight = 0
+weight = 5
 +++
 
 # Servis keşfi
@@ -29,7 +29,7 @@ Proxy listesi her sağlayıcının durumunu, eklediği proxy sayısını ve prox
 | `running`    | Sağlayıcı kaynaklarını okudu ve değişiklikleri izliyor.                    |
 | `error`      | Sağlayıcı kaynaklarını okuyamıyor. Son okumasındaki proxy'ler aktif kalır. |
 
-[Deploy platformu](@/platform.tr.md) çalışırken liste, deploy edilen uygulamaların proxy'lerini yayınlayan `platform` sağlayıcısını da içerir.
+[Deploy platformu](@/reference/platform.tr.md) çalışırken liste, deploy edilen uygulamaların proxy'lerini yayınlayan `platform` sağlayıcısını da içerir.
 
 Her sorun, kaynağı ve sebebi gösterir, örneğin `web-1: http.app: port not found: https`.
 
@@ -56,7 +56,7 @@ r3v3rs3.<protocol>.<name>.<field>=<value>
 | `active`         | `false` proxy'yi pasif olarak ekler. Varsayılan değer `true` olur.                                                                                |
 | `port`           | Kaynağın adresindeki upstream sunucunun portu.                                                                                                    |
 | `scheme`         | HTTP proxy'nin `port` alanı için `http` veya `https`. Varsayılan değer `http` olur.                                                               |
-| `acme`           | HTTP proxy'nin `vhosts` alanı için sertifika alan ACME kaydının id'si. [ACME sertifikaları](@/discovery.tr.md#acme-sertifikalari) bölümüne bakın. |
+| `acme`           | HTTP proxy'nin `vhosts` alanı için sertifika alan ACME kaydının id'si. [ACME sertifikaları](@/reference/discovery.tr.md#acme-sertifikalari) bölümüne bakın. |
 
 ## Değerler
 

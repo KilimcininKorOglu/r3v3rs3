@@ -161,6 +161,6 @@ R3V3RS3_TOKEN=... r3 https://panel.example.com app deploy <id>
 
 ## Next
 
-- The [configuration reference](@/configuration.md#mcp-server) lists every MCP tool and explains the OAuth flow in detail.
+- The [configuration reference](@/reference/mcp-and-cli.md) lists every MCP tool and explains the OAuth flow in detail.
 - [Driving r3v3rs3 from a Script](@/tutorials/admin-api.md) calls the same API with `curl`.
 - [Accounts for a Team](@/tutorials/team-accounts.md) creates an account with fewer rights for a client.

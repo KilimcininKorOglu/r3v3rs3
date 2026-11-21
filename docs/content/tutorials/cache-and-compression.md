@@ -107,6 +107,6 @@ r3v3rs3 trusts the IP ranges of eight known CDNs by default: Cloudflare, Fastly,
 
 ## Next Steps
 
-- [Cache](@/configuration.md#cache) and [Compression](@/configuration.md#compression): every field and every condition.
-- [Client IP](@/configuration.md#client-ip): the header order behind a CDN.
-- [Load Balancing and Health Checks](@/configuration.md#load-balancing-and-health-checks): more upstream servers behind one cache.
+- [Cache](@/reference/proxies.md#cache) and [Compression](@/reference/proxies.md#compression): every field and every condition.
+- [Client IP](@/reference/proxies.md#client-ip): the header order behind a CDN.
+- [Load Balancing and Health Checks](@/reference/proxies.md#load-balancing-and-health-checks): more upstream servers behind one cache.

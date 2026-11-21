@@ -187,9 +187,9 @@ Kullanıcı hesapları, parola hash'leri, geçiş anahtarları (passkey) ve API 
 
 ## Referans
 
-- [Hesaplar](@/accounts.tr.md): bütün kurallar, hata kodları ve API.
-- [Panel Oturumu](@/configuration.tr.md#panel-oturumu): endpoint'ler ve cookie.
-- [Denetim kaydı](@/configuration.tr.md#denetim-kaydi): alanlar ve sorgu parametreleri.
+- [Hesaplar](@/reference/accounts.tr.md): bütün kurallar, hata kodları ve API.
+- [Panel Oturumu](@/reference/proxies.tr.md#panel-oturumu): endpoint'ler ve cookie.
+- [Denetim kaydı](@/reference/administration.tr.md#denetim-kaydi): alanlar ve sorgu parametreleri.
 
 ## Sonraki adımlar
 

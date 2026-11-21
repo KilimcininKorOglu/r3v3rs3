@@ -186,7 +186,7 @@ $ curl -s -b viewer.txt -X DELETE http://localhost:46492/api/proxies/jzr-pgf/cac
 {"message":"the role of the account does not allow this action","error":{"message":"forbidden"}}
 ```
 
-Bu istek 403 döner. Cache temizleme en az `editor` rolü ister. `editor` rolü denetim kaydını ve hesapları okuyamaz, ikisi de 403 döner. Hesap başına proxy listesi ve TOTP için [Hesaplar](@/accounts.tr.md) sayfasına bakın.
+Bu istek 403 döner. Cache temizleme en az `editor` rolü ister. `editor` rolü denetim kaydını ve hesapları okuyamaz, ikisi de 403 döner. Hesap başına proxy listesi ve TOTP için [Hesaplar](@/reference/accounts.tr.md) sayfasına bakın.
 
 ## Adım 7: Denetim kaydını okuyun
 
@@ -200,7 +200,7 @@ $ curl -s -b cookies.txt 'http://localhost:46492/api/audit?limit=5' | jq -c '.[]
 {"time":1789647489459,"username":"admin","client":"127.0.0.1","action":"login"}
 ```
 
-`time` alanı Unix epoch'tan bu yana milisaniyedir. Özet hiçbir zaman parola, token veya key taşımaz. Sorgu parametreleri için [Denetim kaydı](@/configuration.tr.md#denetim-kaydi) bölümüne bakın.
+`time` alanı Unix epoch'tan bu yana milisaniyedir. Özet hiçbir zaman parola, token veya key taşımaz. Sorgu parametreleri için [Denetim kaydı](@/reference/administration.tr.md#denetim-kaydi) bölümüne bakın.
 
 ## Adım 8: Değişiklikleri izleyin
 
@@ -221,9 +221,9 @@ Durum endpoint'lerini döngüde sormak yerine bir izleme paneli veya alarm için
 
 ## Referans
 
-- [Yönetim API'si](@/configuration.tr.md#yonetim-api-si): doküman adresi ve giriş.
-- [Denetim kaydı](@/configuration.tr.md#denetim-kaydi): alanlar ve saklama süresi.
-- [Hesaplar](@/accounts.tr.md): roller, proxy listeleri ve TOTP.
+- [Yönetim API'si](@/reference/administration.tr.md#yonetim-api-si): doküman adresi ve giriş.
+- [Denetim kaydı](@/reference/administration.tr.md#denetim-kaydi): alanlar ve saklama süresi.
+- [Hesaplar](@/reference/accounts.tr.md): roller, proxy listeleri ve TOTP.
 
 ## Sonraki adımlar
 

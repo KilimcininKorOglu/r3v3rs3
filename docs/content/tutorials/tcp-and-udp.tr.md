@@ -100,7 +100,7 @@ Birkaç upstream sunucusu olan bir TCP proxy bağlantıları dağıtır. UDP pro
 - Sağlık kontrolü yanıt vermeyen sunucuyu çıkarır, tekrar yanıt verince geri alır. **Maksimum Hata Sayısı** ve **Kontrol Aralığı (Saniye)** alanları onu ayarlar.
 - **Circuit Breaker** sürekli hata veren bir sunucuya yeni bağlantı göndermeyi durdurur. Bütün sunucuların circuit'i açıksa istemcinin bağlantısı kapanır.
 
-Alanları [Yük dengeleme ve sağlık kontrolü](@/configuration.tr.md#yuk-dengeleme-ve-saglik-kontrolu) bölümü anlatır.
+Alanları [Yük dengeleme ve sağlık kontrolü](@/reference/proxies.tr.md#yuk-dengeleme-ve-saglik-kontrolu) bölümü anlatır.
 
 ## İstemci adresi
 
@@ -117,6 +117,6 @@ TCP proxy istemci adresini upstream sunucudan gizler, çünkü bağlantı r3v3rs
 
 ## Sonraki adımlar
 
-- [Portlar](@/configuration.tr.md#portlar): bütün port türleri, sunucu adları ve PROXY protocol.
-- [UDP oturumları](@/configuration.tr.md#udp-oturumlari): oturum modeli ve sınırları.
-- [Upstream istemci sertifikaları](@/configuration.tr.md#upstream-istemci-sertifikalari): upstream sunucuya doğru mutual TLS.
+- [Portlar](@/reference/ports.tr.md): bütün port türleri, sunucu adları ve PROXY protocol.
+- [UDP oturumları](@/reference/proxies.tr.md#udp-oturumlari): oturum modeli ve sınırları.
+- [Upstream istemci sertifikaları](@/reference/proxies.tr.md#upstream-istemci-sertifikalari): upstream sunucuya doğru mutual TLS.

@@ -133,7 +133,7 @@ $ sudo /usr/local/bin/r3-server unblock 203.0.113.9 --config-dir /etc/r3v3rs3
 - The audit log records the release with the account name `local-control`.
 - Without `--config-dir`, the command reads `R3V3RS3_CONFIG_DIR` or the default directory of the current user, which is not `/etc/r3v3rs3`.
 - The admin API opens the socket, so a server that runs with `--no-webui` has no socket.
-- Add the address to the allowed addresses of the quarantine (see [Threat Detection & Auto-Quarantine](@/configuration.md#threat-detection-auto-quarantine)) so it is not blocked again.
+- Add the address to the allowed addresses of the quarantine (see [Threat Detection & Auto-Quarantine](@/reference/server.md#threat-detection-auto-quarantine)) so it is not blocked again.
 
 ## Upgrade
 
@@ -162,7 +162,7 @@ This leaves `/etc/r3v3rs3` and `/var/log/r3v3rs3`. Delete them only when you kee
 
 ## Install an Agent
 
-An [agent target](@/platform.md#agent-targets) of the deployment platform runs apps on another server. On that server Docker Engine must run. On the master, enable the platform and set `agent_port` (and `agent_host` when the agents dial another name) in the `[platform]` section of `config.toml`, then restart it. Add the target on the **Targets** page of the master, then run the command that the page shows:
+An [agent target](@/reference/platform.md#agent-targets) of the deployment platform runs apps on another server. On that server Docker Engine must run. On the master, enable the platform and set `agent_port` (and `agent_host` when the agents dial another name) in the `[platform]` section of `config.toml`, then restart it. Add the target on the **Targets** page of the master, then run the command that the page shows:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
@@ -202,4 +202,4 @@ $ sudo systemctl daemon-reload
 ## Next Steps
 
 - [Getting Started](@/tutorials/getting-started.md): the first port and the first proxy.
-- [Configuration Files](@/configuration.md#configuration-files): what each file in the config directory holds.
+- [Configuration Files](@/reference/storage.md#configuration-files): what each file in the config directory holds.

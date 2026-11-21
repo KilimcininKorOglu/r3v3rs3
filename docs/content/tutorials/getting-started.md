@@ -29,7 +29,7 @@ Use this code to setup your TOTP client:
 EXAMPLECODEEXAMPLECODE
 ```
 
-`add-user` creates an admin account. [Accounts](@/accounts.md) describes the `editor` and `viewer` roles and the per-account proxy lists.
+`add-user` creates an admin account. [Accounts](@/reference/accounts.md) describes the `editor` and `viewer` roles and the per-account proxy lists.
 
 ## Step 2: Start the Server
 
@@ -45,7 +45,7 @@ The admin WebUI listens on [http://localhost:46492/](http://localhost:46492/). S
 > $ ssh -L 46492:127.0.0.1:46492 user@your-server
 > ```
 >
-> To serve the WebUI over HTTPS, add a proxy with the **Target** `http://127.0.0.1:46492` on an HTTPS port after Step 5. The proxy hands these requests to the panel in process, so the audit log shows the real client address without further settings, and `R3V3RS3_WEBUI_LISTEN=false` can then close the admin port itself (see [WebUI](@/configuration.md#webui)).
+> To serve the WebUI over HTTPS, add a proxy with the **Target** `http://127.0.0.1:46492` on an HTTPS port after Step 5. The proxy hands these requests to the panel in process, so the audit log shows the real client address without further settings, and `R3V3RS3_WEBUI_LISTEN=false` can then close the admin port itself (see [WebUI](@/reference/storage.md#webui)).
 
 ## Step 3: Bind a Port
 
@@ -91,10 +91,10 @@ A public site needs HTTPS. r3v3rs3 orders certificates from an ACME server, for 
 5. Click **Request**. The order runs at once, then again 60 days after each issued certificate.
 6. Add the HTTPS port to your proxy and write the domain name in **Virtual Hosts**.
 
-[Certificates](@/configuration.md#certificates) and [ACME](@/configuration.md#acme) describe every field.
+[Certificates](@/reference/certificates.md) and [ACME](@/reference/certificates.md#acme) describe every field.
 
 ## Next Steps
 
-- [Configuration](@/configuration.md): routing, load balancing, caching, authentication, rate limits and every other proxy setting.
-- [Accounts](@/accounts.md): roles, proxy lists and the audit log.
-- [Service Discovery](@/discovery.md): proxies from Docker labels and etcd.
+- [Configuration](@/reference/_index.md): routing, load balancing, caching, authentication, rate limits and every other proxy setting.
+- [Accounts](@/reference/accounts.md): roles, proxy lists and the audit log.
+- [Service Discovery](@/reference/discovery.md): proxies from Docker labels and etcd.

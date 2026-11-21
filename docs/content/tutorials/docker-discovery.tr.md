@@ -137,7 +137,7 @@ Her yeni container'ın kendi etiketleri olur. Protokolden sonraki proxy adı iki
       r3v3rs3.http.api.rate_limit.per: minute
 ```
 
-Yönetim API'sinin proxy modelindeki her alan etiket olarak çalışır. [Etiketler](@/discovery.tr.md#etiketler) bölümü key'leri, değer biçimlerini, TCP ve UDP proxy'lerini listeler. r3v3rs3 düz metin parolayı ve token'ı kullanmadan önce hash'e çevirir, bu yüzden etikette `password_hash` ve `token_hash` tercih edin.
+Yönetim API'sinin proxy modelindeki her alan etiket olarak çalışır. [Etiketler](@/reference/discovery.tr.md#etiketler) bölümü key'leri, değer biçimlerini, TCP ve UDP proxy'lerini listeler. r3v3rs3 düz metin parolayı ve token'ı kullanmadan önce hash'e çevirir, bu yüzden etikette `password_hash` ve `token_hash` tercih edin.
 
 ## Sertifikalar
 
@@ -147,10 +147,10 @@ Etiketten gelen bir HTTP proxy sertifikasını kendiliğinden alabilir. Önce bi
       r3v3rs3.http.api.acme: e7k-2np
 ```
 
-r3v3rs3 proxy'nin `vhosts` değeri için sertifika ister. Kuralları [ACME sertifikaları](@/discovery.tr.md#acme-sertifikalari) bölümü anlatır.
+r3v3rs3 proxy'nin `vhosts` değeri için sertifika ister. Kuralları [ACME sertifikaları](@/reference/discovery.tr.md#acme-sertifikalari) bölümü anlatır.
 
 ## Sonraki adımlar
 
-- [Servis keşfi](@/discovery.tr.md): bütün sağlayıcılar ve bütün etiket key'leri.
-- [Yapılandırma](@/configuration.tr.md): her proxy alanının ne yaptığı.
+- [Servis keşfi](@/reference/discovery.tr.md): bütün sağlayıcılar ve bütün etiket key'leri.
+- [Yapılandırma](@/reference/_index.tr.md): her proxy alanının ne yaptığı.
 - [etcd'den proxy'ler](@/tutorials/etcd-discovery.tr.md): bir etcd cluster'ının key'lerinden kurulan proxy'ler.

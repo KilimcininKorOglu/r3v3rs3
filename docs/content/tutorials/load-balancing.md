@@ -205,9 +205,9 @@ The proxies of a port that use the same client certificate and the same connect 
 
 ## Reference
 
-- [Load Balancing and Health Checks](@/configuration.md#load-balancing-and-health-checks): every field and its default.
-- [Circuit Breaker](@/configuration.md#circuit-breaker) and [Sticky Sessions](@/configuration.md#sticky-sessions).
-- [HTTP/2](@/configuration.md#http-2), [WebSocket](@/configuration.md#websocket) and [Traffic Mirroring](@/configuration.md#traffic-mirroring).
+- [Load Balancing and Health Checks](@/reference/proxies.md#load-balancing-and-health-checks): every field and its default.
+- [Circuit Breaker](@/reference/proxies.md#circuit-breaker) and [Sticky Sessions](@/reference/proxies.md#sticky-sessions).
+- [HTTP/2](@/reference/proxies.md#http-2), [WebSocket](@/reference/proxies.md#websocket) and [Traffic Mirroring](@/reference/proxies.md#traffic-mirroring).
 
 ## Next Steps
 

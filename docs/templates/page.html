@@ -6,3 +6,26 @@
     {{ macros::render_header(config=config, lang=lang, translations=page.translations) }}
 </header>
 {% endblock header %}
+
+{#- The page content, then links to the pages before and after it in the order of the section
+    weights, so a reader can go through a section page by page. -#}
+{% block content %}
+<div class="heading-text">{{ page.description }}</div>
+{{ page.content | safe }}
+{% if page.lower or page.higher %}
+<nav class="page-nav">
+    {% if page.lower %}
+    <a class="page-nav-prev" href="{{ page.lower.permalink | safe }}">
+        <span class="page-nav-label">← {{ trans(key="previous", lang=lang) }}</span>
+        <span class="page-nav-title">{{ page.lower.title }}</span>
+    </a>
+    {% endif %}
+    {% if page.higher %}
+    <a class="page-nav-next" href="{{ page.higher.permalink | safe }}">
+        <span class="page-nav-label">{{ trans(key="next", lang=lang) }} →</span>
+        <span class="page-nav-title">{{ page.higher.title }}</span>
+    </a>
+    {% endif %}
+</nav>
+{% endif %}
+{% endblock content %}

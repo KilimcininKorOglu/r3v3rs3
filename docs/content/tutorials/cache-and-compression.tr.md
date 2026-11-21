@@ -107,6 +107,6 @@ r3v3rs3 sekiz bilinen CDN'in IP aralıklarına varsayılan olarak güvenir: Clou
 
 ## Sonraki adımlar
 
-- [Cache](@/configuration.tr.md#cache) ve [Sıkıştırma](@/configuration.tr.md#sikistirma): bütün alanlar ve bütün koşullar.
-- [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi): CDN arkasındaki header sırası.
-- [Yük dengeleme ve sağlık kontrolü](@/configuration.tr.md#yuk-dengeleme-ve-saglik-kontrolu): tek bir cache arkasında daha çok upstream sunucu.
+- [Cache](@/reference/proxies.tr.md#cache) ve [Sıkıştırma](@/reference/proxies.tr.md#sikistirma): bütün alanlar ve bütün koşullar.
+- [İstemci IP adresi](@/reference/proxies.tr.md#istemci-ip-adresi): CDN arkasındaki header sırası.
+- [Yük dengeleme ve sağlık kontrolü](@/reference/proxies.tr.md#yuk-dengeleme-ve-saglik-kontrolu): tek bir cache arkasında daha çok upstream sunucu.

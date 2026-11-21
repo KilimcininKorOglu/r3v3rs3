@@ -133,7 +133,7 @@ $ sudo /usr/local/bin/r3-server unblock 203.0.113.9 --config-dir /etc/r3v3rs3
 - Denetim kaydı serbest bırakmayı `local-control` hesap adıyla kaydeder.
 - `--config-dir` verilmezse komut `R3V3RS3_CONFIG_DIR` değişkenini veya mevcut kullanıcının varsayılan dizinini okur. Bu dizin `/etc/r3v3rs3` değildir.
 - Socket'i admin API açar. Bu yüzden `--no-webui` ile çalışan bir sunucunun socket'i yoktur.
-- Adresin tekrar engellenmemesi için onu karantinanın izinli adreslerine ekleyin (bkz. [Tehdit Algılama ve Otomatik Karantina](@/configuration.tr.md#tehdit-algilama-ve-otomatik-karantina)).
+- Adresin tekrar engellenmemesi için onu karantinanın izinli adreslerine ekleyin (bkz. [Tehdit Algılama ve Otomatik Karantina](@/reference/server.tr.md#tehdit-algilama-ve-otomatik-karantina)).
 
 ## Yükseltme
 
@@ -162,7 +162,7 @@ Bu adımlar `/etc/r3v3rs3` ve `/var/log/r3v3rs3` dizinlerini bırakır. Onları 
 
 ## Agent kurma
 
-Deploy platformunun bir [agent hedefi](@/platform.tr.md#agent-hedefleri), uygulamaları başka bir sunucuda çalıştırır. O sunucuda Docker Engine çalışmalıdır. Master'da platformu açın ve `config.toml` dosyasının `[platform]` bölümüne `agent_port` değerini (agent'lar başka bir ada bağlanıyorsa `agent_host` değerini de) yazın, sonra master'ı yeniden başlatın. Hedefi master'daki **Hedefler** sayfasında ekleyin, sonra sayfanın gösterdiği komutu çalıştırın:
+Deploy platformunun bir [agent hedefi](@/reference/platform.tr.md#agent-hedefleri), uygulamaları başka bir sunucuda çalıştırır. O sunucuda Docker Engine çalışmalıdır. Master'da platformu açın ve `config.toml` dosyasının `[platform]` bölümüne `agent_port` değerini (agent'lar başka bir ada bağlanıyorsa `agent_host` değerini de) yazın, sonra master'ı yeniden başlatın. Hedefi master'daki **Hedefler** sayfasında ekleyin, sonra sayfanın gösterdiği komutu çalıştırın:
 
 ```bash
 $ curl -fsSL https://raw.githubusercontent.com/KilimcininKorOglu/r3v3rs3/main/install.sh \
@@ -202,4 +202,4 @@ $ sudo systemctl daemon-reload
 ## Sonraki adımlar
 
 - [Başlangıç](@/tutorials/getting-started.tr.md): ilk port ve ilk proxy.
-- [Yapılandırma dosyaları](@/configuration.tr.md#yapilandirma-dosyalari): yapılandırma dizinindeki her dosyanın içeriği.
+- [Yapılandırma dosyaları](@/reference/storage.tr.md#yapilandirma-dosyalari): yapılandırma dizinindeki her dosyanın içeriği.

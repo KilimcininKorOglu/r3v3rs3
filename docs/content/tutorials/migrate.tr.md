@@ -43,7 +43,7 @@ Aşağıdaki tablolardaki her maddenin r3v3rs3 karşılığı vardır. Tabloda o
 | `proxy_cache_path` ve `proxy_cache`         | Bellek limiti ve varsayılan TTL ile **Cache**                                                                                                                                                   |
 | `gzip on;`                                  | Algoritmalar ve minimum boyut ile **Sıkıştırma**                                                                                                                                                |
 | `return 404;`                               | **Sabit durum kodu** route türü                                                                                                                                                                 |
-| `proxy_set_header X-Real-IP $remote_addr;`  | Yalnız güvenilen bir proxy veya CDN için yazılır. Diğer durumda `set X-Real-IP: {client_ip}` istek header'ı kuralı. [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) bölümüne bakın |
+| `proxy_set_header X-Real-IP $remote_addr;`  | Yalnız güvenilen bir proxy veya CDN için yazılır. Diğer durumda `set X-Real-IP: {client_ip}` istek header'ı kuralı. [İstemci IP adresi](@/reference/proxies.tr.md#istemci-ip-adresi) bölümüne bakın |
 | `client_max_body_size 10m;`                 | **İstek Gövdesi Limiti**                                                                                                                                                                        |
 | `proxy_read_timeout 60s;`                   | Proxy'nin veya route'un **İstek Timeout'u (Saniye)** alanı                                                                                                                                      |
 | `stream { server { proxy_pass db:5432; } }` | TCP proxy                                                                                                                                                                                       |
@@ -133,7 +133,7 @@ Cache header'larına, `Set-Cookie` özniteliklerine, CORS header'larına ve yön
 
 r3v3rs3 `X-Real-IP` header'ını yalnız karşı uç güvenilen bir proxy veya CDN olduğunda yazar. Doğrudan gelen istemcilerde `X-Real-IP` okuyan bir uygulama için `set X-Real-IP: {client_ip}` istek header'ı kuralını ekleyin.
 
-CDN arkasındaysanız karşılaştırmadan önce CDN'i [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi) ayarlarında tanımlayın. Aksi halde her log satırı CDN'in adresini taşır.
+CDN arkasındaysanız karşılaştırmadan önce CDN'i [İstemci IP adresi](@/reference/proxies.tr.md#istemci-ip-adresi) ayarlarında tanımlayın. Aksi halde her log satırı CDN'in adresini taşır.
 
 ## Adım 6: Geçişi yapın
 
@@ -175,9 +175,9 @@ Birkaç gün sorunsuz geçtikten sonra:
 
 ## Referans
 
-- [Route seçimi](@/configuration.tr.md#route-secimi) ve [Yol yeniden yazma](@/configuration.tr.md#yol-yeniden-yazma).
-- [Yönlendirme kuralları](@/configuration.tr.md#yonlendirme-kurallari) ve [Sabit yanıtlar](@/configuration.tr.md#sabit-yanitlar).
-- [İstemci IP adresi](@/configuration.tr.md#istemci-ip-adresi): header'lar ve güvenilen proxy'ler.
+- [Route seçimi](@/reference/proxies.tr.md#route-secimi) ve [Yol yeniden yazma](@/reference/proxies.tr.md#yol-yeniden-yazma).
+- [Yönlendirme kuralları](@/reference/proxies.tr.md#yonlendirme-kurallari) ve [Sabit yanıtlar](@/reference/proxies.tr.md#sabit-yanitlar).
+- [İstemci IP adresi](@/reference/proxies.tr.md#istemci-ip-adresi): header'lar ve güvenilen proxy'ler.
 
 ## Sonraki adımlar
 

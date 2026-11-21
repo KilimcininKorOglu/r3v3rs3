@@ -1,7 +1,7 @@
 +++
 title = "Geliştirme"
 description = "Geliştirme"
-weight = 0
+weight = 13
 +++
 
 Projenin kaynak kodu [GitHub](https://github.com/KilimcininKorOglu/r3v3rs3) üzerindedir.

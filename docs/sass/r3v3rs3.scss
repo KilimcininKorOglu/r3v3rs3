@@ -137,3 +137,42 @@ nav {
         }
     }
 }
+
+// The links to the previous and the next page of a section, under the page content.
+.page-nav {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #e0e0e0;
+
+    a {
+        display: flex;
+        flex-direction: column;
+        max-width: 48%;
+        padding: 0.8rem 1rem;
+        border: 1px solid #e0e0e0;
+        border-radius: 0.4rem;
+        text-decoration: none;
+
+        &:hover {
+            border-color: var(--primary-link-color);
+        }
+    }
+
+    .page-nav-next {
+        margin-left: auto;
+        text-align: right;
+    }
+
+    .page-nav-label {
+        font-size: 0.85rem;
+        color: #707070;
+    }
+
+    .page-nav-title {
+        font-weight: bold;
+        color: var(--primary-link-color);
+    }
+}

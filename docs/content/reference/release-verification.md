@@ -1,7 +1,7 @@
----
-title: "Release Verification"
-weight: 160
----
++++
+title = "Release Verification"
+weight = 12
++++
 
 Every release ships a `SHA256SUMS` file and its minisign signature,
 `SHA256SUMS.minisig`. The public key lives in the repository at

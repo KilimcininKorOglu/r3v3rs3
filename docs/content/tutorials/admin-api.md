@@ -186,7 +186,7 @@ $ curl -s -b viewer.txt -X DELETE http://localhost:46492/api/proxies/jzr-pgf/cac
 {"message":"the role of the account does not allow this action","error":{"message":"forbidden"}}
 ```
 
-That request answers 403. A cache purge needs at least `editor`. An `editor` cannot read the audit log or the accounts; both answer 403. See [Accounts](@/accounts.md) for the per-account proxy list and TOTP.
+That request answers 403. A cache purge needs at least `editor`. An `editor` cannot read the audit log or the accounts; both answer 403. See [Accounts](@/reference/accounts.md) for the per-account proxy list and TOTP.
 
 ## Step 7: Read the Audit Log
 
@@ -200,7 +200,7 @@ $ curl -s -b cookies.txt 'http://localhost:46492/api/audit?limit=5' | jq -c '.[]
 {"time":1789647489459,"username":"admin","client":"127.0.0.1","action":"login"}
 ```
 
-`time` is in milliseconds since the Unix epoch. The summary never holds a password, a token or a key. See [Audit Log](@/configuration.md#audit-log) for the query parameters.
+`time` is in milliseconds since the Unix epoch. The summary never holds a password, a token or a key. See [Audit Log](@/reference/administration.md#audit-log) for the query parameters.
 
 ## Step 8: Watch the Changes
 
@@ -221,9 +221,9 @@ Use it for a dashboard or an alert instead of asking the status endpoints in a l
 
 ## Reference
 
-- [Admin API](@/configuration.md#admin-api): the address of the document and the sign-in.
-- [Audit Log](@/configuration.md#audit-log): the fields and the retention.
-- [Accounts](@/accounts.md): roles, proxy lists and TOTP.
+- [Admin API](@/reference/server.md#admin-api): the address of the document and the sign-in.
+- [Audit Log](@/reference/administration.md#audit-log): the fields and the retention.
+- [Accounts](@/reference/accounts.md): roles, proxy lists and TOTP.
 
 ## Next Steps
 

@@ -1,12 +1,12 @@
 +++
 title = "Hesaplar"
 description = "Panel hesaplarının rolleri ve proxy listeleri"
-weight = 0
+weight = 7
 +++
 
 # Hesaplar
 
-Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir proxy listesi de olabilir. Yönetim paneli, yönetim API'si ve proxy'lerin [Panel Oturumu](@/configuration.tr.md#panel-oturumu) kimlik doğrulaması aynı hesapları kullanır.
+Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir proxy listesi de olabilir. Yönetim paneli, yönetim API'si ve proxy'lerin [Panel Oturumu](@/reference/proxies.tr.md#panel-oturumu) kimlik doğrulaması aynı hesapları kullanır.
 
 ## Roller
 
@@ -35,7 +35,7 @@ Her panel hesabının bir rolü vardır. Editör ve izleyici hesaplarının bir 
 - Bir hesap proxy'yi silince r3v3rs3 proxy'yi her hesabın proxy listesinden kaldırır.
 - Proxy listesi olan hesap, deploy platformuna gönderdiği her istek için `403 forbidden` alır.
 - Yönetim API'si secret ortam değişkeninin değerini hiçbir zaman döndürmez.
-- Uygulama değiştirebilen hesap, bir [Compose uygulamasının](@/platform.tr.md#compose-kaynagi) Compose dosyası üzerinden host'u ele geçirebilir, çünkü r3v3rs3 Compose dosyasının ayarlarını kısıtlamaz. Bir [agent hedefinde](@/platform.tr.md#agent-hedefleri) bu host, agent'ın host'udur.
+- Uygulama değiştirebilen hesap, bir [Compose uygulamasının](@/reference/platform.tr.md#compose-kaynagi) Compose dosyası üzerinden host'u ele geçirebilir, çünkü r3v3rs3 Compose dosyasının ayarlarını kısıtlamaz. Bir [agent hedefinde](@/reference/platform.tr.md#agent-hedefleri) bu host, agent'ın host'udur.
 
 ## Kurallar
 
@@ -154,4 +154,4 @@ $ curl -H "Authorization: Bearer r3v_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" \
 | `/api/auth/tokens`      | `POST`   | Yeni bir API token'ı (`name`, `scope`) oluşturur ve ham anahtarı tek seferlik döner. |
 | `/api/auth/tokens/{id}` | `DELETE` | ID'si verilen API token'ını iptal eder ve siler.                                     |
 
-[Denetim kaydı](@/configuration.tr.md#denetim-kaydi) her hesap değişikliğini ve her girişi kaydeder.
+[Denetim kaydı](@/reference/administration.tr.md#denetim-kaydi) her hesap değişikliğini ve her girişi kaydeder.

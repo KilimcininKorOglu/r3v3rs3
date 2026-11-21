@@ -137,7 +137,7 @@ Each new container needs its own labels. The proxy name after the protocol keeps
       r3v3rs3.http.api.rate_limit.per: minute
 ```
 
-Every field of the admin API proxy model works as a label. [Labels](@/discovery.md#labels) lists the keys, the value formats and the TCP and UDP proxies. r3v3rs3 replaces a plain text password or token with a hash before it uses the proxy, so prefer `password_hash` and `token_hash` in a label.
+Every field of the admin API proxy model works as a label. [Labels](@/reference/discovery.md#labels) lists the keys, the value formats and the TCP and UDP proxies. r3v3rs3 replaces a plain text password or token with a hash before it uses the proxy, so prefer `password_hash` and `token_hash` in a label.
 
 ## Certificates
 
@@ -147,10 +147,10 @@ An HTTP proxy from a label can get its certificate automatically. Create an ACME
       r3v3rs3.http.api.acme: e7k-2np
 ```
 
-r3v3rs3 orders a certificate for the `vhosts` of the proxy. [ACME Certificates](@/discovery.md#acme-certificates) describes the rules.
+r3v3rs3 orders a certificate for the `vhosts` of the proxy. [ACME Certificates](@/reference/discovery.md#acme-certificates) describes the rules.
 
 ## Next Steps
 
-- [Service Discovery](@/discovery.md): every provider and every label key.
-- [Configuration](@/configuration.md): what each proxy field does.
+- [Service Discovery](@/reference/discovery.md): every provider and every label key.
+- [Configuration](@/reference/_index.md): what each proxy field does.
 - [Proxies from etcd](@/tutorials/etcd-discovery.md): proxies built from the keys of an etcd cluster.

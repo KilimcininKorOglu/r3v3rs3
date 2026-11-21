@@ -12,11 +12,19 @@ The documentation is published in English at the root and in Turkish under `/tr/
 
 - [Full documentation](https://r3v3rs3.keremgok.tr/llms-full.txt): every page with an extended description of its content
 - [Overview](https://r3v3rs3.keremgok.tr/): what r3v3rs3 does and the feature list
-- [Configuration](https://r3v3rs3.keremgok.tr/configuration/): every port and proxy field, with its default
-- [Accounts](https://r3v3rs3.keremgok.tr/accounts/): the roles, the permissions and the proxy list of a panel account
-- [Service Discovery](https://r3v3rs3.keremgok.tr/discovery/): Docker and etcd sources
-- [Deployment Platform](https://r3v3rs3.keremgok.tr/platform/): image, Git and Compose apps, deployments and rollback, webhooks, Git providers and agent targets
-- [Development](https://r3v3rs3.keremgok.tr/development/): build the server and the WebUI from source
+- [Configuration and Storage](https://r3v3rs3.keremgok.tr/reference/storage/): the config directory, backups and disaster recovery
+- [Ports](https://r3v3rs3.keremgok.tr/reference/ports/): every port field, with its default
+- [Proxies](https://r3v3rs3.keremgok.tr/reference/proxies/): every proxy field, with its default
+- [Certificates and ACME](https://r3v3rs3.keremgok.tr/reference/certificates/): certificates, ACME, DNS credentials and CT monitoring
+- [Service Discovery](https://r3v3rs3.keremgok.tr/reference/discovery/): Docker and etcd sources
+- [Deployment Platform](https://r3v3rs3.keremgok.tr/reference/platform/): image, Git and Compose apps, deployments and rollback, webhooks, Git providers and agent targets
+- [Accounts](https://r3v3rs3.keremgok.tr/reference/accounts/): the roles, the permissions and the proxy list of a panel account
+- [Host Firewall](https://r3v3rs3.keremgok.tr/reference/firewall/): the nftables table of the host
+- [Server Operation](https://r3v3rs3.keremgok.tr/reference/server/): workers, upgrades, HTTP limits, stream priority and metrics
+- [MCP and CLI](https://r3v3rs3.keremgok.tr/reference/mcp-and-cli/): the MCP server, its tools and the r3 client
+- [Administration](https://r3v3rs3.keremgok.tr/reference/administration/): settings, the WebUI, the admin API, the audit log and logging
+- [Release Verification](https://r3v3rs3.keremgok.tr/reference/release-verification/): checking the signature of a release
+- [Development](https://r3v3rs3.keremgok.tr/reference/development/): build the server and the WebUI from source
 
 ## Tutorials
 

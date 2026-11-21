@@ -161,6 +161,6 @@ R3V3RS3_TOKEN=... r3 https://panel.example.com app deploy <id>
 
 ## Sonraki adımlar
 
-- [Yapılandırma başvurusu](@/configuration.tr.md#mcp-sunucusu) her MCP tool'unu listeler ve OAuth akışını ayrıntılı anlatır.
+- [Yapılandırma başvurusu](@/reference/mcp-and-cli.tr.md) her MCP tool'unu listeler ve OAuth akışını ayrıntılı anlatır.
 - [r3v3rs3'ü script ile yönetme](@/tutorials/admin-api.tr.md) aynı API'yi `curl` ile çağırır.
 - [Ekip için hesaplar](@/tutorials/team-accounts.tr.md) bir istemci için daha az yetkili bir hesap oluşturur.
