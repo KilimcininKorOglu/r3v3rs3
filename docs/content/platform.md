@@ -494,6 +494,14 @@ An app runs one deployment at a time. A second deploy, a rollback or a deletion 
 | `failed`           | The deployment stopped. `message` holds the reason.                                             |
 | `cancelled`        | The deployment was rejected or cancelled. `message` holds the reason.                           |
 
+### Stop, Start and Restart
+
+`POST /api/apps/{id}/stop` stops the containers of the running deployment of an app and keeps them. A Compose app runs `docker compose stop`. The domains of a stopped app answer `503` with the page of the error page theme, and the app list and the app page show it as stopped. A stopped container stays stopped after a restart of Docker or of the server, and a platform prune keeps it.
+
+`POST /api/apps/{id}/start` starts the same containers again without a build, a pull or a new container (`docker compose start` for a Compose app), and the domains route to them again. `POST /api/apps/{id}/restart` stops and starts the containers; a stopped app only starts. An app without a running deployment answers `400 app_not_deployed`. The three operations need the Edit permission, write the audit actions `stop_app`, `start_app` and `restart_app`, and are the MCP tools of the same names and `r3 app stop|start|restart <id>`. On the app page they are the **Stop**, **Start** and **Restart** buttons.
+
+While an app is stopped, r3v3rs3 starts none of its automatic jobs: a webhook push or preview deployment (the webhook answers `202` with the outcome `skipped_stopped`), an image auto-update, a pending deployment whose window opens, a scheduled command and a scheduled database backup wait. Each skipped job is written once per stop to the audit log as `skip_stopped_app`. A manual deployment runs the app again and clears its stopped state.
+
 ### Rollback
 
 `POST /api/deployments/{id}/rollback` starts a new deployment with the image digest, the app settings and the environment variables of an earlier deployment. The digest, not the tag, selects the image, so a rollback runs the same image even after the tag moved. A deployment that failed before it pulled its image has no digest and answers `400 rollback_unavailable`.

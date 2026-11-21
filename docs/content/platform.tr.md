@@ -494,6 +494,14 @@ Bir uygulama aynı anda tek bir deployment çalıştırır. Bir deployment süre
 | `failed`           | Deployment durdu. Nedeni `message` alanındadır.                                                |
 | `cancelled`        | Dağıtım reddedildi veya iptal edildi. Nedeni `message` alanındadır.                            |
 
+### Durdurma, başlatma ve yeniden başlatma
+
+`POST /api/apps/{id}/stop`, uygulamanın çalışan deployment'ına ait container'ları durdurur ve silmez. Compose uygulamasında `docker compose stop` çalışır. Durdurulmuş uygulamanın alan adları, hata sayfası temasının sayfasıyla `503` döndürür. Uygulama listesi ve uygulama sayfası uygulamayı "durduruldu" olarak gösterir. Docker veya sunucu yeniden başlasa da durdurulmuş container kapalı kalır. Platform temizliği de bu container'ı silmez.
+
+`POST /api/apps/{id}/start`, aynı container'ları build, pull veya yeni container olmadan yeniden başlatır (Compose uygulamasında `docker compose start`). Ardından alan adları yeniden bu container'lara yönlenir. `POST /api/apps/{id}/restart`, container'ları durdurup yeniden başlatır. Durdurulmuş bir uygulamada yalnızca başlatır. Çalışan deployment'ı olmayan uygulama `400 app_not_deployed` döndürür. Üç işlem de Edit izni ister ve denetim kaydına `stop_app`, `start_app` ve `restart_app` eylemlerini yazar. Aynı adlı MCP araçları ve `r3 app stop|start|restart <id>` komutları bu işlemleri yapar. Uygulama sayfasında bu işlemler **Durdur**, **Başlat** ve **Yeniden Başlat** butonlarıdır.
+
+Uygulama durdurulmuşken r3v3rs3 uygulamanın otomatik işlerini başlatmaz. Webhook push'u veya preview deployment'ı (webhook `skipped_stopped` sonucuyla `202` döndürür), image otomatik güncellemesi, penceresi açılan bekleyen deployment, zamanlanmış komut ve zamanlanmış veritabanı yedeği bekler. Atlanan her iş, her durdurmada bir kez `skip_stopped_app` olarak denetim kaydına yazılır. El ile başlatılan bir deployment uygulamayı yeniden çalıştırır ve "durduruldu" durumunu kaldırır.
+
 ### Geri alma
 
 `POST /api/deployments/{id}/rollback`, önceki bir deployment'ın image özeti, uygulama ayarları ve ortam değişkenleriyle yeni bir deployment başlatır. Image'ı tag değil özet seçer. Bu yüzden tag değişse bile geri alma aynı image'ı çalıştırır. Image'ını çekmeden önce başarısız olan bir deployment'ın özeti yoktur. Bu deployment için geri alma isteği `400 rollback_unavailable` alır.
