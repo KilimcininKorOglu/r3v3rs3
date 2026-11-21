@@ -1,5 +1,6 @@
 +++
 title = "Servis keşfi"
+aliases = ["/tr/discovery/"]
 description = "Servis keşfi"
 weight = 5
 +++

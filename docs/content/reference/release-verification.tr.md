@@ -1,5 +1,6 @@
 +++
 title = "Release doğrulama"
+aliases = ["/tr/release-verification/"]
 weight = 12
 +++
 

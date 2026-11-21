@@ -2,6 +2,7 @@
 title = "Başvuru"
 description = "r3v3rs3'ün her ayarı ve her davranışı, sayfa başına bir konu"
 sort_by = "weight"
+aliases = ["/tr/configuration/"]
 weight = 0
 +++
 

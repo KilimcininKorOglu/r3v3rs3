@@ -1,5 +1,6 @@
 +++
 title = "Service Discovery"
+aliases = ["/discovery/"]
 description = "Service Discovery"
 weight = 5
 +++

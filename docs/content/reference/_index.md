@@ -2,6 +2,7 @@
 title = "Reference"
 description = "Every setting and every behavior of r3v3rs3, one topic per page"
 sort_by = "weight"
+aliases = ["/configuration/"]
 weight = 0
 +++
 

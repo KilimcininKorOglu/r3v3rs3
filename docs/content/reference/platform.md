@@ -1,5 +1,6 @@
 +++
 title = "Deployment Platform"
+aliases = ["/platform/"]
 description = "Deploy container images and route their domains through r3v3rs3"
 weight = 6
 +++

@@ -1,5 +1,6 @@
 +++
 title = "Geliştirme"
+aliases = ["/tr/development/"]
 description = "Geliştirme"
 weight = 13
 +++

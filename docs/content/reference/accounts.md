@@ -1,5 +1,6 @@
 +++
 title = "Accounts"
+aliases = ["/accounts/"]
 description = "Roles and proxy lists of the panel accounts"
 weight = 7
 +++

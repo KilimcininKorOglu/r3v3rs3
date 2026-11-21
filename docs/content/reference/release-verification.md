@@ -1,5 +1,6 @@
 +++
 title = "Release Verification"
+aliases = ["/release-verification/"]
 weight = 12
 +++
 

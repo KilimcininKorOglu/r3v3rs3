@@ -1,5 +1,6 @@
 +++
 title = "Deploy platformu"
+aliases = ["/tr/platform/"]
 description = "Container image'larını deploy edin ve alan adlarını r3v3rs3 üzerinden yönlendirin"
 weight = 6
 +++

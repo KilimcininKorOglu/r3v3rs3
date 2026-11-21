@@ -1,5 +1,6 @@
 +++
 title = "Development"
+aliases = ["/development/"]
 description = "Development"
 weight = 13
 +++

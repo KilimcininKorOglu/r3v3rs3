@@ -1,5 +1,6 @@
 +++
 title = "Hesaplar"
+aliases = ["/tr/accounts/"]
 description = "Panel hesaplarının rolleri ve proxy listeleri"
 weight = 7
 +++
