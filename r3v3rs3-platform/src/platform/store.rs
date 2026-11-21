@@ -384,56 +384,116 @@ pub struct PlatformStore {
     pool: SqlitePool,
 }
 
+/// A column that a release added to a table of an older database.
+struct AddedColumn {
+    table: &'static str,
+    column: &'static str,
+    alter: &'static str,
+}
+
+const fn added(table: &'static str, column: &'static str, alter: &'static str) -> AddedColumn {
+    AddedColumn {
+        table,
+        column,
+        alter,
+    }
+}
+
+/// Every column added after the first release of its table, in release order.
+const ADDED_COLUMNS: &[AddedColumn] = &[
+    added(
+        "targets",
+        "drained",
+        "ALTER TABLE targets ADD COLUMN drained INTEGER NOT NULL DEFAULT 0",
+    ),
+    added(
+        "targets",
+        "region",
+        "ALTER TABLE targets ADD COLUMN region TEXT",
+    ),
+    added(
+        "prune_policy",
+        "disk_pressure_threshold",
+        "ALTER TABLE prune_policy ADD COLUMN disk_pressure_threshold INTEGER",
+    ),
+    added(
+        "prune_policy",
+        "last_pressure_pruned_at",
+        "ALTER TABLE prune_policy ADD COLUMN last_pressure_pruned_at INTEGER",
+    ),
+    added(
+        "prune_policy",
+        "prune_logs",
+        "ALTER TABLE prune_policy ADD COLUMN prune_logs INTEGER NOT NULL DEFAULT 1",
+    ),
+    added(
+        "prune_policy",
+        "log_vacuum_threshold_mb",
+        "ALTER TABLE prune_policy ADD COLUMN log_vacuum_threshold_mb INTEGER",
+    ),
+    added(
+        "prune_policy",
+        "container_log_max_size",
+        "ALTER TABLE prune_policy ADD COLUMN container_log_max_size TEXT",
+    ),
+    added(
+        "prune_policy",
+        "container_log_max_file",
+        "ALTER TABLE prune_policy ADD COLUMN container_log_max_file TEXT",
+    ),
+    added(
+        "prune_policy",
+        "build_cache_keep_storage_mb",
+        "ALTER TABLE prune_policy ADD COLUMN build_cache_keep_storage_mb INTEGER",
+    ),
+    added(
+        "prune_policy",
+        "kept_builds_count",
+        "ALTER TABLE prune_policy ADD COLUMN kept_builds_count INTEGER",
+    ),
+    added(
+        "prune_policy",
+        "dangling_layers_only",
+        "ALTER TABLE prune_policy ADD COLUMN dangling_layers_only INTEGER NOT NULL DEFAULT 1",
+    ),
+    added(
+        "node_alert_rules",
+        "max_fd_ratio_percent",
+        "ALTER TABLE node_alert_rules ADD COLUMN max_fd_ratio_percent INTEGER",
+    ),
+    added(
+        "node_alert_rules",
+        "max_time_wait_sockets",
+        "ALTER TABLE node_alert_rules ADD COLUMN max_time_wait_sockets INTEGER",
+    ),
+];
+
+/// Adds `column` when its table lacks it. Every other failure, such as a locked or full
+/// database, stops the start instead of leaving a table without the column.
+async fn add_column_if_missing(pool: &SqlitePool, column: &AddedColumn) -> anyhow::Result<()> {
+    let present = sqlx::query("SELECT 1 FROM pragma_table_info(?) WHERE name = ?")
+        .bind(column.table)
+        .bind(column.column)
+        .fetch_optional(pool)
+        .await?
+        .is_some();
+    if !present {
+        sqlx::query(column.alter)
+            .execute(pool)
+            .await
+            .with_context(|| format!("failed to add {}.{}", column.table, column.column))?;
+    }
+    Ok(())
+}
+
 impl PlatformStore {
     pub async fn from_pool(pool: SqlitePool) -> anyhow::Result<Self> {
         for &statement in SCHEMA {
             sqlx::query(statement).execute(&pool).await?;
         }
-        let _ = sqlx::query("ALTER TABLE targets ADD COLUMN drained INTEGER NOT NULL DEFAULT 0")
-            .execute(&pool)
-            .await;
-        let _ = sqlx::query("ALTER TABLE targets ADD COLUMN region TEXT")
-            .execute(&pool)
-            .await;
-        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN disk_pressure_threshold INTEGER")
-            .execute(&pool)
-            .await;
-        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN last_pressure_pruned_at INTEGER")
-            .execute(&pool)
-            .await;
-        let _ = sqlx::query(
-            "ALTER TABLE prune_policy ADD COLUMN prune_logs INTEGER NOT NULL DEFAULT 1",
-        )
-        .execute(&pool)
-        .await;
-        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN log_vacuum_threshold_mb INTEGER")
-            .execute(&pool)
-            .await;
-        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN container_log_max_size TEXT")
-            .execute(&pool)
-            .await;
-        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN container_log_max_file TEXT")
-            .execute(&pool)
-            .await;
-        let _ =
-            sqlx::query("ALTER TABLE prune_policy ADD COLUMN build_cache_keep_storage_mb INTEGER")
-                .execute(&pool)
-                .await;
-        let _ = sqlx::query("ALTER TABLE prune_policy ADD COLUMN kept_builds_count INTEGER")
-            .execute(&pool)
-            .await;
-        let _ = sqlx::query(
-            "ALTER TABLE prune_policy ADD COLUMN dangling_layers_only INTEGER NOT NULL DEFAULT 1",
-        )
-        .execute(&pool)
-        .await;
-        let _ = sqlx::query("ALTER TABLE node_alert_rules ADD COLUMN max_fd_ratio_percent INTEGER")
-            .execute(&pool)
-            .await;
-        let _ =
-            sqlx::query("ALTER TABLE node_alert_rules ADD COLUMN max_time_wait_sockets INTEGER")
-                .execute(&pool)
-                .await;
+        for column in ADDED_COLUMNS {
+            add_column_if_missing(&pool, column).await?;
+        }
         Ok(Self { pool })
     }
 
@@ -1286,6 +1346,48 @@ mod tests {
         let store = PlatformStore::open(&path.0).await?;
         store.ensure_local_target(1).await?;
         Ok((store, path))
+    }
+
+    async fn has_column(pool: &SqlitePool, table: &str, column: &str) -> anyhow::Result<bool> {
+        Ok(
+            sqlx::query("SELECT 1 FROM pragma_table_info(?) WHERE name = ?")
+                .bind(table)
+                .bind(column)
+                .fetch_optional(pool)
+                .await?
+                .is_some(),
+        )
+    }
+
+    /// A database of an older release lacks a later column: the start adds it, a second start
+    /// changes nothing, and a database that cannot take the column stops the start instead of
+    /// running on without it.
+    #[tokio::test]
+    async fn an_older_database_gets_its_missing_columns_or_fails() -> anyhow::Result<()> {
+        let path = tempfile_path::TempPath::new("platform-migrate");
+        let store = PlatformStore::open(&path.0).await?;
+        sqlx::query("ALTER TABLE targets DROP COLUMN region")
+            .execute(store.pool())
+            .await?;
+        store.pool().close().await;
+
+        let read_only = SqliteConnectOptions::new()
+            .filename(&path.0)
+            .read_only(true);
+        let pool = SqlitePool::connect_with(read_only).await?;
+        let refused = PlatformStore::from_pool(pool).await;
+        let err = refused.err().map(|e| format!("{e:#}")).unwrap_or_default();
+        assert!(
+            err.contains("targets.region"),
+            "a read-only start went on: {err:?}"
+        );
+
+        let store = PlatformStore::open(&path.0).await?;
+        assert!(has_column(store.pool(), "targets", "region").await?);
+        store.pool().close().await;
+        let again = PlatformStore::open(&path.0).await?;
+        assert!(has_column(again.pool(), "targets", "region").await?);
+        Ok(())
     }
 
     /// A database path under the temporary directory that is removed after the test.
