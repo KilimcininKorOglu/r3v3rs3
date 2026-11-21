@@ -70,6 +70,12 @@ pub trait ComposeRunner: Send + Sync {
     /// images stay; without the Compose file, `down` does not know the built images.
     async fn down(&self, name: &ProjectName) -> anyhow::Result<()>;
 
+    /// Stops the containers of the project and keeps them, with their networks and volumes.
+    async fn stop(&self, name: &ProjectName) -> anyhow::Result<()>;
+
+    /// Starts the stopped containers of the project again, without a build or a pull.
+    async fn start(&self, name: &ProjectName) -> anyhow::Result<()>;
+
     /// Removes the checkouts in `app_dir` except `keep`, once the services use `keep`.
     async fn retain(&self, app_dir: &Path, keep: &Path) -> anyhow::Result<()> {
         remove_other_dirs(app_dir, keep).await
@@ -172,6 +178,21 @@ impl ComposeRunner for DockerCompose {
         // Without a Compose file, `down` finds the containers by the project name.
         let mut command = self.command(name, Path::new("/"));
         command.args(["down", "--remove-orphans"]);
+        run(command, TIMEOUT).await?;
+        Ok(())
+    }
+
+    async fn stop(&self, name: &ProjectName) -> anyhow::Result<()> {
+        // Like `down`, `stop` and `start` find the containers by the project name.
+        let mut command = self.command(name, Path::new("/"));
+        command.arg("stop");
+        run(command, TIMEOUT).await?;
+        Ok(())
+    }
+
+    async fn start(&self, name: &ProjectName) -> anyhow::Result<()> {
+        let mut command = self.command(name, Path::new("/"));
+        command.arg("start");
         run(command, TIMEOUT).await?;
         Ok(())
     }

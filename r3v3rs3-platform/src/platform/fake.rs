@@ -269,6 +269,30 @@ impl ComposeRunner for FakeCompose {
         remove_project(&mut state, name);
         Ok(())
     }
+
+    async fn stop(&self, name: &ProjectName) -> anyhow::Result<()> {
+        self.state().calls.push(format!("stop {name}"));
+        let mut state = self.runtime.check()?;
+        set_project_running(&mut state, name, false);
+        Ok(())
+    }
+
+    async fn start(&self, name: &ProjectName) -> anyhow::Result<()> {
+        self.state().calls.push(format!("start {name}"));
+        let mut state = self.runtime.check()?;
+        set_project_running(&mut state, name, true);
+        Ok(())
+    }
+}
+
+fn set_project_running(state: &mut FakeState, project: &ProjectName, running: bool) {
+    state
+        .containers
+        .values_mut()
+        .filter(|info| {
+            info.labels.get(COMPOSE_PROJECT_LABEL).map(String::as_str) == Some(project.as_str())
+        })
+        .for_each(|info| info.running = running);
 }
 
 fn remove_project(state: &mut FakeState, project: &ProjectName) {

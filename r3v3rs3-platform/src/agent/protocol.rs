@@ -154,6 +154,14 @@ pub enum AgentRequest {
     ComposeDown {
         project: ProjectName,
     },
+    /// Stops the containers of a project and keeps them.
+    ComposeStop {
+        project: ProjectName,
+    },
+    /// Starts the stopped containers of a project again.
+    ComposeStart {
+        project: ProjectName,
+    },
     /// Removes the deployment directories of an app except `keep`.
     ComposeRetain {
         app: ShortId,

@@ -72,6 +72,18 @@ impl AgentCompose {
         Ok(AgentOutput::Done)
     }
 
+    pub async fn stop(&self, name: &ProjectName) -> anyhow::Result<AgentOutput> {
+        check_project(name)?;
+        self.runner.stop(name).await?;
+        Ok(AgentOutput::Done)
+    }
+
+    pub async fn start(&self, name: &ProjectName) -> anyhow::Result<AgentOutput> {
+        check_project(name)?;
+        self.runner.start(name).await?;
+        Ok(AgentOutput::Done)
+    }
+
     pub async fn retain(&self, app: ShortId, keep: ShortId) -> anyhow::Result<AgentOutput> {
         let app_dir = self.app_dir(app);
         if tokio::fs::try_exists(&app_dir).await? {
@@ -220,6 +232,16 @@ impl ComposeRunner for RemoteCompose {
         self.call(&AgentRequest::ComposeDown { project }).await
     }
 
+    async fn stop(&self, name: &ProjectName) -> anyhow::Result<()> {
+        let project = name.clone();
+        self.call(&AgentRequest::ComposeStop { project }).await
+    }
+
+    async fn start(&self, name: &ProjectName) -> anyhow::Result<()> {
+        let project = name.clone();
+        self.call(&AgentRequest::ComposeStart { project }).await
+    }
+
     /// Removes the other deployment directories on the agent and on the master.
     async fn retain(&self, app_dir: &Path, keep: &Path) -> anyhow::Result<()> {
         let (app, deployment) = self.ids(keep)?;
@@ -239,5 +261,49 @@ impl ComposeRunner for RemoteCompose {
             .parse()?;
         self.call(&AgentRequest::ComposeRemove { app }).await?;
         Ok(crate::build::remove_dir(app_dir).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::fake::{FakeCompose, FakeRuntime};
+    use r3v3rs3_api::container::COMPOSE_PROJECT_LABEL;
+
+    fn agent_with_project(project: &str) -> (AgentCompose, Arc<FakeRuntime>, Arc<FakeCompose>) {
+        let runtime = Arc::new(FakeRuntime::default());
+        let name = "web-1".parse().unwrap();
+        runtime.set(&name, true, &[]);
+        if let Some(info) = runtime.state().containers.get_mut("web-1") {
+            info.labels
+                .insert(COMPOSE_PROJECT_LABEL.into(), project.into());
+        }
+        let compose = Arc::new(FakeCompose::new(runtime.clone()));
+        let agent = AgentCompose::new(compose.clone(), std::env::temp_dir());
+        (agent, runtime, compose)
+    }
+
+    fn running(runtime: &FakeRuntime) -> bool {
+        runtime.state().containers["web-1"].running
+    }
+
+    /// The master sends the project name: a stop or start of a project that the platform did
+    /// not create, such as another stack on the agent host, is refused and touches nothing.
+    #[tokio::test]
+    async fn the_agent_stops_and_starts_only_platform_projects() -> anyhow::Result<()> {
+        let (agent, runtime, compose) = agent_with_project("billing");
+        let foreign: ProjectName = "billing".parse()?;
+        assert!(agent.stop(&foreign).await.is_err());
+        assert!(agent.start(&foreign).await.is_err());
+        assert!(running(&runtime));
+        assert!(compose.state().calls.is_empty());
+
+        let (agent, runtime, _) = agent_with_project("r3v3rs3-shop");
+        let own: ProjectName = "r3v3rs3-shop".parse()?;
+        agent.stop(&own).await?;
+        assert!(!running(&runtime), "the stopped container still runs");
+        agent.start(&own).await?;
+        assert!(running(&runtime), "the started container does not run");
+        Ok(())
     }
 }

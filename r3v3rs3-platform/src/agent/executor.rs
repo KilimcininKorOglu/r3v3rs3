@@ -128,6 +128,8 @@ impl Executor {
             }
             AgentRequest::ComposeUp(request) => self.compose.up(&request).await,
             AgentRequest::ComposeDown { project } => self.compose.down(&project).await,
+            AgentRequest::ComposeStop { project } => self.compose.stop(&project).await,
+            AgentRequest::ComposeStart { project } => self.compose.start(&project).await,
             AgentRequest::ComposeRetain { app, keep } => self.compose.retain(app, keep).await,
             AgentRequest::ComposeRemove { app } => self.compose.remove(app).await,
             request => self.container_request(request).await,
