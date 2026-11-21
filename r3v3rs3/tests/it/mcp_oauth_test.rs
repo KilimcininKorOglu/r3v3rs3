@@ -1674,7 +1674,7 @@ async fn assert_cli_dns_credentials(
 }
 
 /// The client binary of the workspace, built up to date before a test runs it.
-fn client_binary() -> anyhow::Result<std::path::PathBuf> {
+pub(crate) fn client_binary() -> anyhow::Result<std::path::PathBuf> {
     let binary = match std::env::var("CARGO_TARGET_DIR") {
         Ok(dir) => std::path::PathBuf::from(dir).join("debug/r3"),
         Err(_) => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/debug/r3"),
@@ -1964,7 +1964,7 @@ async fn assert_mcp_apps(
 }
 
 /// Runs the client with `input` on its standard input.
-async fn run_client_stdin(
+pub(crate) async fn run_client_stdin(
     binary: &Path,
     addr: &SocketAddr,
     token: &str,

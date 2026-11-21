@@ -39,6 +39,9 @@ const GIT_COMMIT: &str = "dec1ed84e37648285d4ddfae911344483c77906b";
 
 const DOMAIN: &str = "whoami.test";
 
+/// A small image with a shell that serves HTTP on port 80 and writes its access log to stdout.
+const SHELL_IMAGE: &str = "mirror.gcr.io/library/nginx:1.29-alpine";
+
 /// The time a deployment may take, including the image pull or the build.
 const DEPLOY_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -105,6 +108,138 @@ async fn a_git_app_builds_its_image_and_deploys() -> anyhow::Result<()> {
     .await
 }
 
+/// Source: the CLI help of `r3 app open-terminal` ("an interactive shell in the container") and
+/// `r3 app stream-logs` ("the container log of an app as it is written"). Commands piped into
+/// the terminal must run in the container and their output must reach stdout before the client
+/// ends; a size message must change the size of the shell; a new log line must reach stdout.
+#[tokio::test]
+#[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
+async fn the_client_runs_a_terminal_and_follows_the_logs() -> anyhow::Result<()> {
+    let source = json!({"type": "image", "image": SHELL_IMAGE});
+    with_app_checked(source, None, |ctx, id| async move {
+        deploy(&ctx, &id, "shell").await?;
+        wait_for_answer(&ctx, "Welcome to nginx").await?;
+        let token = api_token(&ctx).await?;
+        let binary = crate::mcp_oauth_test::client_binary()?;
+        check_cli_terminal(&ctx, &binary, &token, &id).await?;
+        check_terminal_resize(&ctx, &id).await?;
+        check_cli_logs(&ctx, &binary, &token, &id).await?;
+        delete_app(&ctx, &id).await
+    })
+    .await
+}
+
+/// An API token of the admin account with the edit scope, for the client binary.
+async fn api_token(ctx: &Context) -> anyhow::Result<String> {
+    let body = json!({"name": "e2e", "scope": "edit"});
+    let created = call(ctx, Method::POST, "/api/auth/tokens", Some(body)).await?;
+    created["token"]
+        .as_str()
+        .map(str::to_string)
+        .context("token")
+}
+
+/// Pipes a command into `r3 app open-terminal`. The shell computes the number, so the echo of
+/// the typed line cannot pass for the output.
+async fn check_cli_terminal(
+    ctx: &Context,
+    binary: &Path,
+    token: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let args = ["app", "open-terminal", id];
+    let input = "echo r3-$((40+2))-ok\n";
+    let run = crate::mcp_oauth_test::run_client_stdin(binary, &ctx.admin, token, &args, input);
+    let out = tokio::time::timeout(Duration::from_secs(60), run)
+        .await
+        .context("the terminal client did not end after its input ended")??;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    ensure!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    ensure!(stdout.contains("r3-42-ok"), "the output missed: {stdout}");
+    Ok(())
+}
+
+/// Sends a size message on the terminal WebSocket, then asks the shell for its size.
+async fn check_terminal_resize(ctx: &Context, id: &str) -> anyhow::Result<()> {
+    use futures::SinkExt;
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+    let url = format!("ws://{}/api/apps/{id}/terminal?cols=80&rows=24", ctx.admin);
+    let mut request = url.into_client_request()?;
+    request.headers_mut().insert("cookie", ctx.cookie.parse()?);
+    // A browser sends its origin; the panel refuses a cookie WebSocket without one (CSRF).
+    let origin = format!("http://{}", ctx.admin);
+    request.headers_mut().insert("origin", origin.parse()?);
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await?;
+    let resize = json!({"cols": 100, "rows": 40}).to_string();
+    socket.send(Message::Text(resize.into())).await?;
+    socket
+        .send(Message::Binary(b"stty size; exit\n".to_vec().into()))
+        .await?;
+    let output = tokio::time::timeout(Duration::from_secs(60), read_terminal(&mut socket))
+        .await
+        .context("the terminal did not end")??;
+    ensure!(output.contains("40 100"), "stty answered: {output}");
+    Ok(())
+}
+
+/// Collects the output of a terminal WebSocket until the server closes the session.
+async fn read_terminal<S>(socket: &mut S) -> anyhow::Result<String>
+where
+    S: futures::Stream<
+            Item = Result<
+                tokio_tungstenite::tungstenite::Message,
+                tokio_tungstenite::tungstenite::Error,
+            >,
+        > + Unpin,
+{
+    use futures::StreamExt;
+    use tokio_tungstenite::tungstenite::Message;
+    let mut output = String::new();
+    while let Some(message) = socket.next().await {
+        match message? {
+            Message::Binary(bytes) => output.push_str(&String::from_utf8_lossy(&bytes)),
+            Message::Text(text) => output.push_str(&text),
+            Message::Close(_) => break,
+            _ => {}
+        }
+    }
+    Ok(output)
+}
+
+/// Requests a marked path, then waits until `r3 app stream-logs` prints its access log line.
+async fn check_cli_logs(ctx: &Context, binary: &Path, token: &str, id: &str) -> anyhow::Result<()> {
+    use tokio::io::AsyncBufReadExt;
+    let mut child = tokio::process::Command::new(binary)
+        .arg(format!("http://{}", ctx.admin))
+        .args(["--token", token, "app", "stream-logs", id, "--tail", "1"])
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+    let stdout = child.stdout.take().context("no stdout")?;
+    let mut lines = tokio::io::BufReader::new(stdout).lines();
+    let url = format!("http://{}/r3-log-marker", ctx.proxy.socket_addr());
+    reqwest::Client::new()
+        .get(&url)
+        .header(HOST, DOMAIN)
+        .send()
+        .await?;
+    let find = async {
+        while let Some(line) = lines.next_line().await? {
+            if line.contains("/r3-log-marker") {
+                return anyhow::Ok(());
+            }
+        }
+        bail!("the log stream ended without the marked request")
+    };
+    let found = tokio::time::timeout(Duration::from_secs(60), find).await;
+    child.kill().await?;
+    found.context("no log line of the marked request")?
+}
+
 /// A rollback of a Compose app fetches the commit of the old deployment, which no branch names.
 #[tokio::test]
 #[ignore = "needs a Docker Engine; run with make test-runtime-docker"]
@@ -122,6 +257,19 @@ async fn a_commit_checks_out_without_its_branch() -> anyhow::Result<()> {
 /// Starts a server with the platform, adds an app with `source` and runs `check` on it. The
 /// containers and the network of the app are removed after a failed check too.
 async fn with_app<F, O>(source: Value, check: F) -> anyhow::Result<()>
+where
+    F: FnOnce(Context, String) -> O,
+    O: Future<Output = anyhow::Result<()>>,
+{
+    with_app_checked(source, Some("/health"), check).await
+}
+
+/// [`with_app`] with the health check path of the app, `None` for no health check.
+async fn with_app_checked<F, O>(
+    source: Value,
+    health: Option<&'static str>,
+    check: F,
+) -> anyhow::Result<()>
 where
     F: FnOnce(Context, String) -> O,
     O: Future<Output = anyhow::Result<()>>,
@@ -148,7 +296,7 @@ where
             cookie,
             proxy,
         };
-        let id = add_app(&ctx, source).await?;
+        let id = add_app(&ctx, source, health).await?;
         if let Ok(mut shared) = shared_id.lock() {
             *shared = Some(id.clone());
         }
@@ -225,7 +373,7 @@ async fn call(
     Ok(serde_json::from_str(&text)?)
 }
 
-async fn add_app(ctx: &Context, source: Value) -> anyhow::Result<String> {
+async fn add_app(ctx: &Context, source: Value, health: Option<&str>) -> anyhow::Result<String> {
     let name = format!("e2e-{:08x}", rand::random::<u32>());
     let body = json!({
         "name": name,
@@ -234,7 +382,7 @@ async fn add_app(ctx: &Context, source: Value) -> anyhow::Result<String> {
             "source": source,
             "port": 80,
             "domains": [DOMAIN],
-            "health_check_path": "/health",
+            "health_check_path": health,
             "restart": "no",
         },
     });

@@ -51,10 +51,16 @@ pub async fn run(api: &ApiClient, id: &str, shell: Option<&str>) -> anyhow::Resu
     bridge(socket, (cols, rows)).await
 }
 
-/// Copies stdin to the socket and the socket to stdout until either side ends.
+/// The end-of-transmission key (Ctrl-D): a shell that reads it on an empty line exits.
+const END_OF_INPUT: u8 = 0x04;
+
+/// Copies stdin to the socket and the socket to stdout until the server ends the session. When
+/// stdin ends (piped input), the shell gets Ctrl-D and the output keeps flowing until the shell
+/// exits, so the output of the piped commands is not cut off.
 async fn bridge(socket: WebSocket, mut size: (u16, u16)) -> anyhow::Result<()> {
     let (mut sink, mut stream) = socket.split();
     let mut keys = read_stdin();
+    let mut stdin_open = true;
     let mut ticker = tokio::time::interval(RESIZE_POLL);
     loop {
         tokio::select! {
@@ -63,10 +69,13 @@ async fn bridge(socket: WebSocket, mut size: (u16, u16)) -> anyhow::Result<()> {
                     return Ok(());
                 }
             }
-            key = keys.recv() => match key {
-                Some(bytes) => sink.send(Message::Binary(bytes.into())).await?,
-                None => return Ok(sink.close().await?),
-            },
+            key = keys.recv(), if stdin_open => {
+                let bytes = key.unwrap_or_else(|| {
+                    stdin_open = false;
+                    vec![END_OF_INPUT]
+                });
+                sink.send(Message::Binary(bytes.into())).await?;
+            }
             _ = ticker.tick() => {
                 let now = crossterm::terminal::size().unwrap_or(size);
                 if now != size {

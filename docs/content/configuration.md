@@ -2186,6 +2186,8 @@ r3 <server> platform get-upgrade-status
 r3 <server> platform rotate-key
 ```
 
+`r3 app open-terminal` also takes commands on its standard input, for example `echo 'df -h' | r3 <server> app open-terminal <id>`. When the input ends, the client sends Ctrl-D to the shell and prints the output until the shell exits.
+
 ### Declarative manifests (`apply -f`)
 
 For CI/CD pipelines and automated configuration, `r3 apply -f <file>` applies a declarative YAML or JSON manifest to configure ports, proxies, and applications idempotently:

@@ -2186,6 +2186,8 @@ r3 <server> platform get-upgrade-status
 r3 <server> platform rotate-key
 ```
 
+`r3 app open-terminal` komutları standart girdisinden de alır, örneğin `echo 'df -h' | r3 <server> app open-terminal <id>`. Girdi bittiğinde istemci kabuğa Ctrl-D gönderir ve kabuk kapanana kadar çıktıyı yazdırır.
+
 ### Deklaratif tanımlar (`apply -f`)
 
 CI/CD pipeline'ları ve betikli yönetim için `r3 apply -f <dosya>`, portları, proxy'leri ve uygulamaları tek hamlede ve idempotent biçimde tanımlamak üzere YAML veya JSON manifest uygular:
