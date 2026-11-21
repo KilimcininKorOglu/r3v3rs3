@@ -14,8 +14,11 @@ use axum::{
 };
 use hyper::{Request, Uri};
 use r3v3rs3_api::cache::CachePurge;
+use r3v3rs3_api::compression_dictionary::{CompressionDictionary, CompressionDictionaryRequest};
+use r3v3rs3_api::error::Error;
 use r3v3rs3_api::fixed_response::FixedResponse;
 use r3v3rs3_api::policy::AuthPolicy;
+use r3v3rs3_api::proxy::ProxyKind;
 use r3v3rs3_api::redirect::RedirectRule;
 use r3v3rs3_api::{
     id::ShortId,
@@ -186,6 +189,136 @@ pub async fn put(
 ) -> Result<Json<Box<()>>, AppError> {
     let entry = (id, entry).into();
     Ok(Json(state.call(&caller, UpdateProxy { entry }).await?))
+}
+
+/// Reads an HTTP proxy, or fails with `not_http_proxy` for a TCP or UDP proxy.
+async fn http_proxy(
+    state: &AppState,
+    caller: &Caller,
+    id: ShortId,
+) -> Result<(ProxyEntry, Box<HttpProxy>), AppError> {
+    let entry: ProxyEntry = *state.call(caller, GetProxy { id }).await?;
+    match &entry.proxy.kind {
+        ProxyKind::Http(http) => {
+            let http = http.clone();
+            Ok((entry, http))
+        }
+        _ => Err(Error::NotHttpProxy { id }.into()),
+    }
+}
+
+/// Saves the dictionaries of an HTTP proxy and keeps every other setting.
+async fn save_dictionaries(
+    state: &AppState,
+    caller: &Caller,
+    mut entry: ProxyEntry,
+    mut http: Box<HttpProxy>,
+    dictionaries: Vec<CompressionDictionary>,
+) -> Result<(), AppError> {
+    http.compression.dictionaries = dictionaries;
+    entry.proxy.kind = ProxyKind::Http(http);
+    state.call(caller, UpdateProxy { entry }).await?;
+    Ok(())
+}
+
+/// Lists the compression dictionaries of an HTTP proxy.
+#[utoipa::path(
+    get,
+    path = "/{id}/dictionaries",
+    tag = "proxies",
+    operation_id = "list_proxy_compression_dictionaries",
+    params(("id" = ShortId, Path, description = "Proxy id.")),
+    responses((status = 200, description = "The dictionaries.", body = Vec<CompressionDictionary>), NotFoundResponse, ErrorResponses)
+)]
+pub async fn list_dictionaries(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+) -> Result<Json<Vec<CompressionDictionary>>, AppError> {
+    let (_, http) = http_proxy(&state, &caller, id).await?;
+    Ok(Json(http.compression.dictionaries))
+}
+
+/// Returns one compression dictionary of an HTTP proxy.
+#[utoipa::path(
+    get,
+    path = "/{id}/dictionaries/{dict_id}",
+    tag = "proxies",
+    operation_id = "get_proxy_compression_dictionary",
+    params(
+        ("id" = ShortId, Path, description = "Proxy id."),
+        ("dict_id" = ShortId, Path, description = "Dictionary id.")
+    ),
+    responses((status = 200, description = "The dictionary.", body = CompressionDictionary), NotFoundResponse, ErrorResponses)
+)]
+pub async fn get_dictionary(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((id, dict_id)): Path<(ShortId, ShortId)>,
+) -> Result<Json<CompressionDictionary>, AppError> {
+    let (_, http) = http_proxy(&state, &caller, id).await?;
+    let dict = http
+        .compression
+        .dictionaries
+        .into_iter()
+        .find(|d| d.id == dict_id);
+    Ok(Json(dict.ok_or_else(|| Error::IdNotFound {
+        id: dict_id.to_string(),
+    })?))
+}
+
+/// Adds a compression dictionary to an HTTP proxy. The server computes its hash.
+#[utoipa::path(
+    post,
+    path = "/{id}/dictionaries",
+    tag = "proxies",
+    operation_id = "create_proxy_compression_dictionary",
+    params(("id" = ShortId, Path, description = "Proxy id.")),
+    request_body = CompressionDictionaryRequest,
+    responses((status = 200, description = "The new dictionary.", body = CompressionDictionary), NotFoundResponse, ErrorResponses)
+)]
+pub async fn create_dictionary(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<ShortId>,
+    Json(request): Json<CompressionDictionaryRequest>,
+) -> Result<Json<CompressionDictionary>, AppError> {
+    let dict = CompressionDictionary::from(request);
+    let (entry, http) = http_proxy(&state, &caller, id).await?;
+    let mut dictionaries = http.compression.dictionaries.clone();
+    dictionaries.push(dict.clone());
+    save_dictionaries(&state, &caller, entry, http, dictionaries).await?;
+    Ok(Json(dict))
+}
+
+/// Deletes a compression dictionary from an HTTP proxy.
+#[utoipa::path(
+    delete,
+    path = "/{id}/dictionaries/{dict_id}",
+    tag = "proxies",
+    operation_id = "delete_proxy_compression_dictionary",
+    params(
+        ("id" = ShortId, Path, description = "Proxy id."),
+        ("dict_id" = ShortId, Path, description = "Dictionary id.")
+    ),
+    responses((status = 200, description = "The dictionary is deleted."), NotFoundResponse, ErrorResponses)
+)]
+pub async fn delete_dictionary(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((id, dict_id)): Path<(ShortId, ShortId)>,
+) -> Result<Json<()>, AppError> {
+    let (entry, http) = http_proxy(&state, &caller, id).await?;
+    let mut dictionaries = http.compression.dictionaries.clone();
+    dictionaries.retain(|d| d.id != dict_id);
+    if dictionaries.len() == http.compression.dictionaries.len() {
+        return Err(Error::IdNotFound {
+            id: dict_id.to_string(),
+        }
+        .into());
+    }
+    save_dictionaries(&state, &caller, entry, http, dictionaries).await?;
+    Ok(Json(()))
 }
 
 /// Returns the stream priority configuration of an HTTP proxy.

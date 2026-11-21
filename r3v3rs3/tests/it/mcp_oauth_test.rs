@@ -1446,12 +1446,96 @@ async fn assert_cli_proxy_mutations(
 
     let get_out = run_client(binary, addr, token, &["proxy", "get", &proxy_id]).await?;
     assert!(get_out.status.success());
+    assert_cli_dictionaries(binary, addr, token, &proxy_id).await?;
 
     let rm_proxy = run_client(binary, addr, token, &["proxy", "rm", &proxy_id]).await?;
     assert!(rm_proxy.status.success());
 
     let rm_port = run_client(binary, addr, token, &["port", "rm", port_id]).await?;
     assert!(rm_port.status.success());
+    Ok(())
+}
+
+/// `r3 proxy dictionary` reaches the dictionary API (OpenAPI
+/// `create_proxy_compression_dictionary`, `list_proxy_compression_dictionaries`,
+/// `get_proxy_compression_dictionary`, `delete_proxy_compression_dictionary`): the server
+/// computes the RFC 9842 SHA-256 hash of the content, an unknown dictionary id is 404, and an
+/// invalid dictionary (a serving path without a leading `/`) is refused.
+async fn assert_cli_dictionaries(
+    binary: &Path,
+    addr: &SocketAddr,
+    token: &str,
+    proxy_id: &str,
+) -> anyhow::Result<()> {
+    let base = ["proxy", "dictionary", "create", proxy_id, "--name", "api"];
+    let created = cli_ok(
+        binary,
+        addr,
+        token,
+        &[
+            &base[..],
+            &[
+                "--match-pattern",
+                "/api/*",
+                "--path",
+                "/d.dict",
+                "--data",
+                "abc",
+            ],
+        ]
+        .concat(),
+    )
+    .await?;
+    // SHA-256("abc") in the RFC 8941 byte sequence form that Available-Dictionary carries.
+    assert!(
+        created.contains(":ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=:"),
+        "{created}"
+    );
+    let listing = cli_ok(
+        binary,
+        addr,
+        token,
+        &["proxy", "dictionary", "list", proxy_id],
+    )
+    .await?;
+    let listed: Value = serde_json::from_str(&listing)?;
+    let dict_id = listed[0]["id"].as_str().context("no dictionary id")?;
+    let shown = cli_ok(
+        binary,
+        addr,
+        token,
+        &["proxy", "dictionary", "get", proxy_id, dict_id],
+    )
+    .await?;
+    assert!(shown.contains("/d.dict"), "{shown}");
+    let bad = &[
+        &base[..],
+        &["--match-pattern", "/x", "--path", "rel", "--data", "x"],
+    ]
+    .concat();
+    let out = run_client(binary, addr, token, bad).await?;
+    assert!(
+        !out.status.success(),
+        "a relative serving path was accepted"
+    );
+    cli_ok(
+        binary,
+        addr,
+        token,
+        &["proxy", "dictionary", "delete", proxy_id, dict_id],
+    )
+    .await?;
+    let out = run_client(
+        binary,
+        addr,
+        token,
+        &["proxy", "dictionary", "get", proxy_id, dict_id],
+    )
+    .await?;
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("404"),
+        "{out:?}"
+    );
     Ok(())
 }
 
@@ -3771,19 +3855,6 @@ const MCP_ONLY_TOOLS: &[(&str, &str)] = &[
     (
         "list_project_environments",
         "the environments of get_project",
-    ),
-    (
-        "list_compression_dictionaries",
-        "the dictionaries field of get_proxy",
-    ),
-    ("get_compression_dictionary", "one dictionary of get_proxy"),
-    (
-        "create_compression_dictionary",
-        "the dictionaries field of update_proxy",
-    ),
-    (
-        "delete_compression_dictionary",
-        "the dictionaries field of update_proxy",
     ),
 ];
 

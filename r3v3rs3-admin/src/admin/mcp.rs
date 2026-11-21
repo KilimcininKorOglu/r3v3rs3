@@ -33,7 +33,6 @@ use crate::server::rpc::proxies::{
 use crate::server::rpc::workers::GetWorkers;
 use http::request::Parts;
 use r3v3rs3_api::audit::AuditAction;
-use r3v3rs3_api::compression_dictionary::CompressionDictionary;
 use r3v3rs3_api::error::Error;
 use r3v3rs3_api::id::ShortId;
 use r3v3rs3_api::proxy::{Proxy, ProxyEntry, ProxyKind};
@@ -983,14 +982,14 @@ pub struct UpdateErrorPageThemeParams {
     pub pages: Option<Vec<r3v3rs3_api::proxy::CustomErrorPage>>,
 }
 
-/// The arguments of `list_compression_dictionaries`.
+/// The arguments of `list_proxy_compression_dictionaries`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ListCompressionDictionariesParams {
     /// The id of the proxy.
     pub proxy_id: String,
 }
 
-/// The arguments of `get_compression_dictionary` and `delete_compression_dictionary`.
+/// The arguments of `get_proxy_compression_dictionary` and `delete_proxy_compression_dictionary`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProxyDictIdParams {
     /// The id of the proxy.
@@ -999,7 +998,7 @@ pub struct ProxyDictIdParams {
     pub dict_id: String,
 }
 
-/// The arguments of `create_compression_dictionary`.
+/// The arguments of `create_proxy_compression_dictionary`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddCompressionDictionaryParams {
     /// The id of the proxy.
@@ -2460,66 +2459,48 @@ impl McpServer {
     #[tool(
         description = "List the compression dictionaries of one HTTP proxy (`proxy_id`) with their id, name, URL match pattern, serving path, raw content and SHA-256 hash. A browser that fetched a dictionary sends its hash back, and the proxy then compresses matching responses against it (Compression Dictionary Transport). Fails for TCP and UDP proxies. Read-only; any account can call it."
     )]
-    async fn list_compression_dictionaries(
+    async fn list_proxy_compression_dictionaries(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<ListCompressionDictionariesParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
-        let proxy_id: ShortId = parse_id(&params.proxy_id)?;
-        let entry: ProxyEntry = *self
-            .state
-            .call(&caller, GetProxy { id: proxy_id })
-            .await
-            .map_err(tool_error)?;
-        let ProxyKind::Http(ref http) = entry.proxy.kind else {
-            return Err(ErrorData::invalid_params(
-                "Proxy is not an HTTP proxy",
-                None,
-            ));
-        };
-        json_result(&http.compression.dictionaries)
+        let list = super::proxies::list_dictionaries(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(parse_id(&params.proxy_id)?),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(list.0)
     }
 
     /// Get a compression dictionary by proxy id and dictionary id.
     #[tool(
-        description = "Show one compression dictionary of an HTTP proxy by `proxy_id` and `dict_id` (from `list_compression_dictionaries`), with its match pattern, serving path, raw content and SHA-256 hash. Read-only; any account can call it."
+        description = "Show one compression dictionary of an HTTP proxy by `proxy_id` and `dict_id` (from `list_proxy_compression_dictionaries`), with its match pattern, serving path, raw content and SHA-256 hash. Read-only; any account can call it."
     )]
-    async fn get_compression_dictionary(
+    async fn get_proxy_compression_dictionary(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<ProxyDictIdParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
-        let proxy_id: ShortId = parse_id(&params.proxy_id)?;
-        let dict_id: ShortId = parse_id(&params.dict_id)?;
-        let entry: ProxyEntry = *self
-            .state
-            .call(&caller, GetProxy { id: proxy_id })
-            .await
-            .map_err(tool_error)?;
-        let ProxyKind::Http(ref http) = entry.proxy.kind else {
-            return Err(ErrorData::invalid_params(
-                "Proxy is not an HTTP proxy",
-                None,
-            ));
-        };
-        let dict = http
-            .compression
-            .dictionaries
-            .iter()
-            .find(|d| d.id == dict_id)
-            .ok_or_else(|| {
-                ErrorData::invalid_params(format!("Dictionary not found: {dict_id}"), None)
-            })?;
-        json_result(dict)
+        let ids = (parse_id(&params.proxy_id)?, parse_id(&params.dict_id)?);
+        let dict = super::proxies::get_dictionary(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(ids),
+        )
+        .await
+        .map_err(any_error)?;
+        json_result(dict.0)
     }
 
     /// Add a compression dictionary to an HTTP proxy.
     #[tool(
         description = "Add a compression dictionary to one HTTP proxy (`proxy_id`). The proxy serves `raw_data` at `path` with a `Use-As-Dictionary: match=\"<match_pattern>\"` header, computes its SHA-256 hash itself, and compresses later responses whose URL matches `match_pattern` against it. Returns the new dictionary id and its hash. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
     )]
-    async fn create_compression_dictionary(
+    async fn create_proxy_compression_dictionary(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<AddCompressionDictionaryParams>,
@@ -2527,32 +2508,21 @@ impl McpServer {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
         let proxy_id: ShortId = parse_id(&params.proxy_id)?;
-        let mut entry: ProxyEntry = *self
-            .state
-            .call(&caller, GetProxy { id: proxy_id })
-            .await
-            .map_err(tool_error)?;
-        let ProxyKind::Http(ref mut http) = entry.proxy.kind else {
-            return Err(ErrorData::invalid_params(
-                "Proxy is not an HTTP proxy",
-                None,
-            ));
-        };
-        let mut dict = CompressionDictionary {
-            id: ShortId::new(),
+        let request = r3v3rs3_api::compression_dictionary::CompressionDictionaryRequest {
             name: params.name,
             match_pattern: params.match_pattern,
             path: params.path,
             raw_data: params.raw_data,
-            sha256_sf: String::new(),
         };
-        dict.ensure_hash();
-        dict.validate().map_err(tool_error)?;
-        http.compression.dictionaries.push(dict.clone());
-        self.state
-            .call(&caller, UpdateProxy { entry })
-            .await
-            .map_err(tool_error)?;
+        let dict = super::proxies::create_dictionary(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path(proxy_id),
+            axum::Json(request),
+        )
+        .await
+        .map_err(any_error)?
+        .0;
         json_result(json!({
             "id": dict.id.to_string(),
             "sha256_sf": dict.sha256_sf,
@@ -2564,38 +2534,21 @@ impl McpServer {
     #[tool(
         description = "Delete one compression dictionary (`dict_id`) from an HTTP proxy (`proxy_id`); the proxy stops serving it and stops compressing against it. Needs a token with the edit scope and an editor or admin account; an editor with a proxy list changes only the proxies on its list."
     )]
-    async fn delete_compression_dictionary(
+    async fn delete_proxy_compression_dictionary(
         &self,
         Extension(parts): Extension<Parts>,
         Parameters(params): Parameters<ProxyDictIdParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let caller = caller_of(&parts)?;
         require_edit(&parts)?;
-        let proxy_id: ShortId = parse_id(&params.proxy_id)?;
         let dict_id: ShortId = parse_id(&params.dict_id)?;
-        let mut entry: ProxyEntry = *self
-            .state
-            .call(&caller, GetProxy { id: proxy_id })
-            .await
-            .map_err(tool_error)?;
-        let ProxyKind::Http(ref mut http) = entry.proxy.kind else {
-            return Err(ErrorData::invalid_params(
-                "Proxy is not an HTTP proxy",
-                None,
-            ));
-        };
-        let initial_len = http.compression.dictionaries.len();
-        http.compression.dictionaries.retain(|d| d.id != dict_id);
-        if http.compression.dictionaries.len() == initial_len {
-            return Err(ErrorData::invalid_params(
-                format!("Dictionary not found: {dict_id}"),
-                None,
-            ));
-        }
-        self.state
-            .call(&caller, UpdateProxy { entry })
-            .await
-            .map_err(tool_error)?;
+        let _deleted = super::proxies::delete_dictionary(
+            axum::extract::State(self.state.clone()),
+            axum::Extension(caller),
+            axum::extract::Path((parse_id(&params.proxy_id)?, dict_id)),
+        )
+        .await
+        .map_err(any_error)?;
         json_result(json!({ "deleted": dict_id.to_string() }))
     }
 

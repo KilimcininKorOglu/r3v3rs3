@@ -29,6 +29,35 @@ pub struct CompressionDictionary {
     pub sha256_sf: String,
 }
 
+/// Request to add a compression dictionary to an HTTP proxy. The server picks the id and
+/// computes the hash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, schemars::JsonSchema)]
+pub struct CompressionDictionaryRequest {
+    /// Descriptive human-readable label.
+    pub name: String,
+    /// URL path match pattern sent in `Use-As-Dictionary: match="<match_pattern>"`.
+    pub match_pattern: String,
+    /// Path on the proxy where r3v3rs3 serves the raw dictionary bytes.
+    pub path: String,
+    /// Raw dictionary content.
+    pub raw_data: String,
+}
+
+impl From<CompressionDictionaryRequest> for CompressionDictionary {
+    fn from(request: CompressionDictionaryRequest) -> Self {
+        let mut dict = Self {
+            id: ShortId::new(),
+            name: request.name,
+            match_pattern: request.match_pattern,
+            path: request.path,
+            raw_data: request.raw_data,
+            sha256_sf: String::new(),
+        };
+        dict.ensure_hash();
+        dict
+    }
+}
+
 impl CompressionDictionary {
     /// Computes the RFC 9651 structured field byte sequence binary string `:<base64>:` for given bytes.
     pub fn calculate_sha256_sf(data: &[u8]) -> String {

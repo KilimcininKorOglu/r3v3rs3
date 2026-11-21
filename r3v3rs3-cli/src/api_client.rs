@@ -1,5 +1,4 @@
 use anyhow::{Context, bail};
-use rand::distr::SampleString;
 use reqwest::Method;
 use serde_json::Value;
 
@@ -827,53 +826,20 @@ impl ApiClient {
     }
 
     pub async fn list_proxy_dictionaries(&self, proxy_id: &str) -> anyhow::Result<()> {
-        let entry: r3v3rs3_api::proxy::ProxyEntry =
-            self.get_json(&format!("/api/proxies/{proxy_id}")).await?;
-        let r3v3rs3_api::proxy::ProxyKind::Http(ref http) = entry.proxy.kind else {
-            println!("Proxy {proxy_id} is not an HTTP proxy");
-            return Ok(());
-        };
-        let compression = &http.compression;
-        if compression.dictionaries.is_empty() {
-            println!("No compression dictionaries configured for proxy {proxy_id}");
-            return Ok(());
-        }
-        println!(
-            "{:<26} {:<20} {:<15} {:<30} PATH",
-            "ID", "NAME", "MATCH", "PATH"
-        );
-        println!(
-            "{:-<26} {:-<20} {:-<15} {:-<30} {:-<30}",
-            "", "", "", "", ""
-        );
-        for item in &compression.dictionaries {
-            println!(
-                "{:<26} {:<20} {:<15} {:<30} {}",
-                item.id, item.name, item.match_pattern, item.path, item.path
-            );
-        }
-        Ok(())
+        let list: serde_json::Value = self
+            .get_json(&format!("/api/proxies/{proxy_id}/dictionaries"))
+            .await?;
+        print_json(&list)
     }
 
     pub async fn get_proxy_dictionary(&self, proxy_id: &str, dict_id: &str) -> anyhow::Result<()> {
-        let entry: r3v3rs3_api::proxy::ProxyEntry =
-            self.get_json(&format!("/api/proxies/{proxy_id}")).await?;
-        let r3v3rs3_api::proxy::ProxyKind::Http(ref http) = entry.proxy.kind else {
-            bail!("Proxy {proxy_id} is not an HTTP proxy");
-        };
-        let compression = &http.compression;
-        let dict = compression
-            .dictionaries
-            .iter()
-            .find(|d| d.id.to_string() == dict_id);
-        let Some(d) = dict else {
-            bail!("Dictionary {dict_id} not found in proxy {proxy_id}");
-        };
-        println!("{}", serde_json::to_string_pretty(d)?);
-        Ok(())
+        let dict: serde_json::Value = self
+            .get_json(&format!("/api/proxies/{proxy_id}/dictionaries/{dict_id}"))
+            .await?;
+        print_json(&dict)
     }
 
-    pub async fn add_proxy_dictionary(
+    pub async fn create_proxy_dictionary(
         &self,
         proxy_id: &str,
         name: &str,
@@ -887,34 +853,20 @@ impl ApiClient {
         } else {
             data.to_string()
         };
-        let mut entry: r3v3rs3_api::proxy::ProxyEntry =
-            self.get_json(&format!("/api/proxies/{proxy_id}")).await?;
-        let dict_id = rand::distr::Alphanumeric
-            .sample_string(&mut rand::rng(), 24)
-            .to_ascii_lowercase();
-        let dict = r3v3rs3_api::compression_dictionary::CompressionDictionary {
-            id: dict_id
-                .parse()
-                .map_err(|e| anyhow::anyhow!("invalid dict id: {e}"))?,
+        let request = r3v3rs3_api::compression_dictionary::CompressionDictionaryRequest {
             name: name.to_string(),
             match_pattern: match_pattern.to_string(),
             path: path.to_string(),
             raw_data,
-            sha256_sf: String::new(),
         };
-        let r3v3rs3_api::proxy::ProxyKind::Http(ref mut http) = entry.proxy.kind else {
-            bail!("Proxy {proxy_id} is not an HTTP proxy");
-        };
-        http.compression.dictionaries.push(dict);
-        let updated = self
+        let created = self
             .request(
-                Method::PUT,
-                &format!("/api/proxies/{proxy_id}"),
-                Some(&serde_json::to_value(&entry.proxy)?),
+                Method::POST,
+                &format!("/api/proxies/{proxy_id}/dictionaries"),
+                Some(&serde_json::to_value(&request)?),
             )
             .await?;
-        println!("Compression dictionary added to proxy {proxy_id}");
-        print_json(&updated)
+        print_json(&created)
     }
 
     pub async fn delete_proxy_dictionary(
@@ -922,27 +874,14 @@ impl ApiClient {
         proxy_id: &str,
         dict_id: &str,
     ) -> anyhow::Result<()> {
-        let mut entry: r3v3rs3_api::proxy::ProxyEntry =
-            self.get_json(&format!("/api/proxies/{proxy_id}")).await?;
-        let r3v3rs3_api::proxy::ProxyKind::Http(ref mut http) = entry.proxy.kind else {
-            bail!("Proxy {proxy_id} is not an HTTP proxy");
-        };
-        let initial_len = http.compression.dictionaries.len();
-        http.compression
-            .dictionaries
-            .retain(|d| d.id.to_string() != dict_id);
-        if http.compression.dictionaries.len() == initial_len {
-            bail!("Dictionary {dict_id} not found in proxy {proxy_id}");
-        }
-        let updated = self
-            .request(
-                Method::PUT,
-                &format!("/api/proxies/{proxy_id}"),
-                Some(&serde_json::to_value(&entry.proxy)?),
-            )
-            .await?;
+        self.request(
+            Method::DELETE,
+            &format!("/api/proxies/{proxy_id}/dictionaries/{dict_id}"),
+            None,
+        )
+        .await?;
         println!("Compression dictionary {dict_id} deleted from proxy {proxy_id}");
-        print_json(&updated)
+        Ok(())
     }
 
     // --- Certificate operations ---

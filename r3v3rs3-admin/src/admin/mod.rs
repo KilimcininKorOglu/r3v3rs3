@@ -1103,6 +1103,11 @@ fn proxy_routes() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(proxies::get, proxies::put, proxies::delete))
         .routes(routes!(proxies::get_priority, proxies::put_priority))
+        .routes(routes!(
+            proxies::list_dictionaries,
+            proxies::create_dictionary
+        ))
+        .routes(routes!(proxies::get_dictionary, proxies::delete_dictionary))
         .routes(routes!(proxies::status))
         .routes(routes!(proxies::purge_cache, proxies::purge_cache_post))
 }

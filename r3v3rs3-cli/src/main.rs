@@ -267,8 +267,8 @@ pub enum ProxyDictionaryCommand {
     List { proxy_id: String },
     /// Shows a compression dictionary by proxy id and dictionary id.
     Get { proxy_id: String, dict_id: String },
-    /// Adds a compression dictionary to an HTTP proxy.
-    Add {
+    /// Adds a compression dictionary to an HTTP proxy; the server computes its hash.
+    Create {
         proxy_id: String,
         #[arg(short, long)]
         name: String,
@@ -2120,14 +2120,14 @@ async fn run_proxy_dictionary(
         ProxyDictionaryCommand::Get { proxy_id, dict_id } => {
             api.get_proxy_dictionary(&proxy_id, &dict_id).await
         }
-        ProxyDictionaryCommand::Add {
+        ProxyDictionaryCommand::Create {
             proxy_id,
             name,
             match_pattern,
             path,
             data,
         } => {
-            api.add_proxy_dictionary(&proxy_id, &name, &match_pattern, &path, &data)
+            api.create_proxy_dictionary(&proxy_id, &name, &match_pattern, &path, &data)
                 .await
         }
         ProxyDictionaryCommand::Delete { proxy_id, dict_id } => {
