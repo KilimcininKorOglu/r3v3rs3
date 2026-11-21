@@ -2260,6 +2260,13 @@ Bir port, bir uygulama veya ayar her değiştiğinde r3v3rs3 tabloyu tek bir `nf
 - Trafiği düşüren tek güvenlik duvarı r3v3rs3 olmalıdır. nftables her tablonun input zincirini çalıştırır. Bu yüzden firewalld, ufw veya `iptables-persistent` tablosundaki bir drop kuralı, bu tablonun açtığı bir portu yine engeller. Önce diğer aracı durdurun (`systemctl disable --now firewalld`, `ufw disable` veya `systemctl disable --now netfilter-persistent`). Ayarlar sayfasındaki **Sunucu Güvenlik Duvarı** kartı, `GET /api/firewall`, MCP aracı `get_firewall_status` ve `r3 security firewall get-status` böyle her tabloyu bir uyarı olarak listeler. Port listesi de **Güvenlik duvarı açık, başka bir güvenlik duvarı var** gösterir. Tablo açıkken r3v3rs3 bu uyarıları dakikada bir yeniden okur. Bu yüzden diğer aracı durdurduğunuzda uyarı en geç bir dakika içinde kalkar. ufw, yalnızca `/etc/ufw/ufw.conf` içinde `ENABLED=yes` olduğunda uyarı verir.
 - Docker ile port yayınlayan bir container'a (`-p 8080:80`) forward hook'u üzerinden ulaşılır. Bu yüzden bu tablo onu engellemez.
 
+Önceki güvenlik duvarını durdurmadan önce, onun input zinciri dışındaki kurallarını okuyun (`iptables-save` ve `nft list ruleset`): `OUTPUT`, `FORWARD`, `nat` ve `raw` tabloları. Bir bulut image'ı veya bir VPN bu kurallara bağlı olabilir. Örnekler, sağlayıcının metadata servisi için bir output kuralı veya bir VPN'in NAT kuralıdır. Aracı durdurmak bu kuralları da siler ve r3v3rs3 bunları yeniden yazmaz. Bu kuralları iki yoldan biriyle koruyun:
+
+- Aracı çalışır bırakın, ama kayıtlı kurallarından (örneğin `iptables-persistent` için `/etc/iptables/rules.v4`) `INPUT` kurallarını çıkarın. Böylece gelen trafiği yalnız r3v3rs3 filtreler.
+- Bu kuralları kendinize ait ayrı bir nftables tablosuna taşıyın. `FORWARD` reject kuralını taşımayın. Kendi tablosunda bu kural, Docker'ın yayınladığı container'ları engeller.
+
+Host kurallarını `nftables.service` ile yüklüyorsa, varsayılan unit `nft flush ruleset` ile durur. Bu komut r3v3rs3 tablosunu ve Docker tablolarını da siler. Unit'in `ExecStop` satırını yalnız kendi tablonuzu silecek şekilde değiştirin, örneğin `nft delete table inet custom`.
+
 Geri dönüş: `enabled = false` yapın veya host'ta `nft delete table inet r3v3rs3` çalıştırın. Sonra önceki güvenlik duvarını yeniden başlatın. Önce onun kurallarını kaydedin (`nft list ruleset > /root/ruleset.nft`) ve `nft -f /root/ruleset.nft` ile geri yükleyin.
 
 ## Saklanan veriler
