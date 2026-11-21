@@ -146,64 +146,85 @@ pub fn decrypt_dr_bundle(bundle: &[u8], passphrase: &str) -> anyhow::Result<Vec<
     Ok(body)
 }
 
-async fn checkpoint_db(db_path: &Path) {
-    if !db_path.is_file() {
-        return;
+/// A consistent copy of a live SQLite database. `VACUUM INTO` reads through SQLite, so rows
+/// that are still in the WAL are included even while the server holds connections open.
+async fn snapshot_db(db_path: &Path) -> anyhow::Result<Vec<u8>> {
+    let snapshot = db_path.with_extension("db.dr-snapshot");
+    if snapshot.exists() {
+        fs::remove_file(&snapshot)?;
     }
     let options = SqliteConnectOptions::new()
         .filename(db_path)
+        .read_only(true)
         .busy_timeout(std::time::Duration::from_secs(5));
-    if let Ok(pool) = SqlitePool::connect_with(options).await {
-        let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-            .execute(&pool)
-            .await;
-        let _ = pool.close().await;
-    }
+    let pool = SqlitePool::connect_with(options)
+        .await
+        .with_context(|| format!("cannot open {}", db_path.display()))?;
+    let result = sqlx::query("VACUUM INTO ?")
+        .bind(snapshot.to_string_lossy().into_owned())
+        .execute(&pool)
+        .await;
+    pool.close().await;
+    result.with_context(|| format!("cannot snapshot {}", db_path.display()))?;
+    let bytes = fs::read(&snapshot);
+    fs::remove_file(&snapshot)?;
+    Ok(bytes?)
 }
 
-/// Collects root files and subdirectories from `config_dir` for the bundle.
+/// Collects root files and subdirectories from `config_dir` for the bundle. A file that exists
+/// but cannot be read fails the backup, so a bundle never misses a key or a certificate.
 pub async fn collect_bundle_files(config_dir: &Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     let mut files = Vec::new();
-    collect_root_files(config_dir, &mut files).await;
+    collect_root_files(config_dir, &mut files).await?;
     for subdir in SUBDIRS {
         let dir_path = config_dir.join(subdir);
         if dir_path.is_dir() {
-            collect_dir_recursive(&dir_path, subdir, &mut files);
+            collect_dir_recursive(&dir_path, subdir, &mut files)?;
         }
     }
     Ok(files)
 }
 
-async fn collect_root_files(config_dir: &Path, files: &mut Vec<(String, Vec<u8>)>) {
+async fn collect_root_files(
+    config_dir: &Path,
+    files: &mut Vec<(String, Vec<u8>)>,
+) -> anyhow::Result<()> {
     for filename in ROOT_CONFIG_FILES {
         let path = config_dir.join(filename);
-        if filename.ends_with(".db") {
-            checkpoint_db(&path).await;
+        if !path.is_file() {
+            continue;
         }
-        if path.is_file()
-            && let Ok(bytes) = fs::read(&path)
-        {
-            files.push(((*filename).to_string(), bytes));
-        }
+        let bytes = if filename.ends_with(".db") {
+            snapshot_db(&path).await?
+        } else {
+            read_file(&path)?
+        };
+        files.push(((*filename).to_string(), bytes));
     }
+    Ok(())
 }
 
-fn collect_dir_recursive(dir: &Path, prefix: &str, files: &mut Vec<(String, Vec<u8>)>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
+fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
+    fs::read(path).with_context(|| format!("cannot read {}", path.display()))
+}
+
+fn collect_dir_recursive(
+    dir: &Path,
+    prefix: &str,
+    files: &mut Vec<(String, Vec<u8>)>,
+) -> anyhow::Result<()> {
+    let entries = fs::read_dir(dir).with_context(|| format!("cannot list {}", dir.display()))?;
+    for entry in entries {
+        let path = entry?.path();
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
         let rel_path = format!("{prefix}/{name}");
         if path.is_file() {
-            if let Ok(bytes) = fs::read(&path) {
-                files.push((rel_path, bytes));
-            }
+            files.push((rel_path, read_file(&path)?));
         } else if path.is_dir() {
-            collect_dir_recursive(&path, &rel_path, files);
+            collect_dir_recursive(&path, &rel_path, files)?;
         }
     }
+    Ok(())
 }
 
 /// Packs collected files into a gzipped tar archive.
@@ -862,6 +883,98 @@ mod tests {
         assert!(!filenames.contains(&"r3v3rs3.db-wal".to_string()));
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    /// A fresh directory under the system temp dir, removed when dropped.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("r3dr_{name}_{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The running server keeps its pool open, and a reader can hold the WAL so a checkpoint
+    /// cannot finish. The bundled database must still hold every committed row.
+    #[tokio::test]
+    async fn the_bundled_database_holds_rows_still_in_the_wal() {
+        let temp_dir = Scratch::new("wal_rows");
+        let db_path = temp_dir.path().join("r3v3rs3.db");
+        let options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+        let pool = SqlitePool::connect_with(options).await.unwrap();
+        sqlx::query("PRAGMA wal_autocheckpoint = 0")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE t (v TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO t VALUES ('first')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // An open read transaction pins the WAL, so `wal_checkpoint(TRUNCATE)` reports busy.
+        let mut reader = pool.begin().await.unwrap();
+        sqlx::query("SELECT count(*) FROM t")
+            .execute(&mut *reader)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO t VALUES ('in-wal')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let files = collect_bundle_files(temp_dir.path()).await.unwrap();
+        reader.rollback().await.unwrap();
+        pool.close().await;
+        let (_, bytes) = files.iter().find(|(n, _)| n == "r3v3rs3.db").unwrap();
+        let copy = temp_dir.path().join("copy.db");
+        fs::write(&copy, bytes).unwrap();
+        let copy_pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(&copy))
+            .await
+            .unwrap();
+        let rows: Vec<(String,)> = sqlx::query_as("SELECT v FROM t ORDER BY rowid")
+            .fetch_all(&copy_pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, [("first".into(),), ("in-wal".into(),)]);
+        copy_pool.close().await;
+    }
+
+    /// A file that cannot be read makes the backup fail instead of leaving it out silently.
+    #[tokio::test]
+    async fn an_unreadable_file_fails_the_backup() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let temp_dir = Scratch::new("unreadable");
+        let certs = temp_dir.path().join("certs");
+        fs::create_dir_all(&certs).unwrap();
+        let key = certs.join("site.key");
+        fs::write(&key, b"key").unwrap();
+        fs::set_permissions(&key, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read(&key).is_ok() {
+            // Root reads any file, so the case cannot be built; the CI test job is not root.
+            return;
+        }
+        let result = collect_bundle_files(temp_dir.path()).await;
+        fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(result.is_err(), "a backup left out {}", key.display());
     }
 
     #[test]
